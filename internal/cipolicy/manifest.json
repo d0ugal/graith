@@ -1,0 +1,3870 @@
+{
+  "schema_version": 1,
+  "policy_version": "ci-policy-v1",
+  "policy_digest": "87da45d98e36c8aea6dcf1caaed67c04457b28a02f5275a84fa17a56c84668b0",
+  "source": {
+    "id": "github-actions",
+    "repository": "d0ugal/graith",
+    "default_branch": "main",
+    "policy_path": "internal/cipolicy/manifest.json",
+    "baseline_inventory": {
+      "path": "internal/cibaseline/inventory.json",
+      "schema_version": 2,
+      "digest": "90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21",
+      "observation_state": "p0-observation-in-progress"
+    }
+  },
+  "trust_tiers": [
+    {
+      "id": "fork-untrusted",
+      "owner": "security-owners",
+      "description": "Fork pull-request code and artifacts; no repository secrets or write credentials.",
+      "publication_credentials": false
+    },
+    {
+      "id": "github-service",
+      "owner": "security-owners",
+      "description": "GitHub-created service activity observed outside repository-owned workflow files.",
+      "publication_credentials": false
+    },
+    {
+      "id": "same-repository-agent",
+      "owner": "security-owners",
+      "description": "Same-repository agent-authored branches; repository location does not upgrade token, artifact, cache, or publication trust.",
+      "publication_credentials": false
+    },
+    {
+      "id": "trusted-base",
+      "owner": "graith-maintainers",
+      "description": "Trusted default-branch policy and non-publication evaluation context.",
+      "publication_credentials": false
+    },
+    {
+      "id": "trusted-publication",
+      "owner": "release-owners",
+      "description": "Protected main, tag, environment, or publication path with credentials unavailable to pull-request code.",
+      "publication_credentials": true
+    }
+  ],
+  "events": [
+    {
+      "id": "dynamic",
+      "source": "github-actions",
+      "github_event": "dynamic",
+      "refs": [],
+      "trust_tiers": [
+        "github-service"
+      ],
+      "description": "GitHub-generated service activity not declared by repository-owned workflow YAML."
+    },
+    {
+      "id": "pull-request",
+      "source": "github-actions",
+      "github_event": "pull_request",
+      "refs": [],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "description": "Pull-request proof, including fork and same-repository agent-authored branches."
+    },
+    {
+      "id": "push-main",
+      "source": "github-actions",
+      "github_event": "push",
+      "refs": [
+        "refs/heads/main"
+      ],
+      "trust_tiers": [
+        "trusted-base",
+        "trusted-publication"
+      ],
+      "description": "Default-branch push proof; only explicitly protected publication modes may use publication credentials."
+    },
+    {
+      "id": "push-tag",
+      "source": "github-actions",
+      "github_event": "push",
+      "refs": [
+        "refs/tags/v*"
+      ],
+      "trust_tiers": [
+        "trusted-base",
+        "trusted-publication"
+      ],
+      "description": "Version-tag release-candidate proof; only explicitly protected publication modes may use publication credentials."
+    },
+    {
+      "id": "schedule",
+      "source": "github-actions",
+      "github_event": "schedule",
+      "refs": [],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "description": "Repository-owned scheduled maintenance and drift proof."
+    },
+    {
+      "id": "workflow-dispatch",
+      "source": "github-actions",
+      "github_event": "workflow_dispatch",
+      "refs": [],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "description": "Maintainer-dispatched diagnostic or release-shaped proof."
+    }
+  ],
+  "platforms": [
+    {
+      "id": "github-service",
+      "owner": "security-owners",
+      "runner_label": "github-service",
+      "os": "github",
+      "architecture": "service",
+      "description": "GitHub service-side execution with no repository runner."
+    },
+    {
+      "id": "macos-26",
+      "owner": "graith-maintainers",
+      "runner_label": "macos-26",
+      "os": "macos",
+      "architecture": "arm64",
+      "description": "Pinned GitHub-hosted macOS 26 Apple Silicon runner."
+    },
+    {
+      "id": "macos-latest",
+      "owner": "graith-maintainers",
+      "runner_label": "macos-latest",
+      "os": "macos",
+      "architecture": "hosted-default",
+      "description": "GitHub-hosted macOS latest runner used by current proof."
+    },
+    {
+      "id": "ubuntu-24.04",
+      "owner": "graith-maintainers",
+      "runner_label": "ubuntu-24.04",
+      "os": "linux",
+      "architecture": "x64",
+      "description": "Pinned GitHub-hosted Ubuntu 24.04 x64 runner."
+    },
+    {
+      "id": "ubuntu-24.04-arm",
+      "owner": "graith-maintainers",
+      "runner_label": "ubuntu-24.04-arm",
+      "os": "linux",
+      "architecture": "arm64",
+      "description": "Pinned GitHub-hosted Ubuntu 24.04 arm64 runner."
+    },
+    {
+      "id": "ubuntu-latest",
+      "owner": "graith-maintainers",
+      "runner_label": "ubuntu-latest",
+      "os": "linux",
+      "architecture": "x64",
+      "description": "GitHub-hosted Ubuntu latest runner used by current proof."
+    }
+  ],
+  "cost_classes": [
+    {
+      "id": "external",
+      "owner": "security-owners",
+      "description": "GitHub service-side observation outside repository runner accounting."
+    },
+    {
+      "id": "linux-fast",
+      "owner": "graith-maintainers",
+      "description": "Linux source-level or compile-only proof expected in the PR fast lane."
+    },
+    {
+      "id": "linux-standard",
+      "owner": "graith-maintainers",
+      "description": "Linux runtime, package-consumer, or security proof with standard runner cost."
+    },
+    {
+      "id": "macos",
+      "owner": "gui-owners",
+      "description": "macOS-hosted build, test, GUI, native, or sandbox proof."
+    },
+    {
+      "id": "publication",
+      "owner": "release-owners",
+      "description": "Protected publication, release, Pages, or scheduled producer proof."
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "commit-policy",
+      "owner": "graith-maintainers",
+      "description": "Commit message proof for pull-request merge hygiene.",
+      "modes": [
+        "legacy/commits/commitsar"
+      ]
+    },
+    {
+      "id": "coverage",
+      "owner": "graith-maintainers",
+      "description": "Current informational coverage collection and publication proof.",
+      "modes": [
+        "legacy/coverage/changes",
+        "legacy/coverage/comment",
+        "legacy/coverage/go-coverage",
+        "legacy/coverage/swift-coverage"
+      ]
+    },
+    {
+      "id": "dev-release",
+      "owner": "release-owners",
+      "description": "Development release-shaped package and publication proof.",
+      "modes": [
+        "legacy/dev-release/assemble-dev",
+        "legacy/dev-release/attest-linux",
+        "legacy/dev-release/build-darwin",
+        "legacy/dev-release/build-linux",
+        "legacy/dev-release/changes",
+        "legacy/dev-release/execute-linux",
+        "legacy/dev-release/publish-dev",
+        "legacy/dev-release/release-context"
+      ]
+    },
+    {
+      "id": "docs-preview",
+      "owner": "docs-owners",
+      "description": "Pull-request documentation preview and screenshot publication proof.",
+      "modes": [
+        "legacy/docs-preview/cleanup",
+        "legacy/docs-preview/preview",
+        "legacy/docs-preview/prune"
+      ]
+    },
+    {
+      "id": "docs-publication",
+      "owner": "docs-owners",
+      "description": "Main-branch documentation build and Pages publication proof.",
+      "modes": [
+        "legacy/docs/build",
+        "legacy/docs/deploy"
+      ]
+    },
+    {
+      "id": "generated-metadata",
+      "owner": "graith-maintainers",
+      "description": "Generated-file regeneration validation and credential separation proof.",
+      "modes": [
+        "legacy/regen/prepare",
+        "legacy/regen/regen",
+        "legacy/regen/validate"
+      ]
+    },
+    {
+      "id": "go-core",
+      "owner": "graith-maintainers",
+      "description": "Go build, lint, test, vulnerability, and integration proof.",
+      "modes": [
+        "legacy/ci/build",
+        "legacy/ci/build-macos",
+        "legacy/ci/changes",
+        "legacy/ci/govulncheck",
+        "legacy/ci/integration",
+        "legacy/ci/integration-macos",
+        "legacy/ci/lint",
+        "legacy/ci/test",
+        "legacy/ci/test-macos"
+      ]
+    },
+    {
+      "id": "gui",
+      "owner": "gui-owners",
+      "description": "macOS and iOS GUI build and test proof.",
+      "modes": [
+        "legacy/gui-ci/build"
+      ]
+    },
+    {
+      "id": "native",
+      "owner": "native-owners",
+      "description": "Native libghostty producer, adapter, and consumer proof.",
+      "modes": [
+        "legacy/libghostty-native/apple-adapter",
+        "legacy/libghostty-native/changes",
+        "legacy/libghostty-native/linux-adapter",
+        "legacy/libghostty-native/native-gate"
+      ]
+    },
+    {
+      "id": "native-publication",
+      "owner": "native-owners",
+      "description": "Main-only native dependency publication proof.",
+      "modes": [
+        "legacy/libghostty-native-publish/publish"
+      ]
+    },
+    {
+      "id": "release-automation",
+      "owner": "release-owners",
+      "description": "Release Please automation proof.",
+      "modes": [
+        "legacy/release-please/release-please"
+      ]
+    },
+    {
+      "id": "sandbox",
+      "owner": "graith-maintainers",
+      "description": "Linux and macOS sandbox enforcement proof.",
+      "modes": [
+        "legacy/sandbox/changes",
+        "legacy/sandbox/linux-nono",
+        "legacy/sandbox/macos-safehouse"
+      ]
+    },
+    {
+      "id": "security-codeql",
+      "owner": "security-owners",
+      "description": "CodeQL security analysis proof.",
+      "modes": [
+        "legacy/codeql/analyze"
+      ]
+    },
+    {
+      "id": "security-dependency-review",
+      "owner": "security-owners",
+      "description": "Dependency review supply-chain policy proof.",
+      "modes": [
+        "legacy/dependency-review/dependency-review"
+      ]
+    },
+    {
+      "id": "security-scorecard",
+      "owner": "security-owners",
+      "description": "OpenSSF scorecard posture proof.",
+      "modes": [
+        "legacy/scorecard/analysis"
+      ]
+    },
+    {
+      "id": "security-secret-scan",
+      "owner": "security-owners",
+      "description": "Secret scanning proof.",
+      "modes": [
+        "legacy/secret-scan/gitleaks",
+        "legacy/secret-scan/trufflehog"
+      ]
+    },
+    {
+      "id": "stable-release",
+      "owner": "release-owners",
+      "description": "Stable release-shaped package, attestation, and publication proof.",
+      "modes": [
+        "legacy/goreleaser/assemble-stable",
+        "legacy/goreleaser/attest-stable",
+        "legacy/goreleaser/build-darwin",
+        "legacy/goreleaser/build-linux",
+        "legacy/goreleaser/changes",
+        "legacy/goreleaser/execute-linux",
+        "legacy/goreleaser/publish-stable",
+        "legacy/goreleaser/release-context"
+      ]
+    },
+    {
+      "id": "workflow-policy",
+      "owner": "graith-maintainers",
+      "description": "Workflow, shell, Renovate, and helper policy proof.",
+      "modes": [
+        "legacy/workflow-lint/actionlint",
+        "legacy/workflow-lint/renovate",
+        "legacy/workflow-lint/scripts",
+        "legacy/workflow-lint/shellcheck",
+        "legacy/workflow-lint/zizmor"
+      ]
+    }
+  ],
+  "modes": [
+    {
+      "id": "legacy/ci/build",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/build",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Build (ubuntu-latest)",
+          "evidence_refs": [
+            "github-check-name:Build (ubuntu-latest)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/build"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/build",
+            "legacy_workflow": "ci",
+            "legacy_job": "build",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/build"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/build",
+        "legacy_workflow": "ci",
+        "legacy_job": "build",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/build-macos",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/build-macos",
+          "platform": "macos-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Build (macos-latest)",
+          "evidence_refs": [
+            "github-check-name:Build (macos-latest)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/build-macos"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/build-macos",
+            "legacy_workflow": "ci",
+            "legacy_job": "build-macos",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/build-macos"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/build-macos",
+        "legacy_workflow": "ci",
+        "legacy_job": "build-macos",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/changes",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/changes",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Detect macOS-relevant changes",
+          "evidence_refs": [
+            "github-check-name:Detect macOS-relevant changes",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/changes"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/changes",
+            "legacy_workflow": "ci",
+            "legacy_job": "changes",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/changes"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/changes",
+        "legacy_workflow": "ci",
+        "legacy_job": "changes",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/govulncheck",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/govulncheck",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Vulnerability Check",
+          "evidence_refs": [
+            "github-check-name:Vulnerability Check",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/govulncheck"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/govulncheck",
+            "legacy_workflow": "ci",
+            "legacy_job": "govulncheck",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/govulncheck"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/govulncheck",
+        "legacy_workflow": "ci",
+        "legacy_job": "govulncheck",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/integration",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/integration",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Integration (ubuntu-latest)",
+          "evidence_refs": [
+            "github-check-name:Integration (ubuntu-latest)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/integration"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/integration",
+            "legacy_workflow": "ci",
+            "legacy_job": "integration",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/integration"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/integration",
+        "legacy_workflow": "ci",
+        "legacy_job": "integration",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/integration-macos",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/integration-macos",
+          "platform": "macos-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Integration (macos-latest)",
+          "evidence_refs": [
+            "github-check-name:Integration (macos-latest)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/integration-macos"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/integration-macos",
+            "legacy_workflow": "ci",
+            "legacy_job": "integration-macos",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/integration-macos"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/integration-macos",
+        "legacy_workflow": "ci",
+        "legacy_job": "integration-macos",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/lint",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "required",
+      "cost_class": "linux-fast",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/lint",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "Lint",
+          "evidence_refs": [
+            "github-check-name:Lint",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/lint"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/lint",
+            "legacy_workflow": "ci",
+            "legacy_job": "lint",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/lint"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/lint",
+        "legacy_workflow": "ci",
+        "legacy_job": "lint",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/test",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "required",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/test",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "Test (ubuntu-latest)",
+          "evidence_refs": [
+            "github-check-name:Test (ubuntu-latest)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/test"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/test",
+            "legacy_workflow": "ci",
+            "legacy_job": "test",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/test"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/test",
+        "legacy_workflow": "ci",
+        "legacy_job": "test",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/ci/test-macos",
+      "capability": "go-core",
+      "owner": "graith-maintainers",
+      "requiredness": "required",
+      "cost_class": "macos",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "ci/test-macos",
+          "platform": "macos-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "Test (macos-latest)",
+          "evidence_refs": [
+            "github-check-name:Test (macos-latest)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/test-macos"
+          ],
+          "trace": {
+            "inventory_mapping": "ci/test-macos",
+            "legacy_workflow": "ci",
+            "legacy_job": "test-macos",
+            "workflow_path": ".github/workflows/ci.yml",
+            "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#ci/test-macos"
+      ],
+      "trace": {
+        "inventory_mapping": "job:ci/test-macos",
+        "legacy_workflow": "ci",
+        "legacy_job": "test-macos",
+        "workflow_path": ".github/workflows/ci.yml",
+        "workflow_sha256": "8717e68112d0070e73eaf2175d300891769b8807a5169585bf63d9862c9ee0f9",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/codeql/analyze",
+      "capability": "security-codeql",
+      "owner": "security-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "schedule"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "codeql/analyze",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Analyze (Go)",
+          "evidence_refs": [
+            "github-check-name:Analyze (Go)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#codeql/analyze"
+          ],
+          "trace": {
+            "inventory_mapping": "codeql/analyze",
+            "legacy_workflow": "codeql",
+            "legacy_job": "analyze",
+            "workflow_path": ".github/workflows/codeql.yml",
+            "workflow_sha256": "160972df5072a1160eb70e946ff2aecd8efb992608253f1474e0f5612de0c0fb",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#codeql/analyze"
+      ],
+      "trace": {
+        "inventory_mapping": "job:codeql/analyze",
+        "legacy_workflow": "codeql",
+        "legacy_job": "analyze",
+        "workflow_path": ".github/workflows/codeql.yml",
+        "workflow_sha256": "160972df5072a1160eb70e946ff2aecd8efb992608253f1474e0f5612de0c0fb",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/commits/commitsar",
+      "capability": "commit-policy",
+      "owner": "graith-maintainers",
+      "requiredness": "required",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "commits/commitsar",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "Conventional commits",
+          "evidence_refs": [
+            "github-check-name:Conventional commits",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#commits/commitsar"
+          ],
+          "trace": {
+            "inventory_mapping": "commits/commitsar",
+            "legacy_workflow": "commits",
+            "legacy_job": "commitsar",
+            "workflow_path": ".github/workflows/commits.yml",
+            "workflow_sha256": "30c068d6f10fde86c2e9e954c2362718ea8a73657c4cb23228b686c7273b3acb",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#commits/commitsar"
+      ],
+      "trace": {
+        "inventory_mapping": "job:commits/commitsar",
+        "legacy_workflow": "commits",
+        "legacy_job": "commitsar",
+        "workflow_path": ".github/workflows/commits.yml",
+        "workflow_sha256": "30c068d6f10fde86c2e9e954c2362718ea8a73657c4cb23228b686c7273b3acb",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/coverage/changes",
+      "capability": "coverage",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "soft",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "coverage/changes",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Detect gui changes",
+          "evidence_refs": [
+            "github-check-name:Detect gui changes",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/changes"
+          ],
+          "trace": {
+            "inventory_mapping": "coverage/changes",
+            "legacy_workflow": "coverage",
+            "legacy_job": "changes",
+            "workflow_path": ".github/workflows/coverage.yml",
+            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/changes"
+      ],
+      "trace": {
+        "inventory_mapping": "job:coverage/changes",
+        "legacy_workflow": "coverage",
+        "legacy_job": "changes",
+        "workflow_path": ".github/workflows/coverage.yml",
+        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/coverage/comment",
+      "capability": "coverage",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "soft",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "coverage/comment",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Coverage comment",
+          "evidence_refs": [
+            "github-check-name:Coverage comment",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/comment"
+          ],
+          "trace": {
+            "inventory_mapping": "coverage/comment",
+            "legacy_workflow": "coverage",
+            "legacy_job": "comment",
+            "workflow_path": ".github/workflows/coverage.yml",
+            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/comment"
+      ],
+      "trace": {
+        "inventory_mapping": "job:coverage/comment",
+        "legacy_workflow": "coverage",
+        "legacy_job": "comment",
+        "workflow_path": ".github/workflows/coverage.yml",
+        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/coverage/go-coverage",
+      "capability": "coverage",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "soft",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "coverage/go-coverage",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Go coverage",
+          "evidence_refs": [
+            "github-check-name:Go coverage",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/go-coverage"
+          ],
+          "trace": {
+            "inventory_mapping": "coverage/go-coverage",
+            "legacy_workflow": "coverage",
+            "legacy_job": "go-coverage",
+            "workflow_path": ".github/workflows/coverage.yml",
+            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/go-coverage"
+      ],
+      "trace": {
+        "inventory_mapping": "job:coverage/go-coverage",
+        "legacy_workflow": "coverage",
+        "legacy_job": "go-coverage",
+        "workflow_path": ".github/workflows/coverage.yml",
+        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/coverage/swift-coverage",
+      "capability": "coverage",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "soft",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "coverage/swift-coverage",
+          "platform": "macos-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Swift coverage",
+          "evidence_refs": [
+            "github-check-name:Swift coverage",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/swift-coverage"
+          ],
+          "trace": {
+            "inventory_mapping": "coverage/swift-coverage",
+            "legacy_workflow": "coverage",
+            "legacy_job": "swift-coverage",
+            "workflow_path": ".github/workflows/coverage.yml",
+            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "legacy_condition": "needs.changes.outputs.gui == 'true'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#coverage/swift-coverage"
+      ],
+      "trace": {
+        "inventory_mapping": "job:coverage/swift-coverage",
+        "legacy_workflow": "coverage",
+        "legacy_job": "swift-coverage",
+        "workflow_path": ".github/workflows/coverage.yml",
+        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "legacy_condition": "needs.changes.outputs.gui == 'true'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dependency-review/dependency-review",
+      "capability": "security-dependency-review",
+      "owner": "security-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dependency-review/dependency-review",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Dependency Review",
+          "evidence_refs": [
+            "github-check-name:Dependency Review",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dependency-review/dependency-review"
+          ],
+          "trace": {
+            "inventory_mapping": "dependency-review/dependency-review",
+            "legacy_workflow": "dependency-review",
+            "legacy_job": "dependency-review",
+            "workflow_path": ".github/workflows/dependency-review.yml",
+            "workflow_sha256": "99e716c4891e084c15be79f13cb966887ee7197ff9d3013370b2dbfb9f1b042e",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dependency-review/dependency-review"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dependency-review/dependency-review",
+        "legacy_workflow": "dependency-review",
+        "legacy_job": "dependency-review",
+        "workflow_path": ".github/workflows/dependency-review.yml",
+        "workflow_sha256": "99e716c4891e084c15be79f13cb966887ee7197ff9d3013370b2dbfb9f1b042e",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/assemble-dev",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/assemble-dev",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Aggregate dev release",
+          "evidence_refs": [
+            "github-check-name:Aggregate dev release",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/assemble-dev"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/assemble-dev",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "assemble-dev",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/assemble-dev"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/assemble-dev",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "assemble-dev",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/attest-linux",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/attest-linux[goarch=amd64]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "amd64"
+          },
+          "requiredness": "soft",
+          "github_name": "Attest Linux dev archive (amd64)",
+          "evidence_refs": [
+            "github-check-name:Attest Linux dev archive (amd64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/attest-linux[goarch=amd64]"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/attest-linux[goarch=amd64]",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "attest-linux",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "github.event_name == 'push'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "dev-release/attest-linux[goarch=arm64]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "arm64"
+          },
+          "requiredness": "soft",
+          "github_name": "Attest Linux dev archive (arm64)",
+          "evidence_refs": [
+            "github-check-name:Attest Linux dev archive (arm64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/attest-linux[goarch=arm64]"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/attest-linux[goarch=arm64]",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "attest-linux",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "github.event_name == 'push'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/attest-linux"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/attest-linux",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "attest-linux",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "github.event_name == 'push'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/build-darwin",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/build-darwin",
+          "platform": "macos-26",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Build and verify Darwin dev archives",
+          "evidence_refs": [
+            "github-check-name:Build and verify Darwin dev archives",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/build-darwin"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/build-darwin",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "build-darwin",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/build-darwin"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/build-darwin",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "build-darwin",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/build-linux",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "amd64",
+            "target": "x86_64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "Build and verify Linux dev archive (amd64)",
+          "evidence_refs": [
+            "github-check-name:Build and verify Linux dev archive (amd64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "build-linux",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "arm64",
+            "target": "aarch64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "Build and verify Linux dev archive (arm64)",
+          "evidence_refs": [
+            "github-check-name:Build and verify Linux dev archive (arm64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "build-linux",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/build-linux"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/build-linux",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "build-linux",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/changes",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/changes",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Detect dev-release-relevant changes",
+          "evidence_refs": [
+            "github-check-name:Detect dev-release-relevant changes",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/changes"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/changes",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "changes",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/changes"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/changes",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "changes",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/execute-linux",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "amd64",
+            "runner": "ubuntu-24.04"
+          },
+          "requiredness": "soft",
+          "github_name": "Execute Linux dev archive (amd64)",
+          "evidence_refs": [
+            "github-check-name:Execute Linux dev archive (amd64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "execute-linux",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+          "platform": "ubuntu-24.04-arm",
+          "matrix": {
+            "goarch": "arm64",
+            "runner": "ubuntu-24.04-arm"
+          },
+          "requiredness": "soft",
+          "github_name": "Execute Linux dev archive (arm64)",
+          "evidence_refs": [
+            "github-check-name:Execute Linux dev archive (arm64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "execute-linux",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/execute-linux"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/execute-linux",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "execute-linux",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/publish-dev",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base",
+        "trusted-publication"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/publish-dev",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Publish dev release",
+          "evidence_refs": [
+            "github-check-name:Publish dev release",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/publish-dev"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/publish-dev",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "publish-dev",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "github.event_name == 'push'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/publish-dev"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/publish-dev",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "publish-dev",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "github.event_name == 'push'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/dev-release/release-context",
+      "capability": "dev-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "dev-release/release-context",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Select dev release context",
+          "evidence_refs": [
+            "github-check-name:Select dev release context",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/release-context"
+          ],
+          "trace": {
+            "inventory_mapping": "dev-release/release-context",
+            "legacy_workflow": "dev-release",
+            "legacy_job": "release-context",
+            "workflow_path": ".github/workflows/dev-release.yml",
+            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#dev-release/release-context"
+      ],
+      "trace": {
+        "inventory_mapping": "job:dev-release/release-context",
+        "legacy_workflow": "dev-release",
+        "legacy_job": "release-context",
+        "workflow_path": ".github/workflows/dev-release.yml",
+        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/docs-preview/cleanup",
+      "capability": "docs-preview",
+      "owner": "docs-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "docs-preview/cleanup",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Clean up screenshots",
+          "evidence_refs": [
+            "github-check-name:Clean up screenshots",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs-preview/cleanup"
+          ],
+          "trace": {
+            "inventory_mapping": "docs-preview/cleanup",
+            "legacy_workflow": "docs-preview",
+            "legacy_job": "cleanup",
+            "workflow_path": ".github/workflows/docs-preview.yml",
+            "workflow_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+            "legacy_condition": "github.event.action == 'closed'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs-preview/cleanup"
+      ],
+      "trace": {
+        "inventory_mapping": "job:docs-preview/cleanup",
+        "legacy_workflow": "docs-preview",
+        "legacy_job": "cleanup",
+        "workflow_path": ".github/workflows/docs-preview.yml",
+        "workflow_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+        "legacy_condition": "github.event.action == 'closed'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/docs-preview/preview",
+      "capability": "docs-preview",
+      "owner": "docs-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "docs-preview/preview",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Screenshot changed pages",
+          "evidence_refs": [
+            "github-check-name:Screenshot changed pages",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs-preview/preview"
+          ],
+          "trace": {
+            "inventory_mapping": "docs-preview/preview",
+            "legacy_workflow": "docs-preview",
+            "legacy_job": "preview",
+            "workflow_path": ".github/workflows/docs-preview.yml",
+            "workflow_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+            "legacy_condition": "github.event_name == 'pull_request' \u0026\u0026 github.event.action != 'closed'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs-preview/preview"
+      ],
+      "trace": {
+        "inventory_mapping": "job:docs-preview/preview",
+        "legacy_workflow": "docs-preview",
+        "legacy_job": "preview",
+        "workflow_path": ".github/workflows/docs-preview.yml",
+        "workflow_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+        "legacy_condition": "github.event_name == 'pull_request' \u0026\u0026 github.event.action != 'closed'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/docs-preview/prune",
+      "capability": "docs-preview",
+      "owner": "docs-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "schedule"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "docs-preview/prune",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Prune stale screenshots",
+          "evidence_refs": [
+            "github-check-name:Prune stale screenshots",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs-preview/prune"
+          ],
+          "trace": {
+            "inventory_mapping": "docs-preview/prune",
+            "legacy_workflow": "docs-preview",
+            "legacy_job": "prune",
+            "workflow_path": ".github/workflows/docs-preview.yml",
+            "workflow_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+            "legacy_condition": "github.event_name == 'schedule'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs-preview/prune"
+      ],
+      "trace": {
+        "inventory_mapping": "job:docs-preview/prune",
+        "legacy_workflow": "docs-preview",
+        "legacy_job": "prune",
+        "workflow_path": ".github/workflows/docs-preview.yml",
+        "workflow_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+        "legacy_condition": "github.event_name == 'schedule'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/docs/build",
+      "capability": "docs-publication",
+      "owner": "docs-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "docs/build",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Build",
+          "evidence_refs": [
+            "github-check-name:Build",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs/build"
+          ],
+          "trace": {
+            "inventory_mapping": "docs/build",
+            "legacy_workflow": "docs",
+            "legacy_job": "build",
+            "workflow_path": ".github/workflows/docs.yml",
+            "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs/build"
+      ],
+      "trace": {
+        "inventory_mapping": "job:docs/build",
+        "legacy_workflow": "docs",
+        "legacy_job": "build",
+        "workflow_path": ".github/workflows/docs.yml",
+        "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/docs/deploy",
+      "capability": "docs-publication",
+      "owner": "docs-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base",
+        "trusted-publication"
+      ],
+      "coordinates": [
+        {
+          "id": "docs/deploy",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Deploy",
+          "evidence_refs": [
+            "github-check-name:Deploy",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs/deploy"
+          ],
+          "trace": {
+            "inventory_mapping": "docs/deploy",
+            "legacy_workflow": "docs",
+            "legacy_job": "deploy",
+            "workflow_path": ".github/workflows/docs.yml",
+            "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#docs/deploy"
+      ],
+      "trace": {
+        "inventory_mapping": "job:docs/deploy",
+        "legacy_workflow": "docs",
+        "legacy_job": "deploy",
+        "workflow_path": ".github/workflows/docs.yml",
+        "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/assemble-stable",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/assemble-stable",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Aggregate complete stable release",
+          "evidence_refs": [
+            "github-check-name:Aggregate complete stable release",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/assemble-stable"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/assemble-stable",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "assemble-stable",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/assemble-stable"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/assemble-stable",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "assemble-stable",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/attest-stable",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/attest-stable",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Finalize and attest stable release",
+          "evidence_refs": [
+            "github-check-name:Finalize and attest stable release",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/attest-stable"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/attest-stable",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "attest-stable",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "github.event_name == 'push'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/attest-stable"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/attest-stable",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "attest-stable",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "github.event_name == 'push'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/build-darwin",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/build-darwin",
+          "platform": "macos-26",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Build and verify stable Darwin archives",
+          "evidence_refs": [
+            "github-check-name:Build and verify stable Darwin archives",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/build-darwin"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/build-darwin",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "build-darwin",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/build-darwin"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/build-darwin",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "build-darwin",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/build-linux",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "package-consumer",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "amd64",
+            "target": "x86_64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "Build and verify stable Linux artifacts (amd64)",
+          "evidence_refs": [
+            "github-check-name:Build and verify stable Linux artifacts (amd64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "build-linux",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "arm64",
+            "target": "aarch64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "Build and verify stable Linux artifacts (arm64)",
+          "evidence_refs": [
+            "github-check-name:Build and verify stable Linux artifacts (arm64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "build-linux",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/build-linux"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/build-linux",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "build-linux",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/changes",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/changes",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Detect stable-release-relevant changes",
+          "evidence_refs": [
+            "github-check-name:Detect stable-release-relevant changes",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/changes"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/changes",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "changes",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/changes"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/changes",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "changes",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/execute-linux",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+          "platform": "ubuntu-24.04",
+          "matrix": {
+            "goarch": "amd64",
+            "runner": "ubuntu-24.04"
+          },
+          "requiredness": "soft",
+          "github_name": "Execute stable Linux artifacts (amd64)",
+          "evidence_refs": [
+            "github-check-name:Execute stable Linux artifacts (amd64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "execute-linux",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+          "platform": "ubuntu-24.04-arm",
+          "matrix": {
+            "goarch": "arm64",
+            "runner": "ubuntu-24.04-arm"
+          },
+          "requiredness": "soft",
+          "github_name": "Execute stable Linux artifacts (arm64)",
+          "evidence_refs": [
+            "github-check-name:Execute stable Linux artifacts (arm64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "execute-linux",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/execute-linux"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/execute-linux",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "execute-linux",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/publish-stable",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-publication"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/publish-stable",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Publish verified stable release",
+          "evidence_refs": [
+            "github-check-name:Publish verified stable release",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/publish-stable"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/publish-stable",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "publish-stable",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "github.event_name == 'push'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/publish-stable"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/publish-stable",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "publish-stable",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "github.event_name == 'push'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/goreleaser/release-context",
+      "capability": "stable-release",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-tag"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "goreleaser/release-context",
+          "platform": "ubuntu-24.04",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Bind stable release context",
+          "evidence_refs": [
+            "github-check-name:Bind stable release context",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/release-context"
+          ],
+          "trace": {
+            "inventory_mapping": "goreleaser/release-context",
+            "legacy_workflow": "goreleaser",
+            "legacy_job": "release-context",
+            "workflow_path": ".github/workflows/goreleaser.yml",
+            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#goreleaser/release-context"
+      ],
+      "trace": {
+        "inventory_mapping": "job:goreleaser/release-context",
+        "legacy_workflow": "goreleaser",
+        "legacy_job": "release-context",
+        "workflow_path": ".github/workflows/goreleaser.yml",
+        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/gui-ci/build",
+      "capability": "gui",
+      "owner": "gui-owners",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "gui-ci/build",
+          "platform": "macos-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Build \u0026 Test (macOS)",
+          "evidence_refs": [
+            "github-check-name:Build \u0026 Test (macOS)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#gui-ci/build"
+          ],
+          "trace": {
+            "inventory_mapping": "gui-ci/build",
+            "legacy_workflow": "gui-ci",
+            "legacy_job": "build",
+            "workflow_path": ".github/workflows/gui-ci.yml",
+            "workflow_sha256": "2b24102c66e4733a369298b2477d1ee3d41fe770e4cb50d102227d8e03303c84",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#gui-ci/build"
+      ],
+      "trace": {
+        "inventory_mapping": "job:gui-ci/build",
+        "legacy_workflow": "gui-ci",
+        "legacy_job": "build",
+        "workflow_path": ".github/workflows/gui-ci.yml",
+        "workflow_sha256": "2b24102c66e4733a369298b2477d1ee3d41fe770e4cb50d102227d8e03303c84",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/libghostty-native-publish/publish",
+      "capability": "native-publication",
+      "owner": "native-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base",
+        "trusted-publication"
+      ],
+      "coordinates": [
+        {
+          "id": "libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
+          "platform": "ubuntu-latest",
+          "matrix": {
+            "goarch": "amd64",
+            "target": "x86_64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "publish (amd64, x86_64-linux-gnu)",
+          "evidence_refs": [
+            "github-check-name:publish (amd64, x86_64-linux-gnu)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
+            "legacy_workflow": "libghostty-native-publish",
+            "legacy_job": "publish",
+            "workflow_path": ".github/workflows/libghostty-native-publish.yml",
+            "workflow_sha256": "135c5bea295b4dfcd2e2a6d48c21054fa7f74134d9735bbda35d80b686b4c892",
+            "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]",
+          "platform": "ubuntu-latest",
+          "matrix": {
+            "goarch": "arm64",
+            "target": "aarch64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "publish (arm64, aarch64-linux-gnu)",
+          "evidence_refs": [
+            "github-check-name:publish (arm64, aarch64-linux-gnu)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]",
+            "legacy_workflow": "libghostty-native-publish",
+            "legacy_job": "publish",
+            "workflow_path": ".github/workflows/libghostty-native-publish.yml",
+            "workflow_sha256": "135c5bea295b4dfcd2e2a6d48c21054fa7f74134d9735bbda35d80b686b4c892",
+            "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native-publish/publish"
+      ],
+      "trace": {
+        "inventory_mapping": "job:libghostty-native-publish/publish",
+        "legacy_workflow": "libghostty-native-publish",
+        "legacy_job": "publish",
+        "workflow_path": ".github/workflows/libghostty-native-publish.yml",
+        "workflow_sha256": "135c5bea295b4dfcd2e2a6d48c21054fa7f74134d9735bbda35d80b686b4c892",
+        "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/libghostty-native/apple-adapter",
+      "capability": "native",
+      "owner": "native-owners",
+      "requiredness": "soft",
+      "cost_class": "macos",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "libghostty-native/apple-adapter",
+          "platform": "macos-26",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Adapter and pinned artifact (macOS arm64)",
+          "evidence_refs": [
+            "github-check-name:Adapter and pinned artifact (macOS arm64)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/apple-adapter"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native/apple-adapter",
+            "legacy_workflow": "libghostty-native",
+            "legacy_job": "apple-adapter",
+            "workflow_path": ".github/workflows/libghostty-native.yml",
+            "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/apple-adapter"
+      ],
+      "trace": {
+        "inventory_mapping": "job:libghostty-native/apple-adapter",
+        "legacy_workflow": "libghostty-native",
+        "legacy_job": "apple-adapter",
+        "workflow_path": ".github/workflows/libghostty-native.yml",
+        "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/libghostty-native/changes",
+      "capability": "native",
+      "owner": "native-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "libghostty-native/changes",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Detect libghostty-relevant changes",
+          "evidence_refs": [
+            "github-check-name:Detect libghostty-relevant changes",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/changes"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native/changes",
+            "legacy_workflow": "libghostty-native",
+            "legacy_job": "changes",
+            "workflow_path": ".github/workflows/libghostty-native.yml",
+            "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/changes"
+      ],
+      "trace": {
+        "inventory_mapping": "job:libghostty-native/changes",
+        "legacy_workflow": "libghostty-native",
+        "legacy_job": "changes",
+        "workflow_path": ".github/workflows/libghostty-native.yml",
+        "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/libghostty-native/linux-adapter",
+      "capability": "native",
+      "owner": "native-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "compile-only",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
+          "platform": "ubuntu-latest",
+          "matrix": {
+            "goarch": "amd64",
+            "run_tests": "true",
+            "target": "x86_64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "Adapter source build (x86_64-linux-gnu)",
+          "evidence_refs": [
+            "github-check-name:Adapter source build (x86_64-linux-gnu)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
+            "legacy_workflow": "libghostty-native",
+            "legacy_job": "linux-adapter",
+            "workflow_path": ".github/workflows/libghostty-native.yml",
+            "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        },
+        {
+          "id": "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]",
+          "platform": "ubuntu-latest",
+          "matrix": {
+            "goarch": "arm64",
+            "run_tests": "false",
+            "target": "aarch64-linux-gnu"
+          },
+          "requiredness": "soft",
+          "github_name": "Adapter source build (aarch64-linux-gnu)",
+          "evidence_refs": [
+            "github-check-name:Adapter source build (aarch64-linux-gnu)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]",
+            "legacy_workflow": "libghostty-native",
+            "legacy_job": "linux-adapter",
+            "workflow_path": ".github/workflows/libghostty-native.yml",
+            "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/linux-adapter"
+      ],
+      "trace": {
+        "inventory_mapping": "job:libghostty-native/linux-adapter",
+        "legacy_workflow": "libghostty-native",
+        "legacy_job": "linux-adapter",
+        "workflow_path": ".github/workflows/libghostty-native.yml",
+        "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/libghostty-native/native-gate",
+      "capability": "native",
+      "owner": "native-owners",
+      "requiredness": "required",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "libghostty-native/native-gate",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "Native backend gate",
+          "evidence_refs": [
+            "github-check-name:Native backend gate",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/native-gate"
+          ],
+          "trace": {
+            "inventory_mapping": "libghostty-native/native-gate",
+            "legacy_workflow": "libghostty-native",
+            "legacy_job": "native-gate",
+            "workflow_path": ".github/workflows/libghostty-native.yml",
+            "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+            "legacy_condition": "always()",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#libghostty-native/native-gate"
+      ],
+      "trace": {
+        "inventory_mapping": "job:libghostty-native/native-gate",
+        "legacy_workflow": "libghostty-native",
+        "legacy_job": "native-gate",
+        "workflow_path": ".github/workflows/libghostty-native.yml",
+        "workflow_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+        "legacy_condition": "always()",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/regen/prepare",
+      "capability": "generated-metadata",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "regen/prepare",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Prepare regenerated files",
+          "evidence_refs": [
+            "github-check-name:Prepare regenerated files",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#regen/prepare"
+          ],
+          "trace": {
+            "inventory_mapping": "regen/prepare",
+            "legacy_workflow": "regen",
+            "legacy_job": "prepare",
+            "workflow_path": ".github/workflows/regen.yml",
+            "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+            "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#regen/prepare"
+      ],
+      "trace": {
+        "inventory_mapping": "job:regen/prepare",
+        "legacy_workflow": "regen",
+        "legacy_job": "prepare",
+        "workflow_path": ".github/workflows/regen.yml",
+        "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+        "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/regen/regen",
+      "capability": "generated-metadata",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "regen/regen",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Regenerate generated files",
+          "evidence_refs": [
+            "github-check-name:Regenerate generated files",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#regen/regen"
+          ],
+          "trace": {
+            "inventory_mapping": "regen/regen",
+            "legacy_workflow": "regen",
+            "legacy_job": "regen",
+            "workflow_path": ".github/workflows/regen.yml",
+            "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+            "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#regen/regen"
+      ],
+      "trace": {
+        "inventory_mapping": "job:regen/regen",
+        "legacy_workflow": "regen",
+        "legacy_job": "regen",
+        "workflow_path": ".github/workflows/regen.yml",
+        "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+        "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/regen/validate",
+      "capability": "generated-metadata",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        }
+      ],
+      "trust_tiers": [
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "regen/validate",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Validate regeneration credentials",
+          "evidence_refs": [
+            "github-check-name:Validate regeneration credentials",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#regen/validate"
+          ],
+          "trace": {
+            "inventory_mapping": "regen/validate",
+            "legacy_workflow": "regen",
+            "legacy_job": "validate",
+            "workflow_path": ".github/workflows/regen.yml",
+            "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+            "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#regen/validate"
+      ],
+      "trace": {
+        "inventory_mapping": "job:regen/validate",
+        "legacy_workflow": "regen",
+        "legacy_job": "validate",
+        "workflow_path": ".github/workflows/regen.yml",
+        "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+        "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/release-please/release-please",
+      "capability": "release-automation",
+      "owner": "release-owners",
+      "requiredness": "soft",
+      "cost_class": "publication",
+      "proof_type": "scheduled",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "release-please/release-please",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "release-please",
+          "evidence_refs": [
+            "github-check-name:release-please",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#release-please/release-please"
+          ],
+          "trace": {
+            "inventory_mapping": "release-please/release-please",
+            "legacy_workflow": "release-please",
+            "legacy_job": "release-please",
+            "workflow_path": ".github/workflows/release-please.yml",
+            "workflow_sha256": "971e443986932f9e1c6272a482ec6762070eef27c3723e278d5103aeffbc896d",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#release-please/release-please"
+      ],
+      "trace": {
+        "inventory_mapping": "job:release-please/release-please",
+        "legacy_workflow": "release-please",
+        "legacy_job": "release-please",
+        "workflow_path": ".github/workflows/release-please.yml",
+        "workflow_sha256": "971e443986932f9e1c6272a482ec6762070eef27c3723e278d5103aeffbc896d",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/sandbox/changes",
+      "capability": "sandbox",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "sandbox/changes",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Detect sandbox-relevant changes",
+          "evidence_refs": [
+            "github-check-name:Detect sandbox-relevant changes",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#sandbox/changes"
+          ],
+          "trace": {
+            "inventory_mapping": "sandbox/changes",
+            "legacy_workflow": "sandbox",
+            "legacy_job": "changes",
+            "workflow_path": ".github/workflows/sandbox.yml",
+            "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#sandbox/changes"
+      ],
+      "trace": {
+        "inventory_mapping": "job:sandbox/changes",
+        "legacy_workflow": "sandbox",
+        "legacy_job": "changes",
+        "workflow_path": ".github/workflows/sandbox.yml",
+        "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/sandbox/linux-nono",
+      "capability": "sandbox",
+      "owner": "graith-maintainers",
+      "requiredness": "required",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "sandbox/linux-nono",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "Linux (nono / Landlock)",
+          "evidence_refs": [
+            "github-check-name:Linux (nono / Landlock)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#sandbox/linux-nono"
+          ],
+          "trace": {
+            "inventory_mapping": "sandbox/linux-nono",
+            "legacy_workflow": "sandbox",
+            "legacy_job": "linux-nono",
+            "workflow_path": ".github/workflows/sandbox.yml",
+            "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#sandbox/linux-nono"
+      ],
+      "trace": {
+        "inventory_mapping": "job:sandbox/linux-nono",
+        "legacy_workflow": "sandbox",
+        "legacy_job": "linux-nono",
+        "workflow_path": ".github/workflows/sandbox.yml",
+        "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/sandbox/macos-safehouse",
+      "capability": "sandbox",
+      "owner": "graith-maintainers",
+      "requiredness": "required",
+      "cost_class": "macos",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "sandbox/macos-safehouse",
+          "platform": "macos-latest",
+          "matrix": {},
+          "requiredness": "required",
+          "github_name": "macOS (safehouse / Seatbelt)",
+          "evidence_refs": [
+            "github-check-name:macOS (safehouse / Seatbelt)",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#sandbox/macos-safehouse"
+          ],
+          "trace": {
+            "inventory_mapping": "sandbox/macos-safehouse",
+            "legacy_workflow": "sandbox",
+            "legacy_job": "macos-safehouse",
+            "workflow_path": ".github/workflows/sandbox.yml",
+            "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+            "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#sandbox/macos-safehouse"
+      ],
+      "trace": {
+        "inventory_mapping": "job:sandbox/macos-safehouse",
+        "legacy_workflow": "sandbox",
+        "legacy_job": "macos-safehouse",
+        "workflow_path": ".github/workflows/sandbox.yml",
+        "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+        "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/scorecard/analysis",
+      "capability": "security-scorecard",
+      "owner": "security-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "schedule"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "scorecard/analysis",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Scorecard analysis",
+          "evidence_refs": [
+            "github-check-name:Scorecard analysis",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#scorecard/analysis"
+          ],
+          "trace": {
+            "inventory_mapping": "scorecard/analysis",
+            "legacy_workflow": "scorecard",
+            "legacy_job": "analysis",
+            "workflow_path": ".github/workflows/scorecard.yml",
+            "workflow_sha256": "b0bf3254af3989e72690c51568c262f0bc421ea868229692557419baedae595f",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#scorecard/analysis"
+      ],
+      "trace": {
+        "inventory_mapping": "job:scorecard/analysis",
+        "legacy_workflow": "scorecard",
+        "legacy_job": "analysis",
+        "workflow_path": ".github/workflows/scorecard.yml",
+        "workflow_sha256": "b0bf3254af3989e72690c51568c262f0bc421ea868229692557419baedae595f",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/secret-scan/gitleaks",
+      "capability": "security-secret-scan",
+      "owner": "security-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "schedule"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "secret-scan/gitleaks",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Gitleaks",
+          "evidence_refs": [
+            "github-check-name:Gitleaks",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#secret-scan/gitleaks"
+          ],
+          "trace": {
+            "inventory_mapping": "secret-scan/gitleaks",
+            "legacy_workflow": "secret-scan",
+            "legacy_job": "gitleaks",
+            "workflow_path": ".github/workflows/secret-scan.yml",
+            "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#secret-scan/gitleaks"
+      ],
+      "trace": {
+        "inventory_mapping": "job:secret-scan/gitleaks",
+        "legacy_workflow": "secret-scan",
+        "legacy_job": "gitleaks",
+        "workflow_path": ".github/workflows/secret-scan.yml",
+        "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/secret-scan/trufflehog",
+      "capability": "security-secret-scan",
+      "owner": "security-owners",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        },
+        {
+          "source": "github-actions",
+          "event": "schedule"
+        },
+        {
+          "source": "github-actions",
+          "event": "workflow-dispatch"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "secret-scan/trufflehog",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "TruffleHog",
+          "evidence_refs": [
+            "github-check-name:TruffleHog",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#secret-scan/trufflehog"
+          ],
+          "trace": {
+            "inventory_mapping": "secret-scan/trufflehog",
+            "legacy_workflow": "secret-scan",
+            "legacy_job": "trufflehog",
+            "workflow_path": ".github/workflows/secret-scan.yml",
+            "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#secret-scan/trufflehog"
+      ],
+      "trace": {
+        "inventory_mapping": "job:secret-scan/trufflehog",
+        "legacy_workflow": "secret-scan",
+        "legacy_job": "trufflehog",
+        "workflow_path": ".github/workflows/secret-scan.yml",
+        "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/workflow-lint/actionlint",
+      "capability": "workflow-policy",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "workflow-lint/actionlint",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "actionlint",
+          "evidence_refs": [
+            "github-check-name:actionlint",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/actionlint"
+          ],
+          "trace": {
+            "inventory_mapping": "workflow-lint/actionlint",
+            "legacy_workflow": "workflow-lint",
+            "legacy_job": "actionlint",
+            "workflow_path": ".github/workflows/workflow-lint.yml",
+            "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/actionlint"
+      ],
+      "trace": {
+        "inventory_mapping": "job:workflow-lint/actionlint",
+        "legacy_workflow": "workflow-lint",
+        "legacy_job": "actionlint",
+        "workflow_path": ".github/workflows/workflow-lint.yml",
+        "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/workflow-lint/renovate",
+      "capability": "workflow-policy",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "workflow-lint/renovate",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "Renovate native dependency fixtures",
+          "evidence_refs": [
+            "github-check-name:Renovate native dependency fixtures",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/renovate"
+          ],
+          "trace": {
+            "inventory_mapping": "workflow-lint/renovate",
+            "legacy_workflow": "workflow-lint",
+            "legacy_job": "renovate",
+            "workflow_path": ".github/workflows/workflow-lint.yml",
+            "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/renovate"
+      ],
+      "trace": {
+        "inventory_mapping": "job:workflow-lint/renovate",
+        "legacy_workflow": "workflow-lint",
+        "legacy_job": "renovate",
+        "workflow_path": ".github/workflows/workflow-lint.yml",
+        "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/workflow-lint/scripts",
+      "capability": "workflow-policy",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-standard",
+      "proof_type": "runtime",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "workflow-lint/scripts",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "workflow scripts",
+          "evidence_refs": [
+            "github-check-name:workflow scripts",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/scripts"
+          ],
+          "trace": {
+            "inventory_mapping": "workflow-lint/scripts",
+            "legacy_workflow": "workflow-lint",
+            "legacy_job": "scripts",
+            "workflow_path": ".github/workflows/workflow-lint.yml",
+            "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/scripts"
+      ],
+      "trace": {
+        "inventory_mapping": "job:workflow-lint/scripts",
+        "legacy_workflow": "workflow-lint",
+        "legacy_job": "scripts",
+        "workflow_path": ".github/workflows/workflow-lint.yml",
+        "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/workflow-lint/shellcheck",
+      "capability": "workflow-policy",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "workflow-lint/shellcheck",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "shellcheck",
+          "evidence_refs": [
+            "github-check-name:shellcheck",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/shellcheck"
+          ],
+          "trace": {
+            "inventory_mapping": "workflow-lint/shellcheck",
+            "legacy_workflow": "workflow-lint",
+            "legacy_job": "shellcheck",
+            "workflow_path": ".github/workflows/workflow-lint.yml",
+            "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/shellcheck"
+      ],
+      "trace": {
+        "inventory_mapping": "job:workflow-lint/shellcheck",
+        "legacy_workflow": "workflow-lint",
+        "legacy_job": "shellcheck",
+        "workflow_path": ".github/workflows/workflow-lint.yml",
+        "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    },
+    {
+      "id": "legacy/workflow-lint/zizmor",
+      "capability": "workflow-policy",
+      "owner": "graith-maintainers",
+      "requiredness": "soft",
+      "cost_class": "linux-fast",
+      "proof_type": "source-level",
+      "source_events": [
+        {
+          "source": "github-actions",
+          "event": "pull-request"
+        },
+        {
+          "source": "github-actions",
+          "event": "push-main"
+        }
+      ],
+      "trust_tiers": [
+        "fork-untrusted",
+        "same-repository-agent",
+        "trusted-base"
+      ],
+      "coordinates": [
+        {
+          "id": "workflow-lint/zizmor",
+          "platform": "ubuntu-latest",
+          "matrix": {},
+          "requiredness": "soft",
+          "github_name": "zizmor",
+          "evidence_refs": [
+            "github-check-name:zizmor",
+            "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/zizmor"
+          ],
+          "trace": {
+            "inventory_mapping": "workflow-lint/zizmor",
+            "legacy_workflow": "workflow-lint",
+            "legacy_job": "zizmor",
+            "workflow_path": ".github/workflows/workflow-lint.yml",
+            "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+            "legacy_condition": "",
+            "skip_semantics": "github-skipped-is-distinct-from-passed"
+          }
+        }
+      ],
+      "evidence_refs": [
+        "p0-inventory:90fc3b97b8a8c4ca8bff4c55b475a0b3b3ec9dec90f1212a1539f8b396748f21#workflow-lint/zizmor"
+      ],
+      "trace": {
+        "inventory_mapping": "job:workflow-lint/zizmor",
+        "legacy_workflow": "workflow-lint",
+        "legacy_job": "zizmor",
+        "workflow_path": ".github/workflows/workflow-lint.yml",
+        "workflow_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+        "legacy_condition": "",
+        "skip_semantics": "github-skipped-is-distinct-from-passed"
+      }
+    }
+  ],
+  "unsupported": [
+    {
+      "mode": "dynamic/dependabot/update-graph",
+      "coordinate": "dynamic/dependabot/update-graph",
+      "source": "github-actions",
+      "event": "dynamic",
+      "platform": "github-service",
+      "trust_tier": "github-service",
+      "requiredness": "unsupported",
+      "owner": "graith-maintainers",
+      "rationale": "GitHub-generated Dependabot dependency-graph update outside the 18 repo-owned workflow paths; latency policy no-latency-target; dual-run eligibility false until P1/P2 gives it an explicit mode or retirement decision.",
+      "expires": "2026-08-31",
+      "silent_pass_allowed": false,
+      "evidence_refs": [
+        "github-actions:run/30152132020/job/89664191125",
+        "p0-acceptance:gap-external-dependabot-update-graph-30152132020"
+      ]
+    }
+  ]
+}

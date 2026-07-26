@@ -12,6 +12,9 @@ The CI north-star P0 inventory is a checked-in, closed-world snapshot of the
 repository's current GitHub Actions proof surface. It remains explicitly
 `p0-observation-in-progress`: the inventory and collector do not change
 required checks, workflow behavior, permissions, or publication.
+The P1 policy manifest derives from this inventory through the
+[CI policy manifest]({{< relref "/docs/contributing/ci-policy.md" >}})
+validation path rather than duplicating the workflow inventory language.
 
 The source is `internal/cibaseline/inventory.json`. It enumerates all 18
 workflow files and their events, permissions, jobs and expanded static matrix
