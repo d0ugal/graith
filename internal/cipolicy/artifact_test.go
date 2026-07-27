@@ -29,7 +29,7 @@ type archiveMember struct {
 const testProducerWorkflow = ".github/workflows/libghostty-native.yml"
 
 // Regenerate with: sha256sum .github/workflows/libghostty-native.yml
-const testProducerWorkflowSHA256 = "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed"
+const testProducerWorkflowSHA256 = "c5765d5d3b07e6e2ce7f88b525823ad40cef04071ee3a4c2238b9a9705ea9ddf"
 
 const testProducerRunID = int64(30152132020)
 

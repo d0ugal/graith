@@ -27,6 +27,13 @@ on:
 permissions:
   contents: read
 
+# Pull-request runs are expensive and become obsolete on the next push to the
+# same PR. Manual full-matrix diagnostics use a unique group so they are never
+# cancelled by PR activity or serialized behind a PR run.
+concurrency:
+  group: libghostty-native-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   changes:
     name: Detect libghostty-relevant changes
@@ -509,7 +516,9 @@ jobs:
 
   native-gate:
     name: Native backend gate
-    if: always()
+    # Run after failures or skips so the required check remains fail-safe, but
+    # do not keep a superseded PR run alive after workflow concurrency cancels it.
+    if: ${{ !cancelled() }}
     needs:
       - changes
       - apple-adapter

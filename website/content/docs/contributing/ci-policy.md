@@ -132,6 +132,12 @@ metadata, run plan and gate evaluation from the trusted base ref or from a
 pinned released policy tool. Pull-request-controlled policy code is input to be
 proved, not authority for narrowing itself.
 
+Expensive pull-request workflows use PR-scoped GitHub Actions concurrency groups.
+A newer push to the same pull request cancels the superseded core CI, sandbox,
+and libghostty-native runs. Non-PR runs use unique groups and do not opt into
+that cancellation path, so main, release, scheduled, manual, and publication
+work cannot be cancelled by pull-request activity.
+
 Artifact-producing native and release validation uses artifact-specific
 producer results. Those results bind attempt history, first outcome, final
 status, timestamps, evidence digest, artifact digest, and a 64-hex superseding

@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
+      "file_sha256": "dbac6d786f568a5033fe5380405dfed34c49a82f6dc3468c64af124f0b82f12c",
       "events": {
         "pull_request": null,
         "push": {
@@ -485,7 +485,7 @@
       "path": ".github/workflows/libghostty-native.yml",
       "name": "libghostty core runtime",
       "owner": "native-owners",
-      "file_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
+      "file_sha256": "c5765d5d3b07e6e2ce7f88b525823ad40cef04071ee3a4c2238b9a9705ea9ddf",
       "events": {
         "pull_request": null,
         "workflow_dispatch": {
@@ -665,7 +665,7 @@
           "capability": "legacy-proof/libghostty-native/native-gate",
           "owner": "native-owners",
           "runner": "ubuntu-latest",
-          "condition": "always()",
+          "condition": "${{ !cancelled() }}",
           "skip_semantics": "github-skipped-is-distinct-from-passed",
           "proof_type": "runtime",
           "requiredness": "required",
@@ -1930,7 +1930,7 @@
       "path": ".github/workflows/sandbox.yml",
       "name": "Sandbox",
       "owner": "graith-maintainers",
-      "file_sha256": "3bb5d4f5e0e3bd4ae87e11730192766770e67e6fb093304e6168ea440b278e3d",
+      "file_sha256": "3130ff84cf5fd4211b4933a8860bacb686f35dd8728ac22c7d97913e0e891944",
       "events": {
         "pull_request": null,
         "workflow_dispatch": null
@@ -3169,7 +3169,7 @@
     },
     {
       "legacy_coordinate": "libghostty-native/native-gate",
-      "legacy_condition": "always()",
+      "legacy_condition": "${{ !cancelled() }}",
       "skip_semantics": "github-skipped-is-distinct-from-passed",
       "new_mode": "legacy/libghostty-native/native-gate",
       "owner": "native-owners",
@@ -3525,5 +3525,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "2fdd1b392194dc97a0572955a53d942fcaaf5e3185fc0ec1a72f2676a1ba5604"
+  "digest": "85c1a90983ced3c04ea7027b3547121db2ca5ab272e3421e07a01ac207097322"
 }
