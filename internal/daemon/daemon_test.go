@@ -3715,14 +3715,7 @@ func TestCreateNoFetchSkipsFetch(t *testing.T) {
 		}
 
 		t.Cleanup(func() {
-			sm.mu.RLock()
-			live, ok := sm.sessions[sess.ID]
-			sm.mu.RUnlock()
-
-			if ok {
-				_ = live.Kill()
-				live.Close()
-			}
+			stopAndClosePTY(sm, sess.ID)
 
 			if sess.WorktreePath != "" {
 				cmd := testutil.GitCommand("worktree", "remove", "--force", sess.WorktreePath)
