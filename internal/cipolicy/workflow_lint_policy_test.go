@@ -125,6 +125,24 @@ func TestWorkflowLintDoesNotUseUnpinnedZizmorInstallPath(t *testing.T) {
 	}
 }
 
+func TestGolangciLintDockerImageIsDigestPinned(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	makefile := readPolicyFile(t, filepath.Join(repoRoot, "Makefile"))
+	renovate := readPolicyFile(t, filepath.Join(repoRoot, "renovate.json5"))
+
+	assertRegexp(t, makefile, `(?m)^GOLANGCI_LINT_VERSION := v\d+\.\d+\.\d+$`)
+	assertRegexp(t, makefile, `(?m)^GOLANGCI_LINT_DIGEST := sha256:[0-9a-f]{64}$`)
+	assertContains(t, makefile, "GOLANGCI_LINT_IMAGE := golangci/golangci-lint:$(GOLANGCI_LINT_VERSION)@$(GOLANGCI_LINT_DIGEST)")
+
+	if got := strings.Count(makefile, "golangci/golangci-lint:"); got != 1 {
+		t.Fatalf("Makefile golangci-lint image coordinate count = %d, want 1", got)
+	}
+
+	assertContains(t, renovate, "GOLANGCI_LINT_VERSION := (?<currentValue>v[\\\\d\\\\.]+)\\\\s+GOLANGCI_LINT_DIGEST := (?<currentDigest>sha256:[a-f0-9]{64})")
+	assertContains(t, renovate, "autoReplaceStringTemplate: 'GOLANGCI_LINT_VERSION := {{{newValue}}}\\nGOLANGCI_LINT_DIGEST := {{{newDigest}}}',")
+	assertNotContains(t, renovate, "pinDigests: false")
+}
+
 func workflowExecutableLines(run string) string {
 	lines := strings.Split(run, "\n")
 

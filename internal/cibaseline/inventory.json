@@ -2669,7 +2669,7 @@
       "owner": "graith-maintainers",
       "kind": "ci-entrypoint",
       "git_mode": "100644",
-      "sha256": "fad6702e29ec45d0031da82ead1234ca7b17e567637451fc086d4e25688add86",
+      "sha256": "db1fc885598e9334a34ea4896b11dbe5ea9fe4daf2515846ccdb2a16adfa7336",
       "executable_contract": "preserve the checked-in make targets invoked directly by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -2819,7 +2819,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "6acf0a14aef1141810ff05a3822956c1dbfc89227be3c1a7f22abc1f197766fa",
+      "sha256": "15621db57fc90d0f36644bbf25c07c8595086d2ac23c1a14082ecff3cc205e36",
       "executable_contract": "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
@@ -2899,7 +2899,7 @@
       "owner": "graith-maintainers",
       "kind": "ci-configuration",
       "git_mode": "100644",
-      "sha256": "b9ad166bf35280b04da3861e37bbb14250c261131a61647f5922be4927d1fb2a",
+      "sha256": "30d2743d798c47a68e647281cdfebde7416f13ca685c0bce0f9cc6fbe2c0f790",
       "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -3490,5 +3490,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "048c9d8ae1dd30468e0364492b636cb636ec38099a60a1b33ec11a5d5a8f0a44"
+  "digest": "b9bf92612d4df18ec7a9cbc071982fc8ed3fba10dfed15f0138ff9db6ad6539a"
 }
