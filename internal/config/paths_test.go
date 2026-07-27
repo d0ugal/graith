@@ -28,6 +28,10 @@ func TestResolvePaths(t *testing.T) {
 		t.Errorf("HumanTokenFile = %q, want human.token under DataDir", p.HumanTokenFile)
 	}
 
+	if p.DaemonStderrLog != filepath.Join(p.DataDir, "daemon.stderr.log") {
+		t.Errorf("DaemonStderrLog = %q, want daemon.stderr.log under DataDir", p.DaemonStderrLog)
+	}
+
 	if !strings.HasSuffix(p.ConfigFile, filepath.Join("graith", "config.toml")) {
 		t.Errorf("ConfigFile = %q, want suffix graith/config.toml", p.ConfigFile)
 	}
@@ -189,12 +193,45 @@ func TestWithDataDir(t *testing.T) {
 		t.Errorf("DaemonLog = %q, want daemon.log under new DataDir", override.DaemonLog)
 	}
 
+	if override.DaemonStderrLog != filepath.Join("/tmp/graith-test-data", "daemon.stderr.log") {
+		t.Errorf("DaemonStderrLog = %q, want daemon.stderr.log under new DataDir", override.DaemonStderrLog)
+	}
+
 	if override.MessagesDB != filepath.Join("/tmp/graith-test-data", "messages.sqlite") {
 		t.Errorf("MessagesDB = %q, want messages.sqlite under new DataDir", override.MessagesDB)
 	}
 
 	if override.ConfigFile != p.ConfigFile {
 		t.Errorf("ConfigFile changed: got %q, want %q", override.ConfigFile, p.ConfigFile)
+	}
+}
+
+func TestDaemonStderrLogPathFallbacks(t *testing.T) {
+	tests := map[string]struct {
+		paths Paths
+		want  string
+	}{
+		"explicit path": {
+			paths: Paths{DaemonStderrLog: "/bothy/runtime.stderr.log", DataDir: "/dreich"},
+			want:  "/bothy/runtime.stderr.log",
+		},
+		"data dir": {
+			paths: Paths{DataDir: "/dreich"},
+			want:  filepath.Join("/dreich", "daemon.stderr.log"),
+		},
+		"daemon log sibling": {
+			paths: Paths{DaemonLog: filepath.Join("/dreich", "daemon.log")},
+			want:  filepath.Join("/dreich", "daemon.stderr.log"),
+		},
+		"empty": {},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := test.paths.DaemonStderrLogPath(); got != test.want {
+				t.Fatalf("DaemonStderrLogPath() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

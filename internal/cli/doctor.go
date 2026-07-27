@@ -31,6 +31,11 @@ var (
 	doctorDisk    bool
 )
 
+const (
+	doctorLargeLogThreshold = 10 * 1024 * 1024
+	doctorLogTailKeep       = 1024 * 1024
+)
+
 // nonoInstallHint is the install guidance shown when the nono sandbox backend
 // can't enforce. It deliberately avoids the `curl … | sh` piped-shell pattern
 // the project moved away from in commit 0fa84fa / #697 — recommending a
@@ -403,24 +408,8 @@ func (dc *doctorContext) checkEnvironment() {
 
 	dc.passf("environment", "Data dir: %s%s", paths.DataDir, dirSizeSuffix(paths.DataDir))
 
-	if info, err := os.Stat(paths.DaemonLog); err == nil {
-		size := info.Size()
-		if size > 10*1024*1024 {
-			dc.warnf("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
-
-			if doctorAutofix {
-				if err := truncateFileKeepTail(paths.DaemonLog, 1024*1024); err == nil {
-					dc.hintf("Truncated daemon log to ~1 MB")
-				}
-			} else {
-				dc.hintf("Use --autofix to truncate")
-			}
-		} else {
-			dc.passf("environment", "Daemon log: %s (%s)", paths.DaemonLog, formatBytes(size))
-		}
-	} else {
-		dc.passf("environment", "Daemon log: %s", paths.DaemonLog)
-	}
+	dc.checkEnvironmentLogFile("Daemon log", paths.DaemonLog)
+	dc.checkEnvironmentLogFile("Daemon stderr log", paths.DaemonStderrLogPath())
 
 	if info, err := os.Stat(paths.StateFile); err == nil {
 		dc.passf("environment", "State file: %s (%s)", paths.StateFile, formatBytes(info.Size()))
@@ -465,6 +454,31 @@ func (dc *doctorContext) checkEnvironment() {
 		dc.passf("environment", "Agent prompt: customized")
 	default:
 		dc.passf("environment", "Agent prompt: default")
+	}
+}
+
+func (dc *doctorContext) checkEnvironmentLogFile(label, path string) {
+	if path == "" {
+		return
+	}
+
+	if info, err := os.Stat(path); err == nil {
+		size := info.Size()
+		if size > doctorLargeLogThreshold {
+			dc.warnf("environment", "%s: %s (%s)", label, path, formatBytes(size))
+
+			if doctorAutofix {
+				if err := truncateFileKeepTail(path, doctorLogTailKeep); err == nil {
+					dc.hintf("Truncated %s to ~1 MB", strings.ToLower(label))
+				}
+			} else {
+				dc.hintf("Use --autofix to truncate")
+			}
+		} else {
+			dc.passf("environment", "%s: %s (%s)", label, path, formatBytes(size))
+		}
+	} else {
+		dc.passf("environment", "%s: %s", label, path)
 	}
 }
 

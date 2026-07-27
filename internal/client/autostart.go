@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -406,7 +407,7 @@ func startDaemon(ctx context.Context, cfg *config.Config, paths config.Paths, co
 		return resolution.Manager.Launch(ctx, cfg, paths, configFile, lifetime, os.Environ())
 	}
 
-	return startDaemonWithLauncher(configFile, launchDaemon)
+	return startDaemonWithLauncher(configFile, paths, launchDaemon)
 }
 
 // PrepareDaemonCleanRestart reserves the managed service identity before a
@@ -449,38 +450,79 @@ func prepareDaemonCleanRestartWithGuard(ctx context.Context, paths config.Paths,
 	return resolution.Manager.ReserveForCleanRestart(ctx, paths.Profile)
 }
 
-func startDaemonWithLauncher(configFile string, launch func(string, []string) error) error {
+func startDaemonWithLauncher(configFile string, paths config.Paths, launch func(string, []string, config.Paths) error) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
-	return startDaemonExecutable(configFile, self, testing.Testing(), launch)
+	return startDaemonExecutable(configFile, self, paths, testing.Testing(), launch)
 }
 
-func startDaemonExecutable(configFile, executable string, runningUnderGoTest bool, launch func(string, []string) error) error {
+func startDaemonExecutable(configFile, executable string, paths config.Paths, runningUnderGoTest bool, launch func(string, []string, config.Paths) error) error {
 	if err := validateDaemonExecutable(executable, runningUnderGoTest); err != nil {
 		return err
 	}
 
-	return launch(executable, daemonStartArgs(configFile))
+	return launch(executable, daemonStartArgs(configFile), paths)
 }
 
-func launchDaemon(executable string, args []string) error {
-	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+func launchDaemon(executable string, args []string, paths config.Paths) error {
+	cmd, cleanup, err := prepareDaemonCommand(executable, args, paths)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = devNull.Close() }()
+	defer cleanup()
+
+	return cmd.Start()
+}
+
+func prepareDaemonCommand(executable string, args []string, paths config.Paths) (*exec.Cmd, func(), error) {
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	stderrPath := paths.DaemonStderrLogPath()
+	if stderrPath == "" {
+		_ = devNull.Close()
+
+		return nil, nil, errors.New("daemon stderr log path is empty")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(stderrPath), 0o700); err != nil {
+		_ = devNull.Close()
+
+		return nil, nil, fmt.Errorf("create daemon stderr log directory: %w", err)
+	}
+
+	stderrLog, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		_ = devNull.Close()
+
+		return nil, nil, fmt.Errorf("open daemon stderr log: %w", err)
+	}
+
+	if err := stderrLog.Chmod(0o600); err != nil {
+		_ = devNull.Close()
+		_ = stderrLog.Close()
+
+		return nil, nil, fmt.Errorf("secure daemon stderr log: %w", err)
+	}
+
+	cleanup := func() {
+		_ = devNull.Close()
+		_ = stderrLog.Close()
+	}
 
 	cmd := exec.Command(executable, args...)
 	cmd.Env = agent.ScrubSecurityBoundaryEnvironment(os.Environ())
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
-	cmd.Stderr = devNull
+	cmd.Stderr = stderrLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	return cmd.Start()
+	return cmd, cleanup, nil
 }
 
 func validateDaemonExecutable(path string, runningUnderGoTest bool) error {

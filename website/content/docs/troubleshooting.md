@@ -18,7 +18,7 @@ gr doctor
 It checks:
 
 - **Version:** CLI and daemon version/commit match, plus update availability
-- **Environment:** config file, data dir, daemon log size, state file, messages DB, sandbox availability, agent prompt
+- **Environment:** config file, data dir, daemon log sizes, state file, messages DB, sandbox availability, agent prompt
 - **macOS daemon service:** managed/fallback mode, projected variable names, receipt health, and named-profile slot usage
 - **Daemon:** connectivity, PID/socket ownership, uptime, active terminal-screen backend
 - **Sessions:** zombie processes (PID not alive but status running), missing worktrees, config drift, scrollback saturation
@@ -50,6 +50,23 @@ For wedged sessions -- kills all running sessions and starts fresh:
 ```bash
 gr daemon restart --force
 ```
+
+### Hung daemon goroutine dump
+
+For a daemon that is alive but wedged, ask the Go runtime for a goroutine dump
+before restarting it. `gr doctor` prints the daemon PID and the active
+`daemon.stderr.log` path:
+
+```bash
+gr doctor
+kill -QUIT <daemon-pid>
+tail -200 ~/.local/share/graith/daemon.stderr.log
+gr daemon restart
+```
+
+`daemon.stderr.log` also captures panic tracebacks, fatal runtime errors,
+`GOTRACEBACK` output, and race-detector reports. `daemon.log` remains JSON slog
+output for structured daemon events.
 
 ### Reload config
 
@@ -315,14 +332,16 @@ gr delete --repo my-project --stopped -f
 
 The daemon log is the first place to look when a session stops unexpectedly.
 Default `~/.local/share/graith/daemon.log` (JSON/slog); with `data_dir`
-`~/.graith` it's `~/.graith/daemon.log`. `gr doctor` prints the active data
-directory. Tail the default:
+`~/.graith` it's `~/.graith/daemon.log`. Runtime stderr is separate at
+`daemon.stderr.log` in the same directory, so panic tracebacks and SIGQUIT
+goroutine dumps do not corrupt the structured JSON log. `gr doctor` prints both
+active paths. Tail the default structured log:
 
 ```bash
 tail -f ~/.local/share/graith/daemon.log | jq .
 ```
 
-If it grows large, `gr doctor --autofix` truncates it to ~1 MB.
+If either log grows large, `gr doctor --autofix` truncates it to ~1 MB.
 
 #### Verify the terminal backend
 

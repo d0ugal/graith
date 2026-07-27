@@ -87,6 +87,79 @@ func TestRunBackupFailureStopsBeforeDaemonInitialization(t *testing.T) {
 	}
 }
 
+func TestOpenDaemonRuntimeStderrLogCreatesPrivateAppendFile(t *testing.T) {
+	dir := t.TempDir()
+	paths := config.Paths{DataDir: filepath.Join(dir, "data")}
+
+	first, err := openDaemonRuntimeStderrLog(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := first.WriteString("dreich\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := openDaemonRuntimeStderrLog(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := second.WriteString("canny\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stderrPath := filepath.Join(paths.DataDir, "daemon.stderr.log")
+
+	got, err := os.ReadFile(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "dreich\ncanny\n" {
+		t.Fatalf("daemon stderr log = %q, want appended runtime stderr", got)
+	}
+
+	info, err := os.Stat(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("daemon stderr log mode = %o, want 0600", mode)
+	}
+}
+
+func TestOpenDaemonRuntimeStderrLogReportsBlockedPath(t *testing.T) {
+	dir := t.TempDir()
+
+	blocker := filepath.Join(dir, "data")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stderrLog, err := openDaemonRuntimeStderrLog(config.Paths{DataDir: blocker})
+	if stderrLog != nil {
+		_ = stderrLog.Close()
+	}
+
+	if err == nil {
+		t.Fatal("expected blocked stderr log path to fail")
+	}
+
+	if !strings.Contains(err.Error(), "create daemon stderr log directory") {
+		t.Fatalf("openDaemonRuntimeStderrLog error = %v, want stderr log directory failure", err)
+	}
+}
+
 func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
 	defaults, err := config.ResolvePaths()
 	if err != nil {
