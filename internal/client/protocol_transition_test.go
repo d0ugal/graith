@@ -124,7 +124,7 @@ func TestStopDaemonIdentityRejectsReusedPID(t *testing.T) {
 
 	err = stopDaemonIdentityWith(
 		os.Getpid(), start+1, allowDaemonLifecycleMutation,
-		grpty.ProcessStartTime, syscall.Kill, pollDaemonReady,
+		grpty.ProcessStartTime, syscall.Kill, pollDaemonReadyWithin,
 	)
 	if err == nil || !strings.Contains(err.Error(), "identity changed") {
 		t.Fatalf("stop identity error = %v, want identity-changed failure", err)

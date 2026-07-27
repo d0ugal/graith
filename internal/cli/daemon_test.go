@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -177,7 +178,7 @@ func TestStopExistingDaemonDefersStaleSocketToStartupReconciliation(t *testing.T
 		return nil
 	}
 
-	if err := stopExistingDaemon(); err != nil {
+	if err := stopExistingDaemon(false); err != nil {
 		t.Fatalf("stopExistingDaemon() = %v, want startup to reconcile stale socket", err)
 	}
 }
@@ -200,10 +201,137 @@ func TestStopExistingDaemonFailsClosedOnAuthenticatedHandshakeRejection(t *testi
 		return nil, &client.ExistingDaemonHandshakeError{ResponseType: "handshake_err"}
 	}
 
-	err := stopExistingDaemon()
+	err := stopExistingDaemon(false)
 	if err == nil || !strings.Contains(err.Error(), "authenticate daemon") {
 		t.Fatalf("stopExistingDaemon() = %v, want authenticated rejection to fail closed", err)
 	}
+}
+
+func TestStopExistingDaemonForceUsesEscalatingStopAndCleansPIDFile(t *testing.T) {
+	originalPaths := paths
+	originalConnect := connectExistingForCLI
+	originalStop := stopDaemonIdentityForCLI
+	originalForceStop := forceStopDaemonIdentityForCLI
+	originalWait := waitForDaemonSocketGoneForCLI
+
+	t.Cleanup(func() {
+		paths = originalPaths
+		connectExistingForCLI = originalConnect
+		stopDaemonIdentityForCLI = originalStop
+		forceStopDaemonIdentityForCLI = originalForceStop
+		waitForDaemonSocketGoneForCLI = originalWait
+	})
+
+	dir := shortDaemonPathTestDir(t)
+	paths.SocketPath = filepath.Join(dir, "canny.sock")
+	paths.PIDFile = filepath.Join(dir, "canny.pid")
+
+	if err := os.WriteFile(paths.SocketPath, []byte("socket placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	identity := client.DaemonIdentity{PID: 4242, StartTime: 1473}
+	if err := os.WriteFile(paths.PIDFile, []byte(strconv.Itoa(identity.PID)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	connection := &fakeExistingDaemonConnection{identity: identity}
+	connectExistingForCLI = func(*config.Config, config.Paths) (existingDaemonConnection, error) {
+		return connection, nil
+	}
+
+	stopDaemonIdentityForCLI = func(client.DaemonIdentity) error {
+		t.Fatal("clean force path used the non-escalating stop")
+		return nil
+	}
+
+	forceStopDaemonIdentityForCLI = func(got client.DaemonIdentity) error {
+		if got != identity {
+			t.Fatalf("force stop identity = %#v, want %#v", got, identity)
+		}
+
+		return nil
+	}
+
+	waitForDaemonSocketGoneForCLI = func(path string) bool {
+		if path != paths.SocketPath {
+			t.Fatalf("waited for socket %q", path)
+		}
+
+		return true
+	}
+
+	if err := stopExistingDaemon(true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(paths.SocketPath); err != nil {
+		t.Fatalf("non-socket placeholder after forced stop = %v, want preserved", err)
+	}
+
+	if _, err := os.Lstat(paths.PIDFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("PID file after forced stop = %v, want removed", err)
+	}
+
+	if !connection.closed {
+		t.Fatal("authenticated daemon connection was not closed before force stop")
+	}
+}
+
+func TestRemoveStoppedDaemonPathsPreservesReplacedPIDFileAndNonSocket(t *testing.T) {
+	dir := shortDaemonPathTestDir(t)
+	socketPath := filepath.Join(dir, "dreich.sock")
+	pidPath := filepath.Join(dir, "dreich.pid")
+
+	if err := os.WriteFile(socketPath, []byte("not a socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	socketBefore := snapshotDaemonPath(socketPath)
+
+	if err := os.WriteFile(pidPath, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pidBefore := snapshotDaemonPath(pidPath)
+
+	if err := os.Remove(pidPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(pidPath, []byte("9999\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeStoppedDaemonPaths(client.DaemonIdentity{PID: 4242}, socketBefore, pidBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	if data, err := os.ReadFile(socketPath); err != nil || string(data) != "not a socket" {
+		t.Fatalf("non-socket path = %q, %v; want preserved", data, err)
+	}
+
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(data) != "9999\n" {
+		t.Fatalf("replacement PID file = %q, want preserved", data)
+	}
+}
+
+func shortDaemonPathTestDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp(".", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return dir
 }
 
 // fakeUpgradeConn scripts the handshake + upgrade round-trip execUpgrade drives,
