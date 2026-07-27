@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "d0a1be3f1e956756ab087973b0d023e502ddd90f6752b9b6b5c7e02c4459c16c",
+      "file_sha256": "8c677956c47837df4b0eaebac059f23b157809c857a3719d7adfecf98fd53222",
       "events": {
         "pull_request": null,
         "push": {
@@ -82,6 +82,28 @@
           ],
           "github_names": [
             "Detect macOS-relevant changes"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -333,7 +355,7 @@
       "path": ".github/workflows/coverage.yml",
       "name": "Coverage",
       "owner": "graith-maintainers",
-      "file_sha256": "cf509eae0639fb9f45d5298d7ad1e45156791f180b052b5639adf6a34524cd5f",
+      "file_sha256": "af6f7bd5f0e2f83743b8b20a5d677848a3db9feaf95e2f52c1ef94341e87d959",
       "events": {
         "pull_request": null
       },
@@ -361,6 +383,28 @@
           ],
           "github_names": [
             "Detect gui changes"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -504,7 +548,7 @@
       "path": ".github/workflows/libghostty-native.yml",
       "name": "libghostty core runtime",
       "owner": "native-owners",
-      "file_sha256": "c5765d5d3b07e6e2ce7f88b525823ad40cef04071ee3a4c2238b9a9705ea9ddf",
+      "file_sha256": "0acb9b8cd8437df6e3a85e41e68560db7f1c53326a84b74b5f8c2e9256d62d23",
       "events": {
         "pull_request": null,
         "workflow_dispatch": {
@@ -607,6 +651,28 @@
           ],
           "github_names": [
             "Detect libghostty-relevant changes"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -1948,7 +2014,7 @@
       "path": ".github/workflows/sandbox.yml",
       "name": "Sandbox",
       "owner": "graith-maintainers",
-      "file_sha256": "3130ff84cf5fd4211b4933a8860bacb686f35dd8728ac22c7d97913e0e891944",
+      "file_sha256": "40ef7eeb4a2ce01bc1224abe71dee09af3e524b8947ff9f874c8ef5787c4ddf1",
       "events": {
         "pull_request": null,
         "workflow_dispatch": null
@@ -1977,6 +2043,28 @@
           ],
           "github_names": [
             "Detect sandbox-relevant changes"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -2730,6 +2818,26 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
+      "path": "cmd/ciclassify/main.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "a7adc0fa0e6ad582ca747168a665d79039a6644f3cf6282884fc6fde2f5ecca6",
+      "executable_contract": "preserve centralized CI changed-path classification for job-level gates, release parity checks, GitHub output emission, and fail-safe invalid path handling",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after every workflow consumer has an owner-approved replacement classifier and equivalent parity fixtures"
+    },
+    {
+      "path": "cmd/ciclassify/main_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "ae7d36e00de7ec784c6bba180b3b81acfc8bfafb4cd40eefe14ba988d4521ef7",
+      "executable_contract": "preserve ciclassify CLI contract coverage for GitHub output format, JSON diagnostics, path-file input, invalid changed-file rejection, and mode validation",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent classifier command contract coverage is added"
+    },
+    {
       "path": "cmd/cipolicy/main.go",
       "owner": "graith-maintainers",
       "kind": "go-policy-helper",
@@ -2834,7 +2942,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "1537bf870add4121a072e90d8027f4d4f46f1c025d5be30c6b5adb43b354cfc2",
+      "sha256": "8fa36f00deec5a7deca25fde76eee1c30ccb2011091693051901fd94e4545efb",
       "executable_contract": "preserve native/release/coverage routing and libghostty artifact trust assertions formerly held by libghostty-policy.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent native policy coverage and zero unexplained replay disagreement"
@@ -2870,11 +2978,41 @@
       "retirement_criterion": "owned replacement has equivalent retry fixture coverage and zero unexplained replay disagreement"
     },
     {
+      "path": "internal/cipolicy/testdata/workflow_classifiers.json",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-fixture",
+      "git_mode": "100644",
+      "sha256": "3fe3bfa74d7b7e90dd181d491e4254af5b21b13fea4e12ead87e8ef98a9c1038",
+      "executable_contract": "preserve representative changed-path parity cases for centralized workflow classifiers, including release classifiers that are not yet migrated",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent classifier parity fixtures exist"
+    },
+    {
+      "path": "internal/cipolicy/workflow_classifier.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "c1ddaa732a86ebec96ea8f3bc504de0791752f1b509e3465a42c072b463a480f",
+      "executable_contract": "preserve centralized workflow changed-path classifier rules, output contracts, release parity classifiers, and invalid changed-file fail-safe behavior",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after every workflow consumer has an owner-approved replacement classifier and equivalent parity fixtures"
+    },
+    {
+      "path": "internal/cipolicy/workflow_classifier_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "8c14a94e53b51345e27d333265cd10ca8641e64e93f5b812de0ae712c02723ed",
+      "executable_contract": "preserve parity fixture replay for legacy workflow classifiers and fail-safe behavior for invalid changed-file lists",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent classifier parity and failure-mode coverage exists"
+    },
+    {
       "path": "internal/cipolicy/workflow_lint_policy_test.go",
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "7e1fa1d383089cfa08264c712aa386ceef2d48d9d681101966337768e4f66da8",
+      "sha256": "af1ee6b151851c81128d7f147c89da9779d1db50ecdee691161f04692a553e47",
       "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow tool install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow install and lint policy coverage and zero unexplained replay disagreement"
@@ -3555,5 +3693,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "52fa47121b32a85de2fb177bf5e13c331baba9d668ae5e7ac8f43921a633a232"
+  "digest": "11c394b1744b81076874c039e29058a1b8fab474aaddf8459cc628f1e99090df"
 }

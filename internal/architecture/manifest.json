@@ -6,6 +6,7 @@
   "packages": {
     "github.com/d0ugal/graith/cmd/architecturecheck": "composition",
     "github.com/d0ugal/graith/cmd/cibaseline": "composition",
+    "github.com/d0ugal/graith/cmd/ciclassify": "composition",
     "github.com/d0ugal/graith/cmd/cipolicy": "composition",
     "github.com/d0ugal/graith/cmd/covreport": "composition",
     "github.com/d0ugal/graith/cmd/docsdiff": "composition",
@@ -57,6 +58,7 @@
   "owners": {
     "github.com/d0ugal/graith/cmd/architecturecheck": "graith-maintainers",
     "github.com/d0ugal/graith/cmd/cibaseline": "graith-maintainers",
+    "github.com/d0ugal/graith/cmd/ciclassify": "graith-maintainers",
     "github.com/d0ugal/graith/cmd/cipolicy": "graith-maintainers",
     "github.com/d0ugal/graith/cmd/covreport": "graith-maintainers",
     "github.com/d0ugal/graith/cmd/docsdiff": "graith-maintainers",

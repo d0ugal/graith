@@ -64,7 +64,6 @@ func TestLibghosttyNativePathRouting(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	native := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native.yml"))
 
-	matcher := nativePathMatcher(t, native)
 	tests := map[string]bool{
 		"website/content/docs/troubleshooting.md":             false,
 		"docs/design/2026-07-18-libghostty-daemon-backend.md": false,
@@ -75,7 +74,12 @@ func TestLibghosttyNativePathRouting(t *testing.T) {
 	}
 
 	for path, want := range tests {
-		if got := matcher.MatchString(path); got != want {
+		classification, err := ClassifyWorkflowPaths([]string{path})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := classification.LibghosttyNative; got != want {
 			t.Fatalf("native path matcher for %s = %t, want %t", path, got, want)
 		}
 	}
@@ -85,8 +89,24 @@ func TestLibghosttyNativePathRouting(t *testing.T) {
 	assertContains(t, failure, `echo "native=true" >> "$GITHUB_OUTPUT"`)
 	assertContains(t, failure, `echo "dependency-unit=true" >> "$GITHUB_OUTPUT"`)
 
-	lock := mustMatchString(t, native, `(?ms)if grep -Fxq 'libghostty-native\.lock\.json'.*?\n\s+fi`)
-	assertContains(t, lock, `echo "dependency-unit=true" >> "$GITHUB_OUTPUT"`)
+	classifierFailure := mustMatchString(t, native, `(?ms)if ! classification="\$\(go run \./cmd/ciclassify -mode libghostty.*?\n\s+fi`)
+	assertContains(t, classifierFailure, `echo "native=true" >> "$GITHUB_OUTPUT"`)
+	assertContains(t, classifierFailure, `echo "dependency-unit=true" >> "$GITHUB_OUTPUT"`)
+	assertContains(t, native, "Native dependency lock changed: running update-only race/fuzz gates.")
+	assertContains(t, native, "go run ./cmd/ciclassify -mode libghostty")
+
+	workflow, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/libghostty-native.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gate := p11WorkflowStep(t, p11WorkflowJob(t, workflow, "native-gate"), "Require relevant native jobs to pass").Run
+	assertContains(t, gate, `if [ "$CHANGES_RESULT" != "success" ]; then
+  echo "Change detection did not succeed ($CHANGES_RESULT); requiring all native jobs."
+  NATIVE_RELEVANT=true
+fi`)
+	assertNotContains(t, gate, `echo "Change detection did not succeed: $CHANGES_RESULT" >&2
+  exit 1`)
 }
 
 func TestLibghosttyReleaseRoutingAndUpgradeFixture(t *testing.T) {
@@ -351,19 +371,6 @@ func checkLibghosttyArchiveHelperPolicy(nativeScript, nativePublish string) erro
 	}
 
 	return nil
-}
-
-func nativePathMatcher(t *testing.T, workflow string) *regexp.Regexp {
-	t.Helper()
-
-	pattern := mustSubmatch(t, workflow, `if grep -Eq '([^']+)' <<<"\$files"`)
-
-	matcher, err := regexp.Compile(pattern)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return matcher
 }
 
 func releasePathMatcher(t *testing.T, workflow string) *regexp.Regexp {

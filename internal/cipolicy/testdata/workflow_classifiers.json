@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "go only",
+      "event": "pull_request",
+      "files": ["internal/client/passthrough.go"],
+      "want": {}
+    },
+    {
+      "name": "gui app change",
+      "event": "pull_request",
+      "files": ["gui/macos/Sources/GraithGUI/ContentView.swift"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true
+      }
+    },
+    {
+      "name": "native include change",
+      "event": "pull_request",
+      "files": ["gui/shared/Sources/CGhosttyVT/include/ghostty.h"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "libghostty_native": true
+      }
+    },
+    {
+      "name": "pty runtime change",
+      "event": "pull_request",
+      "files": ["internal/pty/terminal_backend_ghostty.go"],
+      "want": {
+        "ci_macos": true,
+        "libghostty_native": true
+      }
+    },
+    {
+      "name": "daemon runtime change",
+      "event": "pull_request",
+      "files": ["internal/daemon/hooks.go"],
+      "want": {
+        "ci_macos": true,
+        "libghostty_native": true
+      }
+    },
+    {
+      "name": "sandbox backend change",
+      "event": "pull_request",
+      "files": ["internal/sandbox/nono.go"],
+      "want": {
+        "ci_macos": true,
+        "sandbox_macos": true
+      }
+    },
+    {
+      "name": "module graph change",
+      "event": "pull_request",
+      "files": ["go.sum"],
+      "want": {
+        "ci_macos": true,
+        "sandbox_macos": true,
+        "libghostty_native": true
+      }
+    },
+    {
+      "name": "native lock update",
+      "event": "pull_request",
+      "files": ["libghostty-native.lock.json"],
+      "want": {
+        "libghostty_native": true,
+        "libghostty_dependency_unit": true,
+        "dev_release": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "dev release base tag helper",
+      "event": "pull_request",
+      "files": ["scripts/dev-release-base-tag.sh"],
+      "want": {
+        "dev_release": true
+      }
+    },
+    {
+      "name": "stable release config",
+      "event": "pull_request",
+      "files": [".release-please-config.json"],
+      "want": {
+        "stable_release": true
+      }
+    },
+    {
+      "name": "shared macos packaging",
+      "event": "pull_request",
+      "files": ["macos/service/release-signing-mode.sh"],
+      "want": {
+        "dev_release": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "stable release test",
+      "event": "pull_request",
+      "files": ["internal/release/stable_release_test.go"],
+      "want": {
+        "libghostty_native": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "docs page",
+      "event": "pull_request",
+      "files": ["website/content/docs/contributing/ci-policy.md"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs global input",
+      "event": "pull_request",
+      "files": ["website/data/package_dependencies.json"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs tool versions",
+      "event": "pull_request",
+      "files": [".github/ci-tool-versions.env"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "mixed release and docs",
+      "event": "pull_request",
+      "files": [
+        "scripts/libghostty-native.sh",
+        "website/content/docs/installation.md"
+      ],
+      "want": {
+        "dev_release": true,
+        "stable_release": true,
+        "libghostty_native": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    }
+  ]
+}

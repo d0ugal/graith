@@ -585,7 +585,17 @@ func TestGolangciLintBuildTagCoverage(t *testing.T) {
 	assertContains(t, zigSetup, "test \"$(\"${RUNNER_TEMP}/zig/zig\" version)\" = \"$zig_version\"")
 	assertContains(t, p11WorkflowStep(t, lint, "Lint Linux libghostty tag").Run, "make lint-libghostty")
 
-	assertContains(t, ciWorkflowText, "^internal/daemon/")
+	assertContains(t, ciWorkflowText, "go run ./cmd/ciclassify -mode ci")
+
+	classification, err := ClassifyWorkflowPaths([]string{"internal/daemon/hooks.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !classification.CIMacOS {
+		t.Fatalf("internal/daemon change classified as macOS-relevant = false, want true")
+	}
+
 	assertContains(t, nativeScript, "TestDiagnostics|TestLogTerminalBackendSelectionFields|TestFSEvents")
 	assertContains(t, docs, "make lint-darwin")
 	assertContains(t, docs, "make lint-libghostty")

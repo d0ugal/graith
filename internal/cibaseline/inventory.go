@@ -52,6 +52,8 @@ var ciEntrypointPaths = []string{
 }
 
 var ciGoPolicySurfacePaths = []string{
+	"cmd/ciclassify/main.go",
+	"cmd/ciclassify/main_test.go",
 	"cmd/docsdiff/main.go",
 	"cmd/docsdiff/main_test.go",
 	"cmd/docspreview/main.go",
@@ -66,6 +68,9 @@ var ciGoPolicySurfacePaths = []string{
 	"internal/cipolicy/p11_js_surface_test.go",
 	"internal/cipolicy/renovate_retry_test.go",
 	"internal/cipolicy/workflow_lint_policy_test.go",
+	"internal/cipolicy/testdata/workflow_classifiers.json",
+	"internal/cipolicy/workflow_classifier.go",
+	"internal/cipolicy/workflow_classifier_test.go",
 	"internal/cipolicy/workflow_timeout_policy_test.go",
 	"internal/docspreview/docspreview.go",
 	"internal/docspreview/docspreview_test.go",
@@ -82,6 +87,16 @@ type goPolicySurfaceMetadata struct {
 }
 
 var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
+	"cmd/ciclassify/main.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve centralized CI changed-path classification for job-level gates, release parity checks, GitHub output emission, and fail-safe invalid path handling",
+		retirement: "remove only after every workflow consumer has an owner-approved replacement classifier and equivalent parity fixtures",
+	},
+	"cmd/ciclassify/main_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve ciclassify CLI contract coverage for GitHub output format, JSON diagnostics, path-file input, invalid changed-file rejection, and mode validation",
+		retirement: "remove only after equivalent classifier command contract coverage is added",
+	},
 	"cmd/docsdiff/main.go": {
 		kind:       "go-policy-helper",
 		contract:   "preserve docs-preview screenshot diff classification, row alignment, denoise, composite PNG rendering, and manifest output behavior formerly held by docs-diff.js and docs-diff-run.js",
@@ -146,6 +161,21 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve bounded transient Renovate retry behavior formerly held by renovate-retry.test.js",
 		retirement: "owned replacement has equivalent retry fixture coverage and zero unexplained replay disagreement",
+	},
+	"internal/cipolicy/testdata/workflow_classifiers.json": {
+		kind:       "go-policy-fixture",
+		contract:   "preserve representative changed-path parity cases for centralized workflow classifiers, including release classifiers that are not yet migrated",
+		retirement: "remove only after equivalent classifier parity fixtures exist",
+	},
+	"internal/cipolicy/workflow_classifier.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve centralized workflow changed-path classifier rules, output contracts, release parity classifiers, and invalid changed-file fail-safe behavior",
+		retirement: "remove only after every workflow consumer has an owner-approved replacement classifier and equivalent parity fixtures",
+	},
+	"internal/cipolicy/workflow_classifier_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve parity fixture replay for legacy workflow classifiers and fail-safe behavior for invalid changed-file lists",
+		retirement: "remove only after equivalent classifier parity and failure-mode coverage exists",
 	},
 	"internal/cipolicy/workflow_lint_policy_test.go": {
 		kind:       "go-policy-contract-test",

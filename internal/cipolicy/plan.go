@@ -38,6 +38,7 @@ var (
 	ciPolicyPrefixes = []string{
 		".github/actions/",
 		".github/workflows/",
+		"cmd/ciclassify/",
 		"cmd/cipolicy/",
 		"internal/cibaseline/",
 		"internal/cipolicy/",

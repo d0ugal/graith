@@ -74,7 +74,8 @@ jobs:
   # pull_request merge ref can be built against an older base than base.sha, so
   # a local diff surfaces the base branch's own commits and spuriously flips the
   # filter true. The API returns exactly the PR's changed files (same approach
-  # as coverage.yml / ci.yml) and needs no checkout.
+  # as coverage.yml / ci.yml); the job checks out base.sha before running trusted
+  # Go classifier code.
   # ---------------------------------------------------------------------------
   changes:
     name: Detect sandbox-relevant changes
@@ -86,6 +87,15 @@ jobs:
     outputs:
       macos: ${{ steps.filter.outputs.macos }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: github.event_name == 'pull_request'
+        with:
+          go-version-file: go.mod
       - id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,13 +119,15 @@ jobs:
             echo "Could not list PR files; running macOS enforcement job to be safe."
             exit 0
           fi
-          # here-string (not a pipe) so an early grep match can't SIGPIPE-fail an
-          # upstream command under pipefail.
-          if grep -Eq '^internal/sandbox/|^go\.mod$|^go\.sum$|^\.github/workflows/sandbox\.yml$' <<<"$files"; then
+          if ! classification="$(go run ./cmd/ciclassify -mode sandbox <<<"$files")"; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
+            echo "Shared classifier failed; running macOS enforcement job to be safe."
+            exit 0
+          fi
+          echo "$classification" >> "$GITHUB_OUTPUT"
+          if grep -qx 'macos=true' <<<"$classification"; then
             echo "Sandbox-relevant files changed: running macOS enforcement job."
           else
-            echo "macos=false" >> "$GITHUB_OUTPUT"
             echo "No sandbox changes: skipping macOS enforcement job."
           fi
 

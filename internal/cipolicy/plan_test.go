@@ -630,7 +630,7 @@ func TestBuildPlanRejectsRequiredModeOutsideUniversalFloor(t *testing.T) {
 }
 
 func TestDetectorDigestPinned(t *testing.T) {
-	const want = "91cf691cd8164dbf164c1f65e90ac3e66dd96ea1f663a74e4038187088f5f114"
+	const want = "e81cbad0239dc8c6abf0e658bfaf721a3e1918da5e1b17c8ec804204db907798"
 
 	if got := DetectorDigest(); got != want {
 		t.Fatalf("DetectorDigest() = %s, want %s", got, want)

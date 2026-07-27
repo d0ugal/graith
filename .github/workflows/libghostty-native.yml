@@ -46,6 +46,15 @@ jobs:
       native: ${{ steps.filter.outputs.native }}
       dependency-unit: ${{ steps.filter.outputs.dependency-unit }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: github.event_name == 'pull_request'
+        with:
+          go-version-file: go.mod
       - id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,17 +80,21 @@ jobs:
             echo "Could not list PR files; running native jobs to be safe."
             exit 0
           fi
-          if grep -Fxq 'libghostty-native.lock.json' <<<"$files"; then
+          if ! classification="$(go run ./cmd/ciclassify -mode libghostty <<<"$files")"; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
             echo "dependency-unit=true" >> "$GITHUB_OUTPUT"
+            echo "Shared classifier failed; running native jobs to be safe."
+            exit 0
+          fi
+          echo "$classification" >> "$GITHUB_OUTPUT"
+          if grep -qx 'dependency-unit=true' <<<"$classification"; then
             echo "Native dependency lock changed: running update-only race/fuzz gates."
           else
-            echo "dependency-unit=false" >> "$GITHUB_OUTPUT"
+            echo "Native dependency lock unchanged: skipping update-only race/fuzz gates."
           fi
-          if grep -Eq '^\.goreleaser-dev\.yaml$|^\.github/workflows/(dev-release|libghostty-native)\.yml$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty|release)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-version|libghostty-native)\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$' <<<"$files"; then
-            echo "native=true" >> "$GITHUB_OUTPUT"
+          if grep -qx 'native=true' <<<"$classification"; then
             echo "libghostty-relevant files changed: running native jobs."
           else
-            echo "native=false" >> "$GITHUB_OUTPUT"
             echo "No libghostty-relevant files changed: skipping native jobs."
           fi
 
@@ -537,8 +550,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$CHANGES_RESULT" != "success" ]; then
-            echo "Change detection did not succeed: $CHANGES_RESULT" >&2
-            exit 1
+            echo "Change detection did not succeed ($CHANGES_RESULT); requiring all native jobs."
+            NATIVE_RELEVANT=true
           fi
           if [ "$NATIVE_RELEVANT" != "true" ]; then
             echo "No libghostty-relevant files changed; native gate passes."
