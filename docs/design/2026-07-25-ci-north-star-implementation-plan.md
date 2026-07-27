@@ -311,9 +311,9 @@ Expected files:
 - simplify or delete `cmd/cipolicy/**` based on the retained local caller;
 - delete `internal/cipolicy/plan.go`, `result.go`, and `fixture.go` unless C2
   or C4 already imports them directly;
-- delete `internal/cipolicy/cache.go` unless a current native/release validation
-  caller already imports it directly;
-- keep `internal/cipolicy/artifact.go` only for native or release validation.
+- treat `internal/cipolicy/cache.go` as already deleted by #1737;
+- delete `internal/cipolicy/artifact.go` unless current native/release
+  validation has a direct caller.
 
 Dependencies: C0 and C2. Coordinate with C1 to avoid conflicts in architecture
 or docs.
@@ -564,7 +564,7 @@ settings change. No package depends on a fixed elapsed time window.
 | P2 plan/result policy | C3 deletes unless C2/C4 already proved a direct local caller. |
 | P3 hermetic policy fixture | C4 deterministic sample classes. |
 | P4 trusted CI gate App | C1 delete/reject. |
-| P5 artifact/cache contracts | C5 keeps artifact validation where it strengthens core libghostty/release checks; C3 deletes cache authority unless a direct caller exists. |
+| P5 artifact/cache contracts | #1758 removes the artifact contract after finding no direct native/release caller; #1737 already deleted cache authority. Active native/release artifact validation stays in workflow/script tests. |
 | P6 shadow planner and gate dual-run | C2 existing-Actions shadow summary. |
 | P7 bounded dual-run lanes | C4 fixtures plus C7 PR-sized simplifications. |
 | P8 trusted publication boundary | Preserve current release workflows; make only specific in-repository cleanup PRs. |
