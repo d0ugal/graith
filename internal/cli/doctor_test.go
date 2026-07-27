@@ -662,6 +662,153 @@ func TestCheckTriggersHealthy(t *testing.T) {
 	}
 }
 
+func TestCheckWatcherResourcesThresholds(t *testing.T) {
+	oldOut := out
+
+	t.Cleanup(func() { out = oldOut })
+
+	out = output.NewWithWriter(false, io.Discard)
+
+	tests := map[string]struct {
+		diag        protocol.WatcherDiagnostic
+		wantLevel   string
+		wantSection string
+		wantText    string
+	}{
+		"healthy usage passes": {
+			diag:      protocol.WatcherDiagnostic{EstimatedDescriptorCost: 10, Budget: 100, BudgetPercent: 10},
+			wantLevel: "ok",
+			wantText:  "File-watch budget: 10/100 estimated descriptors",
+		},
+		"near budget warns": {
+			diag:      protocol.WatcherDiagnostic{EstimatedDescriptorCost: 91, Budget: 100, BudgetPercent: 91, NearBudget: true},
+			wantLevel: "warn",
+			wantText:  "near capacity",
+		},
+		"exhausted budget warns": {
+			diag:      protocol.WatcherDiagnostic{EstimatedDescriptorCost: 80, Budget: 100, BudgetPercent: 80, BudgetExhausted: true},
+			wantLevel: "warn",
+			wantText:  "budget exhausted",
+		},
+		"degraded binding warns": {
+			diag: protocol.WatcherDiagnostic{
+				EstimatedDescriptorCost: 10,
+				Budget:                  100,
+				BudgetPercent:           10,
+				Bindings: []protocol.WatcherBindingDiagnostic{{
+					TriggerName: "watch-braw",
+					SessionName: "braw-runner",
+					State:       "degraded",
+					Degraded:    "watcher.Add failed: no space left on device",
+				}},
+			},
+			wantLevel:   "warn",
+			wantSection: "triggers",
+			wantText:    "Watch trigger \"watch-braw\" degraded on session \"braw-runner\"",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			dc := newDoctorContext()
+			dc.checkWatcherResources(&protocol.DiagnosticsMsg{Watchers: &test.diag})
+
+			messages := strings.Join(checkResults(dc, test.wantLevel), "\n")
+			if !strings.Contains(messages, test.wantText) {
+				t.Fatalf("expected %s check to contain %q, got %q", test.wantLevel, test.wantText, messages)
+			}
+
+			if test.wantSection != "" {
+				found := false
+
+				for _, check := range dc.checks {
+					if check.Level == test.wantLevel && check.Section == test.wantSection && strings.Contains(check.Message, test.wantText) {
+						found = true
+
+						break
+					}
+				}
+
+				if !found {
+					t.Fatalf("expected %s check in section %q containing %q, got %#v", test.wantLevel, test.wantSection, test.wantText, dc.checks)
+				}
+			}
+
+			if !dc.ok {
+				t.Fatal("watcher resource warnings should not fail the doctor report")
+			}
+		})
+	}
+}
+
+func TestCheckWatcherResourcesAttributionAndGuidance(t *testing.T) {
+	oldOut := out
+
+	t.Cleanup(func() { out = oldOut })
+
+	var buf bytes.Buffer
+
+	out = output.NewWithWriter(false, &buf)
+
+	diag := &protocol.DiagnosticsMsg{
+		Watchers: &protocol.WatcherDiagnostic{
+			EstimatedDescriptorCost: 91,
+			Budget:                  100,
+			BudgetPercent:           91,
+			NearBudget:              true,
+			Bindings: []protocol.WatcherBindingDiagnostic{
+				{
+					TriggerName:                  "watch-croft",
+					SessionID:                    "braw",
+					SessionName:                  "braw-runner",
+					WorktreePath:                 "/work/braw",
+					State:                        "idle",
+					RegisteredWatchDirectories:   12,
+					EstimatedWatchDescriptorCost: 91,
+					WatchBudgetPercent:           91,
+				},
+				{
+					TriggerName:                  "watch-croft",
+					SessionID:                    "canny",
+					SessionName:                  "canny-runner",
+					WorktreePath:                 "/work/canny",
+					State:                        "degraded",
+					RegisteredWatchDirectories:   0,
+					EstimatedWatchDescriptorCost: 0,
+					Degraded:                     "watcher.Add failed: watch descriptor budget exhausted",
+					RetryCount:                   2,
+					NextRetryAt:                  "2026-07-15T10:00:00Z",
+				},
+			},
+		},
+	}
+
+	dc := newDoctorContext()
+	dc.checkWatcherResources(diag)
+
+	rendered := buf.String()
+	for _, want := range []string{
+		"Watcher Resources",
+		"watch-croft",
+		"braw-runner",
+		"12 dir(s), estimated cost 91",
+		"91.00% of budget",
+		"canny-runner",
+		"0 dir(s), estimated cost 0",
+		"degraded: watcher.Add failed",
+		"next attempt at 2026-07-15T10:00:00Z",
+		"Run: gr trigger status <watch-trigger>",
+		"fs.inotify.max_user_watches",
+		"[trigger.watch] ignore",
+		"Stop unnecessary writable sessions",
+		"mirror/read-only sessions",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("expected watcher doctor output to contain %q, got:\n%s", want, rendered)
+		}
+	}
+}
+
 // TestNonoInstallHintNotPipedShell verifies gr doctor's nono install guidance
 // never recommends the `curl … | sh` piped-shell pattern the project moved away
 // from in commit 0fa84fa / #697 — emitting that advice from a security-focused

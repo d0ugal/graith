@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -369,6 +370,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 		Scrollback:        sbDiag,
 		Messages:          msgDiag,
 		Triggers:          sm.degradedTriggerDiagnostics(),
+		Watchers:          sm.watcherDiagnostic(),
 		Purge:             sm.purgeDiagnostic(),
 	}
 	if sm.prPush != nil {
@@ -405,6 +407,69 @@ func (sm *SessionManager) purgeDiagnostic() *protocol.PurgeDiagnostic {
 	if !next.IsZero() {
 		diag.NextSweep = next.Format(time.RFC3339)
 	}
+
+	return diag
+}
+
+const watchBudgetNearPercent = 90
+
+// watcherDiagnostic reports daemon-wide file-watch trigger resource usage for
+// gr doctor. It intentionally reuses watchBindingDetail so the per-binding
+// accounting is identical to gr trigger status.
+func (sm *SessionManager) watcherDiagnostic() *protocol.WatcherDiagnostic {
+	budget := sm.Config().TriggersRuntime.WatchMaxDirectories()
+
+	sm.triggers.mu.Lock()
+	used := sm.triggers.watchDirs
+
+	bindings := make([]*watchBinding, 0, len(sm.triggers.bindings))
+	for _, b := range sm.triggers.bindings {
+		bindings = append(bindings, b)
+	}
+	sm.triggers.mu.Unlock()
+
+	diag := &protocol.WatcherDiagnostic{
+		EstimatedDescriptorCost: used,
+		Budget:                  budget,
+		BudgetPercent:           watchBudgetPercent(used, budget),
+		NearBudget:              budget > 0 && used*100 >= budget*watchBudgetNearPercent,
+		BudgetExhausted:         budget > 0 && used >= budget,
+	}
+
+	for _, b := range bindings {
+		detail := sm.watchBindingDetail(b)
+		binding := protocol.WatcherBindingDiagnostic{
+			TriggerName:                  b.triggerName,
+			SessionID:                    detail.SessionID,
+			SessionName:                  detail.SessionName,
+			WorktreePath:                 detail.WorktreePath,
+			State:                        detail.State,
+			RegisteredWatchDirectories:   detail.RegisteredWatchDirectories,
+			EstimatedWatchDescriptorCost: detail.EstimatedWatchDescriptorCost,
+			WatchBudgetPercent:           detail.WatchBudgetPercent,
+			Degraded:                     detail.Degraded,
+			RetryCount:                   detail.DegradedRetryCount,
+			NextRetryAt:                  detail.DegradedRetryAt,
+		}
+
+		if strings.Contains(detail.Degraded, "watch descriptor budget exhausted") {
+			diag.BudgetExhausted = true
+		}
+
+		diag.Bindings = append(diag.Bindings, binding)
+	}
+
+	sort.SliceStable(diag.Bindings, func(i, j int) bool {
+		if diag.Bindings[i].TriggerName != diag.Bindings[j].TriggerName {
+			return diag.Bindings[i].TriggerName < diag.Bindings[j].TriggerName
+		}
+
+		if diag.Bindings[i].SessionName != diag.Bindings[j].SessionName {
+			return diag.Bindings[i].SessionName < diag.Bindings[j].SessionName
+		}
+
+		return diag.Bindings[i].SessionID < diag.Bindings[j].SessionID
+	})
 
 	return diag
 }

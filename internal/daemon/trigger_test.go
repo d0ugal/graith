@@ -424,6 +424,7 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 		Action: config.ActionConfig{Type: config.ActionCommand, Command: "go test ./...", Deliver: config.DeliverConfig{Topic: "t"}},
 	}
 	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchMaxDirectories = 100
 	now := time.Date(2026, 7, 26, 9, 0, 0, 0, time.UTC)
 
 	sessions := map[string]struct {
@@ -450,6 +451,7 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 			sessionID:   "braw",
 			worktree:    sessions["braw"].worktree,
 			changed:     make(map[string]bool),
+			watchPaths:  map[string]int{"/work/croft-a": 1, "/work/croft-a/src": 2},
 		},
 		"canny": {
 			triggerName:   trig.Name,
@@ -457,6 +459,7 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 			worktree:      sessions["canny"].worktree,
 			changed:       map[string]bool{"main.go": true, "cli.go": true},
 			debounceUntil: now.Add(30 * time.Second),
+			watchPaths:    map[string]int{"/work/croft-b": 4},
 		},
 		"dreich": {
 			triggerName: trig.Name,
@@ -464,6 +467,7 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 			worktree:    sessions["dreich"].worktree,
 			changed:     make(map[string]bool),
 			activeRuns:  1,
+			watchPaths:  map[string]int{"/work/shared": 3, "/work/shared/cmd": 3, "/work/shared/internal": 4},
 		},
 		"blether": {
 			triggerName: trig.Name,
@@ -549,10 +553,13 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 		wantPending int
 		wantResult  string
 		wantError   string
+		wantDirs    int
+		wantCost    int
+		wantPercent float64
 	}{
-		"braw":    {wantState: "idle"},
-		"canny":   {wantState: "debouncing", wantPending: 2},
-		"dreich":  {wantState: "running"},
+		"braw":    {wantState: "idle", wantDirs: 2, wantCost: 3, wantPercent: 3},
+		"canny":   {wantState: "debouncing", wantPending: 2, wantDirs: 1, wantCost: 4, wantPercent: 4},
+		"dreich":  {wantState: "running", wantDirs: 3, wantCost: 10, wantPercent: 10},
 		"blether": {wantState: "idle", wantResult: "exit 0"},
 		"bothy":   {wantState: "failed", wantResult: "exit 1", wantError: "command exited 1"},
 		"bairn":   {wantState: "rate-limited", wantResult: "rate-limited"},
@@ -567,6 +574,11 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 
 		if got.State != test.wantState || got.PendingChanges != test.wantPending || got.LastResult != test.wantResult || got.LastError != test.wantError {
 			t.Errorf("%s detail = %+v, want state %q pending %d result %q error %q", id, got, test.wantState, test.wantPending, test.wantResult, test.wantError)
+		}
+
+		if got.RegisteredWatchDirectories != test.wantDirs || got.EstimatedWatchDescriptorCost != test.wantCost || got.WatchBudgetPercent != test.wantPercent {
+			t.Errorf("%s watcher usage = dirs %d cost %d percent %.2f, want dirs %d cost %d percent %.2f",
+				id, got.RegisteredWatchDirectories, got.EstimatedWatchDescriptorCost, got.WatchBudgetPercent, test.wantDirs, test.wantCost, test.wantPercent)
 		}
 	}
 
@@ -584,6 +596,66 @@ func TestTriggerStatusWatchBindingDetails(t *testing.T) {
 
 	if rec.Degraded == "" || rec.DegradedRetryCount != 3 || rec.DegradedRetryAt != now.Add(5*time.Minute).Format(time.RFC3339) {
 		t.Errorf("top-level degraded summary = %+v", rec)
+	}
+}
+
+func TestWatcherDiagnosticAttribution(t *testing.T) {
+	trig := config.TriggerConfig{
+		Name:   "watch-bothy",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "changed"},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchMaxDirectories = 20
+	now := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
+
+	sm.state.Sessions["braw"] = &SessionState{ID: "braw", Name: "braw-runner", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: "/work/braw"}
+	sm.state.Sessions["canny"] = &SessionState{ID: "canny", Name: "canny-runner", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: "/work/canny"}
+
+	sm.triggers.mu.Lock()
+	sm.triggers.watchDirs = 18
+	sm.triggers.bindings[bindingKey(trig.Name, "braw")] = &watchBinding{
+		triggerName: trig.Name,
+		sessionID:   "braw",
+		worktree:    "/work/braw",
+		changed:     make(map[string]bool),
+		watchPaths:  map[string]int{"/work/braw": 6, "/work/braw/cmd": 6, "/work/braw/internal": 6},
+	}
+	sm.triggers.bindings[bindingKey(trig.Name, "canny")] = &watchBinding{
+		triggerName: trig.Name,
+		sessionID:   "canny",
+		worktree:    "/work/canny",
+		changed:     make(map[string]bool),
+		degraded:    "watcher.Add failed: watch descriptor budget exhausted (used 18/20; cost 4; path \"/work/canny\")",
+		retryCount:  2,
+		nextRetryAt: now.Add(time.Minute),
+	}
+	sm.triggers.mu.Unlock()
+
+	diag := sm.watcherDiagnostic()
+	if diag == nil {
+		t.Fatal("expected watcher diagnostic")
+	}
+
+	if diag.EstimatedDescriptorCost != 18 || diag.Budget != 20 || diag.BudgetPercent != 90 || !diag.NearBudget || !diag.BudgetExhausted {
+		t.Fatalf("watcher diagnostic summary = %+v, want 18/20 near and exhausted by degraded budget failure", diag)
+	}
+
+	bySession := make(map[string]protocol.WatcherBindingDiagnostic, len(diag.Bindings))
+	for _, binding := range diag.Bindings {
+		bySession[binding.SessionID] = binding
+	}
+
+	healthy := bySession["braw"]
+	if healthy.TriggerName != trig.Name || healthy.SessionName != "braw-runner" || healthy.State != "idle" ||
+		healthy.RegisteredWatchDirectories != 3 || healthy.EstimatedWatchDescriptorCost != 18 || healthy.WatchBudgetPercent != 90 {
+		t.Fatalf("healthy binding diagnostic = %+v", healthy)
+	}
+
+	degraded := bySession["canny"]
+	if degraded.State != "degraded" || degraded.RegisteredWatchDirectories != 0 || degraded.EstimatedWatchDescriptorCost != 0 ||
+		degraded.Degraded == "" || degraded.RetryCount != 2 || degraded.NextRetryAt != now.Add(time.Minute).Format(time.RFC3339) {
+		t.Fatalf("degraded binding diagnostic = %+v", degraded)
 	}
 }
 

@@ -208,7 +208,7 @@ func renderTriggerBindingDetails(w io.Writer, bindings []protocol.TriggerBinding
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SESSION\tWORKTREE\tSTATE\tPENDING\tDEBOUNCE\tIN-FLIGHT\tLAST RUN\tRESULT\tRETRY")
+	_, _ = fmt.Fprintln(tw, "SESSION\tWORKTREE\tSTATE\tWATCH DIRS\tWATCH COST\tBUDGET\tPENDING\tDEBOUNCE\tIN-FLIGHT\tLAST RUN\tRESULT\tRETRY")
 
 	for _, b := range bindings {
 		session := b.SessionName
@@ -267,8 +267,10 @@ func renderTriggerBindingDetails(w io.Writer, bindings []protocol.TriggerBinding
 			worktree = "-"
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
-			triggerBindingTableCell(session), triggerBindingTableCell(worktree), b.State, b.PendingChanges, debounce, inFlight, lastRun, result, retry)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%.2f%%\t%d\t%s\t%s\t%s\t%s\t%s\n",
+			triggerBindingTableCell(session), triggerBindingTableCell(worktree), b.State,
+			b.RegisteredWatchDirectories, b.EstimatedWatchDescriptorCost, b.WatchBudgetPercent,
+			b.PendingChanges, debounce, inFlight, lastRun, result, retry)
 	}
 
 	_ = tw.Flush()

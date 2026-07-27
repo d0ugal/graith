@@ -135,7 +135,11 @@ var doctorCmd = &cobra.Command{
 			dc.checkSessions(diag)
 			dc.checkStorage(diag)
 			dc.renderPurgeDiagnostic(diag)
-			dc.checkTriggers(diag)
+			dc.checkWatcherResources(diag)
+
+			if diag.Watchers == nil {
+				dc.checkTriggers(diag)
+			}
 		}
 
 		report.OK = dc.ok
@@ -1163,6 +1167,106 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 			dc.hintf("Use --autofix to remove")
 		}
 	}
+}
+
+// checkWatcherResources surfaces the file-watch trigger descriptor budget and
+// attributes active registrations back to trigger bindings. It is intentionally
+// scoped to trigger file-watch resources; alternate watch implementations are
+// tracked separately.
+func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
+	watchers := diag.Watchers
+	if watchers == nil {
+		return
+	}
+
+	dc.section("Watcher Resources")
+
+	usage := fmt.Sprintf("%d/%d estimated descriptors", watchers.EstimatedDescriptorCost, watchers.Budget)
+	if watchers.Budget > 0 {
+		usage += fmt.Sprintf(" (%.2f%%)", watchers.BudgetPercent)
+	}
+
+	switch {
+	case watchers.BudgetExhausted:
+		dc.warnf("watchers", "File-watch budget exhausted or blocking a binding: %s", usage)
+	case watchers.NearBudget:
+		dc.warnf("watchers", "File-watch budget near capacity: %s", usage)
+	default:
+		dc.passf("watchers", "File-watch budget: %s", usage)
+	}
+
+	bindings := append([]protocol.WatcherBindingDiagnostic(nil), watchers.Bindings...)
+	sort.SliceStable(bindings, func(i, j int) bool {
+		if bindings[i].EstimatedWatchDescriptorCost != bindings[j].EstimatedWatchDescriptorCost {
+			return bindings[i].EstimatedWatchDescriptorCost > bindings[j].EstimatedWatchDescriptorCost
+		}
+
+		if bindings[i].TriggerName != bindings[j].TriggerName {
+			return bindings[i].TriggerName < bindings[j].TriggerName
+		}
+
+		if bindings[i].SessionName != bindings[j].SessionName {
+			return bindings[i].SessionName < bindings[j].SessionName
+		}
+
+		return bindings[i].SessionID < bindings[j].SessionID
+	})
+
+	for _, b := range bindings {
+		who := b.SessionName
+		if who == "" {
+			who = b.SessionID
+		}
+
+		if who == "" {
+			who = "-"
+		}
+
+		worktree := b.WorktreePath
+		if worktree == "" {
+			worktree = "-"
+		}
+
+		line := fmt.Sprintf("%q / %q (%s): %d dir(s), estimated cost %d",
+			b.TriggerName, who, b.State, b.RegisteredWatchDirectories, b.EstimatedWatchDescriptorCost)
+		if watchers.Budget > 0 {
+			line += fmt.Sprintf(" (%.2f%% of budget)", b.WatchBudgetPercent)
+		}
+
+		line += "; worktree " + worktree
+
+		if b.Degraded != "" {
+			line += "; degraded: " + b.Degraded
+		}
+
+		dc.hintf("%s", line)
+
+		if b.NextRetryAt != "" {
+			dc.hintf("Retried %d time(s); next attempt at %s", b.RetryCount, b.NextRetryAt)
+		}
+
+		if b.Degraded != "" {
+			dc.warnf("triggers", "Watch trigger %q degraded on session %q: %s", b.TriggerName, who, b.Degraded)
+		}
+	}
+
+	if watchers.BudgetExhausted || watchers.NearBudget || watcherDiagnosticHasDegraded(bindings) {
+		dc.hintf("Run: gr trigger status <watch-trigger>")
+		dc.hintf("On Linux, raise fs.inotify.max_user_watches if the host watch limit is exhausted")
+		dc.hintf("Narrow [trigger.watch] paths or add [trigger.watch] ignore entries for generated and dependency trees")
+		dc.hintf("Stop unnecessary writable sessions; use mirror/read-only sessions when another view is enough")
+		dc.hintf("If the tree is intentionally large, increase triggers.advanced.watch_max_directories within the host descriptor limit")
+	}
+}
+
+func watcherDiagnosticHasDegraded(bindings []protocol.WatcherBindingDiagnostic) bool {
+	for _, b := range bindings {
+		if b.Degraded != "" {
+			return true
+		}
+	}
+
+	return false
 }
 
 // checkTriggers surfaces watch-trigger bindings that are currently degraded

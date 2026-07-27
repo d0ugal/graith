@@ -265,8 +265,8 @@ the trigger. Prefer precise `paths` includes (for example `cmd/**/*.go`) and
 `ignore` entries for generated or dependency trees to keep bindings below the
 budget. A broad `**/*` watch intentionally consumes more of the shared budget.
 On macOS this is an estimate: kqueue can temporarily add descriptors for new
-files created inside an already-watched directory. Use `watch.ignore` to prune
-generated or high-churn trees as an additional mitigation.
+files created inside an already-watched directory. Use `[trigger.watch] ignore`
+to prune generated or high-churn trees as an additional mitigation.
 
 `scheduler_tick` and `watch_reconcile_interval` are read at daemon start (restart
 to apply); other settings apply on the next reconcile or fire. Both fall back to
