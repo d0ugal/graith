@@ -50,7 +50,13 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"
+          # Fail safe toward running Swift coverage: if the file list can't be
+          # fetched, run the job rather than silently skip validation.
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "gui=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running Swift coverage to be safe."
+            exit 0
+          fi
           # here-string (not a pipe) so grep matching early can't SIGPIPE-fail
           # an upstream command under pipefail.
           if grep -q '^gui/' <<<"$files"; then
@@ -199,7 +205,14 @@ jobs:
   swift-coverage:
     name: Swift coverage
     needs: changes
-    if: needs.changes.outputs.gui == 'true'
+    # Run when the detector says gui/ is relevant — but also when the detector
+    # itself did NOT cleanly succeed (failed/timed out) or produced anything
+    # other than the one trusted skip value. With `needs:` and a custom `if:`
+    # lacking a status function, a failed `changes` job would otherwise skip this
+    # job. `!cancelled()` still lets a superseded run bow out.
+    if: >-
+      !cancelled() &&
+      (needs.changes.result != 'success' || needs.changes.outputs.gui != 'false')
     runs-on: macos-latest
     # Cap scarce macOS runner minutes: a hung suite can't hold one for GitHub's
     # 6h default. Well above the normal coverage runtime.
@@ -297,8 +310,9 @@ jobs:
             warning="> ⚠️ **Coverage regressed by ${GO_DELTA} vs base**, exceeding the allowed 5% budget. Please add tests."$'\n'
           fi
 
-          # Swift row: only meaningful when the PR touches gui/.
-          if [ "$GUI_CHANGED" = "true" ]; then
+          # Swift row: a literal gui=false is the only trusted skip signal. Empty
+          # or malformed detector output routes fail-safe through Swift coverage.
+          if [ "$GUI_CHANGED" != "false" ]; then
             if [ "$SWIFT_RESULT" = "success" ] && [ -n "${SWIFT_PCT:-}" ]; then
               swift_row="| Swift (\`gui/shared\`) | ${SWIFT_PCT}% | — |"
             else

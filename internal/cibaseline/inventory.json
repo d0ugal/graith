@@ -314,7 +314,7 @@
       "path": ".github/workflows/coverage.yml",
       "name": "Coverage",
       "owner": "graith-maintainers",
-      "file_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
+      "file_sha256": "cf509eae0639fb9f45d5298d7ad1e45156791f180b052b5639adf6a34524cd5f",
       "events": {
         "pull_request": null
       },
@@ -412,7 +412,7 @@
           "capability": "legacy-proof/coverage/swift-coverage",
           "owner": "graith-maintainers",
           "runner": "macos-latest",
-          "condition": "needs.changes.outputs.gui == 'true'",
+          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.gui != 'false')",
           "skip_semantics": "github-skipped-is-distinct-from-passed",
           "proof_type": "soft",
           "requiredness": "soft",
@@ -3100,7 +3100,7 @@
     },
     {
       "legacy_coordinate": "coverage/swift-coverage",
-      "legacy_condition": "needs.changes.outputs.gui == 'true'",
+      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.gui != 'false')",
       "skip_semantics": "github-skipped-is-distinct-from-passed",
       "new_mode": "legacy/coverage/swift-coverage",
       "owner": "graith-maintainers",
@@ -3502,5 +3502,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27"
+  "digest": "5522c8f4d22c8d63a7f171d8f5396392bcb59d0108de604e81633912cde4605b"
 }
