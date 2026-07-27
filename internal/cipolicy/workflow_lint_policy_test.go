@@ -7,7 +7,15 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	yaml "go.yaml.in/yaml/v3"
 )
+
+type workflowLintEventFilter struct {
+	Keys     []string
+	Branches []string
+	Paths    []string
+}
 
 func TestWorkflowLintShellcheckPolicy(t *testing.T) {
 	repoRoot := p11RepoRoot()
@@ -36,6 +44,49 @@ func TestWorkflowLintShellcheckPolicy(t *testing.T) {
 
 	if got := strings.Count(workflowText, "- '*.sh'"); got != 2 {
 		t.Fatalf("root shell path-filter count = %d, want 2", got)
+	}
+}
+
+func TestWorkflowLintTriggerPathsIncludeLintConfig(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	filters := readWorkflowLintEventFilters(t, filepath.Join(repoRoot, ".github/workflows/workflow-lint.yml"))
+
+	wantPaths := []string{
+		".github/workflows/**",
+		".github/actionlint.yaml",
+		".github/zizmor.yml",
+		"internal/libghosttydeps/testdata/renovate/**",
+		"libghostty-native.lock.json",
+		"renovate.json5",
+		"**/*.sh",
+		"*.sh",
+		"Makefile",
+		"scripts/verify-renovate-libghostty.sh",
+	}
+
+	tests := map[string]struct {
+		wantKeys     []string
+		wantBranches []string
+	}{
+		"pull_request": {wantKeys: []string{"paths"}},
+		"push":         {wantKeys: []string{"branches", "paths"}, wantBranches: []string{"main"}},
+	}
+
+	if len(filters) != len(tests) {
+		t.Fatalf("workflow-lint events = %v, want only push and pull_request", sortedWorkflowEventNames(filters))
+	}
+
+	for eventName, test := range tests {
+		t.Run(eventName, func(t *testing.T) {
+			filter, ok := filters[eventName]
+			if !ok {
+				t.Fatalf("workflow-lint is missing %s trigger", eventName)
+			}
+
+			assertStringsEqual(t, eventName+" filter keys", filter.Keys, test.wantKeys)
+			assertStringsEqual(t, eventName+" path filters", filter.Paths, wantPaths)
+			assertStringsEqual(t, eventName+" branch filters", filter.Branches, test.wantBranches)
+		})
 	}
 }
 
@@ -167,6 +218,61 @@ func readPolicyFile(t *testing.T, path string) string {
 	}
 
 	return string(data)
+}
+
+func readWorkflowLintEventFilters(t *testing.T, path string) map[string]workflowLintEventFilter {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var raw struct {
+		On map[string]yaml.Node `yaml:"on"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(raw.On) == 0 {
+		t.Fatalf("workflow %s has no event filters", path)
+	}
+
+	filters := make(map[string]workflowLintEventFilter, len(raw.On))
+	for eventName, eventNode := range raw.On {
+		if eventNode.Kind != yaml.MappingNode {
+			t.Fatalf("workflow %s event %s filter node kind = %v, want mapping", path, eventName, eventNode.Kind)
+		}
+
+		var filter workflowLintEventFilter
+
+		for index := 0; index < len(eventNode.Content); index += 2 {
+			key := eventNode.Content[index].Value
+			value := eventNode.Content[index+1]
+
+			filter.Keys = append(filter.Keys, key)
+			switch key {
+			case "branches":
+				filter.Branches = p11StringList(value)
+			case "paths":
+				filter.Paths = p11StringList(value)
+			}
+		}
+
+		filters[eventName] = filter
+	}
+
+	return filters
+}
+
+func sortedWorkflowEventNames(filters map[string]workflowLintEventFilter) []string {
+	names := make([]string, 0, len(filters))
+	for name := range filters {
+		names = append(names, name)
+	}
+
+	return sortedStrings(names)
 }
 
 func assertContains(t *testing.T, value, want string) {

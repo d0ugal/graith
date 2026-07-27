@@ -147,7 +147,7 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 	},
 	"internal/cipolicy/workflow_lint_policy_test.go": {
 		kind:       "go-policy-contract-test",
-		contract:   "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
+		contract:   "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
 		retirement: "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement",
 	},
 	"internal/docspreview/docspreview.go": {

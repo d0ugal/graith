@@ -154,6 +154,7 @@ var (
 		},
 		{
 			Paths: []string{
+				".github/actionlint.yaml",
 				"renovate.json",
 				".renovaterc",
 			},
