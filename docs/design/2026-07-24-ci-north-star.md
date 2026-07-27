@@ -293,8 +293,8 @@ before more code is added.
 | `cmd/cipolicy/**` | Simplify | A local validation/report command may be useful, but not a gate or deployment artifact. | Static summary and deterministic fixtures. | Remove command if no caller lands. |
 | `internal/cipolicy/manifest.go`, `build.go`, `validate.go`, `io.go`, `manifest.json` | Simplify | Keep only the parts needed for current workflow inventory and local validation. | Current workflows. | Regenerate or delete with static inventory PR. |
 | `internal/cipolicy/plan.go`, `result.go`, `fixture.go` | Revert/delete unless a concrete C2/C4 caller lands first | Full plan/result fan-in was designed for the external gate. Do not preserve it as speculative infrastructure. | A direct summary or fixture caller, otherwise none. | Delete in the helper-pruning PR; rollback restores files only. |
-| `internal/cipolicy/artifact.go` and tests | Keep | Artifact identity checks match current native/release risks. Wire them only where they replace duplication. | Native/release scripts. | Revert helper wiring. |
-| `internal/cipolicy/cache.go` and tests | Revert/delete unless a current native/release caller is proven | Cross-run cache authority is not needed for the corrected rollout. | A concrete artifact/native caller, otherwise none. | Delete in the helper-pruning PR; rollback restores files only. |
+| `internal/cipolicy/artifact.go` and tests | Retired by #1758 | Follow-up caller inventory found no workflow, script, command, or local consumer for the artifact manifest/producer-result library. Native/release artifact protections remain in the current workflow, shell, and libghostty policy tests. | None. | Revert the focused deletion if a concrete caller is restored. |
+| `internal/cipolicy/cache.go` and tests | Retired by #1737 | The helper-pruning PR removed cross-run cache authority after no current native/release caller was retained. | None. | Revert that focused deletion if a concrete caller is restored. |
 | `internal/cipolicy/p11_js_surface.go` and tests | Simplify | Retain inventory and semantic comparison value; drop broad porting assumptions. | Workflow script tests. | Revert individual helper-retirement PR. |
 | `cmd/cigate/**` | Revert/delete | The command exists for an external evaluator and live proof path that is prohibited. | None in current workflows. | Delete command and architecture metadata in one PR. |
 | `internal/cigate/**` | Revert/delete | It requires App contracts, webhook signatures, replay storage, live proof bundles, deployment digests, and `merge_group`. | None in current workflows. | Delete package and tests in one PR. |
@@ -338,7 +338,7 @@ sequence:
 | P2 plan/result policy | Delete unless the minimal summary or deterministic fixtures already prove a direct local caller. |
 | P3 hermetic fixture | Keep deterministic fixture idea, not external acceptance. |
 | P4 trusted App | Rejected and scheduled for deletion. |
-| P5 artifact/cache contracts | Keep artifact validation where it strengthens current native/release checks; delete cache authority unless a direct caller exists. |
+| P5 artifact/cache contracts | #1758 found no direct artifact-contract caller and #1737 already deleted cache authority; native/release artifact validation stays in the active workflow/script tests. |
 | P6 shadow planner/gate | Replace with existing-Actions shadow summary. |
 | P7 dual-run promotion | Replace with deterministic sample-class comparisons. |
 | P8 trusted publication boundary | Keep current trusted release workflows; no new credential boundary. |

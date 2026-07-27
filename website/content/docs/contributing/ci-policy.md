@@ -138,10 +138,9 @@ and libghostty-native runs. Non-PR runs use unique groups and do not opt into
 that cancellation path, so main, release, scheduled, manual, and publication
 work cannot be cancelled by pull-request activity.
 
-Artifact-producing native and release validation uses artifact-specific
-producer results. Those results bind attempt history, first outcome, final
-status, timestamps, evidence digest, artifact digest, and a 64-hex superseding
-result identity when applicable before an artifact manifest can be accepted.
+Native and release artifact boundaries remain enforced by the current workflow
+and libghostty-specific checks. `internal/cipolicy` no longer exposes a
+supported artifact manifest or producer-result contract.
 
 ## External observed modes
 
