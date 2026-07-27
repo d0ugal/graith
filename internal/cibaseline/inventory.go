@@ -134,12 +134,12 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 	},
 	"internal/cipolicy/p11_js_surface.go": {
 		kind:       "go-policy-contract",
-		contract:   "preserve current retained-JS surface contracts and semantic replacement metadata for retired workflow-script tests",
-		retirement: "remove only after all P11 JS surfaces are retired or represented by a newer owner-approved contract",
+		contract:   "preserve workflow YAML summary parsing helpers used by current semantic workflow policy tests",
+		retirement: "remove only after equivalent workflow parsing coverage exists",
 	},
 	"internal/cipolicy/p11_js_surface_test.go": {
 		kind:       "go-policy-contract-test",
-		contract:   "preserve regen credential, trust, scalar sweep, git-index enumeration, and repository-command detection assertions formerly held by regen-auth.test.js",
+		contract:   "preserve regen credential, trust, scalar sweep, and repository-command detection assertions formerly held by regen-auth.test.js",
 		retirement: "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement",
 	},
 	"internal/cipolicy/renovate_retry_test.go": {
@@ -833,11 +833,7 @@ func inventorySurfaces(repo string) ([]Surface, error) {
 				owner = "gui-owners"
 			}
 		} else if strings.HasPrefix(rel, ".github/workflows/scripts/") {
-			kind = "workflow-helper"
-			if strings.Contains(rel, ".test.") {
-				kind = "workflow-contract-test"
-				contract = "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts"
-			}
+			return nil, fmt.Errorf("retired workflow script helper surface %s is tracked; use Go, shell, or an owner-approved policy surface instead", rel)
 		} else if metadata, ok := ciGoPolicySurfaces[rel]; ok {
 			kind = metadata.kind
 			contract = metadata.contract

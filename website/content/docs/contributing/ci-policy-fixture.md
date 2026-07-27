@@ -12,7 +12,7 @@ The CI policy replacement tests are the retained Go coverage for retired
 workflow-script policy tests. They run inside `internal/cipolicy` with no
 repository secrets and do not perform external network access. The tests bind
 the same checked-in [CI policy manifest]({{< relref "/docs/contributing/ci-policy.md" >}})
-to repository workflow files, declared P11 compatibility samples, credential
+to repository workflow files, deterministic change classes, credential
 boundaries, and local plan construction.
 
 Run it with the normal package tests:
@@ -63,13 +63,11 @@ The replacement tests fail closed when a deterministic fault tries to make the
 policy look narrower or more trusted than the checked-in manifest allows:
 
 - missing files, unknown paths, or unknown changed-file lists;
-- compatibility samples that are not bound to content-addressed workflow
-  files;
 - manifest workflow traces that drift away from checked-in workflow content;
 - changed-file samples that are not known to the local detector;
 - manifest-level unsupported platform decisions that silently pass; and
-- P11 semantic replacement files whose closed-world inventory identity no
-  longer matches the accepted baseline.
+- tracked helpers under the retired `.github/workflows/scripts/` surface, via
+  the P0 inventory generator and `internal/cibaseline` tests.
 
 The same-repository agent branch tier is treated as untrusted for credentials.
 Synthetic tokens and filesystem roots prove that docs-preview writes,

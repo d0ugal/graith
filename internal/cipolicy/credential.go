@@ -37,6 +37,11 @@ type credentialOperationPolicy struct {
 	AllowedRoots   []string
 }
 
+type credentialTrustAllowance struct {
+	PlanTrustTier       string
+	CredentialTrustTier string
+}
+
 var credentialOperationPolicies = map[string]credentialOperationPolicy{
 	"docs-preview-write": {
 		TokenClasses:   []string{syntheticRepositoryWriteToken},
@@ -72,6 +77,24 @@ var credentialOperationPolicies = map[string]credentialOperationPolicy{
 		Capabilities:   []string{"stable-release"},
 		RequiredScopes: []string{"contents:write"},
 		AllowedRoots:   []string{"dist/stable-release"},
+	},
+}
+
+var credentialTrustAllowlist = map[string][]credentialTrustAllowance{
+	"coverage-comment": {
+		{PlanTrustTier: "same-repository-agent", CredentialTrustTier: "same-repository-agent"},
+	},
+	"docs-preview-write": {
+		{PlanTrustTier: "same-repository-agent", CredentialTrustTier: "same-repository-agent"},
+	},
+	"regeneration-push": {
+		{PlanTrustTier: "trusted-base", CredentialTrustTier: "trusted-publication"},
+	},
+	"dev-release-publish": {
+		{PlanTrustTier: "trusted-base", CredentialTrustTier: "trusted-publication"},
+	},
+	"stable-release-publish": {
+		{PlanTrustTier: "trusted-base", CredentialTrustTier: "trusted-publication"},
 	},
 }
 
@@ -156,6 +179,16 @@ func validateCredentialOperationPlanBinding(operation CredentialOperation, polic
 	}
 
 	return nil
+}
+
+func validateCredentialTrustAllowance(operation CredentialOperation, plan RunPlan) error {
+	for _, allowance := range credentialTrustAllowlist[operation.Operation] {
+		if allowance.PlanTrustTier == plan.TrustTier && allowance.CredentialTrustTier == operation.TrustTier {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%s credential operation credential trust tier %s is not allowed for plan trust tier %s", operation.Operation, operation.TrustTier, plan.TrustTier)
 }
 
 func targetWithinAllowedRoots(target string, roots []string) bool {
