@@ -65,6 +65,7 @@ var ciGoPolicySurfacePaths = []string{
 	"internal/cipolicy/p11_js_surface_test.go",
 	"internal/cipolicy/renovate_retry_test.go",
 	"internal/cipolicy/workflow_lint_policy_test.go",
+	"internal/cipolicy/workflow_timeout_policy_test.go",
 	"internal/docspreview/docspreview.go",
 	"internal/docspreview/docspreview_test.go",
 	"internal/docspreview/github.go",
@@ -149,6 +150,11 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
 		retirement: "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement",
+	},
+	"internal/cipolicy/workflow_timeout_policy_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve positive literal job-level timeout coverage for all recognizable Linux workflow jobs, fail closed on unresolved runner labels, keep non-Linux jobs outside this CI-DN-06 policy by task scope, and retain access to the shared p11 YAML helpers it uses",
+		retirement: "remove only after equivalent Linux workflow timeout policy coverage exists",
 	},
 	"internal/docspreview/docspreview.go": {
 		kind:       "go-policy-helper",

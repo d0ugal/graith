@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy_version": "ci-policy-v1",
-  "policy_digest": "ef5dc4f9c74352f7dfd5e1bf4d2c068b67893a55ef492727956ee03968fdad69",
+  "policy_digest": "6a3b2e4a56209aa99427f4db0d12713dcc5049f5fc5aed81329349686c6de72f",
   "source": {
     "id": "github-actions",
     "repository": "d0ugal/graith",
@@ -10,7 +10,7 @@
     "baseline_inventory": {
       "path": "internal/cibaseline/inventory.json",
       "schema_version": 2,
-      "digest": "cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c",
+      "digest": "fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27",
       "observation_state": "p0-observation-in-progress"
     }
   },
@@ -414,28 +414,28 @@
           "github_name": "Build (ubuntu-latest)",
           "evidence_refs": [
             "github-check-name:Build (ubuntu-latest)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/build"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/build"
           ],
           "trace": {
             "inventory_mapping": "ci/build",
             "legacy_workflow": "ci",
             "legacy_job": "build",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/build"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/build"
       ],
       "trace": {
         "inventory_mapping": "job:ci/build",
         "legacy_workflow": "ci",
         "legacy_job": "build",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -475,28 +475,28 @@
           "github_name": "Detect macOS-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect macOS-relevant changes",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/changes"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/changes"
           ],
           "trace": {
             "inventory_mapping": "ci/changes",
             "legacy_workflow": "ci",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/changes"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/changes"
       ],
       "trace": {
         "inventory_mapping": "job:ci/changes",
         "legacy_workflow": "ci",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -536,28 +536,28 @@
           "github_name": "Vulnerability Check",
           "evidence_refs": [
             "github-check-name:Vulnerability Check",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/govulncheck"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/govulncheck"
           ],
           "trace": {
             "inventory_mapping": "ci/govulncheck",
             "legacy_workflow": "ci",
             "legacy_job": "govulncheck",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/govulncheck"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/govulncheck"
       ],
       "trace": {
         "inventory_mapping": "job:ci/govulncheck",
         "legacy_workflow": "ci",
         "legacy_job": "govulncheck",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -597,28 +597,28 @@
           "github_name": "Integration (ubuntu-latest)",
           "evidence_refs": [
             "github-check-name:Integration (ubuntu-latest)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/integration"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/integration"
           ],
           "trace": {
             "inventory_mapping": "ci/integration",
             "legacy_workflow": "ci",
             "legacy_job": "integration",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/integration"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/integration"
       ],
       "trace": {
         "inventory_mapping": "job:ci/integration",
         "legacy_workflow": "ci",
         "legacy_job": "integration",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -658,28 +658,28 @@
           "github_name": "Integration (macos-latest)",
           "evidence_refs": [
             "github-check-name:Integration (macos-latest)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/integration-macos"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/integration-macos"
           ],
           "trace": {
             "inventory_mapping": "ci/integration-macos",
             "legacy_workflow": "ci",
             "legacy_job": "integration-macos",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/integration-macos"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/integration-macos"
       ],
       "trace": {
         "inventory_mapping": "job:ci/integration-macos",
         "legacy_workflow": "ci",
         "legacy_job": "integration-macos",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -719,28 +719,28 @@
           "github_name": "Lint",
           "evidence_refs": [
             "github-check-name:Lint",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/lint"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/lint"
           ],
           "trace": {
             "inventory_mapping": "ci/lint",
             "legacy_workflow": "ci",
             "legacy_job": "lint",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/lint"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/lint"
       ],
       "trace": {
         "inventory_mapping": "job:ci/lint",
         "legacy_workflow": "ci",
         "legacy_job": "lint",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -780,28 +780,28 @@
           "github_name": "Test (ubuntu-latest)",
           "evidence_refs": [
             "github-check-name:Test (ubuntu-latest)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/test"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/test"
           ],
           "trace": {
             "inventory_mapping": "ci/test",
             "legacy_workflow": "ci",
             "legacy_job": "test",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/test"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/test"
       ],
       "trace": {
         "inventory_mapping": "job:ci/test",
         "legacy_workflow": "ci",
         "legacy_job": "test",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -841,28 +841,28 @@
           "github_name": "Test (macos-latest)",
           "evidence_refs": [
             "github-check-name:Test (macos-latest)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/test-macos"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/test-macos"
           ],
           "trace": {
             "inventory_mapping": "ci/test-macos",
             "legacy_workflow": "ci",
             "legacy_job": "test-macos",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+            "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#ci/test-macos"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#ci/test-macos"
       ],
       "trace": {
         "inventory_mapping": "job:ci/test-macos",
         "legacy_workflow": "ci",
         "legacy_job": "test-macos",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+        "workflow_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -902,28 +902,28 @@
           "github_name": "Analyze (Go)",
           "evidence_refs": [
             "github-check-name:Analyze (Go)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#codeql/analyze"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#codeql/analyze"
           ],
           "trace": {
             "inventory_mapping": "codeql/analyze",
             "legacy_workflow": "codeql",
             "legacy_job": "analyze",
             "workflow_path": ".github/workflows/codeql.yml",
-            "workflow_sha256": "160972df5072a1160eb70e946ff2aecd8efb992608253f1474e0f5612de0c0fb",
+            "workflow_sha256": "64ba5b40047caf68d147ee341d82fb30e11ae4917de43f20ab24b3dab921ca85",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#codeql/analyze"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#codeql/analyze"
       ],
       "trace": {
         "inventory_mapping": "job:codeql/analyze",
         "legacy_workflow": "codeql",
         "legacy_job": "analyze",
         "workflow_path": ".github/workflows/codeql.yml",
-        "workflow_sha256": "160972df5072a1160eb70e946ff2aecd8efb992608253f1474e0f5612de0c0fb",
+        "workflow_sha256": "64ba5b40047caf68d147ee341d82fb30e11ae4917de43f20ab24b3dab921ca85",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -959,28 +959,28 @@
           "github_name": "Conventional commits",
           "evidence_refs": [
             "github-check-name:Conventional commits",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#commits/commitsar"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#commits/commitsar"
           ],
           "trace": {
             "inventory_mapping": "commits/commitsar",
             "legacy_workflow": "commits",
             "legacy_job": "commitsar",
             "workflow_path": ".github/workflows/commits.yml",
-            "workflow_sha256": "30c068d6f10fde86c2e9e954c2362718ea8a73657c4cb23228b686c7273b3acb",
+            "workflow_sha256": "39faf300d76e368128cd2211871568177e6f75b336db01e248b2f78b4166381f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#commits/commitsar"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#commits/commitsar"
       ],
       "trace": {
         "inventory_mapping": "job:commits/commitsar",
         "legacy_workflow": "commits",
         "legacy_job": "commitsar",
         "workflow_path": ".github/workflows/commits.yml",
-        "workflow_sha256": "30c068d6f10fde86c2e9e954c2362718ea8a73657c4cb23228b686c7273b3acb",
+        "workflow_sha256": "39faf300d76e368128cd2211871568177e6f75b336db01e248b2f78b4166381f",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1012,28 +1012,28 @@
           "github_name": "Detect gui changes",
           "evidence_refs": [
             "github-check-name:Detect gui changes",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/changes"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/changes"
           ],
           "trace": {
             "inventory_mapping": "coverage/changes",
             "legacy_workflow": "coverage",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/coverage.yml",
-            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/changes"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/changes"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/changes",
         "legacy_workflow": "coverage",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/coverage.yml",
-        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1064,28 +1064,28 @@
           "github_name": "Coverage comment",
           "evidence_refs": [
             "github-check-name:Coverage comment",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/comment"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/comment"
           ],
           "trace": {
             "inventory_mapping": "coverage/comment",
             "legacy_workflow": "coverage",
             "legacy_job": "comment",
             "workflow_path": ".github/workflows/coverage.yml",
-            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
             "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/comment"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/comment"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/comment",
         "legacy_workflow": "coverage",
         "legacy_job": "comment",
         "workflow_path": ".github/workflows/coverage.yml",
-        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
         "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1117,28 +1117,28 @@
           "github_name": "Go coverage",
           "evidence_refs": [
             "github-check-name:Go coverage",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/go-coverage"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/go-coverage"
           ],
           "trace": {
             "inventory_mapping": "coverage/go-coverage",
             "legacy_workflow": "coverage",
             "legacy_job": "go-coverage",
             "workflow_path": ".github/workflows/coverage.yml",
-            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/go-coverage"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/go-coverage"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/go-coverage",
         "legacy_workflow": "coverage",
         "legacy_job": "go-coverage",
         "workflow_path": ".github/workflows/coverage.yml",
-        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1170,28 +1170,28 @@
           "github_name": "Swift coverage",
           "evidence_refs": [
             "github-check-name:Swift coverage",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/swift-coverage"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/swift-coverage"
           ],
           "trace": {
             "inventory_mapping": "coverage/swift-coverage",
             "legacy_workflow": "coverage",
             "legacy_job": "swift-coverage",
             "workflow_path": ".github/workflows/coverage.yml",
-            "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+            "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
             "legacy_condition": "needs.changes.outputs.gui == 'true'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#coverage/swift-coverage"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#coverage/swift-coverage"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/swift-coverage",
         "legacy_workflow": "coverage",
         "legacy_job": "swift-coverage",
         "workflow_path": ".github/workflows/coverage.yml",
-        "workflow_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+        "workflow_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
         "legacy_condition": "needs.changes.outputs.gui == 'true'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1223,28 +1223,28 @@
           "github_name": "Dependency Review",
           "evidence_refs": [
             "github-check-name:Dependency Review",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dependency-review/dependency-review"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dependency-review/dependency-review"
           ],
           "trace": {
             "inventory_mapping": "dependency-review/dependency-review",
             "legacy_workflow": "dependency-review",
             "legacy_job": "dependency-review",
             "workflow_path": ".github/workflows/dependency-review.yml",
-            "workflow_sha256": "99e716c4891e084c15be79f13cb966887ee7197ff9d3013370b2dbfb9f1b042e",
+            "workflow_sha256": "9a9cdf3f2e21e1bca7bd125a736843e704e2e79b7338113119c4c1009ef07e58",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dependency-review/dependency-review"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dependency-review/dependency-review"
       ],
       "trace": {
         "inventory_mapping": "job:dependency-review/dependency-review",
         "legacy_workflow": "dependency-review",
         "legacy_job": "dependency-review",
         "workflow_path": ".github/workflows/dependency-review.yml",
-        "workflow_sha256": "99e716c4891e084c15be79f13cb966887ee7197ff9d3013370b2dbfb9f1b042e",
+        "workflow_sha256": "9a9cdf3f2e21e1bca7bd125a736843e704e2e79b7338113119c4c1009ef07e58",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1280,28 +1280,28 @@
           "github_name": "Aggregate dev release",
           "evidence_refs": [
             "github-check-name:Aggregate dev release",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/assemble-dev"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/assemble-dev"
           ],
           "trace": {
             "inventory_mapping": "dev-release/assemble-dev",
             "legacy_workflow": "dev-release",
             "legacy_job": "assemble-dev",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/assemble-dev"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/assemble-dev"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/assemble-dev",
         "legacy_workflow": "dev-release",
         "legacy_job": "assemble-dev",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1333,14 +1333,14 @@
           "github_name": "Attest Linux dev archive (amd64)",
           "evidence_refs": [
             "github-check-name:Attest Linux dev archive (amd64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/attest-linux[goarch=amd64]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/attest-linux[goarch=amd64]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/attest-linux[goarch=amd64]",
             "legacy_workflow": "dev-release",
             "legacy_job": "attest-linux",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "github.event_name == 'push'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -1355,28 +1355,28 @@
           "github_name": "Attest Linux dev archive (arm64)",
           "evidence_refs": [
             "github-check-name:Attest Linux dev archive (arm64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/attest-linux[goarch=arm64]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/attest-linux[goarch=arm64]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/attest-linux[goarch=arm64]",
             "legacy_workflow": "dev-release",
             "legacy_job": "attest-linux",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "github.event_name == 'push'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/attest-linux"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/attest-linux"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/attest-linux",
         "legacy_workflow": "dev-release",
         "legacy_job": "attest-linux",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "github.event_name == 'push'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1412,28 +1412,28 @@
           "github_name": "Build and verify Darwin dev archives",
           "evidence_refs": [
             "github-check-name:Build and verify Darwin dev archives",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/build-darwin"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/build-darwin"
           ],
           "trace": {
             "inventory_mapping": "dev-release/build-darwin",
             "legacy_workflow": "dev-release",
             "legacy_job": "build-darwin",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/build-darwin"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/build-darwin"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/build-darwin",
         "legacy_workflow": "dev-release",
         "legacy_job": "build-darwin",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1472,14 +1472,14 @@
           "github_name": "Build and verify Linux dev archive (amd64)",
           "evidence_refs": [
             "github-check-name:Build and verify Linux dev archive (amd64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
             "legacy_workflow": "dev-release",
             "legacy_job": "build-linux",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -1495,28 +1495,28 @@
           "github_name": "Build and verify Linux dev archive (arm64)",
           "evidence_refs": [
             "github-check-name:Build and verify Linux dev archive (arm64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
             "legacy_workflow": "dev-release",
             "legacy_job": "build-linux",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/build-linux"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/build-linux"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/build-linux",
         "legacy_workflow": "dev-release",
         "legacy_job": "build-linux",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1552,28 +1552,28 @@
           "github_name": "Detect dev-release-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect dev-release-relevant changes",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/changes"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/changes"
           ],
           "trace": {
             "inventory_mapping": "dev-release/changes",
             "legacy_workflow": "dev-release",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/changes"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/changes"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/changes",
         "legacy_workflow": "dev-release",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1612,14 +1612,14 @@
           "github_name": "Execute Linux dev archive (amd64)",
           "evidence_refs": [
             "github-check-name:Execute Linux dev archive (amd64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
             "legacy_workflow": "dev-release",
             "legacy_job": "execute-linux",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -1635,28 +1635,28 @@
           "github_name": "Execute Linux dev archive (arm64)",
           "evidence_refs": [
             "github-check-name:Execute Linux dev archive (arm64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
             "legacy_workflow": "dev-release",
             "legacy_job": "execute-linux",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/execute-linux"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/execute-linux"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/execute-linux",
         "legacy_workflow": "dev-release",
         "legacy_job": "execute-linux",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1687,28 +1687,28 @@
           "github_name": "Publish dev release",
           "evidence_refs": [
             "github-check-name:Publish dev release",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/publish-dev"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/publish-dev"
           ],
           "trace": {
             "inventory_mapping": "dev-release/publish-dev",
             "legacy_workflow": "dev-release",
             "legacy_job": "publish-dev",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "github.event_name == 'push'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/publish-dev"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/publish-dev"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/publish-dev",
         "legacy_workflow": "dev-release",
         "legacy_job": "publish-dev",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "github.event_name == 'push'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1744,28 +1744,28 @@
           "github_name": "Select dev release context",
           "evidence_refs": [
             "github-check-name:Select dev release context",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/release-context"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/release-context"
           ],
           "trace": {
             "inventory_mapping": "dev-release/release-context",
             "legacy_workflow": "dev-release",
             "legacy_job": "release-context",
             "workflow_path": ".github/workflows/dev-release.yml",
-            "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+            "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#dev-release/release-context"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#dev-release/release-context"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/release-context",
         "legacy_workflow": "dev-release",
         "legacy_job": "release-context",
         "workflow_path": ".github/workflows/dev-release.yml",
-        "workflow_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+        "workflow_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1797,28 +1797,28 @@
           "github_name": "Clean up screenshots",
           "evidence_refs": [
             "github-check-name:Clean up screenshots",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs-preview/cleanup"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs-preview/cleanup"
           ],
           "trace": {
             "inventory_mapping": "docs-preview/cleanup",
             "legacy_workflow": "docs-preview",
             "legacy_job": "cleanup",
             "workflow_path": ".github/workflows/docs-preview.yml",
-            "workflow_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+            "workflow_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
             "legacy_condition": "github.event.action == 'closed'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs-preview/cleanup"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs-preview/cleanup"
       ],
       "trace": {
         "inventory_mapping": "job:docs-preview/cleanup",
         "legacy_workflow": "docs-preview",
         "legacy_job": "cleanup",
         "workflow_path": ".github/workflows/docs-preview.yml",
-        "workflow_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+        "workflow_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
         "legacy_condition": "github.event.action == 'closed'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1850,28 +1850,28 @@
           "github_name": "Screenshot changed pages",
           "evidence_refs": [
             "github-check-name:Screenshot changed pages",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs-preview/preview"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs-preview/preview"
           ],
           "trace": {
             "inventory_mapping": "docs-preview/preview",
             "legacy_workflow": "docs-preview",
             "legacy_job": "preview",
             "workflow_path": ".github/workflows/docs-preview.yml",
-            "workflow_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+            "workflow_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
             "legacy_condition": "github.event_name == 'pull_request' \u0026\u0026 github.event.action != 'closed'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs-preview/preview"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs-preview/preview"
       ],
       "trace": {
         "inventory_mapping": "job:docs-preview/preview",
         "legacy_workflow": "docs-preview",
         "legacy_job": "preview",
         "workflow_path": ".github/workflows/docs-preview.yml",
-        "workflow_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+        "workflow_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
         "legacy_condition": "github.event_name == 'pull_request' \u0026\u0026 github.event.action != 'closed'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1901,28 +1901,28 @@
           "github_name": "Prune stale screenshots",
           "evidence_refs": [
             "github-check-name:Prune stale screenshots",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs-preview/prune"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs-preview/prune"
           ],
           "trace": {
             "inventory_mapping": "docs-preview/prune",
             "legacy_workflow": "docs-preview",
             "legacy_job": "prune",
             "workflow_path": ".github/workflows/docs-preview.yml",
-            "workflow_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+            "workflow_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
             "legacy_condition": "github.event_name == 'schedule'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs-preview/prune"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs-preview/prune"
       ],
       "trace": {
         "inventory_mapping": "job:docs-preview/prune",
         "legacy_workflow": "docs-preview",
         "legacy_job": "prune",
         "workflow_path": ".github/workflows/docs-preview.yml",
-        "workflow_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+        "workflow_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
         "legacy_condition": "github.event_name == 'schedule'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -1956,28 +1956,28 @@
           "github_name": "Build",
           "evidence_refs": [
             "github-check-name:Build",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs/build"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs/build"
           ],
           "trace": {
             "inventory_mapping": "docs/build",
             "legacy_workflow": "docs",
             "legacy_job": "build",
             "workflow_path": ".github/workflows/docs.yml",
-            "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+            "workflow_sha256": "a114f93477395d89aa444fcbf5f6d2f24e49d424102543f396499ea0bc536931",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs/build"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs/build"
       ],
       "trace": {
         "inventory_mapping": "job:docs/build",
         "legacy_workflow": "docs",
         "legacy_job": "build",
         "workflow_path": ".github/workflows/docs.yml",
-        "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+        "workflow_sha256": "a114f93477395d89aa444fcbf5f6d2f24e49d424102543f396499ea0bc536931",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2012,28 +2012,28 @@
           "github_name": "Deploy",
           "evidence_refs": [
             "github-check-name:Deploy",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs/deploy"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs/deploy"
           ],
           "trace": {
             "inventory_mapping": "docs/deploy",
             "legacy_workflow": "docs",
             "legacy_job": "deploy",
             "workflow_path": ".github/workflows/docs.yml",
-            "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+            "workflow_sha256": "a114f93477395d89aa444fcbf5f6d2f24e49d424102543f396499ea0bc536931",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#docs/deploy"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#docs/deploy"
       ],
       "trace": {
         "inventory_mapping": "job:docs/deploy",
         "legacy_workflow": "docs",
         "legacy_job": "deploy",
         "workflow_path": ".github/workflows/docs.yml",
-        "workflow_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+        "workflow_sha256": "a114f93477395d89aa444fcbf5f6d2f24e49d424102543f396499ea0bc536931",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2069,28 +2069,28 @@
           "github_name": "Aggregate complete stable release",
           "evidence_refs": [
             "github-check-name:Aggregate complete stable release",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/assemble-stable"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/assemble-stable"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/assemble-stable",
             "legacy_workflow": "goreleaser",
             "legacy_job": "assemble-stable",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/assemble-stable"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/assemble-stable"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/assemble-stable",
         "legacy_workflow": "goreleaser",
         "legacy_job": "assemble-stable",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2120,28 +2120,28 @@
           "github_name": "Finalize and attest stable release",
           "evidence_refs": [
             "github-check-name:Finalize and attest stable release",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/attest-stable"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/attest-stable"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/attest-stable",
             "legacy_workflow": "goreleaser",
             "legacy_job": "attest-stable",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "github.event_name == 'push'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/attest-stable"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/attest-stable"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/attest-stable",
         "legacy_workflow": "goreleaser",
         "legacy_job": "attest-stable",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "github.event_name == 'push'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2177,28 +2177,28 @@
           "github_name": "Build and verify stable Darwin archives",
           "evidence_refs": [
             "github-check-name:Build and verify stable Darwin archives",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/build-darwin"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/build-darwin"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/build-darwin",
             "legacy_workflow": "goreleaser",
             "legacy_job": "build-darwin",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/build-darwin"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/build-darwin"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/build-darwin",
         "legacy_workflow": "goreleaser",
         "legacy_job": "build-darwin",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2237,14 +2237,14 @@
           "github_name": "Build and verify stable Linux artifacts (amd64)",
           "evidence_refs": [
             "github-check-name:Build and verify stable Linux artifacts (amd64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
             "legacy_workflow": "goreleaser",
             "legacy_job": "build-linux",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -2260,28 +2260,28 @@
           "github_name": "Build and verify stable Linux artifacts (arm64)",
           "evidence_refs": [
             "github-check-name:Build and verify stable Linux artifacts (arm64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
             "legacy_workflow": "goreleaser",
             "legacy_job": "build-linux",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/build-linux"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/build-linux"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/build-linux",
         "legacy_workflow": "goreleaser",
         "legacy_job": "build-linux",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2317,28 +2317,28 @@
           "github_name": "Detect stable-release-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect stable-release-relevant changes",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/changes"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/changes"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/changes",
             "legacy_workflow": "goreleaser",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/changes"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/changes"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/changes",
         "legacy_workflow": "goreleaser",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2377,14 +2377,14 @@
           "github_name": "Execute stable Linux artifacts (amd64)",
           "evidence_refs": [
             "github-check-name:Execute stable Linux artifacts (amd64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
             "legacy_workflow": "goreleaser",
             "legacy_job": "execute-linux",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -2400,28 +2400,28 @@
           "github_name": "Execute stable Linux artifacts (arm64)",
           "evidence_refs": [
             "github-check-name:Execute stable Linux artifacts (arm64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
             "legacy_workflow": "goreleaser",
             "legacy_job": "execute-linux",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/execute-linux"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/execute-linux"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/execute-linux",
         "legacy_workflow": "goreleaser",
         "legacy_job": "execute-linux",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2451,28 +2451,28 @@
           "github_name": "Publish verified stable release",
           "evidence_refs": [
             "github-check-name:Publish verified stable release",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/publish-stable"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/publish-stable"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/publish-stable",
             "legacy_workflow": "goreleaser",
             "legacy_job": "publish-stable",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "github.event_name == 'push'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/publish-stable"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/publish-stable"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/publish-stable",
         "legacy_workflow": "goreleaser",
         "legacy_job": "publish-stable",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "github.event_name == 'push'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2508,28 +2508,28 @@
           "github_name": "Bind stable release context",
           "evidence_refs": [
             "github-check-name:Bind stable release context",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/release-context"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/release-context"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/release-context",
             "legacy_workflow": "goreleaser",
             "legacy_job": "release-context",
             "workflow_path": ".github/workflows/goreleaser.yml",
-            "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+            "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#goreleaser/release-context"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#goreleaser/release-context"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/release-context",
         "legacy_workflow": "goreleaser",
         "legacy_job": "release-context",
         "workflow_path": ".github/workflows/goreleaser.yml",
-        "workflow_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+        "workflow_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2569,7 +2569,7 @@
           "github_name": "Build \u0026 Test (macOS)",
           "evidence_refs": [
             "github-check-name:Build \u0026 Test (macOS)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#gui-ci/build"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#gui-ci/build"
           ],
           "trace": {
             "inventory_mapping": "gui-ci/build",
@@ -2583,7 +2583,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#gui-ci/build"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#gui-ci/build"
       ],
       "trace": {
         "inventory_mapping": "job:gui-ci/build",
@@ -2628,14 +2628,14 @@
           "github_name": "publish (amd64, x86_64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:publish (amd64, x86_64-linux-gnu)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
             "legacy_workflow": "libghostty-native-publish",
             "legacy_job": "publish",
             "workflow_path": ".github/workflows/libghostty-native-publish.yml",
-            "workflow_sha256": "46fc708495b8e4f7e97afa368302fffb0f834bc4b59f2781443adb235ff52fe9",
+            "workflow_sha256": "2b1ac102271e863e573ba4f062276d87428e0672f53110eca29baed3c3704257",
             "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -2651,28 +2651,28 @@
           "github_name": "publish (arm64, aarch64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:publish (arm64, aarch64-linux-gnu)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]",
             "legacy_workflow": "libghostty-native-publish",
             "legacy_job": "publish",
             "workflow_path": ".github/workflows/libghostty-native-publish.yml",
-            "workflow_sha256": "46fc708495b8e4f7e97afa368302fffb0f834bc4b59f2781443adb235ff52fe9",
+            "workflow_sha256": "2b1ac102271e863e573ba4f062276d87428e0672f53110eca29baed3c3704257",
             "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native-publish/publish"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native-publish/publish"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native-publish/publish",
         "legacy_workflow": "libghostty-native-publish",
         "legacy_job": "publish",
         "workflow_path": ".github/workflows/libghostty-native-publish.yml",
-        "workflow_sha256": "46fc708495b8e4f7e97afa368302fffb0f834bc4b59f2781443adb235ff52fe9",
+        "workflow_sha256": "2b1ac102271e863e573ba4f062276d87428e0672f53110eca29baed3c3704257",
         "legacy_condition": "github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2708,28 +2708,28 @@
           "github_name": "Core runtime and pinned artifact (macOS arm64)",
           "evidence_refs": [
             "github-check-name:Core runtime and pinned artifact (macOS arm64)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/apple-adapter"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/apple-adapter"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/apple-adapter",
             "legacy_workflow": "libghostty-native",
             "legacy_job": "apple-adapter",
             "workflow_path": ".github/workflows/libghostty-native.yml",
-            "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+            "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/apple-adapter"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/apple-adapter"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/apple-adapter",
         "legacy_workflow": "libghostty-native",
         "legacy_job": "apple-adapter",
         "workflow_path": ".github/workflows/libghostty-native.yml",
-        "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+        "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2765,28 +2765,28 @@
           "github_name": "Detect libghostty-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect libghostty-relevant changes",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/changes"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/changes"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/changes",
             "legacy_workflow": "libghostty-native",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/libghostty-native.yml",
-            "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+            "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/changes"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/changes"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/changes",
         "legacy_workflow": "libghostty-native",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/libghostty-native.yml",
-        "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+        "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2826,14 +2826,14 @@
           "github_name": "Core runtime source build (x86_64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:Core runtime source build (x86_64-linux-gnu)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
             "legacy_workflow": "libghostty-native",
             "legacy_job": "linux-adapter",
             "workflow_path": ".github/workflows/libghostty-native.yml",
-            "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+            "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
@@ -2850,28 +2850,28 @@
           "github_name": "Core runtime source build (aarch64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:Core runtime source build (aarch64-linux-gnu)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]",
             "legacy_workflow": "libghostty-native",
             "legacy_job": "linux-adapter",
             "workflow_path": ".github/workflows/libghostty-native.yml",
-            "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+            "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/linux-adapter"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/linux-adapter"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/linux-adapter",
         "legacy_workflow": "libghostty-native",
         "legacy_job": "linux-adapter",
         "workflow_path": ".github/workflows/libghostty-native.yml",
-        "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+        "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') \u0026\u0026 (github.event_name != 'workflow_dispatch' || inputs.include_linux)",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2907,28 +2907,28 @@
           "github_name": "Native backend gate",
           "evidence_refs": [
             "github-check-name:Native backend gate",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/native-gate"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/native-gate"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/native-gate",
             "legacy_workflow": "libghostty-native",
             "legacy_job": "native-gate",
             "workflow_path": ".github/workflows/libghostty-native.yml",
-            "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+            "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
             "legacy_condition": "always()",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#libghostty-native/native-gate"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#libghostty-native/native-gate"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/native-gate",
         "legacy_workflow": "libghostty-native",
         "legacy_job": "native-gate",
         "workflow_path": ".github/workflows/libghostty-native.yml",
-        "workflow_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+        "workflow_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
         "legacy_condition": "always()",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -2959,28 +2959,28 @@
           "github_name": "Prepare regenerated files",
           "evidence_refs": [
             "github-check-name:Prepare regenerated files",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#regen/prepare"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#regen/prepare"
           ],
           "trace": {
             "inventory_mapping": "regen/prepare",
             "legacy_workflow": "regen",
             "legacy_job": "prepare",
             "workflow_path": ".github/workflows/regen.yml",
-            "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+            "workflow_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
             "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#regen/prepare"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#regen/prepare"
       ],
       "trace": {
         "inventory_mapping": "job:regen/prepare",
         "legacy_workflow": "regen",
         "legacy_job": "prepare",
         "workflow_path": ".github/workflows/regen.yml",
-        "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+        "workflow_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
         "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3011,28 +3011,28 @@
           "github_name": "Regenerate generated files",
           "evidence_refs": [
             "github-check-name:Regenerate generated files",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#regen/regen"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#regen/regen"
           ],
           "trace": {
             "inventory_mapping": "regen/regen",
             "legacy_workflow": "regen",
             "legacy_job": "regen",
             "workflow_path": ".github/workflows/regen.yml",
-            "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+            "workflow_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
             "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#regen/regen"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#regen/regen"
       ],
       "trace": {
         "inventory_mapping": "job:regen/regen",
         "legacy_workflow": "regen",
         "legacy_job": "regen",
         "workflow_path": ".github/workflows/regen.yml",
-        "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+        "workflow_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
         "legacy_condition": "always() \u0026\u0026 github.event.pull_request.head.repo.full_name == github.repository",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3063,28 +3063,28 @@
           "github_name": "Validate regeneration credentials",
           "evidence_refs": [
             "github-check-name:Validate regeneration credentials",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#regen/validate"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#regen/validate"
           ],
           "trace": {
             "inventory_mapping": "regen/validate",
             "legacy_workflow": "regen",
             "legacy_job": "validate",
             "workflow_path": ".github/workflows/regen.yml",
-            "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+            "workflow_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
             "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#regen/validate"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#regen/validate"
       ],
       "trace": {
         "inventory_mapping": "job:regen/validate",
         "legacy_workflow": "regen",
         "legacy_job": "validate",
         "workflow_path": ".github/workflows/regen.yml",
-        "workflow_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+        "workflow_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
         "legacy_condition": "github.event.pull_request.head.repo.full_name == github.repository",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3114,28 +3114,28 @@
           "github_name": "release-please",
           "evidence_refs": [
             "github-check-name:release-please",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#release-please/release-please"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#release-please/release-please"
           ],
           "trace": {
             "inventory_mapping": "release-please/release-please",
             "legacy_workflow": "release-please",
             "legacy_job": "release-please",
             "workflow_path": ".github/workflows/release-please.yml",
-            "workflow_sha256": "971e443986932f9e1c6272a482ec6762070eef27c3723e278d5103aeffbc896d",
+            "workflow_sha256": "dcc2090de4fc65518f2608c002cdb3413a4ab91e5e49022bc10c5955470b5da4",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#release-please/release-please"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#release-please/release-please"
       ],
       "trace": {
         "inventory_mapping": "job:release-please/release-please",
         "legacy_workflow": "release-please",
         "legacy_job": "release-please",
         "workflow_path": ".github/workflows/release-please.yml",
-        "workflow_sha256": "971e443986932f9e1c6272a482ec6762070eef27c3723e278d5103aeffbc896d",
+        "workflow_sha256": "dcc2090de4fc65518f2608c002cdb3413a4ab91e5e49022bc10c5955470b5da4",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3171,28 +3171,28 @@
           "github_name": "Detect sandbox-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect sandbox-relevant changes",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#sandbox/changes"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#sandbox/changes"
           ],
           "trace": {
             "inventory_mapping": "sandbox/changes",
             "legacy_workflow": "sandbox",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/sandbox.yml",
-            "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+            "workflow_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#sandbox/changes"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#sandbox/changes"
       ],
       "trace": {
         "inventory_mapping": "job:sandbox/changes",
         "legacy_workflow": "sandbox",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/sandbox.yml",
-        "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+        "workflow_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3228,28 +3228,28 @@
           "github_name": "Linux (nono / Landlock)",
           "evidence_refs": [
             "github-check-name:Linux (nono / Landlock)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#sandbox/linux-nono"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#sandbox/linux-nono"
           ],
           "trace": {
             "inventory_mapping": "sandbox/linux-nono",
             "legacy_workflow": "sandbox",
             "legacy_job": "linux-nono",
             "workflow_path": ".github/workflows/sandbox.yml",
-            "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+            "workflow_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#sandbox/linux-nono"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#sandbox/linux-nono"
       ],
       "trace": {
         "inventory_mapping": "job:sandbox/linux-nono",
         "legacy_workflow": "sandbox",
         "legacy_job": "linux-nono",
         "workflow_path": ".github/workflows/sandbox.yml",
-        "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+        "workflow_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3285,28 +3285,28 @@
           "github_name": "macOS (safehouse / Seatbelt)",
           "evidence_refs": [
             "github-check-name:macOS (safehouse / Seatbelt)",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#sandbox/macos-safehouse"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#sandbox/macos-safehouse"
           ],
           "trace": {
             "inventory_mapping": "sandbox/macos-safehouse",
             "legacy_workflow": "sandbox",
             "legacy_job": "macos-safehouse",
             "workflow_path": ".github/workflows/sandbox.yml",
-            "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+            "workflow_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#sandbox/macos-safehouse"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#sandbox/macos-safehouse"
       ],
       "trace": {
         "inventory_mapping": "job:sandbox/macos-safehouse",
         "legacy_workflow": "sandbox",
         "legacy_job": "macos-safehouse",
         "workflow_path": ".github/workflows/sandbox.yml",
-        "workflow_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+        "workflow_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3344,28 +3344,28 @@
           "github_name": "Scorecard analysis",
           "evidence_refs": [
             "github-check-name:Scorecard analysis",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#scorecard/analysis"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#scorecard/analysis"
           ],
           "trace": {
             "inventory_mapping": "scorecard/analysis",
             "legacy_workflow": "scorecard",
             "legacy_job": "analysis",
             "workflow_path": ".github/workflows/scorecard.yml",
-            "workflow_sha256": "b0bf3254af3989e72690c51568c262f0bc421ea868229692557419baedae595f",
+            "workflow_sha256": "fa37ddba0cff475a0fd504b5e938c22d79a7063544148b265cf3c9b3c28c48b1",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#scorecard/analysis"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#scorecard/analysis"
       ],
       "trace": {
         "inventory_mapping": "job:scorecard/analysis",
         "legacy_workflow": "scorecard",
         "legacy_job": "analysis",
         "workflow_path": ".github/workflows/scorecard.yml",
-        "workflow_sha256": "b0bf3254af3989e72690c51568c262f0bc421ea868229692557419baedae595f",
+        "workflow_sha256": "fa37ddba0cff475a0fd504b5e938c22d79a7063544148b265cf3c9b3c28c48b1",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3409,28 +3409,28 @@
           "github_name": "Gitleaks",
           "evidence_refs": [
             "github-check-name:Gitleaks",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#secret-scan/gitleaks"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#secret-scan/gitleaks"
           ],
           "trace": {
             "inventory_mapping": "secret-scan/gitleaks",
             "legacy_workflow": "secret-scan",
             "legacy_job": "gitleaks",
             "workflow_path": ".github/workflows/secret-scan.yml",
-            "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+            "workflow_sha256": "08f23f17e3622a24646ce2d8ed114a64e11a62ec5353a3015d7005057581a194",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#secret-scan/gitleaks"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#secret-scan/gitleaks"
       ],
       "trace": {
         "inventory_mapping": "job:secret-scan/gitleaks",
         "legacy_workflow": "secret-scan",
         "legacy_job": "gitleaks",
         "workflow_path": ".github/workflows/secret-scan.yml",
-        "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+        "workflow_sha256": "08f23f17e3622a24646ce2d8ed114a64e11a62ec5353a3015d7005057581a194",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3474,28 +3474,28 @@
           "github_name": "TruffleHog",
           "evidence_refs": [
             "github-check-name:TruffleHog",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#secret-scan/trufflehog"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#secret-scan/trufflehog"
           ],
           "trace": {
             "inventory_mapping": "secret-scan/trufflehog",
             "legacy_workflow": "secret-scan",
             "legacy_job": "trufflehog",
             "workflow_path": ".github/workflows/secret-scan.yml",
-            "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+            "workflow_sha256": "08f23f17e3622a24646ce2d8ed114a64e11a62ec5353a3015d7005057581a194",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#secret-scan/trufflehog"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#secret-scan/trufflehog"
       ],
       "trace": {
         "inventory_mapping": "job:secret-scan/trufflehog",
         "legacy_workflow": "secret-scan",
         "legacy_job": "trufflehog",
         "workflow_path": ".github/workflows/secret-scan.yml",
-        "workflow_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+        "workflow_sha256": "08f23f17e3622a24646ce2d8ed114a64e11a62ec5353a3015d7005057581a194",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3531,28 +3531,28 @@
           "github_name": "actionlint",
           "evidence_refs": [
             "github-check-name:actionlint",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/actionlint"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/actionlint"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/actionlint",
             "legacy_workflow": "workflow-lint",
             "legacy_job": "actionlint",
             "workflow_path": ".github/workflows/workflow-lint.yml",
-            "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+            "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/actionlint"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/actionlint"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/actionlint",
         "legacy_workflow": "workflow-lint",
         "legacy_job": "actionlint",
         "workflow_path": ".github/workflows/workflow-lint.yml",
-        "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+        "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3588,28 +3588,28 @@
           "github_name": "Renovate native dependency fixtures",
           "evidence_refs": [
             "github-check-name:Renovate native dependency fixtures",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/renovate"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/renovate"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/renovate",
             "legacy_workflow": "workflow-lint",
             "legacy_job": "renovate",
             "workflow_path": ".github/workflows/workflow-lint.yml",
-            "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+            "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/renovate"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/renovate"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/renovate",
         "legacy_workflow": "workflow-lint",
         "legacy_job": "renovate",
         "workflow_path": ".github/workflows/workflow-lint.yml",
-        "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+        "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3645,28 +3645,28 @@
           "github_name": "workflow policy tests",
           "evidence_refs": [
             "github-check-name:workflow policy tests",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/scripts"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/scripts"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/scripts",
             "legacy_workflow": "workflow-lint",
             "legacy_job": "scripts",
             "workflow_path": ".github/workflows/workflow-lint.yml",
-            "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+            "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/scripts"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/scripts"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/scripts",
         "legacy_workflow": "workflow-lint",
         "legacy_job": "scripts",
         "workflow_path": ".github/workflows/workflow-lint.yml",
-        "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+        "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3702,28 +3702,28 @@
           "github_name": "shellcheck",
           "evidence_refs": [
             "github-check-name:shellcheck",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/shellcheck"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/shellcheck"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/shellcheck",
             "legacy_workflow": "workflow-lint",
             "legacy_job": "shellcheck",
             "workflow_path": ".github/workflows/workflow-lint.yml",
-            "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+            "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/shellcheck"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/shellcheck"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/shellcheck",
         "legacy_workflow": "workflow-lint",
         "legacy_job": "shellcheck",
         "workflow_path": ".github/workflows/workflow-lint.yml",
-        "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+        "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -3759,28 +3759,28 @@
           "github_name": "zizmor",
           "evidence_refs": [
             "github-check-name:zizmor",
-            "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/zizmor"
+            "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/zizmor"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/zizmor",
             "legacy_workflow": "workflow-lint",
             "legacy_job": "zizmor",
             "workflow_path": ".github/workflows/workflow-lint.yml",
-            "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+            "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c#workflow-lint/zizmor"
+        "p0-inventory:fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27#workflow-lint/zizmor"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/zizmor",
         "legacy_workflow": "workflow-lint",
         "legacy_job": "zizmor",
         "workflow_path": ".github/workflows/workflow-lint.yml",
-        "workflow_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+        "workflow_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }

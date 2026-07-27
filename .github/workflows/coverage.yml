@@ -36,6 +36,7 @@ jobs:
   changes:
     name: Detect gui changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -61,6 +62,7 @@ jobs:
   go-coverage:
     name: Go coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       pct: ${{ steps.cov.outputs.pct }}
       base: ${{ steps.cov.outputs.base }}
@@ -244,6 +246,7 @@ jobs:
     # coverage still runs and shows in the job logs) rather than fail the run.
     if: always() && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: write

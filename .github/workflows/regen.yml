@@ -49,6 +49,7 @@ jobs:
     # discarded before repository-controlled generators run.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require workflow-triggering token
         env:
@@ -66,6 +67,7 @@ jobs:
     needs: validate
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       changed: ${{ steps.commit.outputs.changed }}
     steps:
@@ -185,6 +187,7 @@ jobs:
     # explicitly propagating a preparation failure.
     if: always() && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Propagate preparation failure
         if: needs.validate.result != 'success' || needs.prepare.result != 'success'

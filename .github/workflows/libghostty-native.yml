@@ -31,6 +31,7 @@ jobs:
   changes:
     name: Detect libghostty-relevant changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -514,6 +515,7 @@ jobs:
       - apple-adapter
       - linux-adapter
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require relevant native jobs to pass
         env:
