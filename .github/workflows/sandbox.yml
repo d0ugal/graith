@@ -72,6 +72,7 @@ jobs:
   changes:
     name: Detect sandbox-relevant changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -118,6 +119,7 @@ jobs:
   linux-nono:
     name: Linux (nono / Landlock)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       attestations: read # verify nono's build provenance (gh attestation verify)

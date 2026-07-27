@@ -19,6 +19,7 @@ jobs:
   analyze:
     name: Analyze (Go)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       # Required to upload the SARIF results to code scanning.
       security-events: write

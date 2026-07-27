@@ -21,6 +21,7 @@ jobs:
   changes:
     name: Detect dev-release-relevant changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -57,6 +58,7 @@ jobs:
       !cancelled() &&
       (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       base_tag: ${{ steps.release.outputs.base_tag }}
       build_epoch: ${{ steps.release.outputs.build_epoch }}
@@ -420,6 +422,7 @@ jobs:
       - build-linux
       - execute-linux
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       attestations: write

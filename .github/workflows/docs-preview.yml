@@ -30,6 +30,7 @@ jobs:
     name: Screenshot changed pages
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Pushes screenshots to the orphan branch and upserts the sticky PR comment.
     permissions:
       contents: write
@@ -234,6 +235,7 @@ jobs:
     name: Clean up screenshots
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Rewrites the screenshots branch and updates the sticky PR comment.
     permissions:
       contents: write
@@ -267,6 +269,7 @@ jobs:
     name: Prune stale screenshots
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Rewrites the screenshots branch only (no PR comment on the schedule run).
     permissions:
       contents: write

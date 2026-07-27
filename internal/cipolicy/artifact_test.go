@@ -26,11 +26,12 @@ type archiveMember struct {
 	xattrs     map[string]string
 }
 
-const (
-	testProducerWorkflow       = ".github/workflows/libghostty-native.yml"
-	testProducerWorkflowSHA256 = "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539"
-	testProducerRunID          = int64(30152132020)
-)
+const testProducerWorkflow = ".github/workflows/libghostty-native.yml"
+
+// Regenerate with: sha256sum .github/workflows/libghostty-native.yml
+const testProducerWorkflowSHA256 = "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed"
+
+const testProducerRunID = int64(30152132020)
 
 func TestArtifactConsumerVerifiesNativeAndReleaseShapes(t *testing.T) {
 	manifest := loadManifest(t)

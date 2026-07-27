@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
+      "file_sha256": "e04f21ec3e6cc2e105647e6313a90e0f1219fc61e74a9d467efdfceb99bfc4e7",
       "events": {
         "pull_request": null,
         "push": {
@@ -314,7 +314,7 @@
       "path": ".github/workflows/coverage.yml",
       "name": "Coverage",
       "owner": "graith-maintainers",
-      "file_sha256": "a38b07d7406cca5a4bcbaba4dba54b6acb813c4fddf7161f78b05f5db100c167",
+      "file_sha256": "c0a7489047ca4fa5e588e1fe054d95b770365cb787e880e0618ec2980c724e3c",
       "events": {
         "pull_request": null
       },
@@ -485,7 +485,7 @@
       "path": ".github/workflows/libghostty-native.yml",
       "name": "libghostty core runtime",
       "owner": "native-owners",
-      "file_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
+      "file_sha256": "b3bbea2331530670e031afbea601e21fd9512ccc84c7e7a7a9b3bc3a7473f2ed",
       "events": {
         "pull_request": null,
         "workflow_dispatch": {
@@ -685,7 +685,7 @@
       "path": ".github/workflows/libghostty-native-publish.yml",
       "name": "Publish pinned Linux libghostty artifacts",
       "owner": "native-owners",
-      "file_sha256": "46fc708495b8e4f7e97afa368302fffb0f834bc4b59f2781443adb235ff52fe9",
+      "file_sha256": "2b1ac102271e863e573ba4f062276d87428e0672f53110eca29baed3c3704257",
       "events": {
         "push": {
           "branches": [
@@ -766,7 +766,7 @@
       "path": ".github/workflows/regen.yml",
       "name": "Regenerate",
       "owner": "graith-maintainers",
-      "file_sha256": "19db911850527a8d91a53c39748a087c16711fcb96b42cd2bc74f21756672734",
+      "file_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
       "events": {
         "pull_request": null
       },
@@ -888,7 +888,7 @@
       "path": ".github/workflows/docs-preview.yml",
       "name": "Docs Preview",
       "owner": "docs-owners",
-      "file_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
+      "file_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
       "events": {
         "pull_request": {
           "paths": [
@@ -1055,7 +1055,7 @@
       "path": ".github/workflows/dev-release.yml",
       "name": "Dev Release",
       "owner": "release-owners",
-      "file_sha256": "6696431bf3a4d0d9eb16197efbb3694a588752f5ef4ec30f1550ec771ba130f6",
+      "file_sha256": "01c2f6bb45c0325ba40c3d2dc187c3d32f896ee63c16a31fd0125b02dfd77d90",
       "events": {
         "pull_request": null,
         "push": {
@@ -1452,7 +1452,7 @@
       "path": ".github/workflows/release-please.yml",
       "name": "Release Please",
       "owner": "release-owners",
-      "file_sha256": "971e443986932f9e1c6272a482ec6762070eef27c3723e278d5103aeffbc896d",
+      "file_sha256": "dcc2090de4fc65518f2608c002cdb3413a4ab91e5e49022bc10c5955470b5da4",
       "events": {
         "push": {
           "branches": [
@@ -1497,7 +1497,7 @@
       "path": ".github/workflows/goreleaser.yml",
       "name": "Stable Release",
       "owner": "release-owners",
-      "file_sha256": "233a47392a47e1a0cbcc3cbfeacfcb1bf0d99b8ea5b32ba8d57d4fa38cf04277",
+      "file_sha256": "86680cbdf410081d12de714662969302c8499087918dfc3c61b9d599259eee1a",
       "events": {
         "pull_request": null,
         "push": {
@@ -1907,7 +1907,7 @@
       "path": ".github/workflows/sandbox.yml",
       "name": "Sandbox",
       "owner": "graith-maintainers",
-      "file_sha256": "e27934aec704000f6bdcb2f1b0bdd10e8464679a449f39afa36b09ea3cc286f9",
+      "file_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
       "events": {
         "pull_request": null,
         "workflow_dispatch": null
@@ -2029,7 +2029,7 @@
       "path": ".github/workflows/dependency-review.yml",
       "name": "Dependency Review",
       "owner": "security-owners",
-      "file_sha256": "99e716c4891e084c15be79f13cb966887ee7197ff9d3013370b2dbfb9f1b042e",
+      "file_sha256": "9a9cdf3f2e21e1bca7bd125a736843e704e2e79b7338113119c4c1009ef07e58",
       "events": {
         "pull_request": null
       },
@@ -2067,7 +2067,7 @@
       "path": ".github/workflows/codeql.yml",
       "name": "CodeQL",
       "owner": "security-owners",
-      "file_sha256": "160972df5072a1160eb70e946ff2aecd8efb992608253f1474e0f5612de0c0fb",
+      "file_sha256": "64ba5b40047caf68d147ee341d82fb30e11ae4917de43f20ab24b3dab921ca85",
       "events": {
         "pull_request": {
           "branches": [
@@ -2143,7 +2143,7 @@
       "path": ".github/workflows/scorecard.yml",
       "name": "Scorecard",
       "owner": "security-owners",
-      "file_sha256": "b0bf3254af3989e72690c51568c262f0bc421ea868229692557419baedae595f",
+      "file_sha256": "fa37ddba0cff475a0fd504b5e938c22d79a7063544148b265cf3c9b3c28c48b1",
       "events": {
         "push": {
           "branches": [
@@ -2207,7 +2207,7 @@
       "path": ".github/workflows/secret-scan.yml",
       "name": "Secret Scan",
       "owner": "security-owners",
-      "file_sha256": "9f5236a3c5607ce95136d26931971e9a8f6207aaa98950a5c7ed09b3ba986e43",
+      "file_sha256": "08f23f17e3622a24646ce2d8ed114a64e11a62ec5353a3015d7005057581a194",
       "events": {
         "pull_request": null,
         "push": {
@@ -2278,7 +2278,7 @@
       "path": ".github/workflows/workflow-lint.yml",
       "name": "Workflow Lint",
       "owner": "graith-maintainers",
-      "file_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
+      "file_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
       "events": {
         "pull_request": {
           "paths": [
@@ -2460,7 +2460,7 @@
       "path": ".github/workflows/docs.yml",
       "name": "Docs",
       "owner": "docs-owners",
-      "file_sha256": "51acc03fa6fcbe389baa2f6afb6191077d2cf6727d27bcd05eaa7de2c4102b4c",
+      "file_sha256": "a114f93477395d89aa444fcbf5f6d2f24e49d424102543f396499ea0bc536931",
       "events": {
         "push": {
           "branches": [
@@ -2570,7 +2570,7 @@
       "path": ".github/workflows/commits.yml",
       "name": "Commits",
       "owner": "graith-maintainers",
-      "file_sha256": "30c068d6f10fde86c2e9e954c2362718ea8a73657c4cb23228b686c7273b3acb",
+      "file_sha256": "39faf300d76e368128cd2211871568177e6f75b336db01e248b2f78b4166381f",
       "events": {
         "pull_request": null,
         "workflow_dispatch": null
@@ -2825,6 +2825,16 @@
       "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/cipolicy/workflow_timeout_policy_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "a30b20e4af8f606b3b3a039d970932b0eac1b31e2b1c602843c476cf9b12e839",
+      "executable_contract": "preserve positive literal job-level timeout coverage for all recognizable Linux workflow jobs, fail closed on unresolved runner labels, keep non-Linux jobs outside this CI-DN-06 policy by task scope, and retain access to the shared p11 YAML helpers it uses",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent Linux workflow timeout policy coverage exists"
     },
     {
       "path": "internal/docspreview/docspreview.go",
@@ -3492,5 +3502,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c"
+  "digest": "fe34067815d303e7dec87dad1b1de10696cae5ef6a15ca35ea960adaae1fed27"
 }
