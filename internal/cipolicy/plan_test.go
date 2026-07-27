@@ -259,6 +259,88 @@ func TestChangedFileDigestDistinguishesEmptyAndBlankPath(t *testing.T) {
 	}
 }
 
+func TestDetectCapabilitiesClassifiesWebsiteHugoBuildInputs(t *testing.T) {
+	tests := map[string]struct {
+		path             string
+		wantCapabilities []string
+		wantSuperset     bool
+		wantReason       string
+	}{
+		"content page": {
+			path:             "website/content/docs/canny.md",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"nested content index": {
+			path:             "website/content/docs/configuration/_index.md",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"layout template": {
+			path:             "website/layouts/docs/list.html",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"asset pipeline input": {
+			path:             "website/assets/js/package-graph.mjs",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"static asset": {
+			path:             "website/static/favicon.png",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"hugo configuration": {
+			path:             "website/hugo.toml",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"hugo module file": {
+			path:             "website/go.mod",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"hugo module checksum": {
+			path:             "website/go.sum",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"generated hugo data fails closed": {
+			path:         "website/data/package_dependencies.json",
+			wantSuperset: true,
+			wantReason:   "generated-input",
+		},
+		"website go helper": {
+			path:             "website/cmd/packagegraph/main.go",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"website test helper": {
+			path:             "website/tests/package-graph.test.mjs",
+			wantCapabilities: []string{"docs-preview", "docs-publication"},
+		},
+		"unknown website path fails closed": {
+			path:         "website/bothy/blether.txt",
+			wantSuperset: true,
+			wantReason:   "unknown-path",
+		},
+		"unrelated backend path keeps docs fast path": {
+			path:             "internal/client/passthrough.go",
+			wantCapabilities: []string{"go-core"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			detection := DetectCapabilities([]string{test.path}, true, nil)
+
+			assertStringsEqual(t, "capabilities", detection.Capabilities, test.wantCapabilities)
+
+			if detection.Superset != test.wantSuperset {
+				t.Fatalf("Superset = %v, want %v", detection.Superset, test.wantSuperset)
+			}
+
+			if test.wantReason != "" && !slices.Contains(detection.SupersetReasons, test.wantReason) {
+				t.Fatalf("superset reasons = %v, want %s", detection.SupersetReasons, test.wantReason)
+			}
+		})
+	}
+}
+
 func TestBuildPlanWithUnknownFileListSelectsSuperset(t *testing.T) {
 	manifest := loadManifest(t)
 
@@ -544,7 +626,7 @@ func TestBuildPlanRejectsRequiredModeOutsideUniversalFloor(t *testing.T) {
 }
 
 func TestDetectorDigestPinned(t *testing.T) {
-	const want = "1c77facbb5dd1c61205ffd3160d2261abe1ae871d0841cc5ea664625f59928bb"
+	const want = "98faf3fd5833e949b9816187ac07daabb170cb0f42eb44e1cc548902c864b883"
 
 	if got := DetectorDigest(); got != want {
 		t.Fatalf("DetectorDigest() = %s, want %s", got, want)

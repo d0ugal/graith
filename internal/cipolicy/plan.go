@@ -85,6 +85,28 @@ var (
 		},
 	}
 
+	websiteHugoBuildInputRules = detectorPathRule{
+		Paths: []string{
+			"website/go.mod",
+			"website/go.sum",
+			"website/hugo.toml",
+		},
+		Prefixes: []string{
+			"website/.ci/",
+			"website/archetypes/",
+			"website/assets/",
+			"website/cmd/",
+			"website/config/",
+			"website/content/",
+			"website/data/",
+			"website/i18n/",
+			"website/layouts/",
+			"website/static/",
+			"website/tests/",
+			"website/themes/",
+		},
+	}
+
 	capabilityPathRules = []detectorPathRule{
 		{
 			Paths: []string{
@@ -139,10 +161,6 @@ var (
 				"gui/shared/Sources/CGhosttyVT/include/",
 			},
 			Capabilities: []string{"go-core", "native"},
-		},
-		{
-			Prefixes:     []string{"website/"},
-			Capabilities: []string{"docs-preview", "docs-publication"},
 		},
 		{
 			Prefixes:     []string{"docs/"},
@@ -669,6 +687,7 @@ func DetectorDigest() string {
 		GeneratedInputs  detectorPathRule    `json:"generated_inputs"`
 		Lockfiles        detectorPathRule    `json:"lockfiles"`
 		ReleaseMetadata  detectorPathRule    `json:"release_metadata"`
+		WebsiteHugo      detectorPathRule    `json:"website_hugo"`
 		CapabilityPaths  []detectorPathRule  `json:"capability_paths"`
 	}{
 		Version:          DetectorVersion,
@@ -678,6 +697,7 @@ func DetectorDigest() string {
 		GeneratedInputs:  generatedInputRules,
 		Lockfiles:        lockfileRules,
 		ReleaseMetadata:  releaseMetadataRules,
+		WebsiteHugo:      websiteHugoBuildInputRules,
 		CapabilityPaths:  capabilityPathRules,
 	}
 
@@ -1190,6 +1210,11 @@ func capabilitySet(capabilities []string) map[string]bool {
 
 func capabilitiesForPath(path string) []string {
 	capabilities := map[string]bool{}
+
+	if detectorRuleMatches(websiteHugoBuildInputRules, path) {
+		capabilities["docs-preview"] = true
+		capabilities["docs-publication"] = true
+	}
 
 	for _, rule := range capabilityPathRules {
 		if detectorRuleMatches(rule, path) {
