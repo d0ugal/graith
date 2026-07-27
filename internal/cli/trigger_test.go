@@ -71,12 +71,15 @@ func TestRenderTriggerStatus(t *testing.T) {
 		DegradedRetryCount: 2, DegradedRetryAt: "2026-07-15T10:00:00Z", LastError: "boom",
 		BindingsDetail: []protocol.TriggerBindingDetail{
 			{
-				SessionID:      "braw",
-				SessionName:    "braw-runner",
-				WorktreePath:   "/work/croft-a",
-				State:          "debouncing",
-				PendingChanges: 3,
-				DebounceUntil:  "2026-07-15T09:59:00Z",
+				SessionID:                    "braw",
+				SessionName:                  "braw-runner",
+				WorktreePath:                 "/work/croft-a",
+				State:                        "debouncing",
+				RegisteredWatchDirectories:   12,
+				EstimatedWatchDescriptorCost: 34,
+				WatchBudgetPercent:           4.25,
+				PendingChanges:               3,
+				DebounceUntil:                "2026-07-15T09:59:00Z",
 			},
 			{
 				SessionID:          "dreich",
@@ -94,9 +97,9 @@ func TestRenderTriggerStatus(t *testing.T) {
 	out = buf.String()
 
 	for _, want := range []string{
-		"Watch: repo:/croft", "2 live binding", "SESSION", "WORKTREE",
-		"braw-runner (braw)", "/work/croft-a", "debouncing", "3", "2026-07-15T09:59:00Z",
-		"dreich-runner (dreich)", "skipped: action already in flight", "degraded: watcher.Add failed", "2026-07-15T10:00:00Z (2)",
+		"Watch: repo:/croft", "2 live binding", "SESSION", "WORKTREE", "WATCH DIRS", "WATCH COST", "BUDGET",
+		"braw-runner (braw)", "/work/croft-a", "debouncing", "12", "34", "4.25%", "3", "2026-07-15T09:59:00Z",
+		"dreich-runner (dreich)", "0.00%", "skipped: action already in flight", "degraded: watcher.Add failed", "2026-07-15T10:00:00Z (2)",
 		"Degraded:", "Next retry: 2026-07-15T10:00:00Z", "2 attempt", "Last error: boom",
 	} {
 		if !strings.Contains(out, want) {

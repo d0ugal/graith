@@ -115,6 +115,38 @@ func TestCreateMsgLabelsWirePresence(t *testing.T) {
 	}
 }
 
+func TestTriggerBindingDetailWatcherUsageJSON(t *testing.T) {
+	detail := TriggerBindingDetail{
+		SessionID:                    "braw",
+		State:                        "idle",
+		RegisteredWatchDirectories:   12,
+		EstimatedWatchDescriptorCost: 34,
+		WatchBudgetPercent:           4.25,
+	}
+
+	data, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	tests := map[string]float64{
+		"registered_watch_directories":    12,
+		"estimated_watch_descriptor_cost": 34,
+		"watch_budget_percent":            4.25,
+	}
+
+	for field, want := range tests {
+		if got[field] != want {
+			t.Fatalf("%s = %#v in %s, want %v", field, got[field], data, want)
+		}
+	}
+}
+
 func TestMsgPubNoReplyRoundTrip(t *testing.T) {
 	want := MsgPubMsg{
 		Stream: "updates", Body: "morning briefing complete",

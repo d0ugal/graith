@@ -108,11 +108,15 @@ debounce = "30s"             # quiet-window; lower for fast commands
 - `gr trigger status <name>` keeps the aggregate live binding count and, for
   watch triggers, prints each live binding with session ID/name, worktree, state
   (`idle`, `debouncing`, `running`, `rate-limited`, `skipped`, `failed`, or
-  `degraded`), pending matching change count, debounce deadline, in-flight flag,
-  last per-binding result/error, and degraded retry details. `--json` exposes the
-  same rows as `trigger.bindings_detail`. These per-binding rows are live daemon
-  state and are rebuilt on daemon restart; the trigger-wide run history/result
-  remains persisted.
+  `degraded`), active registered watcher directory count, estimated descriptor
+  cost charged against `watch_max_directories`, budget share, pending matching
+  change count, debounce deadline, in-flight flag, last per-binding result/error,
+  and degraded retry details. `--json` exposes the same rows as
+  `trigger.bindings_detail` with `registered_watch_directories`,
+  `estimated_watch_descriptor_cost`, and `watch_budget_percent`. Degraded
+  bindings report zero active registrations while they wait for retry. These
+  per-binding rows are live daemon state and are rebuilt on daemon restart; the
+  trigger-wide run history/result remains persisted.
 
 Repository selector with multiple sessions:
 

@@ -301,6 +301,33 @@ func TestFileWatchBudgetDegradesAndReleases(t *testing.T) {
 	sm.teardownAllBindings()
 }
 
+func TestWatchPathCostForGOOS(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "braw"))
+
+	for _, name := range []string{"canny.go", "dreich.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package main\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := map[string]struct {
+		goos string
+		want int
+	}{
+		"darwin counts directory entries": {goos: "darwin", want: 4},
+		"linux counts one watch path":     {goos: "linux", want: 1},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := watchPathCostForGOOS(test.goos, root); got != test.want {
+				t.Fatalf("watchPathCostForGOOS(%q) = %d, want %d", test.goos, got, test.want)
+			}
+		})
+	}
+}
+
 func mustRel(t *testing.T, root, path string) string {
 	t.Helper()
 

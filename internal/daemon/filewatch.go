@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -896,7 +897,11 @@ func (sm *SessionManager) reserveWatchPath(path string, cost int) error {
 // budget conservative on that platform so a dense worktree cannot exhaust the
 // process descriptor limit even when its directory count is modest.
 func watchPathCost(path string) int {
-	if runtime.GOOS != "darwin" {
+	return watchPathCostForGOOS(runtime.GOOS, path)
+}
+
+func watchPathCostForGOOS(goos, path string) int {
+	if goos != "darwin" {
 		return 1
 	}
 
@@ -915,6 +920,14 @@ func watchPathCostSum(paths map[string]int) int {
 	}
 
 	return total
+}
+
+func watchBudgetPercent(cost, budget int) float64 {
+	if cost <= 0 || budget <= 0 {
+		return 0
+	}
+
+	return math.Round(float64(cost)*10000/float64(budget)) / 100
 }
 
 func (sm *SessionManager) releaseWatchCount(n int) {

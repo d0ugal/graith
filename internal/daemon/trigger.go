@@ -947,18 +947,24 @@ func (sm *SessionManager) watchBindingDetail(b *watchBinding) protocol.TriggerBi
 	degraded := b.degraded
 	retryCount := b.retryCount
 	retryAt := b.nextRetryAt
+	registeredWatchDirs := len(b.watchPaths)
+	estimatedWatchCost := watchPathCostSum(b.watchPaths)
 
 	b.bmu.Unlock()
 
+	watchBudget := sm.Config().TriggersRuntime.WatchMaxDirectories()
 	detail := protocol.TriggerBindingDetail{
-		SessionID:      b.sessionID,
-		SessionName:    sm.sessionName(b.sessionID),
-		WorktreePath:   b.worktree,
-		PendingChanges: pending,
-		ActionInFlight: inFlight,
-		LastResult:     lastResult,
-		LastError:      lastError,
-		Degraded:       degraded,
+		SessionID:                    b.sessionID,
+		SessionName:                  sm.sessionName(b.sessionID),
+		WorktreePath:                 b.worktree,
+		PendingChanges:               pending,
+		RegisteredWatchDirectories:   registeredWatchDirs,
+		EstimatedWatchDescriptorCost: estimatedWatchCost,
+		WatchBudgetPercent:           watchBudgetPercent(estimatedWatchCost, watchBudget),
+		ActionInFlight:               inFlight,
+		LastResult:                   lastResult,
+		LastError:                    lastError,
+		Degraded:                     degraded,
 	}
 
 	switch {

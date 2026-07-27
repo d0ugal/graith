@@ -758,6 +758,9 @@ type DiagnosticsMsg struct {
 	// inotify watch limit was exhausted). Healthy bindings are omitted; the slice
 	// is empty when nothing is degraded.
 	Triggers []TriggerDiagnostic `json:"triggers,omitempty"`
+	// Watchers reports daemon-wide file-watch trigger resource usage for gr
+	// doctor. It is nil when an older daemon omits these diagnostics.
+	Watchers *WatcherDiagnostic `json:"watchers,omitempty"`
 	// Purge reports the soft-delete purge sweep schedule (last/next run and the
 	// configured cadence). Current daemons populate cadence before the first
 	// sweep; LastSweep and NextSweep are empty until it runs. Purge is nil when
@@ -796,6 +799,33 @@ type TriggerDiagnostic struct {
 	Degraded    string `json:"degraded"`
 	RetryCount  int    `json:"retry_count,omitempty"`
 	NextRetryAt string `json:"next_retry_at,omitempty"`
+}
+
+// WatcherDiagnostic reports the daemon-wide file-watch trigger resource budget
+// and per-binding attribution for gr doctor. The budget is the same estimated
+// descriptor accounting used for admission control; on macOS it includes the
+// directory entries charged by the kqueue-backed estimate.
+type WatcherDiagnostic struct {
+	EstimatedDescriptorCost int                        `json:"estimated_descriptor_cost"`
+	Budget                  int                        `json:"budget"`
+	BudgetPercent           float64                    `json:"budget_percent"`
+	NearBudget              bool                       `json:"near_budget,omitempty"`
+	BudgetExhausted         bool                       `json:"budget_exhausted,omitempty"`
+	Bindings                []WatcherBindingDiagnostic `json:"bindings,omitempty"`
+}
+
+type WatcherBindingDiagnostic struct {
+	TriggerName                  string  `json:"trigger_name"`
+	SessionID                    string  `json:"session_id,omitempty"`
+	SessionName                  string  `json:"session_name,omitempty"`
+	WorktreePath                 string  `json:"worktree_path,omitempty"`
+	State                        string  `json:"state"`
+	RegisteredWatchDirectories   int     `json:"registered_watch_directories"`
+	EstimatedWatchDescriptorCost int     `json:"estimated_watch_descriptor_cost"`
+	WatchBudgetPercent           float64 `json:"watch_budget_percent"`
+	Degraded                     string  `json:"degraded,omitempty"`
+	RetryCount                   int     `json:"retry_count,omitempty"`
+	NextRetryAt                  string  `json:"next_retry_at,omitempty"`
 }
 
 type SessionDiagnostic struct {
@@ -1274,19 +1304,28 @@ type TriggerPauseMsg struct {
 // watch trigger's status. Bindings are daemon-runtime state and are rebuilt on
 // daemon restart; the aggregate TriggerRecord history remains durable.
 type TriggerBindingDetail struct {
-	SessionID          string `json:"session_id"`
-	SessionName        string `json:"session_name,omitempty"`
-	WorktreePath       string `json:"worktree_path,omitempty"`
-	State              string `json:"state"`
-	PendingChanges     int    `json:"pending_changes"`
-	DebounceUntil      string `json:"debounce_until,omitempty"` // RFC3339 while armed
-	ActionInFlight     bool   `json:"action_in_flight,omitempty"`
-	LastRun            string `json:"last_run,omitempty"` // RFC3339 or ""
-	LastResult         string `json:"last_result,omitempty"`
-	LastError          string `json:"last_error,omitempty"`
-	Degraded           string `json:"degraded,omitempty"`
-	DegradedRetryCount int    `json:"degraded_retry_count,omitempty"`
-	DegradedRetryAt    string `json:"degraded_retry_at,omitempty"`
+	SessionID      string `json:"session_id"`
+	SessionName    string `json:"session_name,omitempty"`
+	WorktreePath   string `json:"worktree_path,omitempty"`
+	State          string `json:"state"`
+	PendingChanges int    `json:"pending_changes"`
+	// RegisteredWatchDirectories is the number of active directory registrations
+	// held by this binding. Degraded bindings hold no active registrations, so
+	// this is zero while they wait for retry.
+	RegisteredWatchDirectories int `json:"registered_watch_directories"`
+	// EstimatedWatchDescriptorCost is the budget cost currently charged to this
+	// binding. It matches daemon admission accounting; on macOS it can be larger
+	// than RegisteredWatchDirectories because directory entries are included.
+	EstimatedWatchDescriptorCost int     `json:"estimated_watch_descriptor_cost"`
+	WatchBudgetPercent           float64 `json:"watch_budget_percent"`
+	DebounceUntil                string  `json:"debounce_until,omitempty"` // RFC3339 while armed
+	ActionInFlight               bool    `json:"action_in_flight,omitempty"`
+	LastRun                      string  `json:"last_run,omitempty"` // RFC3339 or ""
+	LastResult                   string  `json:"last_result,omitempty"`
+	LastError                    string  `json:"last_error,omitempty"`
+	Degraded                     string  `json:"degraded,omitempty"`
+	DegradedRetryCount           int     `json:"degraded_retry_count,omitempty"`
+	DegradedRetryAt              string  `json:"degraded_retry_at,omitempty"`
 }
 
 // TriggerRecord is the per-trigger info returned to the client.

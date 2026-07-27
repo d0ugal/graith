@@ -878,6 +878,14 @@
           "optional": true
         },
         {
+          "name": "watchers",
+          "type": {
+            "kind": "object",
+            "ref": "WatcherDiagnostic"
+          },
+          "optional": true
+        },
+        {
           "name": "purge",
           "type": {
             "kind": "object",
@@ -5373,6 +5381,27 @@
           "optional": false
         },
         {
+          "name": "registered_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "estimated_watch_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "watch_budget_percent",
+          "type": {
+            "kind": "float"
+          },
+          "optional": false
+        },
+        {
           "name": "debounce_until",
           "type": {
             "kind": "string"
@@ -6050,6 +6079,141 @@
             "kind": "string"
           },
           "optional": false
+        }
+      ]
+    },
+    {
+      "name": "WatcherBindingDiagnostic",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "trigger_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "session_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "worktree_path",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "registered_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "estimated_watch_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "watch_budget_percent",
+          "type": {
+            "kind": "float"
+          },
+          "optional": false
+        },
+        {
+          "name": "degraded",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "retry_count",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "next_retry_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "WatcherDiagnostic",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "estimated_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "budget",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "budget_percent",
+          "type": {
+            "kind": "float"
+          },
+          "optional": false
+        },
+        {
+          "name": "near_budget",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "budget_exhausted",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "bindings",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "WatcherBindingDiagnostic"
+            }
+          },
+          "optional": true
         }
       ]
     }
