@@ -1128,6 +1128,134 @@ esac
 	}
 }
 
+func TestDevHomebrewTapCredentialsAreScopedToGitPrompts(t *testing.T) {
+	workflow := loadDevReleaseWorkflow(t)
+
+	script := workflowStep(workflow.Jobs["publish-dev"], "Update Homebrew tap").Run
+	if script == "" {
+		t.Fatal("dev-release workflow has no Homebrew tap update step")
+	}
+
+	for _, forbidden := range []string{
+		"https://x-access-token:",
+		"${RELEASE_TOKEN}@",
+		"credential.helper store",
+		"git remote set-url",
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("Homebrew tap update exposes or persists credentials with %q", forbidden)
+		}
+	}
+
+	for _, required := range []string{
+		`cat > "$askpass"`,
+		`export GIT_ASKPASS="$askpass"`,
+		`export GIT_TERMINAL_PROMPT=0`,
+		`unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN`,
+		`rm -f "$askpass"`,
+		`rm -rf "$tap_dir"`,
+		`git clone "https://github.com/d0ugal/homebrew-tap.git" .`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("Homebrew tap update missing credential-scope guard %q", required)
+		}
+	}
+
+	work := t.TempDir()
+
+	dist := filepath.Join(work, "dist")
+	if err := os.Mkdir(dist, 0o750); err != nil {
+		t.Fatalf("create dist: %v", err)
+	}
+
+	for _, name := range []string{
+		"graith-dev_darwin_arm64.tar.gz",
+		"graith-dev_linux_amd64.tar.gz",
+		"graith-dev_linux_arm64.tar.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(dist, name), []byte(name), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	bin := filepath.Join(work, "bin")
+	if err := os.Mkdir(bin, 0o750); err != nil {
+		t.Fatalf("create fake tool directory: %v", err)
+	}
+
+	const fakeGit = `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" != clone ]]; then
+  echo "unexpected git invocation: $*" >&2
+  exit 61
+fi
+if [[ "${GIT_TERMINAL_PROMPT:-}" != 0 ]]; then
+  echo "GIT_TERMINAL_PROMPT was not disabled" >&2
+  exit 62
+fi
+if [[ ! -x "${GIT_ASKPASS:-}" ]]; then
+  echo "GIT_ASKPASS is not executable" >&2
+  exit 63
+fi
+username="$("$GIT_ASKPASS" "Username for 'https://github.com':")"
+password="$("$GIT_ASKPASS" "Password for 'https://github.com':")"
+if [[ "$username" != x-access-token || "$password" != "$RELEASE_TOKEN" ]]; then
+  echo "askpass returned unexpected credentials" >&2
+  exit 64
+fi
+echo "clone args: $*" >&2
+echo "askpass-ok" >&2
+exit 65
+`
+	// #nosec G306 -- the executable is a test-only fake confined to t.TempDir.
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(fakeGit), 0o700); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+
+	const fakeSHA256Sum = `#!/usr/bin/env bash
+set -euo pipefail
+printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  %s\n' "$1"
+`
+	// #nosec G306 -- the executable is a test-only fake confined to t.TempDir.
+	if err := os.WriteFile(filepath.Join(bin, "sha256sum"), []byte(fakeSHA256Sum), 0o700); err != nil {
+		t.Fatalf("write fake sha256sum: %v", err)
+	}
+
+	const secret = "canny-release-token"
+
+	command := exec.Command("bash", "-c", script)
+	command.Dir = work
+
+	command.Env = append(os.Environ(),
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GRAITH_DEV_VERSION=0.0.0-dev+canny",
+		"RELEASE_TOKEN="+secret,
+	)
+
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatal("fake clone unexpectedly succeeded")
+	}
+
+	gotOutput := string(output)
+	if !strings.Contains(gotOutput, "askpass-ok") {
+		t.Fatalf("fake git did not exercise askpass helper:\n%s", gotOutput)
+	}
+
+	if strings.Contains(gotOutput, secret) {
+		t.Fatalf("Homebrew tap clone failure leaked RELEASE_TOKEN:\n%s", gotOutput)
+	}
+
+	if strings.Contains(gotOutput, "x-access-token:"+secret) {
+		t.Fatalf("Homebrew tap clone failure exposed an authenticated URL:\n%s", gotOutput)
+	}
+
+	if !strings.Contains(gotOutput, "https://github.com/d0ugal/homebrew-tap.git") {
+		t.Fatalf("fake git did not receive the clean tap URL:\n%s", gotOutput)
+	}
+}
+
 func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
 	job := workflow.Jobs["publish-dev"]
