@@ -267,13 +267,15 @@ func ciCounts(ci *protocol.CIInfo) (string, bool) {
 	return fmt.Sprintf("%d/%d", ci.Passed, ci.Total), true
 }
 
+const draftPRMarker = "D"
+
 // displayPR is the compact per-row PR/CI token for the overlay list, e.g.
 // "#56 19/22 1✗" (CI failing), "#56 16/22" (CI running), "#56 ⚠" (conflict),
-// "#1615 ✓" (passing), "#583 merged". While CI is running/failing the count of
-// passed vs total checks replaces the bare indicator so progress is visible;
-// it falls back to "·"/"✗" when no count is available. The review decision is a
-// separate column (displayReview) so it can carry its own colour independent of
-// the CI/conflict signal.
+// "#1615 ✓" (passing), "#1743D ✓" (draft passing), "#583 merged". While CI is
+// running/failing the count of passed vs total checks replaces the bare indicator
+// so progress is visible; it falls back to "·"/"✗" when no count is available.
+// The review decision is a separate column (displayReview) so it can carry its
+// own colour independent of the CI/conflict signal.
 func displayPR(s protocol.SessionInfo) string {
 	if s.PullRequest == nil {
 		return "—"
@@ -288,7 +290,7 @@ func displayPR(s protocol.SessionInfo) string {
 	case "closed":
 		return out + " closed"
 	case "draft":
-		out += "d"
+		out += draftPRMarker
 	}
 
 	if pr.Conflicting {
@@ -316,6 +318,35 @@ func displayPR(s protocol.SessionInfo) string {
 	}
 
 	return out
+}
+
+func renderPRCell(s protocol.SessionInfo, width int, baseStyle lipgloss.Style) string {
+	value := displayPR(s)
+	padded := pad(value, width)
+
+	if s.PullRequest == nil || s.PullRequest.State != "draft" {
+		return baseStyle.Render(padded)
+	}
+
+	number := fmt.Sprintf("#%d", s.PullRequest.Number)
+
+	prefix := number + draftPRMarker
+	if !strings.HasPrefix(padded, prefix) {
+		return baseStyle.Render(padded)
+	}
+
+	suffix := strings.TrimPrefix(padded, prefix)
+
+	out := baseStyle.Render(number) + draftPRMarkerStyle().Render(draftPRMarker)
+	if suffix != "" {
+		out += baseStyle.Render(suffix)
+	}
+
+	return out
+}
+
+func draftPRMarkerStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Underline(true)
 }
 
 // reviewActiveDecision returns a PR's review decision only while it is live (an
@@ -686,7 +717,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	for _, c := range tuiColumns() {
 		b.WriteString(sep)
-		b.WriteString(c.TUIStyle(si.info).Render(pad(c.TUIValue(si.info), d.cols.col(c.Key))))
+		b.WriteString(renderTUIColumnCell(c, si.info, d.cols.col(c.Key)))
 	}
 
 	line := b.String()
