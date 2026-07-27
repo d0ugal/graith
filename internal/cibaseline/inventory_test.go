@@ -186,7 +186,7 @@ func TestInventoryCarriesReviewedCapabilitiesAndPolicySurfaces(t *testing.T) {
 		t.Fatal("explicit attestation proof type is missing")
 	}
 
-	paths := append([]string{".github/workflows/scripts/package-lock.json"}, ciConfigurationPaths...)
+	paths := append([]string{"cmd/docsdiff/main.go"}, ciConfigurationPaths...)
 
 	paths = append(paths, ciEntrypointPaths...)
 	for _, path := range paths {

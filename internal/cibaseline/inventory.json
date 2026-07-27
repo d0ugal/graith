@@ -972,7 +972,7 @@
       "path": ".github/workflows/docs-preview.yml",
       "name": "Docs Preview",
       "owner": "docs-owners",
-      "file_sha256": "69608d40c3fa8b16fd37d04e4e4284017120dcadcfddcef14eee0e9c510bc9fe",
+      "file_sha256": "2f2a8409869df63be6c3cee9725855e3596b57e2f1a339b84e4ee8089cd5720b",
       "events": {
         "pull_request": {
           "paths": [
@@ -2645,36 +2645,6 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
-      "path": ".github/workflows/scripts/docs-diff-run.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-helper",
-      "git_mode": "100644",
-      "sha256": "ffe5d089ea1bdefcf9192e23d26a49d38b0cf856669c3db432a4e94be3f58cee",
-      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/docs-diff.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-helper",
-      "git_mode": "100644",
-      "sha256": "51fe8a351533e0701891edc3a2957b5c5095a668b410423ab410fed554293d17",
-      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/docs-diff.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "c6de54292646dd4f319e679f1b9cd8a8053b65b3890d2ddde389f6ec57c7540c",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
       "path": ".github/workflows/scripts/docs-preview.js",
       "owner": "graith-maintainers",
       "kind": "workflow-helper",
@@ -2691,26 +2661,6 @@
       "git_mode": "100644",
       "sha256": "2f11cb4d6592e981bb1617beffb36fa91400e229cee53f0961170fd43b360df0",
       "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/package-lock.json",
-      "owner": "graith-maintainers",
-      "kind": "workflow-helper",
-      "git_mode": "100644",
-      "sha256": "63bab3046c6ef84bbbd439d41a1be768bab7f0a2dfeea391ee5bd994c65fca49",
-      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/package.json",
-      "owner": "graith-maintainers",
-      "kind": "workflow-helper",
-      "git_mode": "100644",
-      "sha256": "487ab50e334bac57b3ed8faab83270dd25006569606f868ad20a388c94661d39",
-      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
@@ -2795,6 +2745,26 @@
       "retirement_criterion": "remove only after equivalent cipolicy command coverage is added"
     },
     {
+      "path": "cmd/docsdiff/main.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "613bf4616f2f6760634cdea3d02047f1a63dfb70ca83564cadf41428198c1a65",
+      "executable_contract": "preserve docs-preview screenshot diff classification, row alignment, denoise, composite PNG rendering, and manifest output behavior formerly held by docs-diff.js and docs-diff-run.js",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with the docs-preview screenshot-diff workflow caller or an owner-approved replacement helper"
+    },
+    {
+      "path": "cmd/docsdiff/main_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "978ebd9ef0b3a1ab9168552200d9354a29c0872f4b47d1408cebd522f7b5c560",
+      "executable_contract": "preserve parity coverage for docs-preview screenshot diff row hashing, insert/delete alignment, denoise, hunk padding and merging, manifest ordering, page classifications, exit behavior, and composite PNG geometry",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent docs-preview screenshot-diff parity coverage exists"
+    },
+    {
       "path": "cmd/libghosttyarchive/main.go",
       "owner": "graith-maintainers",
       "kind": "go-policy-helper",
@@ -2849,7 +2819,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract",
       "git_mode": "100644",
-      "sha256": "b081aa042fec51c2eaaff46ed08c0f000fa2b6ecffcf88f721032b016aef93bf",
+      "sha256": "b422349aa7ad786916a80f22a4a9c8f3429c04fb44213f799f4b7ad4cde029ea",
       "executable_contract": "preserve current retained-JS surface contracts and semantic replacement metadata for retired workflow-script tests",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only after all P11 JS surfaces are retired or represented by a newer owner-approved contract"
@@ -2859,7 +2829,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "475993e46669d1ae70add3b367b62fb2917ceed3619d3c5276c9ef956d009c87",
+      "sha256": "f9b1edb25ecebbd08bf181a76477634b816d572d8f84651a2e6876124348054c",
       "executable_contract": "preserve regen credential, trust, scalar sweep, git-index enumeration, and repository-command detection assertions formerly held by regen-auth.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement"
@@ -3546,5 +3516,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "9a613c0bb6787218847f50f8e092c5beb5a6bef11b84d7bcc16bcc6ddc6d7a24"
+  "digest": "7f3dcc8348038129767e0058d4a15f17a6c43bb23295a58a749c065298bd61bf"
 }

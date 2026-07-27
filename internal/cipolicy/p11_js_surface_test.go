@@ -1,6 +1,9 @@
 package cipolicy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/cibaseline"
 )
 
 var p11TestNow = p2TestNow
@@ -36,19 +41,118 @@ func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, path := range []string{
-		".github/workflows/scripts/package.json",
-		".github/workflows/scripts/package-lock.json",
-		".github/workflows/scripts/docs-diff.js",
+	if len(contracts) != 2 {
+		t.Fatalf("P11 retained JS contract count = %d, want docs-preview helper and test only: %#v", len(contracts), contracts)
+	}
+
+	for path, disposition := range map[string]string{
+		".github/workflows/scripts/docs-preview.js":      "wrap",
+		".github/workflows/scripts/docs-preview.test.js": "port",
 	} {
 		contract := p11ContractByPath(t, contracts, path)
-		if contract.Disposition != "retain" {
-			t.Fatalf("%s disposition = %s, want retain", path, contract.Disposition)
+		if contract.Disposition != disposition {
+			t.Fatalf("%s disposition = %s, want %s", path, contract.Disposition, disposition)
 		}
+	}
 
-		if !strings.Contains(strings.Join(append(contract.PolicyInputs, contract.DeletionCriterion), " "), "pngjs") {
-			t.Fatalf("%s does not document the pngjs retained exception", path)
+	for _, path := range p11DocsDiffRetiredSurfacePaths {
+		for _, contract := range contracts {
+			if contract.Path == path {
+				t.Fatalf("retired docs-diff surface %s still has a retained JS contract", path)
+			}
 		}
+	}
+}
+
+func TestP11DocsDiffReplacementSamplesCoverPortMatrix(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	inventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requirements := P11DocsDiffCompatibilityRequirements()
+	if err := ValidateP11DocsDiffReplacement(repoRoot, inventory, P11DocsDiffReplacementPath, requirements); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement := P11JSHelperContract{
+		Path:                 P11DocsDiffReplacementPath,
+		CompatibilitySamples: requirements,
+	}
+
+	for _, want := range p11DocsDiffRequiredSampleIDs() {
+		if !p11HasSampleRequirement(replacement, want) {
+			t.Fatalf("%s is missing compatibility sample %s", replacement.Path, want)
+		}
+	}
+}
+
+func TestP11DocsDiffReplacementRejectsMissingMismatchedAndRetiredSurfaces(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	baseInventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requirements := P11DocsDiffCompatibilityRequirements()
+
+	tests := map[string]struct {
+		replacementPath string
+		requirements    []P11CompatibilitySampleRequirement
+		mutateInventory func(*cibaseline.Inventory)
+		want            string
+	}{
+		"missing Go replacement": {
+			replacementPath: "cmd/docsdiff/missing_test.go",
+			requirements:    requirements,
+			want:            "missing P11 docs-diff Go replacement surface cmd/docsdiff/missing_test.go",
+		},
+		"mismatched Go replacement": {
+			replacementPath: "cmd/docsdiff/main.go",
+			requirements:    requirements,
+			want:            "kind = go-policy-helper, want go-policy-contract-test",
+		},
+		"missing compatibility sample": {
+			replacementPath: P11DocsDiffReplacementPath,
+			requirements:    p11DocsDiffRequirementsWithout(requirements, "png-composite"),
+			want:            "missing compatibility sample png-composite",
+		},
+		"retired JS helper surface": {
+			replacementPath: P11DocsDiffReplacementPath,
+			requirements:    requirements,
+			mutateInventory: func(inventory *cibaseline.Inventory) {
+				inventory.Surfaces = append(inventory.Surfaces, p11RetiredSurface(".github/workflows/scripts/docs-diff.js"))
+			},
+			want: "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/docs-diff.js",
+		},
+		"retired pngjs lock surface": {
+			replacementPath: P11DocsDiffReplacementPath,
+			requirements:    requirements,
+			mutateInventory: func(inventory *cibaseline.Inventory) {
+				inventory.Surfaces = append(inventory.Surfaces, p11RetiredSurface(".github/workflows/scripts/package-lock.json"))
+			},
+			want: "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/package-lock.json",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			inventory := baseInventory
+			inventory.Surfaces = append([]cibaseline.Surface(nil), baseInventory.Surfaces...)
+
+			if test.mutateInventory != nil {
+				test.mutateInventory(&inventory)
+				p11ResignInventory(t, &inventory)
+			}
+
+			err := ValidateP11DocsDiffReplacement(repoRoot, inventory, test.replacementPath, test.requirements)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ValidateP11DocsDiffReplacement() error = %v, want containing %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -568,7 +672,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 
 	for path, data := range map[string]string{
 		filepath.Join(repoRoot, ".gitignore"):                                 ".github/workflows/scripts/node_modules/\n",
-		filepath.Join(scriptsDir, "docs-diff.test.js"):                        "'use strict';\n",
+		filepath.Join(scriptsDir, "docs-preview.test.js"):                     "'use strict';\n",
 		filepath.Join(scriptsDir, "untracked-helper.test.js"):                 "'use strict';\n",
 		filepath.Join(scriptsDir, "node_modules", "ignored-helper.test.js"):   "'use strict';\n",
 		filepath.Join(repoRoot, "internal", "cipolicy", "unrelated.testdata"): "braw\n",
@@ -584,7 +688,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 	}
 
 	p11RunGit(t, repoRoot, "init")
-	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/docs-diff.test.js")
+	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/docs-preview.test.js")
 
 	foreignHelper := filepath.Join(foreignScriptsDir, "foreign-helper.test.js")
 	// #nosec G703 -- foreignHelper is rooted in t.TempDir.
@@ -607,7 +711,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/docs-diff.test.js"}) {
+	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/docs-preview.test.js"}) {
 		t.Fatalf("currentP11ScriptPaths() = %#v, want only git-index tracked helper", paths)
 	}
 }
@@ -1211,6 +1315,45 @@ func p11HasSampleRequirement(contract P11JSHelperContract, id string) bool {
 	}
 
 	return false
+}
+
+func p11DocsDiffRequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
+	filtered := make([]P11CompatibilitySampleRequirement, 0, len(requirements))
+
+	for _, requirement := range requirements {
+		if requirement.ID != id {
+			filtered = append(filtered, requirement)
+		}
+	}
+
+	return filtered
+}
+
+func p11RetiredSurface(path string) cibaseline.Surface {
+	return cibaseline.Surface{
+		Path:        path,
+		Owner:       "graith-maintainers",
+		Kind:        "workflow-helper",
+		GitMode:     "100644",
+		SHA256:      strings.Repeat("0", 64),
+		Contract:    "retired docs-diff surface must not remain in closed-world inventory",
+		Disposition: "grandfathered",
+		Retirement:  "owned Go replacement has equivalent executable coverage",
+	}
+}
+
+func p11ResignInventory(t *testing.T, inventory *cibaseline.Inventory) {
+	t.Helper()
+
+	inventory.Digest = ""
+
+	data, err := json.Marshal(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	digest := sha256.Sum256(data)
+	inventory.Digest = hex.EncodeToString(digest[:])
 }
 
 func p11AssertSampleMatrixMatchesRequirements(t *testing.T, contract P11JSHelperContract, samples []P11CompatibilitySample) {

@@ -12,9 +12,10 @@ informed: ci-north-star rollout owners
 P11 retires the repository-owned JavaScript helpers under
 `.github/workflows/scripts/` one compatibility tranche at a time. This
 serialized deletion tranche removes the small test-only policy scripts whose
-claims now have semantic Go coverage, keeps the docs-preview/docs-diff runtime
-helpers and `pngjs` lock surface, and regenerates the P0/P1 metadata in the
-same owned epoch.
+claims now have semantic Go coverage, keeps the docs-preview runtime helper, and
+regenerates the P0/P1 metadata in the same owned epoch. Its original
+docs-diff/`pngjs` retention carve-out was superseded by the owner-approved C6
+Go migration after equivalent parity coverage was established.
 
 ## Background
 
@@ -58,9 +59,9 @@ authoritative job/context changes remain failures.
 
 ### Non-Goals
 
-- Retiring the docs-preview/docs-diff runtime helpers or their JS tests.
-- Replacing `pngjs`; it remains the explicit retained exception for PNG
-  decoding and encoding.
+- Retiring the docs-preview runtime helper or its JS tests.
+- Replacing unrelated JavaScript dependencies; the former `pngjs` exception was
+  retired only as part of the C6 docs-diff Go migration.
 - Aggregating live Actions history, cross-workflow durations, or check-run
   completion state through C2.
 - Loosening acceptance to ignore helper-surface changes outside the named
@@ -131,7 +132,7 @@ Every entry below is owned by `graith-maintainers`.
 - Inputs: `pages.json`, base/head screenshot directories, PNG files decoded via
   `pngjs`.
 - Outputs: flat screenshot directory, `manifest.json`, count summary.
-- Disposition: explicitly retained with `docs-diff.js`.
+- Disposition: retired by C6 and replaced by `cmd/docsdiff`.
 - Deletion criterion: byte-equivalent manifests and images for added, deleted,
   same, row-change, and divergent screenshot samples.
 
@@ -141,10 +142,9 @@ Every entry below is owned by `graith-maintainers`.
 - Inputs: base/head PNGs, row hashes, hunk settings.
 - Outputs: diff PNG with exit 0, no output with exit 3 for identical renders,
   exit 2 for invalid CLI arguments.
-- Disposition: explicitly retained because `pngjs` is the P11 exception.
-- Deletion criterion: pure row-diff and PNG render outputs match existing
-  helper over synthetic and captured screenshots; `pngjs` remains unless a
-  later owner-approved image-decoding decision replaces it.
+- Disposition: retired by C6 and replaced by `cmd/docsdiff`.
+- Deletion criterion: pure row-diff and PNG render outputs match the retired
+  helper over synthetic and captured screenshots.
 
 ### `docs-diff.test.js`
 
@@ -152,7 +152,7 @@ Every entry below is owned by `graith-maintainers`.
 - Inputs: `docs-diff.js` pure API and synthetic RGBA rows.
 - Outputs: Node test pass/fail for row hashing, Myers alignment, denoise,
   hunking, and render geometry.
-- Disposition: port after `docs-diff.js` pure logic is wrapped or ported.
+- Disposition: retired by C6 and replaced by Go tests for `cmd/docsdiff`.
 - Deletion criterion: Go tests cover the same row-diff sample matrix and
   docs-preview retains PNG parity evidence.
 
@@ -195,9 +195,9 @@ Every entry below is owned by `graith-maintainers`.
   --ignore-scripts`.
 - Inputs: pinned `pngjs` dependency declaration and integrity lock.
 - Outputs: deterministic `pngjs` install for docs-preview image decoding.
-- Disposition: explicitly retained.
-- Deletion criterion: delete only if docs-preview no longer uses `pngjs` or an
-  owner-approved replacement lock exists.
+- Disposition: retired by C6 with the docs-diff Go migration.
+- Deletion criterion: docs-preview no longer uses `pngjs` and C6 parity tests
+  cover the screenshot diff helper behavior.
 
 ### `regen-auth.test.js`
 
@@ -290,12 +290,8 @@ Pre-deletion hardening satisfied by the `regen-auth.test.js` replacement:
 
 ## Remaining Tranche Order
 
-1. `docs-diff.test.js` and pure `docs-diff.js` row logic: port or wrap pure
-   row operations while retaining `pngjs`.
-2. `docs-preview.test.js` and `docs-preview.js`: wrap GitHub API branch/comment
+1. `docs-preview.test.js` and `docs-preview.js`: wrap GitHub API branch/comment
    mutation paths after credential-boundary tests are semantic.
-3. `package.json` and `package-lock.json`: retain as the explicit `pngjs`
-   exception until docs-preview no longer needs that dependency.
 
 ## Other Notes
 

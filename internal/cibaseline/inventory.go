@@ -51,6 +51,8 @@ var ciEntrypointPaths = []string{
 }
 
 var ciGoPolicySurfacePaths = []string{
+	"cmd/docsdiff/main.go",
+	"cmd/docsdiff/main_test.go",
 	"cmd/cipolicy/main.go",
 	"cmd/cipolicy/main_test.go",
 	"cmd/libghosttyarchive/main.go",
@@ -74,6 +76,16 @@ type goPolicySurfaceMetadata struct {
 }
 
 var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
+	"cmd/docsdiff/main.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve docs-preview screenshot diff classification, row alignment, denoise, composite PNG rendering, and manifest output behavior formerly held by docs-diff.js and docs-diff-run.js",
+		retirement: "remove only with the docs-preview screenshot-diff workflow caller or an owner-approved replacement helper",
+	},
+	"cmd/docsdiff/main_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve parity coverage for docs-preview screenshot diff row hashing, insert/delete alignment, denoise, hunk padding and merging, manifest ordering, page classifications, exit behavior, and composite PNG geometry",
+		retirement: "remove only after equivalent docs-preview screenshot-diff parity coverage exists",
+	},
 	"cmd/cipolicy/main.go": {
 		kind:       "go-policy-helper",
 		contract:   "preserve the checked-in cipolicy CLI behavior invoked by workflow policy detection and the CI shadow summary",

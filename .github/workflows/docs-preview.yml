@@ -212,12 +212,7 @@ jobs:
       - name: Build diffs
         if: steps.changed.outputs.count != '0'
         run: |
-          # Integrity-locked, script-free install of the pinned pngjs (see
-          # .github/workflows/scripts/package-lock.json) — this job holds a
-          # write-scoped token, so it must not run whatever the registry serves
-          # at run time. --ignore-scripts blocks dependency lifecycle hooks.
-          npm ci --prefix .github/workflows/scripts --ignore-scripts
-          node .github/workflows/scripts/docs-diff-run.js \
+          go run ./cmd/docsdiff \
             pages.json "$PWD/shots/base" "$PWD/shots/head" "$PWD/shots/out"
           echo "Published diff assets:"; ls -la shots/out
 
@@ -269,7 +264,7 @@ jobs:
             const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const dir = `pr-${pr}/${ymd}-${shortSha}-${runId}.${runAttempt}`;
 
-            // The diff step (docs-diff-run.js) wrote the images to publish plus
+            // The diff step wrote the images to publish plus
             // a manifest describing each page × viewport: kind `diff` (a
             // base-|-head crop of the changed bands), `new` (full render of a
             // page with no baseline), or `same` (renders identically — no image,

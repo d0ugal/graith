@@ -16,8 +16,17 @@ import (
 
 const (
 	P11JSSurfaceDirectory       = ".github/workflows/scripts"
+	P11DocsDiffReplacementPath  = "cmd/docsdiff/main_test.go"
 	P11RegenAuthReplacementPath = "internal/cipolicy/p11_js_surface_test.go"
 )
+
+var p11DocsDiffRetiredSurfacePaths = []string{
+	".github/workflows/scripts/docs-diff.js",
+	".github/workflows/scripts/docs-diff-run.js",
+	".github/workflows/scripts/docs-diff.test.js",
+	".github/workflows/scripts/package.json",
+	".github/workflows/scripts/package-lock.json",
+}
 
 type P11JSHelperContract struct {
 	Path                 string
@@ -123,63 +132,6 @@ type P11WorkflowStep struct {
 func P11JSSurfaceContracts() []P11JSHelperContract {
 	contracts := []P11JSHelperContract{
 		{
-			Path:         ".github/workflows/scripts/docs-diff-run.js",
-			Owner:        "graith-maintainers",
-			Kind:         "workflow-helper",
-			Callers:      []string{".github/workflows/docs-preview.yml: diff rendered docs screenshots"},
-			PolicyInputs: []string{"pages.json", "base screenshot directory", "head screenshot directory", "pngjs-decoded PNG files"},
-			PolicyOutputs: []string{
-				"flat docs-preview screenshot directory",
-				"manifest.json entries classified as diff, same, new, or deleted",
-				"docs-diff count summary on stdout",
-			},
-			Disposition:        "retain",
-			ExecutableContract: "batch docs screenshot comparisons without changing publish semantics",
-			DeletionCriterion:  "a Go or retained-JS adapter produces byte-equivalent manifests and image outputs for added, deleted, same, single-edit, and divergent screenshot samples",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "docs-diff-added-page", Description: "page exists only at head and copies the head PNG"},
-				{ID: "docs-diff-deleted-page", Description: "page exists only at base and copies the base PNG"},
-				{ID: "docs-diff-same-page", Description: "base and head rows match and no PNG is emitted"},
-				{ID: "docs-diff-row-change", Description: "row-level diff emits one composite PNG and stable manifest kind"},
-			},
-			Tranche: "retain with docs-diff.js until image-output parity can be sampled",
-		},
-		{
-			Path:               ".github/workflows/scripts/docs-diff.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-helper",
-			Callers:            []string{".github/workflows/scripts/docs-diff-run.js", "manual CLI: node docs-diff.js <base.png> <head.png> <out.png>", ".github/workflows/scripts/docs-diff.test.js"},
-			PolicyInputs:       []string{"base PNG", "head PNG", "row hash sequence", "hunk padding and denoise thresholds"},
-			PolicyOutputs:      []string{"exit code 0 with diff PNG", "exit code 3 with no output for identical render", "exit code 2 for invalid CLI arguments"},
-			Disposition:        "retain",
-			ExecutableContract: "row-align docs screenshots and render base/head composite hunks while retaining pngjs for ecosystem-specific PNG decoding",
-			DeletionCriterion:  "all pure row-diff functions and PNG render output match the existing helper over synthetic and captured docs-preview images; pngjs remains allowed unless a separate image-decoding decision replaces it",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "row-identical", Description: "identical rows return no diff and CLI exit 3"},
-				{ID: "mid-page-insertion", Description: "Myers alignment realigns after inserted rows"},
-				{ID: "global-divergence", Description: "large divergence falls back to one all-covering hunk"},
-				{ID: "png-composite", Description: "rendered base/head PNG composite is byte-equivalent"},
-			},
-			Tranche: "retain because pngjs is the explicit P11 exception; pure row logic can be split later",
-		},
-		{
-			Path:               ".github/workflows/scripts/docs-diff.test.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-contract-test",
-			Callers:            []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:       []string{"docs-diff.js pure row-diff API", "synthetic RGBA rows"},
-			PolicyOutputs:      []string{"Node test pass/fail for docs-preview visual diff contract"},
-			Disposition:        "port",
-			ExecutableContract: "preserve row hashing, Myers alignment, denoise, hunk merge, and render geometry assertions",
-			DeletionCriterion:  "Go tests cover the same row-diff sample matrix and docs-preview retains PNG parity evidence",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "hash-row-stability", Description: "equal rows hash equal and different rows do not"},
-				{ID: "hunk-padding", Description: "padding clamps and merges exactly as current tests assert"},
-				{ID: "render-geometry", Description: "base-left/head-right/gutter pixels match expected RGBA output"},
-			},
-			Tranche: "after docs-diff.js pure logic is wrapped or ported",
-		},
-		{
 			Path:               ".github/workflows/scripts/docs-preview.js",
 			Owner:              "graith-maintainers",
 			Kind:               "workflow-helper",
@@ -214,41 +166,105 @@ func P11JSSurfaceContracts() []P11JSHelperContract {
 			},
 			Tranche: "paired with docs-preview.js wrap",
 		},
-		{
-			Path:               ".github/workflows/scripts/package-lock.json",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-script-dependency-lock",
-			Callers:            []string{".github/workflows/docs-preview.yml: npm ci --prefix .github/workflows/scripts --ignore-scripts"},
-			PolicyInputs:       []string{"pinned npm dependency graph for docs-preview pngjs PNG decoding"},
-			PolicyOutputs:      []string{"integrity-locked pngjs install"},
-			Disposition:        "retain",
-			ExecutableContract: "pin pngjs with an npm integrity lock and no install scripts",
-			DeletionCriterion:  "only delete if the docs-preview PNG decode/encode path no longer needs npm dependencies or an owner-approved replacement lock exists",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "pngjs-integrity", Description: "lockfile pins pngjs 7.0.0 with integrity and no transitive packages"},
-			},
-			Tranche: "explicit P11 retained exception for pngjs",
-		},
-		{
-			Path:               ".github/workflows/scripts/package.json",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-script-dependency-manifest",
-			Callers:            []string{".github/workflows/docs-preview.yml: npm ci --prefix .github/workflows/scripts --ignore-scripts"},
-			PolicyInputs:       []string{"docs-preview script dependency declaration"},
-			PolicyOutputs:      []string{"declares pngjs as the only workflow-script package dependency"},
-			Disposition:        "retain",
-			ExecutableContract: "keep pngjs as an explicit ecosystem-specific dependency exception",
-			DeletionCriterion:  "only delete if docs-preview no longer uses pngjs or the exception is replaced by an owner-approved image decoding contract",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "pngjs-only-dependency", Description: "package manifest keeps pngjs as the sole dependency"},
-			},
-			Tranche: "explicit P11 retained exception for pngjs",
-		},
 	}
 
 	sort.Slice(contracts, func(i, j int) bool { return contracts[i].Path < contracts[j].Path })
 
 	return contracts
+}
+
+func P11DocsDiffCompatibilityRequirements() []P11CompatibilitySampleRequirement {
+	return []P11CompatibilitySampleRequirement{
+		{ID: "hash-row-stability", Description: "equal rows hash equal and different rows do not"},
+		{ID: "mid-page-insertion", Description: "Myers alignment realigns after inserted rows"},
+		{ID: "pure-deletion", Description: "deleted rows produce an empty head range"},
+		{ID: "denoise-jitter", Description: "sub-line reflow jitter is dropped while real edits remain"},
+		{ID: "hunk-padding", Description: "padding clamps and merges like the retired helper"},
+		{ID: "render-geometry", Description: "base-left/head-right/gutter pixels match expected RGBA output"},
+		{ID: "cli-identical", Description: "identical pages exit 3 and write no image"},
+		{ID: "batch-manifest", Description: "batch mode preserves manifest ordering, counts, and page kinds"},
+		{ID: "png-composite", Description: "rendered base/head PNG composite preserves decoded dimensions and pixels"},
+	}
+}
+
+func ValidateP11DocsDiffReplacement(repoRoot string, inventory cibaseline.Inventory, replacementPath string, requirements []P11CompatibilitySampleRequirement) error {
+	if err := inventory.Validate(); err != nil {
+		return fmt.Errorf("validate P0 inventory: %w", err)
+	}
+
+	surfaces := map[string]cibaseline.Surface{}
+	for _, surface := range inventory.Surfaces {
+		surfaces[surface.Path] = surface
+	}
+
+	surface, exists := surfaces[replacementPath]
+	if !exists {
+		return fmt.Errorf("missing P11 docs-diff Go replacement surface %s", replacementPath)
+	}
+
+	if surface.Kind != "go-policy-contract-test" {
+		return fmt.Errorf("P11 docs-diff replacement %s kind = %s, want go-policy-contract-test", replacementPath, surface.Kind)
+	}
+
+	if surface.Owner != "graith-maintainers" {
+		return fmt.Errorf("P11 docs-diff replacement %s owner = %s, want graith-maintainers", replacementPath, surface.Owner)
+	}
+
+	sampleIDs := map[string]bool{}
+
+	for _, requirement := range requirements {
+		if requirement.ID == "" || requirement.Description == "" {
+			return fmt.Errorf("P11 docs-diff replacement %s has incomplete compatibility sample", replacementPath)
+		}
+
+		if sampleIDs[requirement.ID] {
+			return fmt.Errorf("P11 docs-diff replacement %s has duplicate compatibility sample %s", replacementPath, requirement.ID)
+		}
+
+		sampleIDs[requirement.ID] = true
+	}
+
+	for _, want := range p11DocsDiffRequiredSampleIDs() {
+		if !sampleIDs[want] {
+			return fmt.Errorf("P11 docs-diff replacement %s is missing compatibility sample %s", replacementPath, want)
+		}
+	}
+
+	current, err := currentP11ScriptPaths(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	currentSet := map[string]bool{}
+	for _, path := range current {
+		currentSet[path] = true
+	}
+
+	for _, path := range p11DocsDiffRetiredSurfacePaths {
+		if currentSet[path] {
+			return fmt.Errorf("retired P11 docs-diff surface is still tracked: %s", path)
+		}
+
+		if _, exists := surfaces[path]; exists {
+			return fmt.Errorf("P0 inventory still references retired P11 docs-diff surface %s", path)
+		}
+	}
+
+	return nil
+}
+
+func p11DocsDiffRequiredSampleIDs() []string {
+	return []string{
+		"hash-row-stability",
+		"mid-page-insertion",
+		"pure-deletion",
+		"denoise-jitter",
+		"hunk-padding",
+		"render-geometry",
+		"cli-identical",
+		"batch-manifest",
+		"png-composite",
+	}
 }
 
 func P11RegenAuthCompatibilityRequirements() []P11CompatibilitySampleRequirement {
