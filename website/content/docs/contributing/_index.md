@@ -216,9 +216,18 @@ a release or downstream repository. A real tag requires configured macOS
 signing/notarization. The publisher prepares and validates every configured
 downstream update while the GitHub release remains a draft, then exposes the
 complete release before pushing package metadata that refers to its public URLs.
-Retries accept the already-public exact asset set and converge an interrupted
-downstream push. Dev and stable configuration must not add separately named
-rollback archives.
+Stable retries accept the already-public exact asset set and converge an
+interrupted downstream push. Dev releases keep the public `dev` release in
+place: each build uploads versioned asset names, verifies those remote bytes,
+then moves the `dev` tag and Homebrew formula to the new complete set. If dev
+upload or verification fails, the previous `dev` assets remain installable; a
+retry accepts exact matching uploaded assets and continues from there. A
+same-named dev asset with a different digest, missing digest, or incomplete
+upload state fails before promotion and must be inspected and removed as a
+single asset before rerunning. After Homebrew points at the new versioned asset
+set, the workflow prunes the legacy unversioned dev asset names so direct
+downloads cannot keep resolving to a frozen canary. Dev and stable configuration
+must not add separately named rollback archives.
 
 Before generation can succeed, the checksum-reviewed Apple xcframework for the
 selected Ghostty commit must already be published at the exact URL derived by

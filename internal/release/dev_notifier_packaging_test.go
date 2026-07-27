@@ -1,6 +1,7 @@
 package release
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -561,6 +562,19 @@ func workflowStep(job devReleaseWorkflowJob, name string) devReleaseWorkflowStep
 	return devReleaseWorkflowStep{}
 }
 
+func firstIndex(s string, needles ...string) int {
+	first := -1
+
+	for _, needle := range needles {
+		index := strings.Index(s, needle)
+		if index >= 0 && (first < 0 || index < first) {
+			first = index
+		}
+	}
+
+	return first
+}
+
 func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	workflow := loadDevReleaseWorkflow(t)
 	if strings.Contains(string(mustReadReleaseFile(t, ".github/workflows/dev-release.yml")), "darwin_amd64") {
@@ -868,6 +882,27 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		}
 	}
 
+	publishAt, homebrewAt, pruneAt := -1, -1, -1
+
+	for index, step := range publishJob.Steps {
+		switch step.Name {
+		case "Upload dev release":
+			publishAt = index
+		case "Update Homebrew tap":
+			homebrewAt = index
+		case "Prune legacy unversioned dev assets":
+			pruneAt = index
+		}
+	}
+
+	if publishAt < 0 || homebrewAt <= publishAt {
+		t.Errorf("Homebrew update can run before dev release promotion: publish=%d homebrew=%d", publishAt, homebrewAt)
+	}
+
+	if pruneAt <= homebrewAt {
+		t.Errorf("legacy asset pruning can run before Homebrew update: prune=%d homebrew=%d", pruneAt, homebrewAt)
+	}
+
 	publishScript := workflowStep(publishJob, "Upload dev release").Run
 	if strings.Contains(publishScript, "dist/*.tar.gz") || strings.Contains(publishScript, "_charm") {
 		t.Fatal("publisher uses an open archive glob or rollback asset")
@@ -877,10 +912,21 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		`gh api --paginate --slurp`,
 		`repos/$GITHUB_REPOSITORY/releases?per_page=100`,
 		`repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev`,
+		`gh api --method PATCH`,
+		`-F force=true`,
 		`-f ref=refs/tags/dev -f sha="$RELEASE_REVISION"`,
 		`gh release create dev --repo "$GITHUB_REPOSITORY"`,
+		`--draft`,
+		`gh release view dev --repo "$GITHUB_REPOSITORY" --json assets`,
+		`gh release upload dev "$path" --repo "$GITHUB_REPOSITORY"`,
+		`missing-digest`,
+		`state:*`,
+		`gh release download dev --repo "$GITHUB_REPOSITORY"`,
+		`cmp "$remote/$name" "$publish_dir/$name"`,
+		`gh release edit dev --repo "$GITHUB_REPOSITORY"`,
+		`--draft=false`,
+		`--latest=false`,
 		`--verify-tag`,
-		`gh release view dev --repo "$GITHUB_REPOSITORY"`,
 		`repos/$GITHUB_REPOSITORY/git/ref/tags/dev`,
 		`test "$published_tag_sha" = "$RELEASE_REVISION"`,
 	} {
@@ -889,7 +935,13 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"checksums.txt", "--json assets", "git/ref/heads/main", `"$current_main" != "$RELEASE_REVISION"`} {
+	for _, want := range []string{
+		`graith-dev_${GRAITH_DEV_VERSION}_checksums.txt`,
+		`graith-dev_${GRAITH_DEV_VERSION}_darwin_arm64.tar.gz`,
+		`sha256sum --check "$checksums_asset"`,
+		"git/ref/heads/main",
+		`"$current_main" != "$RELEASE_REVISION"`,
+	} {
 		if !strings.Contains(publishScript, want) {
 			t.Errorf("publisher final release step missing %q", want)
 		}
@@ -899,9 +951,31 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		t.Error("publisher suppresses release or tag mutation errors")
 	}
 
+	if strings.Contains(publishScript, "--method DELETE") || strings.Contains(publishScript, "--clobber") {
+		t.Error("publisher can create a release-absence or asset-clobber window")
+	}
+
+	pruneScript := workflowStep(publishJob, "Prune legacy unversioned dev assets").Run
+	for _, want := range []string{
+		`gh release view dev --repo "$GITHUB_REPOSITORY" --json assets`,
+		"checksums.txt",
+		"graith-dev_darwin_arm64.tar.gz",
+		"graith-dev_linux_amd64.tar.gz",
+		"graith-dev_linux_arm64.tar.gz",
+		`gh api --method DELETE "$url" --silent`,
+	} {
+		if !strings.Contains(pruneScript, want) {
+			t.Errorf("legacy asset pruning step missing %q", want)
+		}
+	}
+
 	var (
 		mainGuardAt       = strings.Index(publishScript, "git/ref/heads/main")
-		releaseMutationAt = strings.Index(publishScript, "gh api --method DELETE")
+		releaseMutationAt = firstIndex(publishScript,
+			"gh release create dev",
+			"gh release upload dev",
+			"gh api --method PATCH",
+		)
 	)
 
 	if mainGuardAt < 0 || releaseMutationAt < 0 || mainGuardAt > releaseMutationAt {
@@ -931,16 +1005,96 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 	}
 }
 
-func TestDevReleaseWorkflowPublishesWithoutCheckout(t *testing.T) {
+func TestDevReleaseWorkflowPublishesVersionedAssetsWithoutCheckout(t *testing.T) {
 	publishScript := workflowStep(loadDevReleaseWorkflow(t).Jobs["publish-dev"], "Upload dev release").Run
+
+	const version = "0.69.7-dev.1784712345"
+
+	assetNames := func() []string {
+		assets := []string{
+			"graith-dev_" + version + "_checksums.txt",
+			"graith-dev_" + version + "_darwin_arm64.tar.gz",
+			"graith-dev_" + version + "_linux_amd64.tar.gz",
+			"graith-dev_" + version + "_linux_arm64.tar.gz",
+		}
+		slices.Sort(assets)
+
+		return assets
+	}
+
+	uploadOrder := func() []string {
+		return []string{
+			"graith-dev_" + version + "_darwin_arm64.tar.gz",
+			"graith-dev_" + version + "_linux_amd64.tar.gz",
+			"graith-dev_" + version + "_linux_arm64.tar.gz",
+			"graith-dev_" + version + "_checksums.txt",
+		}
+	}
+
+	uploadEvents := func(assets []string) []string {
+		events := make([]string, 0, len(assets)*2)
+		for _, asset := range assets {
+			events = append(events, "get-release", "upload:"+asset)
+		}
+
+		return events
+	}
+
+	confirmEvents := func(assets []string) []string {
+		events := make([]string, 0, len(assets))
+		for range assets {
+			events = append(events, "get-release")
+		}
+
+		return events
+	}
+
+	downloadEvents := func(assets []string) []string {
+		events := make([]string, 0, len(assets))
+		for _, asset := range assets {
+			events = append(events, "download:"+asset)
+		}
+
+		return events
+	}
+
+	noPromotion := func(t *testing.T, events []string) {
+		t.Helper()
+
+		for _, forbidden := range []string{"create-tag", "update-tag", "edit-release", "verify-tag"} {
+			if slices.Contains(events, forbidden) {
+				t.Fatalf("publisher promoted after failure: events = %v", events)
+			}
+		}
+	}
+
+	exactPreload := func() map[string]string {
+		contents := map[string]string{
+			"graith-dev_" + version + "_darwin_arm64.tar.gz": "braw darwin\n",
+			"graith-dev_" + version + "_linux_amd64.tar.gz":  "canny amd64\n",
+			"graith-dev_" + version + "_linux_arm64.tar.gz":  "dreich arm64\n",
+		}
+
+		var checksums strings.Builder
+
+		for _, name := range uploadOrder()[:3] {
+			sum := sha256.Sum256([]byte(contents[name]))
+			fmt.Fprintf(&checksums, "%x  %s\n", sum, name)
+		}
+
+		contents["graith-dev_"+version+"_checksums.txt"] = checksums.String()
+
+		return contents
+	}
 
 	type result struct {
 		events []string
+		assets []string
 		output string
 		err    error
 	}
 
-	run := func(t *testing.T, existingRelease, existingTag bool, failAt string) result {
+	run := func(t *testing.T, existingRelease, existingTag, existingDraft bool, failAt string, preload map[string]string) result {
 		t.Helper()
 
 		work := t.TempDir()
@@ -948,12 +1102,22 @@ func TestDevReleaseWorkflowPublishesWithoutCheckout(t *testing.T) {
 			t.Fatalf("create dist: %v", err)
 		}
 
+		for name, contents := range map[string]string{
+			"graith-dev_darwin_arm64.tar.gz": "braw darwin\n",
+			"graith-dev_linux_amd64.tar.gz":  "canny amd64\n",
+			"graith-dev_linux_arm64.tar.gz":  "dreich arm64\n",
+		} {
+			// #nosec G306 -- release fixtures are local to this test's t.TempDir().
+			if err := os.WriteFile(filepath.Join(work, "dist", name), []byte(contents), 0o600); err != nil {
+				t.Fatalf("write dist fixture %s: %v", name, err)
+			}
+		}
+
 		bin := filepath.Join(work, "bin")
 		if err := os.Mkdir(bin, 0o750); err != nil {
 			t.Fatalf("create bin: %v", err)
 		}
 
-		//nolint:dupword // The embedded shell fixture necessarily repeats its fi terminator.
 		fakeGH := `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -964,13 +1128,39 @@ record() {
   fi
 }
 
-if [[ -e .git ]]; then
-  echo "publisher unexpectedly has a checkout" >&2
-  exit 90
-fi
+release_exists() {
+  [[ "$FAKE_EXISTING_RELEASE" == true || -f "$FAKE_GH_STATE/release-created" ]]
+}
 
-args="$*"
-if [[ "$1" == release ]]; then
+tag_exists() {
+  [[ "$FAKE_EXISTING_TAG" == true || -f "$FAKE_GH_STATE/tag-created" ]]
+}
+
+release_is_draft() {
+  [[ -f "$FAKE_GH_STATE/release-draft" ]]
+}
+
+release_json() {
+  assets="$(
+    shopt -s nullglob
+    for asset in "$FAKE_GH_STATE/assets"/*; do
+      name="$(basename "$asset")"
+      digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
+      api_url="https://api.github.local/assets/$name"
+      jq -n --arg name "$name" --arg digest "$digest" --arg api_url "$api_url" \
+        '{name:$name,digest:$digest,state:"uploaded",apiUrl:$api_url}'
+    done | jq -s .
+  )"
+  if release_is_draft; then
+    draft=true
+  else
+    draft=false
+  fi
+  jq -n --argjson assets "$assets" --argjson draft "$draft" \
+    '{id:2718, tag_name:"dev", draft:$draft, prerelease:true, assets:$assets}'
+}
+
+require_repo() {
   repo=""
   for ((i = 1; i <= $#; i++)); do
     if [[ "${!i}" == --repo ]]; then
@@ -982,6 +1172,16 @@ if [[ "$1" == release ]]; then
     echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2
     exit 1
   fi
+}
+
+if [[ -e .git ]]; then
+  echo "publisher unexpectedly has a checkout" >&2
+  exit 90
+fi
+
+args="$*"
+if [[ "$1" == release ]]; then
+  require_repo "$@"
 fi
 
 case "$args" in
@@ -997,36 +1197,76 @@ case "$args" in
       printf '[[]]\n'
     fi
     ;;
-  *"--method DELETE"*"/releases/2718"*)
-    [[ "$FAKE_EXISTING_RELEASE" == true ]] || exit 91
-    record delete-release
+  *"releases/tags/dev"*)
+    release_exists || exit 91
+    if release_is_draft; then
+      exit 91
+    fi
+    record get-release-api
+    release_json
     ;;
   *"git/matching-refs/tags/dev"*)
     record list-tags
-    if [[ "$FAKE_EXISTING_TAG" == true ]]; then
-      printf '%s\n' "$RELEASE_REVISION"
+    if tag_exists; then
+      jq -n --arg sha "$RELEASE_REVISION" \
+        '[{ref:"refs/tags/dev", object:{sha:$sha}}]'
     fi
     ;;
-  *"--method DELETE"*"git/refs/tags/dev"*)
-    [[ "$FAKE_EXISTING_TAG" == true ]] || exit 92
-    record delete-tag
+  *"--method PATCH"*"git/refs/tags/dev"*)
+    tag_exists || exit 92
+    record update-tag
+    : > "$FAKE_GH_STATE/tag-created"
     ;;
   *"--method POST"*"git/refs"*)
     record create-tag
     : > "$FAKE_GH_STATE/tag-created"
     ;;
-  "release create dev"*)
-    [[ -f "$FAKE_GH_STATE/tag-created" ]] || exit 93
-    record create-release
-    : > "$FAKE_GH_STATE/release-created"
+	  "release create dev"*)
+	    [[ -f "$FAKE_GH_STATE/tag-created" ]] || exit 93
+	    [[ "$args" == *"--draft"* ]] || exit 94
+	    record create-release
+	    : > "$FAKE_GH_STATE/release-created"
+	    : > "$FAKE_GH_STATE/release-draft"
+	    ;;
+	  release\ view\ dev*)
+	    release_exists || exit 97
+	    record get-release
+	    release_json
+	    ;;
+	  release\ upload\ dev*)
+	    [[ "$args" != *"--clobber"* ]] || exit 95
+    release_exists || exit 96
+    src="$4"
+    asset="$(basename "$src")"
+    record "upload:$asset"
+    cp "$src" "$FAKE_GH_STATE/assets/$asset"
     ;;
-  "release view dev"*)
-    [[ -f "$FAKE_GH_STATE/release-created" ]] || exit 94
-    record view-release
-    printf '%s\n' checksums.txt \
-      graith-dev_darwin_arm64.tar.gz \
-      graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz
+  release\ download\ dev*)
+    release_exists || exit 97
+    pattern=""
+    dir=""
+    for ((i = 1; i <= $#; i++)); do
+      case "${!i}" in
+        --pattern)
+          next=$((i + 1))
+          pattern="${!next}"
+          ;;
+        --dir)
+          next=$((i + 1))
+          dir="${!next}"
+          ;;
+      esac
+    done
+    [[ -n "$pattern" && -n "$dir" ]] || exit 98
+    record "download:$pattern"
+    cp "$FAKE_GH_STATE/assets/$pattern" "$dir/$pattern"
     ;;
+	  "release edit dev"*)
+	    release_exists || exit 99
+	    [[ "$args" == *"--draft=false"* ]] || exit 100
+	    record edit-release
+	    rm -f "$FAKE_GH_STATE/release-draft"
+	    ;;
   *"git/ref/tags/dev"*)
     [[ -f "$FAKE_GH_STATE/tag-created" ]] || exit 95
     record verify-tag
@@ -1050,6 +1290,39 @@ esac
 			t.Fatalf("create fake gh state: %v", err)
 		}
 
+		assets := filepath.Join(state, "assets")
+		if err := os.Mkdir(assets, 0o750); err != nil {
+			t.Fatalf("create fake gh asset state: %v", err)
+		}
+
+		if existingDraft {
+			// #nosec G306 -- fake release state is local to this test.
+			if err := os.WriteFile(filepath.Join(state, "release-draft"), nil, 0o600); err != nil {
+				t.Fatalf("write fake draft release state: %v", err)
+			}
+		}
+
+		if existingRelease {
+			for _, name := range []string{
+				"checksums.txt",
+				"graith-dev_darwin_arm64.tar.gz",
+				"graith-dev_linux_amd64.tar.gz",
+				"graith-dev_linux_arm64.tar.gz",
+			} {
+				// #nosec G306 -- existing release fixtures are local to this test.
+				if err := os.WriteFile(filepath.Join(assets, name), []byte("auld "+name+"\n"), 0o600); err != nil {
+					t.Fatalf("write existing asset %s: %v", name, err)
+				}
+			}
+		}
+
+		for name, contents := range preload {
+			// #nosec G306 -- preloaded release fixtures are local to this test.
+			if err := os.WriteFile(filepath.Join(assets, name), []byte(contents), 0o600); err != nil {
+				t.Fatalf("write preloaded asset %s: %v", name, err)
+			}
+		}
+
 		command := exec.Command("bash", "-c", publishScript)
 		command.Dir = work
 		command.Env = []string{
@@ -1060,6 +1333,7 @@ esac
 			"FAKE_GH_FAIL_AT=" + failAt,
 			"FAKE_GH_STATE=" + state,
 			"GITHUB_REPOSITORY=d0ugal/bothy",
+			"GRAITH_DEV_VERSION=" + version,
 			"RELEASE_REVISION=3fdb037103f6f32ef9d35210a7d920d44d2d18b7",
 		}
 		output, commandErr := command.CombinedOutput()
@@ -1069,38 +1343,75 @@ esac
 			t.Fatalf("read fake gh events: %v", err)
 		}
 
+		assetEntries, err := os.ReadDir(assets)
+		if err != nil {
+			t.Fatalf("read fake gh asset state: %v", err)
+		}
+
+		assetNames := make([]string, 0, len(assetEntries))
+		for _, entry := range assetEntries {
+			assetNames = append(assetNames, entry.Name())
+		}
+
+		slices.Sort(assetNames)
+
 		return result{
 			events: strings.Fields(string(eventData)),
+			assets: assetNames,
 			output: string(output),
 			err:    commandErr,
 		}
 	}
 
-	wantFirstPublish := []string{
-		"get-main", "list-releases", "list-tags", "create-tag",
-		"create-release", "view-release", "verify-tag",
-	}
-	wantOrphanReplacement := []string{
-		"get-main", "list-releases", "delete-release", "list-tags", "create-tag",
-		"create-release", "view-release", "verify-tag",
-	}
-	wantReleaseAndTagReplacement := []string{
-		"get-main", "list-releases", "delete-release", "list-tags", "delete-tag", "create-tag",
-		"create-release", "view-release", "verify-tag",
-	}
+	newAssets := assetNames()
+	newUploadOrder := uploadOrder()
+	wantFirstPublish := slices.Concat(
+		[]string{"get-main", "list-releases", "list-tags", "create-tag", "create-release"},
+		uploadEvents(newUploadOrder),
+		downloadEvents(newAssets),
+		[]string{"list-tags", "update-tag", "edit-release", "verify-tag"},
+	)
+	wantNormalUpdate := slices.Concat(
+		[]string{"get-main", "list-releases"},
+		uploadEvents(newUploadOrder),
+		downloadEvents(newAssets),
+		[]string{"list-tags", "update-tag", "edit-release", "verify-tag"},
+	)
+	wantMissingTagRepair := slices.Concat(
+		[]string{"get-main", "list-releases"},
+		uploadEvents(newUploadOrder),
+		downloadEvents(newAssets),
+		[]string{"list-tags", "create-tag", "edit-release", "verify-tag"},
+	)
+	wantExactRetry := slices.Concat(
+		[]string{"get-main", "list-releases"},
+		confirmEvents(newUploadOrder),
+		downloadEvents(newAssets),
+		[]string{"list-tags", "update-tag", "edit-release", "verify-tag"},
+	)
 
 	for _, test := range []struct {
 		name            string
 		existingRelease bool
 		existingTag     bool
+		existingDraft   bool
+		preload         map[string]string
 		want            []string
 	}{
 		{name: "first publish", want: wantFirstPublish},
-		{name: "orphaned draft", existingRelease: true, want: wantOrphanReplacement},
-		{name: "replace release and tag", existingRelease: true, existingTag: true, want: wantReleaseAndTagReplacement},
+		{name: "normal update", existingRelease: true, existingTag: true, want: wantNormalUpdate},
+		{name: "retry existing draft", existingRelease: true, existingTag: true, existingDraft: true, want: wantNormalUpdate},
+		{
+			name:            "retry exact uploaded assets",
+			existingRelease: true,
+			existingTag:     true,
+			preload:         exactPreload(),
+			want:            wantExactRetry,
+		},
+		{name: "repair missing tag", existingRelease: true, want: wantMissingTagRepair},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := run(t, test.existingRelease, test.existingTag, "")
+			got := run(t, test.existingRelease, test.existingTag, test.existingDraft, "", test.preload)
 
 			if got.err != nil {
 				t.Fatalf("run checkout-free publisher: %v\n%s", got.err, got.output)
@@ -1109,23 +1420,47 @@ esac
 			if !slices.Equal(got.events, test.want) {
 				t.Fatalf("publisher events = %v, want %v", got.events, test.want)
 			}
+
+			for _, name := range newAssets {
+				if !slices.Contains(got.assets, name) {
+					t.Fatalf("published assets = %v, want %s", got.assets, name)
+				}
+			}
 		})
 	}
 
-	for index, failAt := range wantReleaseAndTagReplacement[2:] {
-		t.Run("fails closed at "+failAt, func(t *testing.T) {
-			got := run(t, true, true, failAt)
+	for _, test := range []struct {
+		name      string
+		failAt    string
+		noPromote bool
+	}{
+		{name: "partial upload failure", failAt: "upload:" + newUploadOrder[1], noPromote: true},
+		{name: "remote verification failure", failAt: "download:" + newAssets[2], noPromote: true},
+		{name: "tag update failure", failAt: "update-tag"},
+		{name: "release edit failure", failAt: "edit-release"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := run(t, true, true, false, test.failAt, nil)
 
 			if got.err == nil {
-				t.Fatalf("publisher ignored %s failure", failAt)
+				t.Fatalf("publisher ignored %s failure", test.failAt)
 			}
 
-			want := wantReleaseAndTagReplacement[:index+3]
-			if !slices.Equal(got.events, want) {
-				t.Fatalf("publisher events after %s failure = %v, want %v", failAt, got.events, want)
+			if test.noPromote {
+				noPromotion(t, got.events)
 			}
 		})
 	}
+
+	t.Run("mismatched retry asset fails before promotion", func(t *testing.T) {
+		got := run(t, true, true, false, "", map[string]string{newAssets[0]: "thrawn checksum\n"})
+
+		if got.err == nil {
+			t.Fatal("publisher accepted a mismatched existing asset")
+		}
+
+		noPromotion(t, got.events)
+	})
 }
 
 func TestDevHomebrewTapCredentialsAreScopedToGitPrompts(t *testing.T) {
@@ -1277,6 +1612,16 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		t.Error("Linux publisher does not calculate final archive SHA-256 values")
 	}
 
+	for _, required := range []string{
+		`DARWIN_ARM64_ASSET="graith-dev_${VERSION}_darwin_arm64.tar.gz"`,
+		`LINUX_AMD64_ASSET="graith-dev_${VERSION}_linux_amd64.tar.gz"`,
+		`LINUX_ARM64_ASSET="graith-dev_${VERSION}_linux_arm64.tar.gz"`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("Homebrew update step does not bind versioned asset name %q", required)
+		}
+	}
+
 	if strings.Contains(script, "sed -i") {
 		t.Error("macOS dev-release workflow still uses non-portable in-place sed")
 	}
@@ -1305,6 +1650,10 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		t.Fatal("generated Homebrew formula does not fail closed on unsupported Intel macOS")
 	}
 
+	if !strings.Contains(formula, "${DARWIN_ARM64_ASSET}") {
+		t.Fatal("generated Homebrew formula does not use the versioned Darwin asset")
+	}
+
 	linuxAt := strings.Index(formula, "on_linux do")
 
 	installAt := strings.Index(formula, "def install")
@@ -1316,9 +1665,9 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 
 	for _, required := range []string{
 		"if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?",
-		"graith-dev_linux_amd64.tar.gz",
+		"${LINUX_AMD64_ASSET}",
 		"elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?",
-		"graith-dev_linux_arm64.tar.gz",
+		"${LINUX_ARM64_ASSET}",
 		"else", `odie "graith-dev supports only Linux amd64/arm64"`,
 	} {
 		if !strings.Contains(linuxFormula, required) {
