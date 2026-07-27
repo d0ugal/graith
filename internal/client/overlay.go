@@ -271,7 +271,7 @@ const draftPRMarker = "D"
 
 // displayPR is the compact per-row PR/CI token for the overlay list, e.g.
 // "#56 19/22 1✗" (CI failing), "#56 16/22" (CI running), "#56 ⚠" (conflict),
-// "#1615 ✓" (passing), "#1743D ✓" (draft passing), "#583 merged". While CI is
+// "#1615 ✓" (passing), "#1743 D ✓" (draft passing), "#583 merged". While CI is
 // running/failing the count of passed vs total checks replaces the bare indicator
 // so progress is visible; it falls back to "·"/"✗" when no count is available.
 // The review decision is a separate column (displayReview) so it can carry its
@@ -290,7 +290,7 @@ func displayPR(s protocol.SessionInfo) string {
 	case "closed":
 		return out + " closed"
 	case "draft":
-		out += draftPRMarker
+		out += " " + draftPRMarker
 	}
 
 	if pr.Conflicting {
@@ -330,14 +330,14 @@ func renderPRCell(s protocol.SessionInfo, width int, baseStyle lipgloss.Style) s
 
 	number := fmt.Sprintf("#%d", s.PullRequest.Number)
 
-	prefix := number + draftPRMarker
+	prefix := number + " " + draftPRMarker
 	if !strings.HasPrefix(padded, prefix) {
 		return baseStyle.Render(padded)
 	}
 
 	suffix := strings.TrimPrefix(padded, prefix)
 
-	out := baseStyle.Render(number) + draftPRMarkerStyle().Render(draftPRMarker)
+	out := baseStyle.Render(number+" ") + draftPRMarkerStyle().Render(draftPRMarker)
 	if suffix != "" {
 		out += baseStyle.Render(suffix)
 	}
@@ -346,7 +346,7 @@ func renderPRCell(s protocol.SessionInfo, width int, baseStyle lipgloss.Style) s
 }
 
 func draftPRMarkerStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Underline(true)
+	return lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
 }
 
 // reviewActiveDecision returns a PR's review decision only while it is live (an
