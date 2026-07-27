@@ -167,6 +167,7 @@ var registeredTypes = []any{
 	IncludedRepoInfo{},
 	DetachedMsg{},
 	ErrorMsg{},
+	ReloadedMsg{},
 	ScreenPreviewMsg{},
 	ScreenPreviewResponseMsg{},
 	ScreenSnapshotMsg{},
@@ -342,6 +343,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"IncludedRepoInfo": {SwiftRequired, "IncludedRepoInfo"},
 	"DetachedMsg":      {SwiftRequired, "DetachedMsg"},
 	"ErrorMsg":         {SwiftRequired, "ErrorMsg"},
+	"ReloadedMsg":      {SwiftNA, ""}, // local-only daemon reload response
 
 	// Screen peek.
 	"ScreenPreviewResponseMsg":  {SwiftRequired, "ScreenPreviewResponseMsg"},

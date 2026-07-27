@@ -22,6 +22,36 @@ import (
 
 func allowDaemonLifecycleMutation(string) error { return nil }
 
+func TestPrintDaemonReloadResultReportsRemoteDegradationWithoutError(t *testing.T) {
+	var rendered bytes.Buffer
+
+	previousOut := out
+	out = output.NewWithWriter(false, &rendered)
+
+	t.Cleanup(func() { out = previousOut })
+
+	resp := payloadEnv("reloaded", protocol.ReloadedMsg{
+		Applied:              true,
+		RemoteDegraded:       true,
+		RemoteState:          "closed",
+		RemoteDegradedReason: "listener setup: tailscale status (is tailscaled running?): not running",
+	})
+
+	if err := printDaemonReloadResult(resp); err != nil {
+		t.Fatalf("printDaemonReloadResult() error = %v", err)
+	}
+
+	got := rendered.String()
+	for _, want := range []string{
+		"Config reloaded\n",
+		"Remote access degraded and closed: listener setup: tailscale status",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("reload output = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestExecUpgradeRejectsGoTestBeforeDial(t *testing.T) {
 	setupUpgradeTest(t)
 

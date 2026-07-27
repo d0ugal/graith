@@ -108,9 +108,11 @@ recovery commands.
 Reload configuration without restarting the daemon. Invalid settings or a
 non-optional runtime apply failure return an error and leave the previous config
 generation in place. Remote transport replacement closes the old listener first
-and stays closed if the replacement fails; the reload reports that degraded
-remote state while unrelated settings still apply. Fix the setting and reload
-again through the local socket. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
+and stays closed if the replacement fails; the command still succeeds after the
+config generation is applied and reports remote access as degraded and closed.
+Fix the setting or dependency, then reload again through the local socket. In
+`remote.mode = "interface"`, this includes starting `tailscaled` and rerunning
+`gr daemon reload`. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
 
 ## macOS user service
 

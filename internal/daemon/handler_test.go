@@ -3997,6 +3997,55 @@ func TestCoverReloadLocalHuman(t *testing.T) {
 	h.expectType(t, "reloaded")
 }
 
+func TestCoverReloadReportsInterfaceTailscaleUnavailableAsDegraded(t *testing.T) {
+	h := newTestHarness(t)
+	factory := &fakeRemoteFactory{
+		failMode: "interface",
+		failErr:  errors.New("tailscale status (is tailscaled running?): dial unix /var/run/tailscaled.socket: connect: no such file or directory"),
+	}
+
+	h.sm.configReloadMu.Lock()
+	h.sm.remote = newRemoteController(t.Context(), h.sm, h.sm.paths.DataDir)
+	h.sm.remote.newListener = factory.new
+	h.sm.configReloadMu.Unlock()
+
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	h.sm.configFile = cfgPath
+
+	const cfg = `
+branch_prefix = "canny/"
+
+[remote]
+enabled = true
+mode = "interface"
+port = 4823
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h.sendControl(t, "reload", struct{}{})
+
+	env := h.expectType(t, "reloaded")
+
+	var result protocol.ReloadedMsg
+	if err := protocol.DecodePayload(env, &result); err != nil {
+		t.Fatalf("DecodePayload() error = %v", err)
+	}
+
+	if !result.Applied || !result.RemoteDegraded || result.RemoteState != "closed" {
+		t.Fatalf("reload result = %+v, want applied with closed remote degradation", result)
+	}
+
+	if !strings.Contains(result.RemoteDegradedReason, "tailscale status") {
+		t.Fatalf("RemoteDegradedReason = %q, want tailscale status failure", result.RemoteDegradedReason)
+	}
+
+	if got := h.sm.Config().BranchPrefix; got != "canny/" {
+		t.Fatalf("BranchPrefix = %q, want unrelated config to apply", got)
+	}
+}
+
 func TestCoverReloadRejectsAgent(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "thrawn-reload", "thrawn", "tok-rl")

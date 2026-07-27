@@ -58,8 +58,29 @@ func (s orchestratorRuntimeSnapshot) live() bool {
 
 // ReloadConfig loads the config from disk and swaps it in, logging what changed.
 func (sm *SessionManager) ReloadConfig() error {
+	_, err := sm.ReloadConfigDetailed()
+
+	return err
+}
+
+// ReloadConfigResult describes a completed config reload. A non-empty
+// RemoteDegradedReason means the config generation was published, but optional
+// remote access is closed until a later reload can prepare it successfully.
+type ReloadConfigResult struct {
+	RemoteDegradedReason string
+}
+
+// RemoteDegraded reports whether optional remote access failed while the rest
+// of the config generation still applied.
+func (r ReloadConfigResult) RemoteDegraded() bool {
+	return r.RemoteDegradedReason != ""
+}
+
+// ReloadConfigDetailed is ReloadConfig with recoverable subsystem degradation
+// surfaced separately from hard apply errors.
+func (sm *SessionManager) ReloadConfigDetailed() (ReloadConfigResult, error) {
 	if err := sm.beginLifecycleOperation(); err != nil {
-		return err
+		return ReloadConfigResult{}, err
 	}
 	defer sm.endLifecycleOperation()
 
@@ -70,7 +91,7 @@ func (sm *SessionManager) ReloadConfig() error {
 
 	cfg, err := config.LoadOrDefault(sm.configFile)
 	if err != nil {
-		return err
+		return ReloadConfigResult{}, err
 	}
 
 	return sm.applyConfigLocked(cfg)
@@ -157,6 +178,12 @@ func (sm *SessionManager) orchestratorDisableError(id string, err error) error {
 }
 
 func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
+	_, err := sm.applyConfigDetailed(newCfg)
+
+	return err
+}
+
+func (sm *SessionManager) applyConfigDetailed(newCfg *config.Config) (ReloadConfigResult, error) {
 	// Applying a config can include process signaling. Serialize whole
 	// applications without holding sm.mu across that slow boundary so a newer
 	// reload cannot publish over (or be overwritten by) a failed transition.
@@ -168,7 +195,7 @@ func (sm *SessionManager) applyConfig(newCfg *config.Config) error {
 
 // applyConfigLocked applies one config generation. The caller must hold
 // configReloadMu, including while loading that generation from disk.
-func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
+func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) (ReloadConfigResult, error) {
 	sm.mu.RLock()
 	old := sm.cfg
 	oldDataDir := old.DataDir
@@ -177,7 +204,7 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 	sm.mu.RUnlock()
 
 	if newCfg.DataDir != oldDataDir {
-		return fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, newCfg.DataDir)
+		return ReloadConfigResult{}, fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, newCfg.DataDir)
 	}
 
 	var (
@@ -219,7 +246,7 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 			// and this check. In that case the desired runtime state was reached and
 			// the disable can still commit.
 			if !sm.orchestratorStoppedSince(orchestrator.id) {
-				return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, fmt.Errorf("stop session: %w", err)))
+				return ReloadConfigResult{}, rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, fmt.Errorf("stop session: %w", err)))
 			}
 		}
 	}
@@ -227,11 +254,11 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 	if transitioningOrchestratorOff && orchestrator.id != "" && !orchestrator.live() {
 		switch orchestrator.status {
 		case StatusCreating:
-			return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is being created; retry reload")))
+			return ReloadConfigResult{}, rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is being created; retry reload")))
 		case StatusDeleting:
-			return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is being deleted; retry reload")))
+			return ReloadConfigResult{}, rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is being deleted; retry reload")))
 		case StatusRunning:
-			return rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is marked running without a live process; retry reload after recovery")))
+			return ReloadConfigResult{}, rejectPreparedRemote(sm.orchestratorDisableError(orchestrator.id, errors.New("session is marked running without a live process; retry reload after recovery")))
 		}
 	}
 
@@ -246,7 +273,7 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 				id = orchestrator.id
 			}
 
-			return rejectPreparedRemote(sm.orchestratorDisableError(id, errors.New("session lifecycle changed during reload; retry reload")))
+			return ReloadConfigResult{}, rejectPreparedRemote(sm.orchestratorDisableError(id, errors.New("session lifecycle changed during reload; retry reload")))
 		}
 	}
 
@@ -467,10 +494,10 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) error {
 	}
 
 	if remotePrepareErr != nil {
-		return fmt.Errorf("configuration applied with remote access degraded and closed: %w", remotePrepareErr)
+		return ReloadConfigResult{RemoteDegradedReason: remotePrepareErr.Error()}, nil
 	}
 
-	return nil
+	return ReloadConfigResult{}, nil
 }
 
 // applyLiveInputDelay pushes a reloaded [lifecycle] input_delay to every live

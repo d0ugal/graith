@@ -2326,6 +2326,40 @@
       ]
     },
     {
+      "name": "ReloadedMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "applied",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "remote_degraded",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "remote_state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "remote_degraded_reason",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "RepoEntry",
       "swift": "required",
       "swift_type": "RepoEntry",

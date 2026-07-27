@@ -77,10 +77,16 @@ type fakeRemoteFactory struct {
 	configs   []config.RemoteConfig
 	listeners []*fakeRemoteListener
 	failPort  int
+	failMode  string
+	failErr   error
 	whoIs     func(context.Context, string) (*TailnetIdentity, error)
 }
 
 func (f *fakeRemoteFactory) new(_ context.Context, cfg config.RemoteConfig, _ string) (RemoteListener, error) {
+	if cfg.Mode == f.failMode {
+		return nil, f.failErr
+	}
+
 	l := &fakeRemoteListener{whoIs: f.whoIs}
 	if cfg.Port == f.failPort {
 		l.listenErr = errors.New("braw bind failed")
@@ -334,9 +340,13 @@ func TestRemoteRuntimeReloadRetainsConsumedAuthKeyUntilReplacement(t *testing.T)
 	replacement.Remote = cloneRemoteConfig(changed.Remote)
 	replacement.Remote.Hostname = "croft"
 
-	err := sm.applyConfig(&replacement)
-	if err == nil || !strings.Contains(err.Error(), "read auth_key_file") {
-		t.Fatalf("replacement error = %v, want unreadable auth_key_file", err)
+	result, err := sm.applyConfigDetailed(&replacement)
+	if err != nil {
+		t.Fatalf("replacement hard error = %v, want degraded reload result", err)
+	}
+
+	if !result.RemoteDegraded() || !strings.Contains(result.RemoteDegradedReason, "read auth_key_file") {
+		t.Fatalf("replacement result = %+v, want unreadable auth_key_file degradation", result)
 	}
 
 	sm.mu.RLock()
@@ -423,7 +433,7 @@ func TestRemoteRuntimeAllowlistTightenAndExpand(t *testing.T) {
 	}
 }
 
-func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T) {
+func TestRemoteRuntimeReplacementFailureClosesOldAndReportsDegradedConfig(t *testing.T) {
 	factory := &fakeRemoteFactory{failPort: 4924}
 	initial := remoteRuntimeTestConfig(true)
 	sm := newRemoteRuntimeTestSM(t, initial, factory)
@@ -451,9 +461,13 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 	broken.Remote.Port = factory.failPort
 	broken.BranchPrefix = "braw/"
 
-	err = sm.applyConfig(&broken)
-	if err == nil || !strings.Contains(err.Error(), "configuration applied with remote access degraded and closed") {
-		t.Fatalf("replacement error = %v, want explicit degraded-application error", err)
+	result, err := sm.applyConfigDetailed(&broken)
+	if err != nil {
+		t.Fatalf("replacement hard error = %v, want degraded reload result", err)
+	}
+
+	if !result.RemoteDegraded() || !strings.Contains(result.RemoteDegradedReason, "listen: braw bind failed") {
+		t.Fatalf("replacement result = %+v, want explicit degraded listener failure", result)
 	}
 
 	if !strings.Contains(logs.String(), "remote runtime degraded") {
@@ -490,10 +504,13 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 
 	unrelated.BranchPrefix = "canny/"
 
-	err = sm.applyConfig(&unrelated)
+	result, err = sm.applyConfigDetailed(&unrelated)
+	if err != nil {
+		t.Fatalf("unchanged broken remote reload hard error = %v, want degraded reload result", err)
+	}
 
-	if err == nil || !strings.Contains(err.Error(), "remote access degraded") {
-		t.Fatalf("unchanged broken remote reload error = %v, want degraded error", err)
+	if !result.RemoteDegraded() || !strings.Contains(result.RemoteDegradedReason, "listen: braw bind failed") {
+		t.Fatalf("unchanged broken remote reload result = %+v, want degraded listener failure", result)
 	}
 
 	sm.mu.RLock()
@@ -512,6 +529,54 @@ func TestRemoteRuntimeReplacementFailureClosesOldAndRollsBackConfig(t *testing.T
 
 	if sm.remote.runtime == nil || sm.remote.runtime.generation <= oldGeneration {
 		t.Fatalf("retry runtime = %+v, want a newer active generation", sm.remote.runtime)
+	}
+}
+
+func TestReloadConfigInterfaceModeTailscaleUnavailableAppliesUnrelatedConfig(t *testing.T) {
+	factory := &fakeRemoteFactory{
+		failMode: "interface",
+		failErr:  errors.New("tailscale status (is tailscaled running?): dial unix /var/run/tailscaled.socket: connect: no such file or directory"),
+	}
+	initial := remoteRuntimeTestConfig(false)
+	sm := newRemoteRuntimeTestSM(t, initial, factory)
+
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	sm.configFile = cfgPath
+
+	const reloaded = `
+branch_prefix = "canny/"
+
+[remote]
+enabled = true
+mode = "interface"
+port = 4823
+`
+	if err := os.WriteFile(cfgPath, []byte(reloaded), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := sm.ReloadConfigDetailed()
+	if err != nil {
+		t.Fatalf("ReloadConfigDetailed() hard error = %v, want degraded reload result", err)
+	}
+
+	if !result.RemoteDegraded() || !strings.Contains(result.RemoteDegradedReason, "tailscale status") {
+		t.Fatalf("reload result = %+v, want tailscale degradation", result)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if sm.cfg.BranchPrefix != "canny/" {
+		t.Fatalf("BranchPrefix = %q, want unrelated config to apply", sm.cfg.BranchPrefix)
+	}
+
+	if !sm.cfg.Remote.Enabled || sm.cfg.Remote.Mode != "interface" {
+		t.Fatalf("remote config = %+v, want interface mode candidate published", sm.cfg.Remote)
+	}
+
+	if sm.remoteGeneration != 0 || sm.remoteTLSPin != "" || sm.remote.runtime != nil {
+		t.Fatalf("remote state generation=%d pin=%q runtime=%v, want closed degraded remote access", sm.remoteGeneration, sm.remoteTLSPin, sm.remote.runtime)
 	}
 }
 

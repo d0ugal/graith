@@ -658,6 +658,13 @@ type ErrorMsg struct {
 	Message string `json:"message"`
 }
 
+type ReloadedMsg struct {
+	Applied              bool   `json:"applied"`
+	RemoteDegraded       bool   `json:"remote_degraded,omitempty"`
+	RemoteState          string `json:"remote_state,omitempty"`
+	RemoteDegradedReason string `json:"remote_degraded_reason,omitempty"`
+}
+
 type ScreenPreviewMsg struct {
 	SessionID string `json:"session_id"`
 }
