@@ -28,7 +28,12 @@ func FuzzGhosttyHelperWrite(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer term.Close()
+
+		t.Cleanup(func() {
+			if err := term.Close(); err != nil {
+				t.Errorf("close terminal: %v", err)
+			}
+		})
 
 		if _, err := term.Write(input); err != nil {
 			// A helper exit is a contained native failure and therefore a useful
@@ -36,6 +41,7 @@ func FuzzGhosttyHelperWrite(f *testing.F) {
 			// cache without bringing down the parent test process.
 			t.Fatal(err)
 		}
+
 		if _, err := term.Snapshot(); err != nil {
 			t.Fatal(err)
 		}
@@ -49,6 +55,7 @@ func FuzzGhosttySnapshotDecoder(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
+
 	f.Add(valid)
 	f.Add([]byte("thrawn"))
 
@@ -56,6 +63,7 @@ func FuzzGhosttySnapshotDecoder(f *testing.F) {
 		if len(payload) > 1024*1024 {
 			t.Skip()
 		}
+
 		_, _ = decodeGhosttySnapshot(payload)
 	})
 }
@@ -69,6 +77,7 @@ func FuzzGhosttyRequestDecoder(f *testing.F) {
 		if len(frame) > ghosttyMaxRequestBytes+12 {
 			t.Skip()
 		}
+
 		_, _, _ = readGhosttyRequest(bytes.NewReader(frame))
 	})
 }

@@ -45,6 +45,7 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	got, err := decodeGhosttySnapshot(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -55,9 +56,11 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 		got.CursorVisible != want.CursorVisible {
 		t.Fatalf("snapshot metadata = %+v, want %+v", got, want)
 	}
+
 	if len(got.Cells) != len(want.Cells) {
 		t.Fatalf("snapshot cells = %d, want %d", len(got.Cells), len(want.Cells))
 	}
+
 	for i := range want.Cells {
 		if got.Cells[i] != want.Cells[i] {
 			t.Errorf("cell %d = %+v, want %+v", i, got.Cells[i], want.Cells[i])
@@ -452,6 +455,7 @@ func TestGhosttyHelperExitDuringEveryOperation(t *testing.T) {
 
 func TestGhosttyExchangeTimeoutPoisonsConnection(t *testing.T) {
 	started := time.Now()
+
 	err := ghosttyRunScriptedExchangeWithTimeout(
 		t,
 		ghosttyOpWrite,
@@ -459,12 +463,14 @@ func TestGhosttyExchangeTimeoutPoisonsConnection(t *testing.T) {
 		25*time.Millisecond,
 		func(conn net.Conn) {
 			var one [1]byte
+
 			_, _ = conn.Read(one[:])
 		},
 	)
 	if !errors.Is(err, errGhosttyHelperTimeout) {
 		t.Fatalf("exchange error = %v, want timeout", err)
 	}
+
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("timeout took %v, want bounded failure", elapsed)
 	}
@@ -472,12 +478,14 @@ func TestGhosttyExchangeTimeoutPoisonsConnection(t *testing.T) {
 
 func TestGhosttyNativeFailureIsClassifiedAndPrivate(t *testing.T) {
 	terminalData := "braw-terminal-secret credential=dreich /private/croft/session.log"
+
 	err := ghosttyRunScriptedExchange(t, ghosttyOpWrite, []byte(terminalData), func(conn net.Conn) {
 		_, _ = conn.Write(ghosttyTestReply(ghosttyOpWrite, ghosttyStatusNative, nil))
 	})
 	if !errors.Is(err, errGhosttyHelperNative) {
 		t.Fatalf("exchange error = %v, want native failure", err)
 	}
+
 	if strings.Contains(err.Error(), terminalData) {
 		t.Fatalf("native error exposed terminal bytes: %q", err)
 	}
@@ -491,12 +499,14 @@ func TestGhosttyChildEnvironmentIsAllowlisted(t *testing.T) {
 	t.Setenv("GORACE", "halt_on_error=1")
 
 	env := ghosttyChildEnvironment()
+
 	joined := strings.Join(env, "\n")
 	for _, forbidden := range []string{"GRAITH_SECRET_CREDENTIAL", "dreich-secret", "HOME=", "/private/croft", "DYLD_"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("helper environment contains %q: %q", forbidden, joined)
 		}
 	}
+
 	for _, required := range []string{ghosttyHelperEnv + "=1", "ASAN_OPTIONS=abort_on_error=1", "GORACE=halt_on_error=1"} {
 		if !slices.Contains(env, required) {
 			t.Errorf("helper environment missing %q: %q", required, env)
@@ -509,14 +519,23 @@ func TestGhosttySocketpairIsCloseOnExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(fds[0])
-	defer unix.Close(fds[1])
+
+	t.Cleanup(func() {
+		if err := unix.Close(fds[0]); err != nil {
+			t.Errorf("close parent socket: %v", err)
+		}
+
+		if err := unix.Close(fds[1]); err != nil {
+			t.Errorf("close child socket: %v", err)
+		}
+	})
 
 	for _, fd := range fds {
 		flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if flags&unix.FD_CLOEXEC == 0 {
 			t.Errorf("socket fd %d is inheritable", fd)
 		}
@@ -525,16 +544,24 @@ func TestGhosttySocketpairIsCloseOnExec(t *testing.T) {
 
 func TestGhosttyProcessLimiterBoundsAndReleases(t *testing.T) {
 	limiter := newGhosttyProcessLimiter(2)
-	if !limiter.acquire() || !limiter.acquire() {
+	if !limiter.acquire() {
+		t.Fatal("limiter rejected the first available slot")
+	}
+
+	if !limiter.acquire() {
 		t.Fatal("limiter rejected an available slot")
 	}
+
 	if limiter.acquire() {
 		t.Fatal("limiter exceeded its process bound")
 	}
+
 	limiter.release()
+
 	if !limiter.acquire() {
 		t.Fatal("limiter did not reuse a released slot")
 	}
+
 	limiter.release()
 	limiter.release()
 }
@@ -544,21 +571,32 @@ func TestGhosttyHelperExecutesPinnedSelfImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer source.Close()
+
+	t.Cleanup(func() {
+		if err := source.Close(); err != nil {
+			t.Errorf("close source executable: %v", err)
+		}
+	})
+
 	dir := t.TempDir()
 	targetPath := filepath.Join(dir, "graith-pinned")
-	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+
+	target, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700) //nolint:gosec // G302: test fixture must be owner-executable.
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := io.Copy(target, source); err != nil {
 		_ = target.Close()
+
 		t.Fatal(err)
 	}
+
 	if err := target.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +608,8 @@ func TestGhosttyHelperExecutesPinnedSelfImage(t *testing.T) {
 			if err := os.Remove(targetPath); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(targetPath, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+
+			if err := os.WriteFile(targetPath, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil { //nolint:gosec // G306: replacement fixture must remain executable.
 				t.Fatal(err)
 			}
 		},
@@ -578,7 +617,13 @@ func TestGhosttyHelperExecutesPinnedSelfImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helper did not execute the pinned pre-replacement inode: %v", err)
 	}
-	defer term.Close()
+
+	t.Cleanup(func() {
+		if err := term.Close(); err != nil {
+			t.Errorf("close terminal: %v", err)
+		}
+	})
+
 	reply, err := term.exchange(ghosttyOpPinProbe, nil)
 	if err != nil || !bytes.Equal(reply, []byte{1}) {
 		t.Fatalf("helper pinned-FD bootstrap = (%v, %v), want closed", reply, err)
@@ -596,10 +641,12 @@ func TestGhosttyPinProbeReplyWriterBounds(t *testing.T) {
 			}
 		})
 	}
+
 	var encoded bytes.Buffer
 	if err := writeGhosttyReply(&encoded, ghosttyOpPinProbe, ghosttyStatusOK, []byte{1}); err != nil {
 		t.Fatalf("write valid pin probe reply: %v", err)
 	}
+
 	if got := encoded.Len(); got != 13 {
 		t.Fatalf("encoded pin probe reply = %d bytes, want 13", got)
 	}
@@ -619,6 +666,7 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 		defer limiter.release()
 
 		started := time.Now()
+
 		_, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
 			executable: executable,
 			limiter:    limiter,
@@ -626,6 +674,7 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 		if !errors.Is(err, errGhosttyHelperLimit) {
 			t.Fatalf("constructor error = %v, want resource limit", err)
 		}
+
 		if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
 			t.Fatalf("limiter exhaustion blocked for %v", elapsed)
 		}
@@ -633,6 +682,7 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 
 	t.Run("close reaps and releases", func(t *testing.T) {
 		limiter := newGhosttyProcessLimiter(1)
+
 		term, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
 			executable: executable,
 			limiter:    limiter,
@@ -640,15 +690,19 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if err := term.Close(); err != nil {
 			t.Fatal(err)
 		}
+
 		if term.cmd.ProcessState == nil {
 			t.Fatal("close did not reap helper")
 		}
+
 		if !limiter.acquire() {
 			t.Fatal("close did not release helper slot")
 		}
+
 		limiter.release()
 	})
 
@@ -657,8 +711,11 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 		if err != nil {
 			t.Skip("false executable unavailable")
 		}
+
 		limiter := newGhosttyProcessLimiter(1)
+
 		var started *exec.Cmd
+
 		term, err := newGhosttyProcessTerminalWithConfig(20, 3, ghosttyProcessConfig{
 			executable: falsePath,
 			limiter:    limiter,
@@ -669,12 +726,15 @@ func TestGhosttyLimiterExhaustionAndLifecycleRelease(t *testing.T) {
 		if term != nil || !errors.Is(err, errGhosttyHelperIO) {
 			t.Fatalf("constructor result = (%v, %v), want nil communication failure", term, err)
 		}
+
 		if started == nil || started.ProcessState == nil {
 			t.Fatal("failed constructor did not reap started helper")
 		}
+
 		if !limiter.acquire() {
 			t.Fatal("failed constructor did not release helper slot")
 		}
+
 		limiter.release()
 	})
 }
@@ -684,6 +744,7 @@ func TestGhosttyLimiterExhaustionPreventsSessionCommandLaunch(t *testing.T) {
 	for ghosttyHelperLimiter.acquire() {
 		held++
 	}
+
 	defer func() {
 		for range held {
 			ghosttyHelperLimiter.release()
@@ -692,6 +753,7 @@ func TestGhosttyLimiterExhaustionPreventsSessionCommandLaunch(t *testing.T) {
 
 	tempDir := t.TempDir()
 	marker := filepath.Join(tempDir, "command-started")
+
 	touch, err := exec.LookPath("touch")
 	if err != nil {
 		t.Skip("touch is unavailable")
@@ -709,6 +771,7 @@ func TestGhosttyLimiterExhaustionPreventsSessionCommandLaunch(t *testing.T) {
 	if session != nil || !errors.Is(err, errGhosttyHelperLimit) {
 		t.Fatalf("constructor result = (%v, %v), want nil helper limit", session, err)
 	}
+
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("limiter-rejected command created its side-effect marker: %v", err)
 	}
@@ -719,13 +782,16 @@ func TestGhosttyHelperResourceLimits(t *testing.T) {
 		if err := hardenGhosttyHelperResources(); err != nil {
 			t.Fatal(err)
 		}
+
 		var core, files unix.Rlimit
 		if err := unix.Getrlimit(unix.RLIMIT_CORE, &core); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &files); err != nil {
 			t.Fatal(err)
 		}
+
 		if core.Cur != 0 || core.Max != 0 || files.Cur > ghosttyHelperFDLimit || files.Max > ghosttyHelperFDLimit {
 			t.Fatalf("limits core=%+v files=%+v", core, files)
 		}
@@ -733,7 +799,8 @@ func TestGhosttyHelperResourceLimits(t *testing.T) {
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGhosttyHelperResourceLimits$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGhosttyHelperResourceLimits$") //nolint:gosec // G702: test intentionally re-execs this test binary.
+
 	cmd.Env = append(os.Environ(), "GRAITH_TEST_HELPER_RLIMITS=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("resource-limit helper: %v: %s", err, output)
@@ -745,11 +812,13 @@ func TestGhosttyProcessTerminalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = term.Close() })
 
 	if term.cmd == nil || term.cmd.Process == nil || term.cmd.Process.Pid == 0 {
 		t.Fatal("helper process was not started")
 	}
+
 	if _, err := term.Write([]byte("braw e\u0301 你")); err != nil {
 		t.Fatal(err)
 	}
@@ -758,15 +827,19 @@ func TestGhosttyProcessTerminalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := snapshot.Cells[5].Content; got != "e\u0301" {
 		t.Errorf("combined grapheme = %q, want %q", got, "e\u0301")
 	}
+
 	if err := term.Resize(30, 4); err != nil {
 		t.Fatal(err)
 	}
+
 	if term.cache.Cells != nil {
 		t.Fatal("resize retained a stale viewport cache")
 	}
+
 	if cols, rows := term.Size(); cols != 30 || rows != 4 {
 		t.Errorf("size = (%d,%d), want (30,4)", cols, rows)
 	}
@@ -774,12 +847,15 @@ func TestGhosttyProcessTerminalLifecycle(t *testing.T) {
 	if err := term.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := term.Close(); err != nil {
 		t.Fatalf("second close: %v", err)
 	}
+
 	if term.cmd.ProcessState == nil {
 		t.Fatal("close returned before the helper was reaped")
 	}
+
 	if _, err := term.Write([]byte("thrawn")); !errors.Is(err, errGhosttyHelperClosed) {
 		t.Fatalf("write after close = %v, want helper closed", err)
 	}
@@ -798,14 +874,18 @@ func TestGhosttyProcessTerminalConcurrentClose(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+
 	errs := make(chan error, 8)
+
 	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+
 			errs <- term.Close()
 		}()
 	}
+
 	wg.Wait()
 	close(errs)
 
@@ -814,6 +894,7 @@ func TestGhosttyProcessTerminalConcurrentClose(t *testing.T) {
 			t.Errorf("concurrent close: %v", err)
 		}
 	}
+
 	if term.cmd.ProcessState == nil {
 		t.Fatal("concurrent close returned before helper reaping")
 	}
@@ -824,11 +905,13 @@ func TestGhosttyWriteRequestLimitDoesNotPoisonHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = term.Close() })
 
 	if _, err := term.Write(make([]byte, ghosttyMaxRequestBytes+1)); !errors.Is(err, errGhosttyHelperLimit) {
 		t.Fatalf("oversized write error = %v, want resource limit", err)
 	}
+
 	if _, err := term.Write([]byte("braw after rejected write")); err != nil {
 		t.Fatalf("helper poisoned by local request rejection: %v", err)
 	}
@@ -1207,6 +1290,7 @@ func TestGhosttyTerminalSizeLimit(t *testing.T) {
 func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
 	line := []byte("dreich hydration on the brae\r\n")
 	fixture := bytes.Repeat(line, ghosttyMaxRequestBytes/len(line)+1)
+
 	fixture = append(fixture, []byte("\x1b[2J\x1b[Hcanny hydration marker")...)
 	if len(fixture) <= ghosttyMaxRequestBytes {
 		t.Fatalf("fixture bytes = %d, want more than request limit %d", len(fixture), ghosttyMaxRequestBytes)
@@ -1221,6 +1305,7 @@ func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -1230,6 +1315,7 @@ func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
 		_ = r.Close()
 		_ = w.Close()
@@ -1239,6 +1325,7 @@ func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1257,11 +1344,13 @@ func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("adopt with hydration over request limit: %v", err)
 	}
+
 	if got := session.ScreenPreview(); !strings.Contains(got, "canny hydration marker") {
 		t.Fatalf("hydrated screen missing final marker: %q", got)
 	}
 
 	closeDone := make(chan struct{})
+
 	go func() {
 		session.Close()
 		close(closeDone)
@@ -1270,11 +1359,13 @@ func TestGhosttyAdoptHydrationOverRequestLimit(t *testing.T) {
 	// lets that read observe teardown; the post-Close write below is the actual
 	// endpoint-ownership assertion.
 	_, _ = w.Write([]byte("unblock adopted read"))
+
 	select {
 	case <-closeDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("adopted session close did not finish")
 	}
+
 	if _, err := w.Write([]byte("bothy ownership probe")); !errors.Is(err, unix.EPIPE) {
 		t.Fatalf("write after adopted endpoint teardown = %v, want EPIPE", err)
 	}
@@ -1285,17 +1376,22 @@ func TestGhosttyFreezeBlocksGenerationAndSnapshotsUnreapedHelpers(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	helpers, err := FreezeTerminalHelpers(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer ThawTerminalHelpers()
+
 	if len(helpers) != 1 || helpers[0].PID <= 0 || helpers[0].StartTime <= 0 {
 		t.Fatalf("frozen helper registry = %+v", helpers)
 	}
+
 	if _, err := newGhosttyProcessTerminal(8, 4); !errors.Is(err, errTerminalGenerationFrozen) {
 		t.Fatalf("generation while frozen error = %v", err)
 	}
+
 	if err := terminal.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1306,24 +1402,31 @@ func TestGhosttyFreezeDeadlineThawsGeneration(t *testing.T) {
 	if err := registry.begin(); err != nil {
 		t.Fatal(err)
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
+
 	if _, err := registry.freeze(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("freeze error = %v, want deadline exceeded", err)
 	}
+
 	registry.finish(HelperProcessIdentity{})
+
 	if err := registry.begin(); err != nil {
 		t.Fatalf("generation remained frozen after deadline: %v", err)
 	}
+
 	registry.finish(HelperProcessIdentity{})
 }
 
 func TestGhosttyRegistryRetainsReplacedHelperUntilWait(t *testing.T) {
 	registry := newGhosttyHelperRegistry()
 	identity := HelperProcessIdentity{PID: 4242, StartTime: 99}
+
 	if err := registry.begin(); err != nil {
 		t.Fatal(err)
 	}
+
 	registry.finish(identity)
 
 	// Losing the terminal's current-screen reference does not touch the global
@@ -1331,11 +1434,14 @@ func TestGhosttyRegistryRetainsReplacedHelperUntilWait(t *testing.T) {
 	if got, err := registry.freeze(context.Background()); err != nil || !slices.Equal(got, []HelperProcessIdentity{identity}) {
 		t.Fatalf("snapshot before Wait = %+v", got)
 	}
+
 	registry.remove(identity)
 	registry.thaw()
+
 	if got, err := registry.freeze(context.Background()); err != nil || len(got) != 0 {
 		t.Fatalf("snapshot after Wait = %+v", got)
 	}
+
 	registry.thaw()
 }
 
@@ -1344,44 +1450,55 @@ func TestGhosttyHelperFailureDuringFreezeRecoversAfterThaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "bothy.log"), 1024*1024)
 	if err != nil {
 		_ = terminal.Close()
+
 		t.Fatal(err)
 	}
+
 	session := &Session{
 		ID: "bothy-freeze", Scrollback: scrollback, screen: terminal,
 		screenFactory: newTerminal, screenHydrationBytes: 1024, log: slog.Default(),
 	}
 	defer session.Close()
+
 	helpers, err := FreezeTerminalHelpers(context.Background())
 	if err != nil || len(helpers) != 1 {
 		ThawTerminalHelpers()
 		t.Fatalf("FreezeTerminalHelpers = (%+v, %v)", helpers, err)
 	}
+
 	payload := []byte("canny output retained during freeze")
 	if _, err := scrollback.Write(payload); err != nil {
 		ThawTerminalHelpers()
 		t.Fatal(err)
 	}
+
 	if err := unix.Kill(helpers[0].PID, unix.SIGKILL); err != nil {
 		ThawTerminalHelpers()
 		t.Fatal(err)
 	}
+
 	<-terminal.waitDone
 
 	session.mu.Lock()
 	writeErr := session.writeScreenLocked(payload)
 	pending := session.screenRecoveryPending
 	session.mu.Unlock()
+
 	if writeErr == nil || !errors.Is(writeErr, errTerminalGenerationFrozen) || !pending {
 		ThawTerminalHelpers()
 		t.Fatalf("write while frozen = (%v, pending=%v)", writeErr, pending)
 	}
+
 	ThawTerminalHelpers()
+
 	if err := session.RecoverTerminalAfterUpgrade(); err != nil {
 		t.Fatal(err)
 	}
+
 	if got := session.ScreenPreview(); !strings.Contains(got, "canny output") {
 		t.Fatalf("reconstructed preview = %q", got)
 	}
@@ -1392,12 +1509,15 @@ func TestGhosttyPeakRSSConcurrentClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	stop := make(chan struct{})
+
 	var readers sync.WaitGroup
 	for range 8 {
 		readers.Add(1)
 		go func() {
 			defer readers.Done()
+
 			for {
 				select {
 				case <-stop:
@@ -1408,9 +1528,11 @@ func TestGhosttyPeakRSSConcurrentClose(t *testing.T) {
 			}
 		}()
 	}
+
 	if err := terminal.Close(); err != nil {
 		t.Fatal(err)
 	}
+
 	close(stop)
 	readers.Wait()
 }
@@ -1426,6 +1548,7 @@ func TestGhosttySustainedScrollDoesNotRetainHistory(t *testing.T) {
 	)
 
 	baseline := ghosttySustainedScrollPeakRSS(t, 12_000)
+
 	extended := ghosttySustainedScrollPeakRSS(t, 24_000)
 	if baseline > maxHelperPeak || extended > maxHelperPeak {
 		t.Fatalf(
@@ -1435,6 +1558,7 @@ func TestGhosttySustainedScrollDoesNotRetainHistory(t *testing.T) {
 			maxHelperPeak,
 		)
 	}
+
 	if growth := extended - baseline; growth > maxHelperGrowth {
 		t.Fatalf(
 			"helper peak RSS grew by %d bytes when scroll input doubled (%d to %d); want growth <= %d",
@@ -1444,6 +1568,7 @@ func TestGhosttySustainedScrollDoesNotRetainHistory(t *testing.T) {
 			maxHelperGrowth,
 		)
 	}
+
 	t.Logf("helper peak RSS for 12k/24k lines = %d/%d bytes", baseline, extended)
 }
 
@@ -1461,11 +1586,13 @@ func ghosttySustainedScrollPeakRSS(t testing.TB, lines int) int64 {
 
 		t.Fatal(err)
 	}
+
 	if _, err := snapshotTerminal(terminal); err != nil {
 		_ = terminal.Close()
 
 		t.Fatal(err)
 	}
+
 	if err := terminal.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1480,18 +1607,25 @@ func ghosttySustainedScrollPeakRSS(t testing.TB, lines int) int64 {
 
 func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
 	poison := []byte("dreich-poison-terminal-secret")
+
 	scrollback, err := NewScrollback(filepath.Join(t.TempDir(), "croft.log"), 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() { _ = scrollback.Close() })
+
 	if _, err := scrollback.Write(poison); err != nil {
 		t.Fatal(err)
 	}
 
 	failed := &poisonReplayTerminal{cols: 20, rows: 2, poison: poison}
-	var replacements []*poisonReplayTerminal
-	var logs bytes.Buffer
+
+	var (
+		replacements []*poisonReplayTerminal
+		logs         bytes.Buffer
+	)
+
 	session := &Session{
 		ID:         "canny-poison",
 		Scrollback: scrollback,
@@ -1509,12 +1643,15 @@ func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
 	if err := session.writeScreenLocked(poison); !errors.Is(err, errGhosttyHelperNative) {
 		t.Fatalf("poison write error = %v, want native failure", err)
 	}
+
 	if len(replacements) != 2 {
 		t.Fatalf("replacement attempts = %d, want hydrated then empty", len(replacements))
 	}
+
 	if got := len(replacements[0].writes); got != 1 {
 		t.Fatalf("hydrated replacement writes = %d, want one bounded replay", got)
 	}
+
 	if got := len(replacements[1].writes); got != 0 {
 		t.Fatalf("empty replacement writes = %d, poison was replayed again", got)
 	}
@@ -1523,12 +1660,15 @@ func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
 	if _, err := scrollback.Write(safe); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := session.writeScreenLocked(safe); err != nil {
 		t.Fatalf("write after poison recovery: %v", err)
 	}
+
 	if got := string(replacements[1].writes[0]); got != string(safe) {
 		t.Fatalf("post-recovery write = %q, want %q", got, safe)
 	}
+
 	if strings.Contains(logs.String(), string(poison)) {
 		t.Fatalf("recovery log exposed terminal bytes: %s", logs.String())
 	}
@@ -1594,19 +1734,24 @@ func ghosttyRunScriptedExchangeWithTimeout(
 		reapTimeout:     10 * time.Millisecond,
 	}
 	serverDone := make(chan error, 1)
+
 	go func() {
-		defer child.Close()
+		defer func() { _ = child.Close() }()
+
 		if _, _, err := readGhosttyRequest(child); err != nil {
 			serverDone <- err
 
 			return
 		}
+
 		script(child)
+
 		serverDone <- nil
 	}()
 
 	_, exchangeErr := terminal.exchange(op, payload)
 	_ = parent.Close()
+
 	if serverErr := <-serverDone; serverErr != nil {
 		t.Fatalf("scripted server request: %v", serverErr)
 	}
@@ -1625,7 +1770,7 @@ func ghosttyTestRequestHeader(op byte, length int) []byte {
 	copy(header, ghosttyRequestMagic[:])
 	header[4] = ghosttyProtocolVersion
 	header[5] = op
-	binary.BigEndian.PutUint32(header[8:12], uint32(length))
+	binary.BigEndian.PutUint32(header[8:12], uint32(length)) //nolint:gosec // G115: test callers pass protocol-sized frame lengths.
 
 	return header
 }
@@ -1642,7 +1787,7 @@ func ghosttyTestReplyHeader(op, status byte, length int) []byte {
 	header[4] = ghosttyProtocolVersion
 	header[5] = op
 	header[6] = status
-	binary.BigEndian.PutUint32(header[8:12], uint32(length))
+	binary.BigEndian.PutUint32(header[8:12], uint32(length)) //nolint:gosec // G115: test callers pass protocol-sized frame lengths.
 
 	return header
 }

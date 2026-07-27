@@ -204,7 +204,7 @@ func (p *upgradeTargetPin) writePrivateCopy() (string, string, error) {
 }
 
 func syncDirectory(path string) error {
-	dir, err := os.Open(path)
+	dir, err := os.Open(path) // #nosec G703 -- path is a private pin directory created by this package.
 	if err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func cleanupRetainedUpgradeTarget(path string) error {
 		return errors.New("upgrade target retained path is unsafe")
 	}
 
-	info, err := os.Lstat(dir)
+	info, err := os.Lstat(dir) // #nosec G703 -- retained dir basename is validated before stat.
 	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
 		return errors.New("upgrade target retained directory is unsafe")
 	}
@@ -326,5 +326,5 @@ func cleanupRetainedUpgradeTarget(path string) error {
 		return errors.New("upgrade target retained directory owner is unsafe")
 	}
 
-	return os.RemoveAll(dir)
+	return os.RemoveAll(dir) // #nosec G703 -- retained dir mode and owner are validated above.
 }

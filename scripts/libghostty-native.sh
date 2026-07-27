@@ -617,7 +617,7 @@ run_go() {
             go test -count=1 go.mitchellh.com/libghostty
             go test -count=1 -tags=libghostty ./internal/pty
             go test -count=1 -tags=libghostty ./internal/daemon \
-                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff|TestDiagnostics|TestLogTerminalBackendSelectionFields'
+                -run 'TestLibghostty|TestProbeUpgrade|TestUpgradeHelperHandoff|TestDiagnostics|TestLogTerminalBackendSelectionFields|TestFSEvents'
             ;;
         race)
             verify_metadata

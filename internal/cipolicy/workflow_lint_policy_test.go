@@ -535,6 +535,67 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 	}
 }
 
+func TestGolangciLintBuildTagCoverage(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	makefile := readPolicyFile(t, filepath.Join(repoRoot, "Makefile"))
+	config := readPolicyFile(t, filepath.Join(repoRoot, ".golangci.yml"))
+	ciWorkflowText := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/ci.yml"))
+	docs := readPolicyFile(t, filepath.Join(repoRoot, "website/content/docs/contributing/_index.md"))
+	nativeScript := readPolicyFile(t, filepath.Join(repoRoot, "scripts/libghostty-native.sh"))
+
+	assertContains(t, config, "build-tags:\n    - integration")
+	assertContains(t, config, "lint-libghostty target")
+
+	assertContains(t, makefile, "lint-darwin:")
+	assertContains(t, makefile, "-e GOOS=darwin -e CGO_ENABLED=0")
+	assertContains(t, makefile, "lint-libghostty:")
+	assertContains(t, makefile, "GOLANGCI_LINT_LIBGHOSTTY_PACKAGES := ./internal/pty ./internal/daemon ./cmd/graith")
+	assertContains(t, makefile, "scripts/libghostty-native.sh prepare-linux-artifact")
+	assertContains(t, makefile, "--build-tags=integration,libghostty")
+	assertContains(t, makefile, "PKG_CONFIG_PATH=\"/app/.lint-libghostty-linux-$$goarch/pkgconfig\"")
+
+	workflow, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lint := p11WorkflowJob(t, workflow, "lint")
+	setupGo := false
+
+	for _, step := range lint.Steps {
+		if strings.Contains(step.Uses, "actions/setup-go") {
+			setupGo = true
+		}
+	}
+
+	if !setupGo {
+		t.Fatal("CI lint job must set up Go for the libghostty artifact helper")
+	}
+
+	assertContains(t, p11WorkflowStep(t, lint, "Lint default and integration tags").Run, "make lint-only")
+	assertContains(t, p11WorkflowStep(t, lint, "Lint Darwin non-cgo files").Run, "make lint-darwin")
+	zigSetup := p11WorkflowStep(t, lint, "Install checksum-verified Zig from the native dependency lock").Run
+	assertContains(t, zigSetup, "set -euo pipefail")
+	assertContains(t, zigSetup, "jq -er '.zig.version' libghostty-native.lock.json")
+	assertContains(t, zigSetup, "jq -er '.zig.linuxX8664URL' libghostty-native.lock.json")
+	assertContains(t, zigSetup, "jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json")
+	assertContains(t, zigSetup, "curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error")
+	assertContains(t, zigSetup, "sha256sum --check --status")
+	assertContains(t, zigSetup, "echo \"${RUNNER_TEMP}/zig\" >> \"$GITHUB_PATH\"")
+	assertContains(t, zigSetup, "test \"$(\"${RUNNER_TEMP}/zig/zig\" version)\" = \"$zig_version\"")
+	assertContains(t, p11WorkflowStep(t, lint, "Lint Linux libghostty tag").Run, "make lint-libghostty")
+
+	assertContains(t, ciWorkflowText, "^internal/daemon/")
+	assertContains(t, nativeScript, "TestDiagnostics|TestLogTerminalBackendSelectionFields|TestFSEvents")
+	assertContains(t, docs, "make lint-darwin")
+	assertContains(t, docs, "make lint-libghostty")
+	assertContains(t, docs, "the pinned Zig toolchain")
+	assertContains(t, docs, "Darwin `cgo` code, including")
+	assertContains(t, docs, "macOS build/test lanes compile that surface")
+	assertContains(t, docs, "run the FSEvents and")
+	assertContains(t, docs, "native terminal tests")
+}
+
 func validateAttestationVerifyCommand(code, stepName, repository, signerWorkflow string) error {
 	if err := validateAttestationVerifySafety(code, stepName); err != nil {
 		return err

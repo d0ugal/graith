@@ -117,6 +117,7 @@ func (r *ghosttyHelperRegistry) begin() error {
 	if r.frozen {
 		return errTerminalGenerationFrozen
 	}
+
 	r.creating++
 
 	return nil
@@ -127,6 +128,7 @@ func (r *ghosttyHelperRegistry) finish(identity HelperProcessIdentity) {
 	if identity.PID > 0 && identity.StartTime > 0 {
 		r.helpers[identity.PID] = identity.StartTime
 	}
+
 	r.creating--
 	r.signalLocked()
 	r.mu.Unlock()
@@ -142,10 +144,12 @@ func (r *ghosttyHelperRegistry) remove(identity HelperProcessIdentity) {
 
 func (r *ghosttyHelperRegistry) freeze(ctx context.Context) ([]HelperProcessIdentity, error) {
 	r.mu.Lock()
+
 	r.frozen = true
 	for r.creating > 0 {
 		changed := r.changed
 		r.mu.Unlock()
+
 		select {
 		case <-changed:
 			r.mu.Lock()
@@ -211,10 +215,13 @@ var (
 // by newGhosttyProcessTerminal. Ordinary import performs no filesystem work;
 // the daemon or the first lazy terminal construction pins the running image
 // after upgrade ownership has been established.
+//
+//nolint:gochecknoinits // Helper binaries must dispatch before package tests or main run.
 func init() {
 	if len(os.Args) == 2 && os.Args[1] == ghosttyHelperArg && os.Getenv(ghosttyHelperEnv) == "1" {
 		err := unix.Close(ghosttyPinnedExecFD)
 		ghosttyPinnedFDClosed = err == nil || errors.Is(err, unix.EBADF)
+
 		code := 0
 		if err := serveGhosttyHelperFD(); err != nil {
 			code = 70
@@ -222,7 +229,6 @@ func init() {
 
 		os.Exit(code)
 	}
-
 }
 
 // PreparePinnedTerminalExecutable performs the fallible running-image pin only
@@ -232,6 +238,7 @@ func init() {
 func PreparePinnedTerminalExecutable() error {
 	ghosttyPinnedMu.Lock()
 	defer ghosttyPinnedMu.Unlock()
+
 	return preparePinnedTerminalExecutableLocked()
 }
 
@@ -239,11 +246,14 @@ func preparePinnedTerminalExecutableLocked() error {
 	if ghosttyPinnedExecutable != nil {
 		return nil
 	}
+
 	pinned, err := pinRunningGhosttyExecutable()
 	if err != nil {
 		return err
 	}
+
 	ghosttyPinnedExecutable = pinned
+
 	return nil
 }
 
@@ -254,9 +264,11 @@ func preparePinnedTerminalExecutableLocked() error {
 func ClosePinnedTerminalExecutable() {
 	ghosttyPinnedMu.Lock()
 	defer ghosttyPinnedMu.Unlock()
+
 	if ghosttyPinnedExecutable == nil || ghosttyPinnedExecutable.cleanup == nil {
 		return
 	}
+
 	if err := ghosttyPinnedExecutable.cleanup(); err == nil {
 		ghosttyPinnedExecutable = nil
 	}
@@ -269,21 +281,26 @@ func ClosePinnedTerminalExecutable() {
 func ReleasePinnedTerminalExecutablePathForExec() error {
 	ghosttyPinnedMu.Lock()
 	defer ghosttyPinnedMu.Unlock()
+
 	if ghosttyPinnedExecutable == nil || ghosttyPinnedExecutable.releasePath == nil {
 		return nil
 	}
+
 	return ghosttyPinnedExecutable.releasePath()
 }
 
 func RestorePinnedTerminalExecutableAfterExec() error {
 	ghosttyPinnedMu.Lock()
 	defer ghosttyPinnedMu.Unlock()
+
 	if ghosttyPinnedExecutable == nil {
 		return errGhosttyHelperStart
 	}
+
 	if err := ghosttyPinnedExecutable.prepare(); err != nil {
 		return err
 	}
+
 	return ghosttyPinnedExecutable.validate()
 }
 
@@ -328,22 +345,26 @@ func newGhosttyProcessTerminalWithConfig(
 	cols, rows int,
 	config ghosttyProcessConfig,
 ) (*ghosttyProcessTerminal, error) {
-	cols, rows, err := validateGhosttySize(cols, rows)
+	cols, rows, cols16, rows16, err := validateGhosttySize16(cols, rows)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := ghosttyHelpers.begin(); err != nil {
 		return nil, err
 	}
+
 	generationActive := true
 	defer func() {
 		if generationActive {
 			ghosttyHelpers.finish(HelperProcessIdentity{})
 		}
 	}()
+
 	if config.limiter == nil || !config.limiter.acquire() {
 		return nil, errGhosttyHelperLimit
 	}
+
 	slotHeld := true
 	defer func() {
 		if slotHeld {
@@ -357,11 +378,13 @@ func newGhosttyProcessTerminalWithConfig(
 	}
 
 	parentFile := os.NewFile(uintptr(fds[0]), "libghostty-parent")
+
 	childFile := os.NewFile(uintptr(fds[1]), "libghostty-child")
 	if parentFile == nil || childFile == nil {
 		if parentFile != nil {
 			_ = parentFile.Close()
 		}
+
 		if childFile != nil {
 			_ = childFile.Close()
 		}
@@ -370,6 +393,7 @@ func newGhosttyProcessTerminalWithConfig(
 	}
 
 	conn, err := net.FileConn(parentFile)
+
 	_ = parentFile.Close()
 	if err != nil {
 		_ = childFile.Close()
@@ -378,29 +402,36 @@ func newGhosttyProcessTerminalWithConfig(
 	}
 
 	globalPinLocked := false
+
 	if config.executable == "" {
 		// Registry begin above makes an in-progress launch visible to the exec
 		// freeze. Hold the owner lock until the child has completed bootstrap so
 		// path release or final shutdown cannot close the pin beneath Start.
 		ghosttyPinnedMu.Lock()
+
 		globalPinLocked = true
 		defer func() {
 			if globalPinLocked {
 				ghosttyPinnedMu.Unlock()
 			}
 		}()
+
 		if err := preparePinnedTerminalExecutableLocked(); err != nil {
 			_ = childFile.Close()
 			_ = conn.Close()
+
 			return nil, errGhosttyHelperStart
 		}
 	}
+
 	var pinned *ghosttyPinnedImage
 	if globalPinLocked {
 		pinned = ghosttyPinnedExecutable
 	}
+
 	closePinned := false
 	customCleanupPending := false
+
 	if config.executable != "" {
 		pinned, err = pinGhosttyExecutable(config.executable)
 		if err != nil {
@@ -409,7 +440,9 @@ func newGhosttyProcessTerminalWithConfig(
 
 			return nil, errGhosttyHelperStart
 		}
+
 		closePinned = true
+
 		customCleanupPending = true
 		defer func() {
 			if customCleanupPending {
@@ -417,39 +450,46 @@ func newGhosttyProcessTerminalWithConfig(
 			}
 		}()
 	}
+
 	if pinned == nil || pinned.file == nil || pinned.prepare == nil {
 		_ = childFile.Close()
 		_ = conn.Close()
 
 		return nil, errGhosttyHelperStart
 	}
+
 	if err := pinned.prepare(); err != nil {
 		_ = childFile.Close()
 		_ = conn.Close()
 
 		return nil, errGhosttyHelperStart
 	}
+
 	if config.onExecutablePinned != nil {
 		config.onExecutablePinned()
 	}
+
 	if pinned.path == "" || pinned.validate == nil {
 		_ = childFile.Close()
 		_ = conn.Close()
 
 		return nil, errGhosttyHelperStart
 	}
+
 	if err := pinned.validate(); err != nil {
 		_ = childFile.Close()
 		_ = conn.Close()
 
 		return nil, errGhosttyHelperStart
 	}
+
 	cmd := exec.Command(pinned.path, ghosttyHelperArg)
 	cmd.Env = ghosttyChildEnvironment()
 	cmd.ExtraFiles = []*os.File{pinned.file, childFile}
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		_ = childFile.Close()
@@ -457,14 +497,19 @@ func newGhosttyProcessTerminalWithConfig(
 
 		return nil, errGhosttyHelperStart
 	}
+
 	if globalPinLocked {
 		ghosttyPinnedMu.Unlock()
+
 		globalPinLocked = false
 	}
+
 	if config.onStart != nil {
 		config.onStart(cmd)
 	}
+
 	_ = childFile.Close()
+
 	helperStartTime, startErr := ProcessStartTime(cmd.Process.Pid)
 	if startErr != nil || helperStartTime == 0 {
 		_ = conn.Close()
@@ -473,8 +518,10 @@ func newGhosttyProcessTerminalWithConfig(
 
 		return nil, errGhosttyHelperStart
 	}
+
 	helperIdentity := HelperProcessIdentity{PID: cmd.Process.Pid, StartTime: helperStartTime}
 	ghosttyHelpers.finish(helperIdentity)
+
 	generationActive = false
 
 	terminal := &ghosttyProcessTerminal{
@@ -492,23 +539,28 @@ func newGhosttyProcessTerminalWithConfig(
 		dirty: true,
 	}
 	slotHeld = false
+
 	go func() {
 		waitErr := cmd.Wait()
 		terminal.peakRSS.Store(extractPeakRSS(cmd.ProcessState))
 		ghosttyHelpers.remove(helperIdentity)
 		terminal.releaseSlot()
+
 		terminal.waitDone <- waitErr
+
 		close(terminal.waitDone)
 	}()
 
 	payload := make([]byte, 4)
-	binary.BigEndian.PutUint16(payload[0:2], uint16(cols))
-	binary.BigEndian.PutUint16(payload[2:4], uint16(rows))
+	binary.BigEndian.PutUint16(payload[0:2], cols16)
+	binary.BigEndian.PutUint16(payload[2:4], rows16)
+
 	if _, err := terminal.exchange(ghosttyOpCreate, payload); err != nil {
 		terminal.stop(true)
 
 		return nil, fmt.Errorf("initialize libghostty helper: %w", err)
 	}
+
 	if closePinned {
 		_ = pinned.cleanup()
 		customCleanupPending = false
@@ -528,6 +580,7 @@ func ghosttySocketpair() ([2]int, error) {
 	if err != nil {
 		return [2]int{}, err
 	}
+
 	unix.CloseOnExec(fds[0])
 	unix.CloseOnExec(fds[1])
 
@@ -554,9 +607,11 @@ func (gt *ghosttyProcessTerminal) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, gt.currentError()
 	}
+
 	if len(p) > ghosttyMaxRequestBytes {
 		return 0, errGhosttyHelperLimit
 	}
+
 	if _, err := gt.exchangeLocked(ghosttyOpWrite, p); err != nil {
 		return 0, err
 	}
@@ -571,14 +626,15 @@ func (gt *ghosttyProcessTerminal) Resize(cols, rows int) error {
 	gt.opMu.Lock()
 	defer gt.opMu.Unlock()
 
-	cols, rows, err := validateGhosttySize(cols, rows)
+	cols, rows, cols16, rows16, err := validateGhosttySize16(cols, rows)
 	if err != nil {
 		return err
 	}
 
 	payload := make([]byte, 4)
-	binary.BigEndian.PutUint16(payload[0:2], uint16(cols))
-	binary.BigEndian.PutUint16(payload[2:4], uint16(rows))
+	binary.BigEndian.PutUint16(payload[0:2], cols16)
+	binary.BigEndian.PutUint16(payload[2:4], rows16)
+
 	if _, err := gt.exchangeLocked(ghosttyOpResize, payload); err != nil {
 		return err
 	}
@@ -637,6 +693,7 @@ func (gt *ghosttyProcessTerminal) snapshotLocked() (TerminalSnapshot, error) {
 	if err := gt.currentError(); err != nil {
 		return TerminalSnapshot{}, err
 	}
+
 	if !gt.dirty {
 		return gt.cache, nil
 	}
@@ -652,6 +709,7 @@ func (gt *ghosttyProcessTerminal) snapshotLocked() (TerminalSnapshot, error) {
 
 		return TerminalSnapshot{}, err
 	}
+
 	if snapshot.Cols != gt.cols || snapshot.Rows != gt.rows {
 		err := fmt.Errorf("%w: helper returned geometry %dx%d, expected %dx%d",
 			errGhosttyHelperProtocol, snapshot.Cols, snapshot.Rows, gt.cols, gt.rows)
@@ -674,6 +732,7 @@ func (gt *ghosttyProcessTerminal) Close() error {
 		if gt.conn != nil && gt.fatalErr == nil {
 			_, gt.closeErr = gt.exchangeLocked(ghosttyOpClose, nil)
 		}
+
 		gt.stop(false)
 	})
 
@@ -688,6 +747,7 @@ func (gt *ghosttyProcessTerminal) currentError() error {
 	if gt.fatalErr != nil {
 		return gt.fatalErr
 	}
+
 	if gt.conn == nil {
 		return errGhosttyHelperClosed
 	}
@@ -706,6 +766,7 @@ func (gt *ghosttyProcessTerminal) exchangeLocked(op byte, payload []byte) ([]byt
 	if err := gt.currentError(); err != nil {
 		return nil, err
 	}
+
 	if err := validateGhosttyRequest(op, len(payload)); err != nil {
 		return nil, err
 	}
@@ -720,10 +781,12 @@ func (gt *ghosttyProcessTerminal) exchangeLocked(op byte, payload []byte) ([]byt
 	copy(header[0:4], ghosttyRequestMagic[:])
 	header[4] = ghosttyProtocolVersion
 	header[5] = op
-	binary.BigEndian.PutUint32(header[8:12], uint32(len(payload)))
+	binary.BigEndian.PutUint32(header[8:12], uint32(len(payload))) //nolint:gosec // G115: validateGhosttyRequest caps payload at 1 MiB.
+
 	if err := writeAll(gt.conn, header); err != nil {
 		return nil, gt.exchangeIOError(err)
 	}
+
 	if err := writeAll(gt.conn, payload); err != nil {
 		return nil, gt.exchangeIOError(err)
 	}
@@ -731,6 +794,7 @@ func (gt *ghosttyProcessTerminal) exchangeLocked(op byte, payload []byte) ([]byt
 	if _, err := io.ReadFull(gt.conn, header); err != nil {
 		return nil, gt.exchangeIOError(err)
 	}
+
 	if !bytes.Equal(header[0:4], ghosttyReplyMagic[:]) ||
 		header[4] != ghosttyProtocolVersion || header[5] != op || header[7] != 0 {
 		gt.fail(errGhosttyHelperProtocol)
@@ -739,16 +803,19 @@ func (gt *ghosttyProcessTerminal) exchangeLocked(op byte, payload []byte) ([]byt
 	}
 
 	length := int(binary.BigEndian.Uint32(header[8:12]))
+
 	status := header[6]
 	if err := validateGhosttyReply(op, status, length, gt.cols, gt.rows); err != nil {
 		gt.fail(errGhosttyHelperProtocol)
 
 		return nil, errGhosttyHelperProtocol
 	}
+
 	payload = make([]byte, length)
 	if _, err := io.ReadFull(gt.conn, payload); err != nil {
 		return nil, gt.exchangeIOError(err)
 	}
+
 	_ = gt.conn.SetDeadline(time.Time{})
 
 	switch status {
@@ -778,9 +845,12 @@ func (gt *ghosttyProcessTerminal) rpcDeadline() time.Duration {
 
 func (gt *ghosttyProcessTerminal) exchangeIOError(err error) error {
 	result := errGhosttyHelperIO
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		result = errGhosttyHelperTimeout
 	}
+
 	gt.fail(result)
 
 	return result
@@ -790,6 +860,7 @@ func (gt *ghosttyProcessTerminal) fail(err error) {
 	if gt.fatalErr == nil {
 		gt.fatalErr = err
 	}
+
 	gt.stop(true)
 }
 
@@ -811,9 +882,11 @@ func (gt *ghosttyProcessTerminal) stop(force bool) {
 				if gt.cmd != nil && gt.cmd.Process != nil {
 					_ = gt.cmd.Process.Kill()
 				}
+
 				reaped = gt.waitForExit(gt.reapDeadline())
 			}
 		}
+
 		gt.cache = TerminalSnapshot{}
 		if reaped {
 			gt.releaseSlot()
@@ -884,6 +957,7 @@ func validateGhosttyReply(op, status byte, length, cols, rows int) error {
 	if status > ghosttyStatusProtocol || length < 0 || length > ghosttyMaxReplyBytes {
 		return errGhosttyHelperProtocol
 	}
+
 	if status != ghosttyStatusOK {
 		if length != 0 {
 			return errGhosttyHelperProtocol
@@ -897,12 +971,15 @@ func validateGhosttyReply(op, status byte, length, cols, rows int) error {
 		if cols < 1 || rows < 1 || cols > maxGhosttyCells/rows {
 			return errGhosttyHelperProtocol
 		}
+
 		cells := cols * rows
 		minimum := 13 + cells*16
+
 		maximum := 13 + cells*(16+ghosttyMaxCellContentBytes)
 		if maximum > ghosttyMaxReplyBytes {
 			maximum = ghosttyMaxReplyBytes
 		}
+
 		if length < minimum || length > maximum {
 			return errGhosttyHelperProtocol
 		}
@@ -930,12 +1007,15 @@ func serveGhosttyHelperFD() error {
 	if file == nil {
 		return errGhosttyHelperProtocol
 	}
+
 	conn, err := net.FileConn(file)
 	_ = file.Close()
+
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+
+	defer func() { _ = conn.Close() }()
 
 	return serveGhosttyHelper(conn)
 }
@@ -955,15 +1035,19 @@ func serveGhosttyHelper(conn net.Conn) error {
 		}
 
 		status := byte(ghosttyStatusOK)
+
 		var reply []byte
+
 		switch op {
 		case ghosttyOpCreate:
 			if terminal != nil || len(payload) != 4 {
 				status = ghosttyStatusInvalid
 				break
 			}
+
 			cols := int(binary.BigEndian.Uint16(payload[0:2]))
 			rows := int(binary.BigEndian.Uint16(payload[2:4]))
+
 			terminal, err = newGhosttyTerminal(cols, rows)
 			if err != nil {
 				status = ghosttyStatusNative
@@ -973,6 +1057,7 @@ func serveGhosttyHelper(conn net.Conn) error {
 				status = ghosttyStatusInvalid
 				break
 			}
+
 			if _, err = terminal.Write(payload); err != nil {
 				status = ghosttyStatusNative
 			}
@@ -981,7 +1066,9 @@ func serveGhosttyHelper(conn net.Conn) error {
 				status = ghosttyStatusInvalid
 				break
 			}
+
 			cols := int(binary.BigEndian.Uint16(payload[0:2]))
+
 			rows := int(binary.BigEndian.Uint16(payload[2:4]))
 			if err = terminal.Resize(cols, rows); err != nil {
 				status = ghosttyStatusNative
@@ -991,6 +1078,7 @@ func serveGhosttyHelper(conn net.Conn) error {
 				status = ghosttyStatusInvalid
 				break
 			}
+
 			snapshot, snapshotErr := terminal.Snapshot()
 			if snapshotErr != nil {
 				status = ghosttyStatusNative
@@ -1005,8 +1093,10 @@ func serveGhosttyHelper(conn net.Conn) error {
 				status = ghosttyStatusInvalid
 				break
 			}
+
 			err = terminal.Close()
 			terminal = nil
+
 			if err != nil {
 				status = ghosttyStatusNative
 			}
@@ -1015,6 +1105,7 @@ func serveGhosttyHelper(conn net.Conn) error {
 				status = ghosttyStatusInvalid
 				break
 			}
+
 			reply = []byte{0}
 			if ghosttyPinnedFDClosed {
 				reply[0] = 1
@@ -1026,6 +1117,7 @@ func serveGhosttyHelper(conn net.Conn) error {
 		if err := writeGhosttyReply(conn, op, status, reply); err != nil {
 			return err
 		}
+
 		if op == ghosttyOpClose && status == ghosttyStatusOK {
 			return nil
 		}
@@ -1044,10 +1136,12 @@ func hardenGhosttyHelperResources() error {
 	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &files); err != nil {
 		return err
 	}
+
 	limit := files.Cur
 	if uint64(ghosttyHelperFDLimit) < limit {
 		limit = ghosttyHelperFDLimit
 	}
+
 	if files.Max < limit {
 		limit = files.Max
 	}
@@ -1060,6 +1154,7 @@ func readGhosttyRequest(r io.Reader) (byte, []byte, error) {
 	if _, err := io.ReadFull(r, header); err != nil {
 		return 0, nil, errGhosttyHelperProtocol
 	}
+
 	if !bytes.Equal(header[0:4], ghosttyRequestMagic[:]) ||
 		header[4] != ghosttyProtocolVersion || header[6] != 0 || header[7] != 0 {
 		return 0, nil, errGhosttyHelperProtocol
@@ -1069,6 +1164,7 @@ func readGhosttyRequest(r io.Reader) (byte, []byte, error) {
 	if err := validateGhosttyRequest(header[5], length); err != nil {
 		return 0, nil, err
 	}
+
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return 0, nil, errGhosttyHelperProtocol
@@ -1082,6 +1178,7 @@ func writeGhosttyReply(w io.Writer, op, status byte, payload []byte) error {
 		(status != ghosttyStatusOK && len(payload) != 0) {
 		return errGhosttyHelperProtocol
 	}
+
 	if status == ghosttyStatusOK {
 		switch op {
 		case ghosttyOpSnapshot:
@@ -1098,12 +1195,14 @@ func writeGhosttyReply(w io.Writer, op, status byte, payload []byte) error {
 			}
 		}
 	}
+
 	header := make([]byte, 12)
 	copy(header[0:4], ghosttyReplyMagic[:])
 	header[4] = ghosttyProtocolVersion
 	header[5] = op
 	header[6] = status
-	binary.BigEndian.PutUint32(header[8:12], uint32(len(payload)))
+	binary.BigEndian.PutUint32(header[8:12], uint32(len(payload))) //nolint:gosec // G115: payload length is capped by ghosttyMaxReplyBytes above.
+
 	if err := writeAll(w, header); err != nil {
 		return err
 	}
@@ -1117,9 +1216,11 @@ func writeAll(w io.Writer, p []byte) error {
 		if err != nil {
 			return err
 		}
+
 		if n == 0 {
 			return io.ErrShortWrite
 		}
+
 		p = p[n:]
 	}
 
@@ -1142,25 +1243,29 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 			total > ghosttyMaxReplyBytes-16-len(cell.Content) {
 			return nil, errGhosttyHelperProtocol
 		}
+
 		total += 16 + len(cell.Content)
 	}
 
 	var buf bytes.Buffer
 	buf.Grow(total)
+
 	fixed := make([]byte, 13)
 	binary.BigEndian.PutUint16(fixed[0:2], uint16(snapshot.Cols))
 	binary.BigEndian.PutUint16(fixed[2:4], uint16(snapshot.Rows))
-	binary.BigEndian.PutUint16(fixed[4:6], uint16(snapshot.CursorX))
-	binary.BigEndian.PutUint16(fixed[6:8], uint16(snapshot.CursorY))
+	binary.BigEndian.PutUint16(fixed[4:6], uint16(snapshot.CursorX)) //nolint:gosec // G115: cursor bounds are validated above.
+	binary.BigEndian.PutUint16(fixed[6:8], uint16(snapshot.CursorY)) //nolint:gosec // G115: cursor bounds are validated above.
+
 	if snapshot.CursorVisible {
 		fixed[8] = 1
 	}
-	binary.BigEndian.PutUint32(fixed[9:13], uint32(len(snapshot.Cells)))
+
+	binary.BigEndian.PutUint32(fixed[9:13], uint32(len(snapshot.Cells))) //nolint:gosec // G115: maxGhosttyCells caps cell count well below uint32.
 	_, _ = buf.Write(fixed)
 
 	for _, cell := range snapshot.Cells {
 		record := make([]byte, 16)
-		binary.BigEndian.PutUint32(record[0:4], uint32(len(cell.Content)))
+		binary.BigEndian.PutUint32(record[0:4], uint32(len(cell.Content))) //nolint:gosec // G115: cell content is capped by ghosttyMaxCellContentBytes above.
 		record[4] = byte(cell.Style.FG.Kind)
 		record[5] = byte(cell.Style.BG.Kind)
 		binary.BigEndian.PutUint16(record[6:8], encodeGhosttyStyleFlags(cell.Style))
@@ -1188,6 +1293,7 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 	if payload[8] > 1 {
 		return TerminalSnapshot{}, errGhosttyHelperProtocol
 	}
+
 	count := int(binary.BigEndian.Uint32(payload[9:13]))
 	if snapshot.Cols < 1 || snapshot.Rows < 1 || count != snapshot.Cols*snapshot.Rows ||
 		count > maxGhosttyCells || count > (len(payload)-13)/16 ||
@@ -1196,24 +1302,29 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 	}
 
 	payload = payload[13:]
+
 	snapshot.Cells = make([]Cell, count)
 	for i := range snapshot.Cells {
 		if len(payload) < 16 {
 			return TerminalSnapshot{}, errGhosttyHelperProtocol
 		}
+
 		contentLen := int(binary.BigEndian.Uint32(payload[0:4]))
 		fgKind := ColorKind(payload[4])
 		bgKind := ColorKind(payload[5])
 		flags := binary.BigEndian.Uint16(payload[6:8])
 		fg := Color{Kind: fgKind, Value: binary.BigEndian.Uint32(payload[8:12])}
+
 		bg := Color{Kind: bgKind, Value: binary.BigEndian.Uint32(payload[12:16])}
 		if flags&^uint16(0x7f) != 0 || contentLen > ghosttyMaxCellContentBytes ||
 			contentLen > len(payload)-16 || !utf8.Valid(payload[16:16+contentLen]) {
 			return TerminalSnapshot{}, errGhosttyHelperProtocol
 		}
+
 		if !validGhosttyColor(fg) || !validGhosttyColor(bg) {
 			return TerminalSnapshot{}, errGhosttyHelperProtocol
 		}
+
 		snapshot.Cells[i] = Cell{
 			Content: string(payload[16 : 16+contentLen]),
 			Style: CellStyle{
@@ -1222,8 +1333,10 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 			},
 		}
 		decodeGhosttyStyleFlags(&snapshot.Cells[i].Style, flags)
+
 		payload = payload[16+contentLen:]
 	}
+
 	if len(payload) != 0 {
 		return TerminalSnapshot{}, errGhosttyHelperProtocol
 	}
@@ -1246,6 +1359,7 @@ func validGhosttyColor(color Color) bool {
 
 func encodeGhosttyStyleFlags(style CellStyle) uint16 {
 	var flags uint16
+
 	values := [...]bool{
 		style.Bold, style.Faint, style.Italic, style.Underline,
 		style.Blink, style.Reverse, style.Strikethrough,

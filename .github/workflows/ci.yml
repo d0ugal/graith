@@ -38,6 +38,8 @@ jobs:
   #   - darwin-only-compiled Go: internal/pty (procstart_darwin.go) and
   #     internal/sandbox (safehouse/Seatbelt) — a Linux build never compiles
   #     these, so they'd otherwise get zero pre-merge coverage;
+  #   - internal/daemon, which owns Darwin cgo FSEvents watcher code and macOS
+  #     runtime branches;
   #   - integration tests, which may explicitly exercise Darwin runtime
   #     behaviour and need their macOS leg to validate the change itself;
   #   - the protocol/capability packages whose shapes the Swift conformance
@@ -47,13 +49,13 @@ jobs:
   #   - this workflow itself.
   #
   # Deliberately NOT gated: high-churn Go packages whose only macOS-specific code
-  # is *runtime* `runtime.GOOS == "darwin"` branches (internal/daemon,
-  # internal/cli, internal/store, internal/config, internal/covreport, …). Those
-  # compile on Linux, so the Linux build/test still catches compile breaks; only
-  # the darwin runtime *behaviour* goes unexercised pre-merge. That's an accepted
-  # trade-off to keep scarce macOS minutes off the common Go-only PR — the
-  # push-to-main run below (macos=true) is the safety net that turns main red if a
-  # darwin-only regression slips through.
+  # is *runtime* `runtime.GOOS == "darwin"` branches (internal/cli,
+  # internal/store, internal/config, internal/covreport, …). Those compile on
+  # Linux, so the Linux build/test still catches compile breaks; only the darwin
+  # runtime *behaviour* goes unexercised pre-merge. That's an accepted trade-off
+  # to keep scarce macOS minutes off the common Go-only PR — the push-to-main run
+  # below (macos=true) is the safety net that turns main red if a darwin-only
+  # regression slips through.
   #
   # Uses the PR files API rather than a local `git diff`: the checked-out
   # pull_request merge ref can be built against an older base than base.sha, so
@@ -95,7 +97,7 @@ jobs:
           fi
           # here-string (not a pipe) so an early grep match can't SIGPIPE-fail an
           # upstream command under pipefail.
-          if grep -Eq '^gui/|^demo/|^internal/integration/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/sandbox/|^Makefile$|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
+          if grep -Eq '^gui/|^demo/|^internal/integration/|^internal/protocol/|^internal/capabilities/|^internal/pty/|^internal/daemon/|^internal/sandbox/|^Makefile$|^go\.mod$|^go\.sum$|\.swift$|^\.github/workflows/ci\.yml$' <<<"$files"; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
             echo "macOS-relevant files changed: running macOS jobs."
           else
@@ -225,10 +227,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: make lint-only
-      # Lint Darwin-only files too — the Linux lint above never compiles them,
-      # so wsl_v5/etc. findings in *_darwin.go slip through (issue #784).
-      - run: make lint-darwin
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Lint default and integration tags
+        run: make lint-only
+      # Lint non-cgo Darwin-only files too — the Linux lint above never compiles
+      # them, so wsl_v5/etc. findings in *_darwin.go slip through (issue #784).
+      - name: Lint Darwin non-cgo files
+        run: make lint-darwin
+      - name: Install checksum-verified Zig from the native dependency lock
+        run: |
+          set -euo pipefail
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_url="$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)"
+          zig_sha256="$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)"
+          mkdir -p "${RUNNER_TEMP}/zig"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$zig_url" --output "${RUNNER_TEMP}/zig.tar.xz"
+          printf '%s  %s\n' "$zig_sha256" "${RUNNER_TEMP}/zig.tar.xz" | sha256sum --check --status
+          tar -xf "${RUNNER_TEMP}/zig.tar.xz" -C "${RUNNER_TEMP}/zig" --strip-components=1
+          echo "${RUNNER_TEMP}/zig" >> "$GITHUB_PATH"
+          test "$("${RUNNER_TEMP}/zig/zig" version)" = "$zig_version"
+      # Lint the supported Linux native surface against the pinned libghostty
+      # artifact. Darwin native cgo remains validated by macOS build/test lanes
+      # because Linux runners cannot practically cross-lint the Apple SDK slice.
+      - name: Lint Linux libghostty tag
+        run: make lint-libghostty
 
   govulncheck:
     name: Vulnerability Check

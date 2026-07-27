@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "38afad450229bb3d1979d54dada06b982c29d429682292d8700c39bf7002a043",
+      "file_sha256": "d0a1be3f1e956756ab087973b0d023e502ddd90f6752b9b6b5c7e02c4459c16c",
       "events": {
         "pull_request": null,
         "push": {
@@ -223,7 +223,26 @@
             "Lint"
           ],
           "action_pins": [
-            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -2655,7 +2674,7 @@
       "owner": "graith-maintainers",
       "kind": "ci-configuration",
       "git_mode": "100644",
-      "sha256": "531c939b35e1651987acec9a3c760fcdc67d5127f322556a7dbe1872c7059d80",
+      "sha256": "ded5a64c43bacb2f44de379b5b19bf40863d80e019c539e4d872e32cdceb8bbe",
       "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -2705,7 +2724,7 @@
       "owner": "graith-maintainers",
       "kind": "ci-entrypoint",
       "git_mode": "100644",
-      "sha256": "db1fc885598e9334a34ea4896b11dbe5ea9fe4daf2515846ccdb2a16adfa7336",
+      "sha256": "878aa5e9ad300df34148ab476c38ddaca54d2d6660d965c367c0d22b65addf81",
       "executable_contract": "preserve the checked-in make targets invoked directly by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -2855,7 +2874,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "7a4800ccd7e7d12f02ca6b697c7a6712fd938d65333875a0a103897accfcd291",
+      "sha256": "7e1fa1d383089cfa08264c712aa386ceef2d48d9d681101966337768e4f66da8",
       "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow tool install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow install and lint policy coverage and zero unexplained replay disagreement"
@@ -2975,7 +2994,7 @@
       "owner": "graith-maintainers",
       "kind": "root-script-policy",
       "git_mode": "100755",
-      "sha256": "c15c877ab279011bc80aa2f4531148ad0cc4f3908bda420132c88c5f18c9305a",
+      "sha256": "6c803367a0afb270444a465bfae7bd4aaaecbdfe47a39acde77049bd752b62d3",
       "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -3536,5 +3555,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "1a6d9e5125dda7368501b192c2dff87ad57ac19351f805535cfdef89312135e1"
+  "digest": "52fa47121b32a85de2fb177bf5e13c331baba9d668ae5e7ac8f43921a633a232"
 }

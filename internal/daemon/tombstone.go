@@ -149,7 +149,7 @@ func (sm *SessionManager) fsyncTombstoneDir() error {
 // syncTombstoneDir fsyncs the tombstone directory so an unlink is durable. A
 // non-existent directory is treated as success (nothing to make durable).
 func syncTombstoneDir(dir string) error {
-	d, err := os.Open(dir)
+	d, err := os.Open(dir) // #nosec G703 -- tombstone directory is derived from daemon-owned state paths.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil

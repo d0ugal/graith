@@ -1958,7 +1958,7 @@ func WriteManifest(dir string, m *UpgradeManifest) (string, error) {
 	}
 
 	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
+	defer func() { _ = os.Remove(tmpPath) }() // #nosec G703 -- tmpPath is returned by os.CreateTemp in the upgrade state dir above.
 
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
@@ -1988,7 +1988,7 @@ func WriteManifest(dir string, m *UpgradeManifest) (string, error) {
 		return "", err
 	}
 
-	if err := os.Remove(tmpPath); err != nil {
+	if err := os.Remove(tmpPath); err != nil { // #nosec G703 -- tmpPath is returned by os.CreateTemp in the upgrade state dir above.
 		return path, err
 	}
 
@@ -2258,7 +2258,7 @@ func removeUpgradeJournalMarker(path, phase string) error {
 		return nil
 	}
 
-	if err := os.Remove(upgradeJournalMarkerPath(path, phase)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(upgradeJournalMarkerPath(path, phase)); err != nil && !errors.Is(err, os.ErrNotExist) { // #nosec G703 -- marker path is derived from a validated upgrade journal path and phase.
 		return err
 	}
 
@@ -2281,7 +2281,7 @@ func removeUpgradeJournal(path string, manifest *UpgradeManifest) error {
 		return errors.New("upgrade adoption journal pathname was replaced")
 	}
 
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil { // #nosec G703 -- path identity is verified against the journal manifest above.
 		return err
 	}
 
@@ -2313,7 +2313,7 @@ func recoverPendingUpgradeJournals(dir string) error {
 
 	if len(pending) == 0 {
 		for _, marker := range markers {
-			if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) { // #nosec G703 -- marker paths come from upgradeJournalPaths for the state directory.
 				return err
 			}
 		}
@@ -2427,7 +2427,7 @@ func quarantineUpgradeJournal(path string) error {
 		return err
 	}
 
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil { // #nosec G703 -- quarantine path validation above requires an upgrade journal suffix.
 		return err
 	}
 
@@ -4482,7 +4482,7 @@ func stopDaemonWithGuard(
 		return err
 	}
 
-	data, err := os.ReadFile(pidFile)
+	data, err := os.ReadFile(pidFile) // #nosec G703 -- pid file path is supplied by daemon-controlled config paths.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return errors.New("daemon not running (no pid file)")

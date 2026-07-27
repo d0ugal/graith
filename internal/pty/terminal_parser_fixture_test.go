@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-//nolint:unused // used by the supported native terminal parser tests.
 func terminalParserPanicFixture(t *testing.T) []byte {
 	t.Helper()
 
