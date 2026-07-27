@@ -828,20 +828,22 @@ func TestToSessionInfo(t *testing.T) {
 	createdAt := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
 	sess := SessionState{
-		ID:             "abc123",
-		Name:           "braw",
-		RepoPath:       "/home/user/croft",
-		RepoName:       "croft",
-		WorktreePath:   "/home/user/.local/share/graith/worktrees/abc123",
-		CWD:            "/home/user/.local/share/graith/worktrees/abc123",
-		Branch:         "user/graith/braw-abc123",
-		Agent:          "claude",
-		AgentSessionID: "session-id-123",
-		Model:          "claude-sonnet-4-5-20250514",
-		Status:         StatusStopped,
-		ExitCode:       &exitCode,
-		CreatedAt:      createdAt,
-		HookToolName:   "Bash",
+		ID:               "abc123",
+		Name:             "braw",
+		RepoPath:         "/home/user/croft",
+		RepoName:         "croft",
+		WorktreePath:     "/home/user/.local/share/graith/worktrees/abc123",
+		CWD:              "/home/user/.local/share/graith/worktrees/abc123",
+		Branch:           "user/graith/braw-abc123",
+		Agent:            "claude",
+		AgentSessionID:   "session-id-123",
+		Model:            "claude-sonnet-4-5-20250514",
+		Status:           StatusStopped,
+		ExitCode:         &exitCode,
+		CreatedAt:        createdAt,
+		HookToolName:     "Bash",
+		ReadOnlyBranch:   true,
+		ReadOnlyRevision: "braw-revision",
 	}
 
 	info := toSessionInfo(sess, config.Default(), nil)
@@ -872,6 +874,14 @@ func TestToSessionInfo(t *testing.T) {
 
 	if info.Branch != sess.Branch {
 		t.Errorf("Branch = %q, want %q", info.Branch, sess.Branch)
+	}
+
+	if !info.ReadOnlyBranch {
+		t.Error("ReadOnlyBranch = false, want true")
+	}
+
+	if info.ReadOnlyRevision != sess.ReadOnlyRevision {
+		t.Errorf("ReadOnlyRevision = %q, want %q", info.ReadOnlyRevision, sess.ReadOnlyRevision)
 	}
 
 	if info.Agent != sess.Agent {
@@ -3170,7 +3180,8 @@ func TestResumeRefreshesSandboxConfig(t *testing.T) {
 		if err != nil {
 			if !strings.Contains(err.Error(), "cannot enforce") &&
 				!strings.Contains(err.Error(), "not available") &&
-				!strings.Contains(err.Error(), "not found in PATH") {
+				!strings.Contains(err.Error(), "not found in PATH") &&
+				!strings.Contains(err.Error(), "nono cannot grant it read-only") {
 				t.Fatalf("unexpected error: %v", err)
 			}
 

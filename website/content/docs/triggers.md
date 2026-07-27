@@ -77,15 +77,15 @@ debounce = "30s"             # quiet-window; lower for fast commands
 
 - A watch trigger is a **policy selector** by `repo` or `role` — never a live
   session name — binding to matching running writable sessions and watching
-  their worktrees. Mirror sessions are read-only and share another session's
-  worktree, so they are not bound directly.
+  their worktrees. Mirror sessions and branch-backed read-only sessions are
+  read-only/mirror-classified, so they are not bound directly.
 - A `repo` selector binds to every running writable session for that repository.
   If multiple writable sessions share a worktree, `gr trigger status <name>`
   shows multiple binding rows with the same worktree path, so duplicate activity
   is explicit.
 - A `role` selector matches any running writable session with that scenario
-  role. Select the role of the writable source, not a mirror that shares its
-  worktree. This is how a scenario ships its own automation: a
+  role. Select the role of the writable source, not a mirror or read-only branch
+  reader. This is how a scenario ships its own automation: a
   [scenario-embedded trigger]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
   uses a `role` its scenario defines and binds only inside that scenario.
 - `.gitignore` is always honoured — ignored directories (`node_modules/` etc.) are

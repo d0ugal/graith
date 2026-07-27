@@ -19,6 +19,8 @@ type WorktreePort interface {
 	DiscoverDefaultBranch(repoPath string) (string, error)
 	DiscoverDefaultBranchOrHEAD(repoPath string) (string, error)
 	Setup(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error
+	SetupReadOnly(ctx context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error)
+	RefreshReadOnly(ctx context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error)
 	Teardown(repoPath, worktreePath, branchName string) error
 }
 
@@ -46,6 +48,14 @@ func (gitWorktreeAdapter) DiscoverDefaultBranchOrHEAD(repoPath string) (string, 
 
 func (gitWorktreeAdapter) Setup(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
 	return git.SetupSession(ctx, repoPath, worktreePath, branchName, baseBranch, fetch)
+}
+
+func (gitWorktreeAdapter) SetupReadOnly(ctx context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	return git.SetupReadOnlySession(ctx, repoPath, worktreePath, branch, fetch)
+}
+
+func (gitWorktreeAdapter) RefreshReadOnly(ctx context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	return git.RefreshReadOnlySession(ctx, repoPath, worktreePath, branch, fetch)
 }
 
 func (gitWorktreeAdapter) Teardown(repoPath, worktreePath, branchName string) error {

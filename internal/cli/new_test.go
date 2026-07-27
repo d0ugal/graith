@@ -51,6 +51,45 @@ func TestNewRejectsInvalidLabelBeforeConnecting(t *testing.T) {
 	}
 }
 
+func TestNewReadOnlyRejectsConflictingModesBeforeConnecting(t *testing.T) {
+	oldReadOnly, oldNoRepo, oldMirror, oldInPlace := newReadOnly, newNoRepo, newMirror, newInPlace
+	oldPrompt, oldPromptFile, oldLabels, oldCfg := newPrompt, newPromptFile, newLabels, cfg
+
+	t.Cleanup(func() {
+		newReadOnly, newNoRepo, newMirror, newInPlace = oldReadOnly, oldNoRepo, oldMirror, oldInPlace
+		newPrompt, newPromptFile, newLabels, cfg = oldPrompt, oldPromptFile, oldLabels, oldCfg
+	})
+
+	tests := map[string]struct {
+		noRepo  bool
+		mirror  string
+		inPlace bool
+		want    string
+	}{
+		"no repo":  {noRepo: true, want: "--read-only and --no-repo"},
+		"mirror":   {mirror: "subject", want: "--read-only and --mirror"},
+		"in place": {inPlace: true, want: "--read-only and --in-place"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg = config.Default()
+			newReadOnly = true
+			newNoRepo = test.noRepo
+			newMirror = test.mirror
+			newInPlace = test.inPlace
+			newPrompt = ""
+			newPromptFile = ""
+			newLabels = nil
+
+			err := newCmd.RunE(newCmd, []string{"braw-reader"})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("new --read-only error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestCreateLabelsFromRawPreservesOmittedVsExplicit(t *testing.T) {
 	tests := map[string]struct {
 		raw         []string
@@ -100,5 +139,13 @@ func TestNewLabelFlagIsRepeatable(t *testing.T) {
 	flag := newCmd.Flags().Lookup("label")
 	if flag == nil || flag.Value.Type() != "stringArray" {
 		t.Fatalf("new --label = %#v, want repeatable stringArray", flag)
+	}
+}
+
+func TestScenarioAddReadOnlyFlagRegistered(t *testing.T) {
+	registerCommands()
+
+	if flag := scenarioAddCmd.Flags().Lookup("read-only"); flag == nil || flag.Value.Type() != "bool" {
+		t.Fatalf("scenario add --read-only = %#v, want bool flag", flag)
 	}
 }

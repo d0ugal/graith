@@ -14,13 +14,14 @@ Create a new agent session.
 | Flag | Description |
 |------|-------------|
 | `--agent <name>` | Agent to run (default: `default_agent` from config) |
-| `--base <branch>` | Base branch to fork the worktree from (default: repo default branch) |
+| `--base <branch>` | Base branch to fork the worktree from, or branch to reference for `--read-only` (default: repo default branch) |
 | `-C, --repo <path>` | Path to git repo (default: current directory) |
 | `--label <label>` | Add a session label; repeat the flag for multiple labels |
 | `--no-repo` | Create session without a git repo or worktree |
 | `--in-place` | Run agent directly in the repo without creating a worktree |
 | `--allow-concurrent` | Allow multiple in-place sessions on the same repo (requires `--in-place`) |
 | `--mirror <session>` | Mount another session's worktree read-only (requires sandbox) |
+| `--read-only` | Mount the selected repository branch read-only from a writable scratch cwd (requires sandbox) |
 | `--background` | Create without attaching |
 | `-p, --prompt <text>` | Initial prompt for the agent |
 | `--prompt-file <path>` | Read initial prompt from file |
@@ -45,6 +46,22 @@ Graith creates an empty orphan worktree on the generated session branch, leaving
 the source checkout and its unborn branch unchanged. An explicit `--base` must
 name that unborn branch. Creating this kind of session requires Git 2.42 or
 newer.
+
+### Branch-backed read-only sessions
+
+`gr new observer --repo ~/Code/app --read-only --base main` creates a
+mirror-classified session without another source session. Graith resolves the
+repository, fetches according to `fetch_on_create` unless `--no-fetch` is given,
+checks out the selected branch revision into a detached worktree, and launches
+the agent from a writable scratch directory. `GRAITH_WORKTREE_PATH` points to
+the read-only repository view; `gr path` returns the writable scratch cwd.
+
+If `--base` is omitted, Graith uses the repository default branch. On
+resume/restart, the detached worktree is refreshed to the latest resolved branch
+revision and status JSON reports `read_only_branch: true` plus
+`read_only_revision`. The mode requires sandbox enforcement and is mutually
+exclusive with `--mirror`, `--in-place`, `--no-repo`, and included repos. File
+watch triggers skip these sessions just like `--mirror` sessions.
 
 ### Codex options
 
@@ -157,6 +174,8 @@ and errors outside a graith session (no
 ## `gr restart <name-or-id>`
 
 Restart a stopped session in the existing worktree using the agent's `resume_args`.
+For a branch-backed read-only session, restart also refreshes the detached
+worktree to the current selected branch revision before launching.
 
 | Flag | Description |
 |------|-------------|
@@ -166,7 +185,9 @@ Restart a stopped session in the existing worktree using the agent's `resume_arg
 
 Soft-delete a session. This stops and hides it while retaining its worktree,
 branch, and state for the configured retention window. Recover it with
-`gr restore`, or remove it immediately with `gr purge`.
+`gr restore`, or remove it immediately with `gr purge`. Branch-backed read-only
+sessions have no generated branch; on purge or retention cleanup, Graith removes
+their detached worktree and writable scratch directory.
 
 | Flag | Description |
 |------|-------------|

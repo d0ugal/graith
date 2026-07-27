@@ -348,6 +348,31 @@ func TestPullIfClean_DefaultBranchSessionBlocks(t *testing.T) {
 	}
 }
 
+func TestPullIfClean_ReadOnlyBranchSessionDoesNotBlock(t *testing.T) {
+	bareDir, cloneDir := setupTestRepo(t)
+	advanceRemote(t, bareDir, cloneDir)
+
+	sm := newTestSM(t)
+	sm.state.Sessions["reader-session"] = &SessionState{
+		ID:             "reader-session",
+		RepoPath:       cloneDir,
+		WorktreePath:   filepath.Join(t.TempDir(), "reader"),
+		Branch:         "main",
+		Mirror:         true,
+		ReadOnlyBranch: true,
+		Status:         StatusRunning,
+	}
+
+	pulled, err := sm.pullIfClean(context.Background(), cloneDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !pulled {
+		t.Fatal("expected pull to proceed for a detached read-only branch session")
+	}
+}
+
 // The explicit InPlace flag blocks the pull even when the recorded WorktreePath
 // does not resolve to the repo root, decoupling the guard from that invariant.
 func TestPullIfClean_InPlaceFlagBlocks(t *testing.T) {

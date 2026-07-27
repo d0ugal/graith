@@ -14,6 +14,11 @@ func CreateWorktree(repoPath, worktreePath, branchName string) error {
 	return err
 }
 
+func CreateDetachedWorktree(repoPath, worktreePath, ref string) error {
+	_, err := RunOutput(repoPath, "worktree", "add", "--detach", worktreePath, ref)
+	return err
+}
+
 // An orphan branch has no ref to roll back before its first commit, so setup is
 // intentionally a single worktree-add operation rather than CreateBranch plus
 // CreateWorktree like the commit-backed path below.
@@ -63,6 +68,62 @@ func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseB
 	}
 
 	return nil
+}
+
+func SetupReadOnlySession(ctx context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	revision, err := resolveReadOnlyBranch(ctx, repoPath, branch, fetch)
+	if err != nil {
+		return "", err
+	}
+
+	if err := CreateDetachedWorktree(repoPath, worktreePath, revision); err != nil {
+		return "", fmt.Errorf("create read-only worktree: %w", err)
+	}
+
+	return revision, nil
+}
+
+func RefreshReadOnlySession(ctx context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	revision, err := resolveReadOnlyBranch(ctx, repoPath, branch, fetch)
+	if err != nil {
+		return "", err
+	}
+
+	switch info, statErr := os.Stat(worktreePath); {
+	case statErr == nil && info.IsDir():
+		if _, err := RunOutputContext(ctx, worktreePath, "checkout", "--detach", "--force", revision); err != nil {
+			return "", fmt.Errorf("refresh read-only worktree: %w", err)
+		}
+	case errors.Is(statErr, os.ErrNotExist):
+		if err := PruneWorktrees(repoPath); err != nil {
+			return "", fmt.Errorf("prune read-only worktrees: %w", err)
+		}
+
+		if err := CreateDetachedWorktree(repoPath, worktreePath, revision); err != nil {
+			return "", fmt.Errorf("recreate read-only worktree: %w", err)
+		}
+	case statErr == nil:
+		return "", fmt.Errorf("read-only worktree path %q is not a directory", worktreePath)
+	default:
+		return "", fmt.Errorf("stat read-only worktree: %w", statErr)
+	}
+
+	return revision, nil
+}
+
+func resolveReadOnlyBranch(ctx context.Context, repoPath, branch string, fetch bool) (string, error) {
+	if fetch && HasRemote(repoPath, "origin") {
+		if err := FetchOriginContext(ctx, repoPath); err != nil {
+			return "", fmt.Errorf("fetch: %w", err)
+		}
+	}
+
+	revision, err := ResolveBranchCommit(repoPath, branch)
+	if err != nil {
+		return "", err
+	}
+
+	return revision, nil
 }
 
 func WorktreeGitDirs(worktreePath string) (gitDir, commonDir string, err error) {

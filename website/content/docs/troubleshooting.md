@@ -256,9 +256,10 @@ brew install eugene1g/tools/agent-safehouse
 
 `gr doctor` warns when configured sandbox read/write paths don't exist. Create the directory or remove it from config.
 
-### Mirror session fails
+### Read-only or mirror session fails
 
-`--mirror` requires sandbox enabled; without it, session creation fails closed.
+`--mirror` and `gr new --read-only` require sandbox enabled; without it, session
+creation fails closed because Graith cannot enforce read-only repository access.
 
 ```toml
 [sandbox]

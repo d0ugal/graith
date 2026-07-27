@@ -435,6 +435,10 @@ func TestReconcileBindings_SkipsMirrorSessions(t *testing.T) {
 		ID: "reader", Name: "canny", Status: StatusRunning, RepoPath: "/repo/croft",
 		ScenarioRole: "implementer", WorktreePath: worktree, Mirror: true, MirrorSourceID: "src",
 	}
+	sm.state.Sessions["branch-reader"] = &SessionState{
+		ID: "branch-reader", Name: "bothy", Status: StatusRunning, RepoPath: "/repo/croft",
+		ScenarioRole: "implementer", WorktreePath: worktree, Mirror: true, ReadOnlyBranch: true,
+	}
 	sm.state.Sessions["reactor"] = &SessionState{
 		ID: "reactor", Name: "dreich", Status: StatusRunning, RepoPath: "/repo/croft",
 		WorktreePath: worktree, Mirror: true, MirrorSourceID: "src",
@@ -457,6 +461,14 @@ func TestReconcileBindings_SkipsMirrorSessions(t *testing.T) {
 
 	if _, ok := sm.triggers.bindings[bindingKey("role-watch", "reader")]; ok {
 		t.Fatalf("created role binding for mirror session")
+	}
+
+	if _, ok := sm.triggers.bindings[bindingKey("repo-watch", "branch-reader")]; ok {
+		t.Fatalf("created repo binding for read-only branch session")
+	}
+
+	if _, ok := sm.triggers.bindings[bindingKey("role-watch", "branch-reader")]; ok {
+		t.Fatalf("created role binding for read-only branch session")
 	}
 
 	if _, ok := sm.triggers.bindings[bindingKey("repo-watch", "reactor")]; ok {

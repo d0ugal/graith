@@ -1027,6 +1027,34 @@ func TestScenarioStatusCovErrored(t *testing.T) {
 	}
 }
 
+func TestScenarioStatusIncludesReadOnlyMembers(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	sm.mu.Lock()
+	sm.state.Scenarios["sc-readers"] = &ScenarioState{
+		ID:         "sc-readers",
+		Name:       "strath-readers",
+		SessionIDs: []string{"reader-id"},
+		Sessions: []ScenarioSession{{
+			Name: "reader", Repo: "croft", ReadOnly: true,
+		}},
+	}
+	sm.state.Sessions["reader-id"] = &SessionState{
+		ID: "reader-id", Name: "reader", Status: StatusRunning,
+		RepoName: "croft", Mirror: true, ReadOnlyBranch: true,
+	}
+	sm.mu.Unlock()
+
+	record, err := sm.ScenarioStatus("strath-readers")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(record.Sessions) != 1 || !record.Sessions[0].ReadOnly {
+		t.Fatalf("scenario status sessions = %+v, want read_only=true", record.Sessions)
+	}
+}
+
 // --- ResumeScenario ---
 
 func TestResumeScenarioCovSkipsAndLogsErrors(t *testing.T) {
@@ -2893,6 +2921,28 @@ func TestStartScenarioMirrorsScenarioOwnedSource(t *testing.T) {
 	deleted, err := sm.DeleteScenario("strath-owned-source")
 	if err != nil || len(deleted) != 2 {
 		t.Fatalf("DeleteScenario = %v, err=%v, want source and reader", deleted, err)
+	}
+}
+
+func TestStartScenarioRejectsMirrorOfReadOnlyMember(t *testing.T) {
+	sm, orchID := newMirroredScenarioOrchestrator(t)
+	repo := initScenarioGitRepo(t)
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID, Name: "strath-read-only-chain",
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "subject", Repo: repo, ReadOnly: true},
+			{Name: "reader", Mirror: "subject"},
+		},
+	}, 24, 80)
+	if err == nil || !strings.Contains(err.Error(), "mirror target \"subject\" is read_only") {
+		t.Fatalf("StartScenario() error = %v, want read-only mirror target rejection", err)
+	}
+
+	for _, sess := range sm.state.Sessions {
+		if sess.ScenarioName == "strath-read-only-chain" {
+			t.Fatalf("rejected scenario left session reservation: %+v", sess)
+		}
 	}
 }
 

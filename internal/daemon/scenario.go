@@ -604,7 +604,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 
 		mirrorMembers[i] = scenariofile.MirrorMember{
-			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Name: s.Name, Mirror: s.Mirror, ReadOnly: s.ReadOnly, Repo: s.Repo, Base: s.Base,
 			Shared: s.Shared, Includes: len(s.Includes),
 		}
 	}
@@ -642,8 +642,9 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		// Shared members keep their original scenario identity, so a watch trigger
 		// can never bind to them. Mirror members are read-only and share another
 		// session's worktree, so they are also excluded from the selectable set. A
-		// shared or mirror member is still a valid delivery target by name.
-		if s.Role != "" && !s.Shared && s.Mirror == "" {
+		// shared, mirror, or read-only member is still a valid delivery target by
+		// name.
+		if s.Role != "" && !s.Shared && s.Mirror == "" && !s.ReadOnly {
 			definedRoles[s.Role] = true
 		}
 
@@ -694,6 +695,17 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 			}
 		}
 
+		if s.ReadOnly {
+			sandboxed, sandboxErr := sm.resolveSandboxFromConfig(cfg, agentName)
+			if sandboxErr != nil {
+				return nil, fmt.Errorf("session %q: read-only sandbox unavailable: %w", s.Name, sandboxErr)
+			}
+
+			if !sandboxed {
+				return nil, fmt.Errorf("session %q: read-only branch sessions require sandbox to be enabled", s.Name)
+			}
+		}
+
 		if s.Repo == "" {
 			continue
 		}
@@ -709,6 +721,13 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		if !cfg.RepoPathAllowed(repoRoot) {
 			return nil, fmt.Errorf("session %q: repo %q is not under any allowed_repo_paths", s.Name, s.Repo)
+		}
+
+		if s.ReadOnly {
+			rc, _ := cfg.FindRepo(repoRoot)
+			if len(mergeIncludes(rc.Includes, s.Includes)) > 0 {
+				return nil, fmt.Errorf("session %q: read-only branch sessions do not support included repos", s.Name)
+			}
 		}
 
 		repoRoots[i] = repoRoot
@@ -870,7 +889,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 		}
 
 		scenarioSessions[i] = ScenarioSession{
-			Name: s.Name, Mirror: s.Mirror, Role: s.Role, Prompt: s.Prompt, Task: s.Task,
+			Name: s.Name, Mirror: s.Mirror, ReadOnly: s.ReadOnly, Role: s.Role, Prompt: s.Prompt, Task: s.Task,
 			Repo: repoName, Agent: agentName, Model: s.Model, Shared: s.Shared,
 		}
 		if normalizedPolicy != nil {
@@ -1043,6 +1062,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 					ID: sessionIDs[idx], Name: s.Name, AgentName: agentName,
 					RepoPath: repoRoots[idx], MirrorSourceID: mirrorSourceID,
 					BaseBranch: s.Base, Prompt: s.StartupPrompt(), Model: s.Model,
+					ReadOnly: s.ReadOnly,
 					Labels:   append([]string{}, parentLabels...),
 					ParentID: msg.ParentSessionID, AgentHooks: s.AgentHooks,
 					Includes: s.Includes, Starred: s.Star,
@@ -1250,6 +1270,7 @@ type scenarioManifestSelf struct {
 	Name      string                   `json:"name"`
 	SessionID string                   `json:"session_id"`
 	Mirror    string                   `json:"mirror,omitempty"`
+	ReadOnly  bool                     `json:"read_only,omitempty"`
 	Role      string                   `json:"role"`
 	Prompt    string                   `json:"prompt,omitempty"`
 	Task      string                   `json:"task"`
@@ -1260,6 +1281,7 @@ type scenarioManifestSibling struct {
 	Name      string                   `json:"name"`
 	SessionID string                   `json:"session_id"`
 	Mirror    string                   `json:"mirror,omitempty"`
+	ReadOnly  bool                     `json:"read_only,omitempty"`
 	Role      string                   `json:"role"`
 	Repo      string                   `json:"repo"`
 	Results   []scenarioManifestResult `json:"results,omitempty"`
@@ -1308,6 +1330,7 @@ func (sm *SessionManager) buildManifest(
 			Name:      s.Name,
 			SessionID: sessionIDs[j],
 			Mirror:    s.Mirror,
+			ReadOnly:  s.ReadOnly,
 			Role:      s.Role,
 			Repo:      repo,
 			Results:   sm.manifestScenarioResults(scenarioID, msg.Name, sessionIDs[j], s),
@@ -1323,6 +1346,7 @@ func (sm *SessionManager) buildManifest(
 			Name:      self.Name,
 			SessionID: sessionIDs[selfIndex],
 			Mirror:    self.Mirror,
+			ReadOnly:  self.ReadOnly,
 			Role:      self.Role,
 			Prompt:    self.StartupPrompt(),
 			Task:      self.Task,
@@ -1874,6 +1898,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, errors.New("scenario add does not support mirror references; declare mirrored members in the scenario file so the full topology can be preflighted atomically")
 	}
 
+	if input.ReadOnly && len(input.Includes) > 0 {
+		return nil, errors.New("read-only branch sessions do not support included repos")
+	}
+
 	if input.Repo == "" {
 		return nil, errors.New("repo is required")
 	}
@@ -1905,9 +1933,27 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
 
+	if input.ReadOnly {
+		sandboxed, sandboxErr := sm.resolveSandboxFromConfig(cfg, agentName)
+		if sandboxErr != nil {
+			return nil, fmt.Errorf("read-only sandbox unavailable: %w", sandboxErr)
+		}
+
+		if !sandboxed {
+			return nil, errors.New("read-only branch sessions require sandbox to be enabled")
+		}
+	}
+
 	repoRoot, err := git.RepoRootPath(input.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("resolve repo root: %w", err)
+	}
+
+	if input.ReadOnly {
+		rc, _ := cfg.FindRepo(repoRoot)
+		if len(mergeIncludes(rc.Includes, input.Includes)) > 0 {
+			return nil, errors.New("read-only branch sessions do not support included repos")
+		}
 	}
 
 	resolvedID, ok := sm.scenarioIDByName(name)
@@ -2134,6 +2180,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		BaseBranch: input.Base,
 		Prompt:     input.StartupPrompt(),
 		Model:      input.Model,
+		ReadOnly:   input.ReadOnly,
 		// Scenario additions are fresh child creations: they inherit the
 		// orchestrator's current labels, not StartScenario's initial snapshot.
 		ParentID:   orchestratorID,
@@ -2257,7 +2304,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 	}
 
 	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
-		Name: input.Name, Role: input.Role, Prompt: input.Prompt, Task: input.Task,
+		Name: input.Name, Role: input.Role, Prompt: input.Prompt, Task: input.Task, ReadOnly: input.ReadOnly,
 		Repo: filepath.Base(repoRoot), Agent: agentName, Model: input.Model,
 		Results: results, Policy: memberPolicy,
 	})
@@ -2450,7 +2497,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 		}
 
 		sessions[i] = protocol.ScenarioSessionInput{
-			Name: ss.Name, Repo: ss.Repo, Mirror: ss.Mirror, Role: ss.Role,
+			Name: ss.Name, Repo: ss.Repo, Mirror: ss.Mirror, ReadOnly: ss.ReadOnly, Role: ss.Role,
 			Prompt: ss.Prompt, Task: ss.Task, Agent: ss.Agent, Model: ss.Model, Results: results,
 		}
 	}
@@ -2541,7 +2588,7 @@ func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.Scena
 	for i, ss := range sc.Sessions {
 		sessions[i] = protocol.ScenarioSessionInfo{
 			Name: ss.Name, Mirror: ss.Mirror, Role: ss.Role, Prompt: ss.startupPrompt(), Task: ss.Task,
-			Repo: ss.Repo, Agent: ss.Agent, Model: ss.Model, Shared: ss.Shared,
+			Repo: ss.Repo, Agent: ss.Agent, Model: ss.Model, Shared: ss.Shared, ReadOnly: ss.ReadOnly,
 		}
 
 		if len(ss.Results) > 0 {

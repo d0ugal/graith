@@ -68,6 +68,7 @@ public struct CreateMsg: Codable, Sendable {
     public var model: String?
     public var noRepo: Bool?
     public var mirror: String?
+    public var readOnly: Bool?
     public var agentHooks: Bool?
     public var inPlace: Bool?
     public var allowConcurrent: Bool?
@@ -75,7 +76,8 @@ public struct CreateMsg: Codable, Sendable {
 
     public init(name: String, labels: [String]? = nil, agent: String, repoPath: String, base: String? = nil,
                 prompt: String? = nil, model: String? = nil, parentID: String? = nil,
-                noRepo: Bool? = nil, agentHooks: Bool? = nil, inPlace: Bool? = nil) {
+                noRepo: Bool? = nil, mirror: String? = nil, readOnly: Bool? = nil,
+                agentHooks: Bool? = nil, inPlace: Bool? = nil) {
         self.name = name
         self.labels = labels
         self.agent = agent
@@ -85,6 +87,8 @@ public struct CreateMsg: Codable, Sendable {
         self.model = model
         self.parentID = parentID
         self.noRepo = noRepo
+        self.mirror = mirror
+        self.readOnly = readOnly
         self.agentHooks = agentHooks
         self.inPlace = inPlace
     }
@@ -100,6 +104,7 @@ public struct CreateMsg: Codable, Sendable {
         case model
         case noRepo = "no_repo"
         case mirror = "mirror"
+        case readOnly = "read_only"
         case agentHooks = "agent_hooks"
         case inPlace = "in_place"
         case allowConcurrent = "allow_concurrent"
@@ -299,6 +304,8 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var unpushedCount: Int?
     public var sandboxed: Bool?
     public var mirror: Bool?
+    public var readOnlyBranch: Bool?
+    public var readOnlyRevision: String?
     public var inPlace: Bool?
     public var model: String?
     public var toolName: String?
@@ -326,7 +333,9 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         status: String, agentStatus: String? = nil, exitCode: Int? = nil,
         exitSignal: String? = nil, createdAt: String = "", lastAttachedAt: String? = nil,
         statusChangedAt: String? = nil, dirty: Bool? = nil, unpushedCount: Int? = nil,
-        sandboxed: Bool? = nil, mirror: Bool? = nil, inPlace: Bool? = nil,
+        sandboxed: Bool? = nil, mirror: Bool? = nil,
+        readOnlyBranch: Bool? = nil, readOnlyRevision: String? = nil,
+        inPlace: Bool? = nil,
         model: String? = nil, toolName: String? = nil,
         includes: [IncludedRepoInfo]? = nil, configStale: Bool? = nil, starred: Bool? = nil,
         systemKind: String? = nil,
@@ -339,7 +348,9 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         self.status = status; self.agentStatus = agentStatus; self.exitCode = exitCode
         self.exitSignal = exitSignal; self.createdAt = createdAt; self.lastAttachedAt = lastAttachedAt
         self.statusChangedAt = statusChangedAt; self.dirty = dirty; self.unpushedCount = unpushedCount
-        self.sandboxed = sandboxed; self.mirror = mirror; self.inPlace = inPlace
+        self.sandboxed = sandboxed; self.mirror = mirror
+        self.readOnlyBranch = readOnlyBranch; self.readOnlyRevision = readOnlyRevision
+        self.inPlace = inPlace
         self.model = model; self.toolName = toolName; self.includes = includes
         self.configStale = configStale; self.starred = starred; self.systemKind = systemKind
         self.summaryText = summaryText
@@ -371,6 +382,8 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case unpushedCount = "unpushed_count"
         case sandboxed
         case mirror = "mirror"
+        case readOnlyBranch = "read_only_branch"
+        case readOnlyRevision = "read_only_revision"
         case inPlace = "in_place"
         case model
         case toolName = "tool_name"

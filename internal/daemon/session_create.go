@@ -45,6 +45,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	parentID := opts.ParentID
 	noRepo := opts.NoRepo
 	mirror := opts.Mirror
+	readOnlyBranch := opts.ReadOnly
 	exactMirrorSourceID := opts.MirrorSourceID
 	agentHooks := opts.AgentHooks
 	inPlace := opts.InPlace
@@ -99,10 +100,26 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, errors.New("mirror name and exact mirror source id are mutually exclusive")
 	}
 
-	hasMirror := mirror != "" || exactMirrorSourceID != ""
+	hasSessionMirror := mirror != "" || exactMirrorSourceID != ""
 
-	if inPlace && hasMirror {
+	if readOnlyBranch && noRepo {
+		return SessionState{}, errors.New("--read-only and --no-repo are mutually exclusive")
+	}
+
+	if readOnlyBranch && repoPath == "" {
+		return SessionState{}, errors.New("--read-only requires a repository")
+	}
+
+	if readOnlyBranch && hasSessionMirror {
+		return SessionState{}, errors.New("--read-only and --mirror are mutually exclusive")
+	}
+
+	if inPlace && hasSessionMirror {
 		return SessionState{}, errors.New("--in-place and --mirror are mutually exclusive")
+	}
+
+	if inPlace && readOnlyBranch {
+		return SessionState{}, errors.New("--in-place and --read-only are mutually exclusive")
 	}
 
 	if inPlace && baseBranch != "" {
@@ -113,7 +130,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// These can involve network calls (gh api) and must not hold the mutex.
 	var preRepoRoot string
 
-	if !noRepo && !hasMirror && repoPath != "" {
+	if !noRepo && !hasSessionMirror && repoPath != "" {
 		if !worktreePort.IsInsideRepo(repoPath) {
 			if inPlace {
 				return SessionState{}, fmt.Errorf("not inside a git repository: %s", repoPath)
@@ -144,12 +161,12 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	// Preserve authorization and singleton validation before invoking the
 	// provider, while keeping the provider call outside the manager lock.
-	if baseBranch == "" && preRepoRoot != "" && !inPlace && !hasMirror {
+	if baseBranch == "" && preRepoRoot != "" && !inPlace && !hasSessionMirror {
 		if !preLockCfg.RepoPathAllowed(repoPath) {
 			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
 		}
 
-		if rc, ok := preLockCfg.FindRepo(preRepoRoot); ok && rc.Singleton {
+		if rc, ok := preLockCfg.FindRepo(preRepoRoot); ok && rc.Singleton && !readOnlyBranch {
 			canonicalRoot := config.ResolvePath(preRepoRoot)
 
 			sm.mu.RLock()
@@ -323,6 +340,27 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		repoName = filepath.Base(repoRoot)
 		worktreePath = repoRoot
+	case readOnlyBranch:
+		repoRoot = preRepoRoot
+
+		if !sm.cfg.RepoPathAllowed(repoPath) {
+			sm.mu.Unlock()
+			return SessionState{}, fmt.Errorf("repo path %q is not under any allowed_repo_paths", repoPath)
+		}
+
+		rc, _ := sm.cfg.FindRepo(repoRoot)
+		rcIncludes = mergeIncludes(rc.Includes, opts.Includes)
+
+		if len(rcIncludes) > 0 {
+			sm.mu.Unlock()
+			return SessionState{}, errors.New("--read-only sessions do not support included repos")
+		}
+
+		repoName = filepath.Base(repoRoot)
+		worktreePath = filepath.Join(sm.paths.DataDir, "worktrees", repoName, repoHash(repoRoot), id)
+		branchName = baseBranch
+		isMirror = true
+		fetchOnCreate = sm.cfg.FetchOnCreate && !opts.NoFetch
 	default:
 		repoRoot = preRepoRoot
 
@@ -392,7 +430,13 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	if isMirror && !sandboxed {
+		if readOnlyBranch {
+			sm.mu.Unlock()
+			return SessionState{}, errors.New("--read-only requires sandbox to be enabled so the branch worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
+		}
+
 		sm.mu.Unlock()
+
 		return SessionState{}, errors.New("--mirror requires sandbox to be enabled so the mirrored worktree can be mounted read-only; set sandbox.enabled = true in config and ensure safehouse is installed (gr doctor)")
 	}
 
@@ -421,6 +465,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		Codex:                codexStatePtr(codexOpts),
 		Mirror:               isMirror,
 		MirrorSourceID:       mirrorSourceID,
+		ReadOnlyBranch:       readOnlyBranch,
 		InPlace:              inPlace,
 		AgentHooks:           hooksEnabled,
 		TriggerID:            opts.TriggerID,
@@ -466,6 +511,13 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		// no profile was written (os.Remove ignores a missing file).
 		_ = os.Remove(sm.nonoProfilePath(id))
 		_ = os.Remove(sm.safehouseFragmentPath(id))
+
+		if readOnlyBranch {
+			_ = worktreePort.Teardown(repoRoot, worktreePath, "")
+			_ = os.RemoveAll(cwd)
+
+			return
+		}
 
 		if isMirror || inPlace {
 			return
@@ -521,7 +573,18 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	// Git worktree setup (default path only — includes fetch which can block).
-	if repoRoot != "" && !isMirror && !inPlace {
+	readOnlyRevision := ""
+
+	if repoRoot != "" && readOnlyBranch {
+		gitCtx, gitCancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.FetchTimeoutDuration())
+		defer gitCancel()
+
+		readOnlyRevision, err = worktreePort.SetupReadOnly(gitCtx, repoRoot, worktreePath, branchName, fetchOnCreate)
+		if err != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("setup read-only branch session: %w", err)
+		}
+	} else if repoRoot != "" && !isMirror && !inPlace {
 		gitCtx, gitCancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.FetchTimeoutDuration())
 		defer gitCancel()
 
@@ -1035,6 +1098,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.SandboxConfig = mergedSandbox
 	sessState.Includes = includes
 	sessState.DriverKind = driverKind
+	sessState.ReadOnlyRevision = readOnlyRevision
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.LaunchGeneration = 1

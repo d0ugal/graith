@@ -321,6 +321,10 @@ func (sm *SessionManager) hasBlockingSessionForRepo(repoPath, defaultBranch stri
 			continue
 		}
 
+		if s.Mirror || s.ReadOnlyBranch {
+			continue
+		}
+
 		if blocks(s.InPlace, s.RepoPath, s.WorktreePath, s.Branch) {
 			return true
 		}

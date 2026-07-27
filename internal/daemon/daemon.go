@@ -1423,6 +1423,9 @@ type CreateOpts struct {
 	ParentID string
 	NoRepo   bool
 	Mirror   string
+	// ReadOnly creates a mirror-classified session backed by a detached
+	// worktree at BaseBranch/the repository default instead of another session.
+	ReadOnly bool
 	// MirrorSourceID is the internal exact-ID mirror contract. Unlike Mirror,
 	// it never treats the value as a session name. Scenario startup uses it
 	// after resolving and reserving an authoritative source identity.
