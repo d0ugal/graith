@@ -87,7 +87,7 @@ func (manifest Manifest) ValidateAt(now time.Time) error {
 		return err
 	}
 
-	return validateUnsupported(manifest.Unsupported, modes, coordinates, events, trustTiers, platforms, baselineDigest, now)
+	return validateUnsupported(manifest.Unsupported, modes, coordinates, events, trustTiers, platforms, baselineDigest)
 }
 
 func validateSource(source SourceIdentity) (string, error) {
@@ -437,7 +437,6 @@ func validateUnsupported(
 	trustTiers map[string]TrustTier,
 	platforms map[string]Platform,
 	baselineDigest string,
-	now time.Time,
 ) error {
 	seen := map[string]bool{}
 	seenCoordinates := map[string]string{}
@@ -474,21 +473,8 @@ func validateUnsupported(
 			seenCoordinates[decision.Coordinate] = subject
 		}
 
-		if decision.Owner == "" || decision.Rationale == "" || decision.Expires == "" {
-			return fmt.Errorf("unsupported %s lacks owner, rationale, or expiry", subject)
-		}
-
-		expiry, err := time.Parse("2006-01-02", decision.Expires)
-		if err != nil || expiry.IsZero() {
-			return fmt.Errorf("unsupported %s has invalid expiry %q", subject, decision.Expires)
-		}
-
-		if !now.Before(expiry.AddDate(0, 0, 1)) {
-			return fmt.Errorf("unsupported %s expired on %s", subject, decision.Expires)
-		}
-
-		if expiry.After(now.AddDate(0, 3, 0)) {
-			return fmt.Errorf("unsupported %s expiry %s exceeds the three-month renewal window", subject, decision.Expires)
+		if decision.Owner == "" || decision.Rationale == "" {
+			return fmt.Errorf("unsupported %s lacks owner or rationale", subject)
 		}
 
 		if decision.SilentPassAllowed {

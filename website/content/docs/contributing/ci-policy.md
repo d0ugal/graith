@@ -141,8 +141,7 @@ result identity when applicable before an artifact manifest can be accepted.
 
 The current P1 manifest explicitly records the GitHub-generated
 `dynamic/dependabot/update-graph` observation as an unsupported external mode
-with owner, rationale, expiry, and P0 evidence references. It is not a
+with owner, rationale, and P0 evidence references. It is not a
 repository-owned current proof mode and cannot silently pass or enter dual-run
-sampling until a later policy package gives it an explicit mode or retirement
-decision. Its current expiry is `2026-08-31`; validation fails after that date
-until the owner renews, promotes, or retires the row.
+sampling until a reviewed policy change gives it an explicit implementation or
+retirement decision. Elapsed calendar time alone does not invalidate the row.

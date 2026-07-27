@@ -294,7 +294,6 @@ type PlanUnsupportedDecision struct {
 	Requiredness      string   `json:"requiredness"`
 	Owner             string   `json:"owner"`
 	Rationale         string   `json:"rationale"`
-	Expires           string   `json:"expires"`
 	SilentPassAllowed bool     `json:"silent_pass_allowed"`
 	EvidenceRefs      []string `json:"evidence_refs"`
 }
@@ -696,6 +695,10 @@ func (plan RunPlan) Validate(manifest Manifest) error {
 }
 
 func (plan RunPlan) ValidateAt(manifest Manifest, now time.Time) error {
+	if now.IsZero() {
+		return errors.New("plan validation time is required")
+	}
+
 	if err := manifest.ValidateAt(now); err != nil {
 		return err
 	}
@@ -741,7 +744,7 @@ func (plan RunPlan) ValidateAt(manifest Manifest, now time.Time) error {
 		return errors.New("plan expiry must be after creation")
 	}
 
-	if !now.IsZero() && plan.CreatedAt.After(now.Add(maxPlanClockSkew)) {
+	if plan.CreatedAt.After(now.Add(maxPlanClockSkew)) {
 		return fmt.Errorf("plan created_at %s is too far in the future", plan.CreatedAt.Format(time.RFC3339))
 	}
 
@@ -749,7 +752,7 @@ func (plan RunPlan) ValidateAt(manifest Manifest, now time.Time) error {
 		return fmt.Errorf("plan ttl %s exceeds maximum %s", plan.ExpiresAt.Sub(plan.CreatedAt), defaultPlanTTL)
 	}
 
-	if !now.IsZero() && !now.Before(plan.ExpiresAt) {
+	if !now.Before(plan.ExpiresAt) {
 		return fmt.Errorf("plan expired at %s", plan.ExpiresAt.Format(time.RFC3339))
 	}
 
@@ -1080,7 +1083,6 @@ func expandPlanRows(
 			Requiredness:      decision.Requiredness,
 			Owner:             decision.Owner,
 			Rationale:         decision.Rationale,
-			Expires:           decision.Expires,
 			SilentPassAllowed: decision.SilentPassAllowed,
 			EvidenceRefs:      append([]string(nil), decision.EvidenceRefs...),
 		})

@@ -302,8 +302,7 @@ func defaultExternalModeDecision() UnsupportedDecision {
 		Mode: "dynamic/dependabot/update-graph", Coordinate: "dynamic/dependabot/update-graph",
 		Source: sourceID, Event: "dynamic", Platform: "github-service", TrustTier: "github-service",
 		Requiredness: "unsupported", Owner: "graith-maintainers",
-		Rationale: "GitHub-generated Dependabot dependency-graph update outside the 18 repo-owned workflow paths; latency policy no-latency-target; dual-run eligibility false until P1/P2 gives it an explicit mode or retirement decision.",
-		Expires:   "2026-08-31",
+		Rationale: "GitHub-generated Dependabot dependency-graph update outside the 18 repo-owned workflow paths; latency policy no-latency-target; dual-run eligibility false until an explicit reviewed implementation or retirement change updates this decision.",
 		EvidenceRefs: []string{
 			"github-actions:run/30152132020/job/89664191125",
 			"p0-acceptance:gap-external-dependabot-update-graph-30152132020",

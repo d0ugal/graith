@@ -226,36 +226,5 @@ func TestPlanWithoutChangedFilesSelectsUnknownFileListSuperset(t *testing.T) {
 func stableCLIPlanTime(t *testing.T) time.Time {
 	t.Helper()
 
-	manifestPath := filepath.Join("..", "..", "internal", "cipolicy", "manifest.json")
-
-	manifest, err := cipolicy.ReadManifest(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var earliest time.Time
-
-	for _, decision := range manifest.Unsupported {
-		expires, err := time.Parse(time.DateOnly, decision.Expires)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if earliest.IsZero() || expires.Before(earliest) {
-			earliest = expires
-		}
-	}
-
-	if earliest.IsZero() {
-		return time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
-	}
-
-	candidate := earliest.AddDate(0, -1, 0).Add(10 * time.Hour).UTC()
-	current := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
-
-	if candidate.After(current) {
-		return current
-	}
-
-	return candidate
+	return time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 }
