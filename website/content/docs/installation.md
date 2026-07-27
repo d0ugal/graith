@@ -149,35 +149,40 @@ Assets attached to historical releases remain unchanged.
 
 For stable installations, Homebrew and the package repositories select the
 matching `graith_<version>_darwin_arm64.tar.gz` or Linux tar/deb/rpm/apk asset.
-For the moving channel, Homebrew selects `graith-dev_darwin_arm64.tar.gz`,
-`graith-dev_linux_amd64.tar.gz`, or `graith-dev_linux_arm64.tar.gz` for those
-native targets. Each native archive contains its final executable, normal
-release metadata, executable-bound `libghostty-native.spdx.json`, and
+For the moving channel, Homebrew selects versioned dev assets such as
+`graith-dev_<dev-version>_darwin_arm64.tar.gz`,
+`graith-dev_<dev-version>_linux_amd64.tar.gz`, or
+`graith-dev_<dev-version>_linux_arm64.tar.gz` for those native targets. Each
+native archive contains its final executable, normal release metadata,
+executable-bound `libghostty-native.spdx.json`, and
 `THIRD_PARTY_NOTICES.libghostty.md`. Stable Linux deb/rpm/apk packages carry the
-same executable bytes and native evidence. The published `checksums.txt` binds
+same executable bytes and native evidence. The matching checksum file binds
 every archive/package, and GitHub build provenance can be verified after
 download:
 
 ```bash
-gh attestation verify graith-dev_linux_amd64.tar.gz --repo d0ugal/graith
-grep '  graith-dev_linux_amd64.tar.gz$' checksums.txt > archive-checksum.txt
+archive=graith-dev_<dev-version>_linux_amd64.tar.gz
+checksums=graith-dev_<dev-version>_checksums.txt
+gh attestation verify "$archive" --repo d0ugal/graith
+grep "  ${archive}$" "$checksums" > archive-checksum.txt
 test "$(wc -l < archive-checksum.txt)" -eq 1
 sha256sum --check archive-checksum.txt
 ```
 
-For a stable download, substitute its exact versioned filename, for example
-`graith_0.70.0_linux_amd64.tar.gz`; the same attestation and checksum commands
-apply. Verify a downloaded deb/rpm/apk by selecting its exact line from the same
-stable `checksums.txt`.
+For a stable download, substitute its exact filename, for example
+`graith_0.70.0_linux_amd64.tar.gz`, and use the stable `checksums.txt`; the same
+attestation and checksum commands apply. Verify a downloaded deb/rpm/apk by
+selecting its exact line from the same stable `checksums.txt`.
 
-Use `graith-dev_linux_arm64.tar.gz` on arm64. The release workflow builds each
-Linux artifact from the exact pinned Ghostty/Zig dependency unit on Linux,
-compares the executable across tar/deb/rpm/apk, and executes those final bytes
-on the target architecture before publication. Stable releases remain drafts
-until the complete same-revision set, checksums, provenance, configured signing,
-and downstream metadata have been prepared and validated. The complete GitHub
-release is exposed before that metadata is pushed, so its URLs never point at
-private draft assets; interrupted channel pushes are safe to retry.
+Use `graith-dev_<dev-version>_linux_arm64.tar.gz` on arm64. The release
+workflow builds each Linux artifact from the exact pinned Ghostty/Zig dependency
+unit on Linux, compares the executable across tar/deb/rpm/apk, and executes
+those final bytes on the target architecture before publication. Stable releases
+remain drafts until the complete same-revision set, checksums, provenance,
+configured signing, and downstream metadata have been prepared and validated.
+The complete GitHub release is exposed before that metadata is pushed, so its
+URLs never point at private draft assets; interrupted channel pushes are safe to
+retry.
 
 After restarting the `dev` daemon, verify the selected canary without relying
 on a live helper process:

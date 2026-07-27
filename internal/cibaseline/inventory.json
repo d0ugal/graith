@@ -1056,7 +1056,7 @@
       "path": ".github/workflows/dev-release.yml",
       "name": "Dev Release",
       "owner": "release-owners",
-      "file_sha256": "0d3f6a90e2aa86914cfe035a041114d52ba5c907c5b69c70626cfca0932b2288",
+      "file_sha256": "7e2454d633ca93444e541a64b46622f2edf90579685a3edcaa07691ade8958aa",
       "events": {
         "pull_request": null,
         "push": {
@@ -3503,5 +3503,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "4e0575f5d51ab645bb3fe54754e39dd6e209f0e732006c466a46afd11f1ea5ab"
+  "digest": "753fcd277e4f35a66e7c2bcf1b83ab950ba42ccc4f05ef678a4f29c3c2623d2d"
 }

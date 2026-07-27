@@ -652,6 +652,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          release_title="Dev Build ($(date -u +%Y-%m-%d))"
+          release_notes="Built from main at ${RELEASE_REVISION:0:7}. Install: \`brew install d0ugal/tap/graith-dev\`"
           current_main="$(gh api \
             "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
           if [[ "$current_main" != "$RELEASE_REVISION" ]]; then
@@ -659,48 +661,137 @@ jobs:
             exit 1
           fi
 
+          publish_dir="$(mktemp -d)"
+          darwin_asset="graith-dev_${GRAITH_DEV_VERSION}_darwin_arm64.tar.gz"
+          linux_amd64_asset="graith-dev_${GRAITH_DEV_VERSION}_linux_amd64.tar.gz"
+          linux_arm64_asset="graith-dev_${GRAITH_DEV_VERSION}_linux_arm64.tar.gz"
+          checksums_asset="graith-dev_${GRAITH_DEV_VERSION}_checksums.txt"
+          cp dist/graith-dev_darwin_arm64.tar.gz "$publish_dir/$darwin_asset"
+          cp dist/graith-dev_linux_amd64.tar.gz "$publish_dir/$linux_amd64_asset"
+          cp dist/graith-dev_linux_arm64.tar.gz "$publish_dir/$linux_arm64_asset"
+          (
+            cd "$publish_dir"
+            sha256sum "$darwin_asset" "$linux_amd64_asset" "$linux_arm64_asset" \
+              >"$checksums_asset"
+            test "$(wc -l <"$checksums_asset")" -eq 3
+            sha256sum --check "$checksums_asset"
+          )
+          expected="$(printf '%s\n' "$checksums_asset" "$darwin_asset" \
+            "$linux_amd64_asset" "$linux_arm64_asset" | sort)"
+          upload_order="$(printf '%s\n' "$darwin_asset" "$linux_amd64_asset" \
+            "$linux_arm64_asset" "$checksums_asset")"
+
           release_ids="$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/releases?per_page=100" | \
             jq -er '[.[][] | select(.tag_name == "dev") | .id] | @tsv')"
           if [[ "$release_ids" == *$'\t'* ]]; then
-            echo "::error::Refusing to replace multiple dev releases"
+            echo "::error::Refusing to update multiple dev releases"
             exit 1
           fi
-          if [[ -n "$release_ids" ]]; then
-            gh api --method DELETE \
-              "repos/$GITHUB_REPOSITORY/releases/$release_ids" --silent
+
+          ensure_dev_tag() {
+            local tag_shas
+            tag_shas="$(gh api \
+              "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev" \
+              --jq '[.[] | select(.ref == "refs/tags/dev") | .object.sha] | @tsv')"
+            if [[ "$tag_shas" == *$'\t'* ]]; then
+              echo "::error::Refusing to update multiple exact dev tags"
+              exit 1
+            fi
+            if [[ -n "$tag_shas" ]]; then
+              gh api --method PATCH \
+                "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" \
+                -f sha="$RELEASE_REVISION" -F force=true --silent
+            else
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref=refs/tags/dev -f sha="$RELEASE_REVISION" --silent
+            fi
+          }
+
+          if [[ -z "$release_ids" ]]; then
+            ensure_dev_tag
+            gh release create dev --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --prerelease \
+              --latest=false \
+              --title "$release_title" \
+              --notes "$release_notes"
           fi
 
-          tag_shas="$(gh api \
-            "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev" \
-            --jq '[.[] | select(.ref == "refs/tags/dev") | .object.sha] | @tsv')"
-          if [[ "$tag_shas" == *$'\t'* ]]; then
-            echo "::error::Refusing to replace multiple exact dev tags"
-            exit 1
-          fi
-          if [[ -n "$tag_shas" ]]; then
-            gh api --method DELETE \
-              "repos/$GITHUB_REPOSITORY/git/refs/tags/dev" --silent
-          fi
+          upload_or_confirm_asset() {
+            local name path local_sha release_json remote_status
+            name="$1"
+            path="$2"
+            local_sha="$(sha256sum "$path" | awk '{print $1}')"
+            release_json="$(gh release view dev --repo "$GITHUB_REPOSITORY" --json assets)"
+            remote_status="$(jq -er --arg name "$name" '
+              [.assets[] | select(.name == $name)] as $matches |
+              if ($matches | length) == 0 then "missing"
+              elif ($matches | length) == 1 then
+                ($matches[0].state // "unknown") as $state |
+                ($matches[0].digest // "") as $digest |
+                if $state != "uploaded" then "state:" + $state
+                elif $digest == "" then "missing-digest"
+                else $digest
+                end
+              else "duplicate"
+              end
+            ' <<<"$release_json")"
+            case "$remote_status" in
+              missing)
+                gh release upload dev "$path" --repo "$GITHUB_REPOSITORY"
+                ;;
+              "sha256:$local_sha")
+                ;;
+              duplicate)
+                echo "::error::Dev release has multiple assets named $name"
+                exit 1
+                ;;
+              missing-digest)
+                echo "::error::Existing dev release asset $name has no uploaded digest"
+                exit 1
+                ;;
+              state:*)
+                echo "::error::Existing dev release asset $name is not fully uploaded (${remote_status#state:})"
+                exit 1
+                ;;
+              *)
+                echo "::error::Existing dev release asset $name has digest $remote_status, want sha256:$local_sha"
+                exit 1
+                ;;
+            esac
+          }
 
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref=refs/tags/dev -f sha="$RELEASE_REVISION" --silent
-          gh release create dev --repo "$GITHUB_REPOSITORY" \
-            dist/graith-dev_darwin_arm64.tar.gz \
-            dist/graith-dev_linux_amd64.tar.gz \
-            dist/graith-dev_linux_arm64.tar.gz \
-            dist/checksums.txt \
-            --verify-tag \
-            --prerelease \
-            --title "Dev Build ($(date -u +%Y-%m-%d))" \
-            --notes "Built from main at ${RELEASE_REVISION:0:7}. Install: \`brew install d0ugal/tap/graith-dev\`"
+          while IFS= read -r name; do
+            upload_or_confirm_asset "$name" "$publish_dir/$name"
+          done <<<"$upload_order"
 
-          expected="$(printf '%s\n' checksums.txt \
-            graith-dev_darwin_arm64.tar.gz \
-            graith-dev_linux_amd64.tar.gz graith-dev_linux_arm64.tar.gz | sort)"
-          actual="$(gh release view dev --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name' | sort)"
+          remote="$(mktemp -d)"
+          while IFS= read -r name; do
+            gh release download dev --repo "$GITHUB_REPOSITORY" \
+              --pattern "$name" --dir "$remote"
+          done <<<"$expected"
+          actual="$(find "$remote" -maxdepth 1 -type f -exec basename {} \; | sort)"
           test "$actual" = "$expected"
+          while IFS= read -r name; do
+            cmp "$remote/$name" "$publish_dir/$name"
+          done <<<"$expected"
+          (
+            cd "$remote"
+            sha256sum --check "$checksums_asset"
+          )
+
+          ensure_dev_tag
+          gh release edit dev --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft=false \
+            --prerelease \
+            --latest=false \
+            --target "$RELEASE_REVISION" \
+            --title "$release_title" \
+            --notes "$release_notes"
+
           published_tag_sha="$(gh api \
             "repos/$GITHUB_REPOSITORY/git/ref/tags/dev" --jq '.object.sha')"
           test "$published_tag_sha" = "$RELEASE_REVISION"
@@ -711,6 +802,9 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$GRAITH_DEV_VERSION"
+          DARWIN_ARM64_ASSET="graith-dev_${VERSION}_darwin_arm64.tar.gz"
+          LINUX_AMD64_ASSET="graith-dev_${VERSION}_linux_amd64.tar.gz"
+          LINUX_ARM64_ASSET="graith-dev_${VERSION}_linux_arm64.tar.gz"
           DARWIN_ARM64_SHA="$(sha256sum dist/graith-dev_darwin_arm64.tar.gz | awk '{print $1}')"
           LINUX_AMD64_SHA="$(sha256sum dist/graith-dev_linux_amd64.tar.gz | awk '{print $1}')"
           LINUX_ARM64_SHA="$(sha256sum dist/graith-dev_linux_arm64.tar.gz | awk '{print $1}')"
@@ -730,7 +824,7 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_darwin_arm64.tar.gz"
+                url "https://github.com/${REPO}/releases/download/${TAG}/${DARWIN_ARM64_ASSET}"
                 sha256 "${DARWIN_ARM64_SHA}"
               else
                 odie "graith-dev supports only Apple Silicon on macOS"
@@ -739,10 +833,10 @@ jobs:
 
             on_linux do
               if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-                url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_linux_amd64.tar.gz"
+                url "https://github.com/${REPO}/releases/download/${TAG}/${LINUX_AMD64_ASSET}"
                 sha256 "${LINUX_AMD64_SHA}"
               elsif Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-                url "https://github.com/${REPO}/releases/download/${TAG}/graith-dev_linux_arm64.tar.gz"
+                url "https://github.com/${REPO}/releases/download/${TAG}/${LINUX_ARM64_ASSET}"
                 sha256 "${LINUX_ARM64_SHA}"
               else
                 odie "graith-dev supports only Linux amd64/arm64"
@@ -803,3 +897,26 @@ jobs:
           git add graith-dev.rb
           git diff --cached --quiet || git commit -m "chore: update graith-dev to ${VERSION}"
           git push
+
+      - name: Prune legacy unversioned dev assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view dev --repo "$GITHUB_REPOSITORY" --json assets)"
+          for name in \
+            checksums.txt \
+            graith-dev_darwin_arm64.tar.gz \
+            graith-dev_linux_amd64.tar.gz \
+            graith-dev_linux_arm64.tar.gz; do
+            urls="$(jq -er --arg name "$name" \
+              '[.assets[] | select(.name == $name) | .apiUrl] | @tsv' \
+              <<<"$release_json")"
+            if [[ -z "$urls" ]]; then
+              continue
+            fi
+            while IFS= read -r url; do
+              test -n "$url"
+              gh api --method DELETE "$url" --silent
+            done < <(tr '\t' '\n' <<<"$urls")
+          done
