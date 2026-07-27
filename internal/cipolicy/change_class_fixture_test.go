@@ -169,6 +169,28 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				},
 			},
 		},
+		"dev-release-script": {
+			files:                    []string{"scripts/dev-release-version.sh"},
+			wantTrustTier:            "same-repository-agent",
+			wantDetectedCapabilities: []string{"dev-release", "workflow-policy"},
+			wantCapabilities:         pullRequestCapabilityFloor("dev-release", "workflow-policy"),
+			wantSupersetReasons:      []string{},
+			wantPolicyModes: []deterministicPolicyModeCheck{
+				detectedPolicyMode("legacy/dev-release/release-context"),
+				detectedPolicyMode("legacy/dev-release/build-darwin"),
+				detectedPolicyMode("legacy/dev-release/build-linux"),
+				detectedPolicyMode("legacy/dev-release/execute-linux"),
+				detectedPolicyMode("legacy/dev-release/assemble-dev"),
+			},
+			wantCredentialChecks: []deterministicCredentialCheck{
+				{
+					name:          "same-repository dev-release PR cannot bind publication credentials",
+					operation:     devReleasePublishOperation("trusted-publication"),
+					bindToPlan:    true,
+					wantPlanError: "credential trust tier trusted-publication is not allowed for plan trust tier same-repository-agent",
+				},
+			},
+		},
 		"same-repository-mutation": {
 			files: []string{
 				"website/content/docs/contributing/ci-policy.md",
@@ -217,10 +239,11 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				"internal/cipolicy/p11_js_surface.go",
 			},
 			wantTrustTier:            "same-repository-agent",
-			wantDetectedCapabilities: []string{"workflow-policy"},
+			wantDetectedCapabilities: []string{"dev-release", "workflow-policy"},
 			wantCapabilities:         allManifestCapabilities(),
 			wantSupersetReasons:      []string{"ci-policy-change"},
 			wantPolicyModes: []deterministicPolicyModeCheck{
+				detectedPolicyMode("legacy/dev-release/build-linux"),
 				detectedPolicyMode("legacy/workflow-lint/actionlint"),
 				detectedPolicyMode("legacy/workflow-lint/scripts"),
 				detectedPolicyMode("legacy/workflow-lint/shellcheck"),
@@ -265,6 +288,222 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			assertPolicyModesVisible(t, manifest, plan, test.wantPolicyModes)
 			assertCredentialChecks(t, plan, test.wantCredentialChecks)
 		})
+	}
+}
+
+func TestDevReleaseSharedClassifierParityFixtures(t *testing.T) {
+	manifest := loadManifest(t)
+
+	tests := map[string]struct {
+		event                    EventInput
+		files                    []string
+		errors                   []string
+		exact                    bool
+		wantRelease              bool
+		wantTrust                string
+		wantModes                []string
+		wantDetectedCapabilities []string
+		wantSupersetReasons      []string
+	}{
+		"pull-request dev-release workflow": {
+			event:                    planEvent(nil),
+			files:                    []string{".github/workflows/dev-release.yml"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+			wantSupersetReasons:      []string{"ci-policy-change"},
+		},
+		"pull-request dev-release config": {
+			event:                    planEvent(nil),
+			files:                    []string{".goreleaser-dev.yaml"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+		},
+		"pull-request dev-release shell helper": {
+			event:                    planEvent(nil),
+			files:                    []string{"scripts/dev-release-base-tag.sh"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release", "workflow-policy"},
+		},
+		"pull-request native release helper": {
+			event:                    planEvent(nil),
+			files:                    []string{"scripts/libghostty-native.sh"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release", "workflow-policy"},
+		},
+		"pull-request macos service helper": {
+			event:                    planEvent(nil),
+			files:                    []string{"macos/service/release-signing-mode.sh"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+		},
+		"pull-request native lock metadata": {
+			event:                    planEvent(nil),
+			files:                    []string{"libghostty-native.lock.json"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+		},
+		"pull-request native spdx metadata": {
+			event:                    planEvent(nil),
+			files:                    []string{"libghostty-native.spdx.json"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+		},
+		"pull-request native notices": {
+			event:                    planEvent(nil),
+			files:                    []string{"THIRD_PARTY_NOTICES.libghostty.md"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+		},
+		"pull-request unrelated runtime path": {
+			event:                    planEvent(nil),
+			files:                    []string{"internal/pty/terminal_backend_ghostty.go"},
+			exact:                    true,
+			wantRelease:              false,
+			wantTrust:                "same-repository-agent",
+			wantDetectedCapabilities: []string{"go-core", "native"},
+		},
+		"pull-request unknown path keeps old dev-release filter semantics": {
+			event:               planEvent(nil),
+			files:               []string{"README.md"},
+			exact:               true,
+			wantRelease:         false,
+			wantTrust:           "same-repository-agent",
+			wantSupersetReasons: []string{"unknown-path"},
+		},
+		"pull-request detector failure": {
+			event:                    planEvent(nil),
+			files:                    []string{"internal/pty/terminal_backend_ghostty.go"},
+			errors:                   []string{"dreich detector failure"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "same-repository-agent",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"go-core", "native"},
+			wantSupersetReasons:      []string{"detector-error"},
+		},
+		"fork pull-request release-shaped build without publication": {
+			event: planEvent(func(event *EventInput) {
+				event.HeadRepository = "croft/graith"
+				event.SameRepositoryAgent = false
+				event.PullRequestFork = true
+			}),
+			files:                    []string{".goreleaser-dev.yaml"},
+			exact:                    true,
+			wantRelease:              true,
+			wantTrust:                "fork-untrusted",
+			wantModes:                pullRequestDevReleaseModes(),
+			wantDetectedCapabilities: []string{"dev-release"},
+		},
+		"push main default branch": {
+			event:               pushEvent(nil),
+			files:               nil,
+			exact:               false,
+			wantRelease:         true,
+			wantTrust:           "trusted-base",
+			wantModes:           pushMainDevReleaseModes(),
+			wantSupersetReasons: []string{"file-list-unknown"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan := buildTestPlan(t, manifest, test.event, test.files, test.errors, test.exact)
+
+			if plan.TrustTier != test.wantTrust {
+				t.Fatalf("trust tier = %s, want %s", plan.TrustTier, test.wantTrust)
+			}
+
+			assertStringsEqual(t, "detected capabilities", plan.DetectedCapabilities, test.wantDetectedCapabilities)
+			assertStringsEqual(t, "superset reasons", plan.SupersetReasons, test.wantSupersetReasons)
+
+			gotRelease := devReleaseWorkflowSelected(plan)
+			if gotRelease != test.wantRelease {
+				t.Fatalf("dev-release workflow selected = %t, want %t; detected=%v capabilities=%v reasons=%v", gotRelease, test.wantRelease, plan.DetectedCapabilities, plan.Capabilities, plan.SupersetReasons)
+			}
+
+			assertDevReleaseModesAvailable(t, manifest, plan, test.wantModes)
+			assertDevReleasePublicationModeDoesNotApplyToPullRequests(t, manifest, plan)
+
+			publishErr := ValidateCredentialOperation(devReleasePublishOperation(plan.TrustTier))
+			switch plan.TrustTier {
+			case "fork-untrusted":
+				if publishErr == nil || !strings.Contains(publishErr.Error(), "fork pull requests may use only synthetic read tokens") {
+					t.Fatalf("fork dev release publish credential error = %v, want fork token rejection", publishErr)
+				}
+			case "same-repository-agent":
+				if publishErr == nil || !strings.Contains(publishErr.Error(), "same-repository agent branches cannot obtain maintainer credentials") {
+					t.Fatalf("same-repository dev release publish credential error = %v, want maintainer credential rejection", publishErr)
+				}
+			case "trusted-base":
+				if publishErr == nil || !strings.Contains(publishErr.Error(), "dev-release-publish is not allowed for trust tier trusted-base") {
+					t.Fatalf("trusted-base dev release publish credential error = %v, want publication trust rejection", publishErr)
+				}
+			default:
+				t.Fatalf("unexpected trust tier %s", plan.TrustTier)
+			}
+		})
+	}
+}
+
+func devReleaseWorkflowSelected(plan RunPlan) bool {
+	if plan.Event.Event != "pull-request" {
+		return true
+	}
+
+	if slices.Contains(plan.DetectedCapabilities, "dev-release") {
+		return true
+	}
+
+	for _, reason := range plan.SupersetReasons {
+		switch reason {
+		case "detector-error", "empty-file-list", "file-list-unknown":
+			return true
+		}
+	}
+
+	return false
+}
+
+func assertDevReleasePublicationModeDoesNotApplyToPullRequests(t *testing.T, manifest Manifest, plan RunPlan) {
+	t.Helper()
+
+	if plan.Event.Event != "pull-request" {
+		return
+	}
+
+	mode := findMode(t, manifest, "legacy/dev-release/publish-dev")
+	if modeAppliesToEvent(mode, plan.Event.Event) {
+		t.Fatalf("dev-release publish mode must not apply to pull-request plans")
+	}
+
+	if slices.Contains(mode.TrustTiers, plan.TrustTier) {
+		t.Fatalf("dev-release publish trust tiers = %v, want no pull-request tier %s", mode.TrustTiers, plan.TrustTier)
 	}
 }
 
@@ -538,5 +777,72 @@ func stableReleasePublishOperation(trustTier string) CredentialOperation {
 			AllowedRoots: []string{"dist/stable-release"},
 		},
 		Target: "dist/stable-release/graith.tar.gz",
+	}
+}
+
+func devReleasePublishOperation(trustTier string) CredentialOperation {
+	return CredentialOperation{
+		Operation:  "dev-release-publish",
+		TrustTier:  trustTier,
+		Capability: "dev-release",
+		Token: SyntheticToken{
+			Name:         "release",
+			TrustTier:    trustTier,
+			Class:        syntheticMaintainerToken,
+			Scopes:       []string{"contents:write"},
+			AllowedRoots: []string{"dist/dev-release"},
+		},
+		Target: "dist/dev-release/graith-dev.tar.gz",
+	}
+}
+
+func pullRequestDevReleaseModes() []string {
+	return []string{
+		"legacy/dev-release/assemble-dev",
+		"legacy/dev-release/build-darwin",
+		"legacy/dev-release/build-linux",
+		"legacy/dev-release/changes",
+		"legacy/dev-release/execute-linux",
+		"legacy/dev-release/release-context",
+	}
+}
+
+func pushMainDevReleaseModes() []string {
+	return []string{
+		"legacy/dev-release/assemble-dev",
+		"legacy/dev-release/attest-linux",
+		"legacy/dev-release/build-darwin",
+		"legacy/dev-release/build-linux",
+		"legacy/dev-release/changes",
+		"legacy/dev-release/execute-linux",
+		"legacy/dev-release/publish-dev",
+		"legacy/dev-release/release-context",
+	}
+}
+
+func assertDevReleaseModesAvailable(t *testing.T, manifest Manifest, plan RunPlan, modes []string) {
+	t.Helper()
+
+	for _, modeID := range modes {
+		mode := findMode(t, manifest, modeID)
+		if mode.Capability != "dev-release" {
+			t.Fatalf("mode %s capability = %s, want dev-release", modeID, mode.Capability)
+		}
+
+		if !slices.Contains(plan.Capabilities, mode.Capability) {
+			t.Fatalf("capabilities = %v, want dev-release for mode %s", plan.Capabilities, modeID)
+		}
+
+		if !modeAppliesToEvent(mode, plan.Event.Event) {
+			t.Fatalf("mode %s does not apply to event %s", modeID, plan.Event.Event)
+		}
+
+		if !slices.Contains(mode.TrustTiers, plan.TrustTier) {
+			t.Fatalf("mode %s trust tiers = %v, want %s", modeID, mode.TrustTiers, plan.TrustTier)
+		}
+
+		if modeID == "legacy/dev-release/publish-dev" && plan.Event.Event == "pull-request" {
+			t.Fatalf("publish-dev must not apply to pull-request plans")
+		}
 	}
 }
