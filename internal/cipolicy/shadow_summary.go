@@ -168,7 +168,7 @@ func summarizeShadowDetector(plan *RunPlan, planError string, input ShadowSummar
 
 	switch {
 	case macosResult == "success" && macosOutput == "true":
-		macosDecision = "macOS-relevant changes detected; macOS build/test/integration jobs run."
+		macosDecision = "macOS-relevant changes detected; macOS test/integration jobs run."
 	case macosResult == "success" && macosOutput == "false":
 		macosDecision = "No macOS-relevant paths detected; macOS jobs are skipped at job level."
 	case macosResult == "success":

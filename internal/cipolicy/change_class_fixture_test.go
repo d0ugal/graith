@@ -159,7 +159,7 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			},
 			wantSummaryContains: []string{
 				"GUI/iOS (gui)",
-				"macOS-relevant changes detected; macOS build/test/integration jobs run.",
+				"macOS-relevant changes detected; macOS test/integration jobs run.",
 			},
 		},
 		"libghostty-runtime": {
