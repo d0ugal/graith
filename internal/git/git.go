@@ -77,6 +77,13 @@ func RunCheck(dir string, args ...string) bool {
 	return cmd.Run() == nil
 }
 
+func RunCheckContext(ctx context.Context, dir string, args ...string) bool {
+	cmd := exec.CommandContext(ctx, tools.Git(), args...)
+	cmd.Dir = dir
+
+	return cmd.Run() == nil
+}
+
 func IsInsideGitRepo(dir string) bool {
 	return RunCheck(dir, "rev-parse", "--is-inside-work-tree")
 }
@@ -85,8 +92,27 @@ func RefExists(dir string, ref string) bool {
 	return RunCheck(dir, "rev-parse", "--verify", ref)
 }
 
+func RefExistsContext(ctx context.Context, dir string, ref string) bool {
+	return RunCheckContext(ctx, dir, "rev-parse", "--verify", ref)
+}
+
 func HasRemote(dir string, name string) bool {
 	out, err := RunOutput(dir, "remote")
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func HasRemoteContext(ctx context.Context, dir string, name string) bool {
+	out, err := RunOutputContext(ctx, dir, "remote")
 	if err != nil {
 		return false
 	}

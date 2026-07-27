@@ -55,13 +55,36 @@ func unbornBranch(repoPath string) (string, bool) {
 	return branch, true
 }
 
+func unbornBranchContext(ctx context.Context, repoPath string) (string, bool) {
+	if RefExistsContext(ctx, repoPath, "HEAD") {
+		return "", false
+	}
+
+	branch, err := RunOutputContext(ctx, repoPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch == "" {
+		return "", false
+	}
+
+	return branch, true
+}
+
 func CreateBranch(repoPath, branchName, fromRef string) error {
 	_, err := RunOutput(repoPath, "branch", branchName, fromRef)
 	return err
 }
 
+func CreateBranchContext(ctx context.Context, repoPath, branchName, fromRef string) error {
+	_, err := RunOutputContext(ctx, repoPath, "branch", branchName, fromRef)
+	return err
+}
+
 func DeleteBranch(repoPath, branchName string) error {
 	_, err := RunOutput(repoPath, "branch", "-D", branchName)
+	return err
+}
+
+func DeleteBranchContext(ctx context.Context, repoPath, branchName string) error {
+	_, err := RunOutputContext(ctx, repoPath, "branch", "-D", branchName)
 	return err
 }
 
@@ -87,6 +110,22 @@ func ResolveBranchCommit(repoPath, branch string) (string, error) {
 
 	for _, ref := range branchRefCandidates(branch) {
 		sha, err := RunOutput(repoPath, "rev-parse", "--verify", ref+"^{commit}")
+		if err == nil && sha != "" {
+			return sha, nil
+		}
+	}
+
+	return "", fmt.Errorf("branch %q does not resolve to a commit", branch)
+}
+
+func ResolveBranchCommitContext(ctx context.Context, repoPath, branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", errors.New("branch is required")
+	}
+
+	for _, ref := range branchRefCandidates(branch) {
+		sha, err := RunOutputContext(ctx, repoPath, "rev-parse", "--verify", ref+"^{commit}")
 		if err == nil && sha != "" {
 			return sha, nil
 		}

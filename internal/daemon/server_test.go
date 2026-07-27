@@ -1,11 +1,15 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -192,6 +196,106 @@ func TestCoverServeAndShutdownTCP(t *testing.T) {
 	}
 }
 
+// TestServerShutdownBoundsForcedHandlerDrain is the regression test for a
+// handler parked in a non-context-aware child wait: closing the connection does
+// not unblock cmd.Wait, so Shutdown must log the stuck handler and return after
+// its forced-drain bound instead of waiting forever.
+func TestServerShutdownBoundsForcedHandlerDrain(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+
+	cmdCh := make(chan *exec.Cmd, 1)
+	handlerErr := make(chan error, 1)
+	handlerDone := make(chan struct{})
+
+	handler := func(ctx context.Context, conn net.Conn) {
+		cmd := exec.Command("sleep", "30")
+		if err := cmd.Start(); err != nil {
+			handlerErr <- err
+
+			close(handlerDone)
+
+			return
+		}
+
+		cmdCh <- cmd
+
+		_ = cmd.Wait()
+
+		close(handlerDone)
+	}
+
+	srv := NewServer(l, handler, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = srv.Serve(ctx) }()
+
+	conn, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = conn.Close() })
+
+	var cmd *exec.Cmd
+	select {
+	case cmd = <-cmdCh:
+	case err := <-handlerErr:
+		t.Fatalf("start child: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not start child")
+	}
+
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+
+		select {
+		case <-handlerDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("handler did not return after child kill")
+		}
+	})
+
+	start := time.Now()
+	done := make(chan struct{})
+
+	go func() {
+		srv.shutdown(20*time.Millisecond, 30*time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Shutdown did not return after forced-drain bound")
+	}
+
+	if elapsed := time.Since(start); elapsed > 300*time.Millisecond {
+		t.Fatalf("Shutdown took %s, want bounded well below 300ms", elapsed)
+	}
+
+	select {
+	case <-handlerDone:
+		t.Fatal("handler unexpectedly returned before its child was killed")
+	default:
+	}
+
+	gotLogs := logs.String()
+	if !strings.Contains(gotLogs, "server handler drain still blocked after force close") {
+		t.Fatalf("shutdown log missing blocked-handler diagnostic:\n%s", gotLogs)
+	}
+
+	if !strings.Contains(gotLogs, "active_handlers=1") {
+		t.Fatalf("shutdown log missing active handler count:\n%s", gotLogs)
+	}
+}
+
 // TestServeShutdownNoRaceWithConcurrentAccepts is a regression test for a data
 // race between Serve's accept loop and Shutdown: Serve enrolled each accepted
 // connection with s.wg.Add(1) while Shutdown called s.wg.Wait() concurrently —
@@ -289,6 +393,60 @@ func TestCoverServeContextCancelReturns(t *testing.T) {
 	}
 }
 
+func TestServerShutdownNoRaceWithContextCancel(t *testing.T) {
+	for range 50 {
+		sockPath := filepath.Join(shortSocketDir(t), "race.sock")
+
+		l, err := Listen(sockPath)
+		if err != nil {
+			if bindUnavailable(err) {
+				t.Skipf("unix socket bind unavailable in this environment: %v", err)
+			}
+
+			t.Fatal(err)
+		}
+
+		srv := NewServer(l, func(ctx context.Context, conn net.Conn) {}, nil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+
+		go func() { errCh <- srv.Serve(ctx) }()
+
+		start := make(chan struct{})
+
+		var shutdowns sync.WaitGroup
+
+		shutdowns.Add(2)
+		go func() {
+			defer shutdowns.Done()
+
+			<-start
+
+			cancel()
+		}()
+
+		go func() {
+			defer shutdowns.Done()
+
+			<-start
+
+			srv.Shutdown()
+		}()
+
+		close(start)
+		shutdowns.Wait()
+
+		select {
+		case <-errCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Serve did not return after concurrent cancel and shutdown")
+		}
+
+		_ = os.Remove(sockPath)
+	}
+}
+
 // TestCoverListenStaleSocketRemoval covers Listen over a unix socket using a
 // short /tmp path (within the sockaddr limit), verifies the 0700 permission,
 // and exercises the stale-socket removal branch: after the first listener is
@@ -353,5 +511,35 @@ func TestCoverListenBadDir(t *testing.T) {
 
 	if _, err := Listen(filepath.Join(blocker, "s.sock")); err == nil {
 		t.Fatal("expected Listen to fail when the socket dir cannot be created")
+	}
+}
+
+func TestServerShutdownKeepsUnixSocketUntilCallerRemovesIt(t *testing.T) {
+	sockPath := filepath.Join(shortSocketDir(t), "shutdown.sock")
+
+	l, err := Listen(sockPath)
+	if err != nil {
+		if bindUnavailable(err) {
+			t.Skipf("unix socket bind unavailable in this environment: %v", err)
+		}
+
+		t.Fatal(err)
+	}
+
+	srv := NewServer(l, func(ctx context.Context, conn net.Conn) {}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() { _ = srv.Serve(ctx) }()
+
+	srv.shutdown(20*time.Millisecond, 20*time.Millisecond)
+
+	if _, err := os.Stat(sockPath); err != nil {
+		t.Fatalf("socket path after shutdown close: %v", err)
+	}
+
+	if err := os.Remove(sockPath); err != nil {
+		t.Fatalf("remove socket path: %v", err)
 	}
 }

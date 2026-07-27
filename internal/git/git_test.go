@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/testutil"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func setupTestRepo(t *testing.T) string {
@@ -312,6 +314,34 @@ func TestFetchRemoteNoRemote(t *testing.T) {
 
 	if err := FetchRemote(context.Background(), dir); err == nil {
 		t.Error("expected error fetching with no origin remote")
+	}
+}
+
+func TestSetupSessionHonorsCanceledContext(t *testing.T) {
+	t.Cleanup(tools.Reset)
+
+	dir := t.TempDir()
+	fakeGit := filepath.Join(dir, "canny-git")
+
+	script := "#!/bin/sh\nsleep 1\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil { //nolint:gosec // G306: stub must be executable for exec
+		t.Fatalf("write fake git: %v", err)
+	}
+
+	tools.Configure(tools.Config{Git: fakeGit})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+
+	err := SetupSession(ctx, dir, filepath.Join(t.TempDir(), "bothy"), "graith/glen-canny", "main", true)
+	if err == nil {
+		t.Fatal("expected canceled setup to fail")
+	}
+
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("canceled SetupSession took %s; git child commands did not observe context cancellation", elapsed)
 	}
 }
 

@@ -14,16 +14,26 @@ func CreateWorktree(repoPath, worktreePath, branchName string) error {
 	return err
 }
 
+func CreateWorktreeContext(ctx context.Context, repoPath, worktreePath, branchName string) error {
+	_, err := RunOutputContext(ctx, repoPath, "worktree", "add", worktreePath, branchName)
+	return err
+}
+
 func CreateDetachedWorktree(repoPath, worktreePath, ref string) error {
 	_, err := RunOutput(repoPath, "worktree", "add", "--detach", worktreePath, ref)
+	return err
+}
+
+func CreateDetachedWorktreeContext(ctx context.Context, repoPath, worktreePath, ref string) error {
+	_, err := RunOutputContext(ctx, repoPath, "worktree", "add", "--detach", worktreePath, ref)
 	return err
 }
 
 // An orphan branch has no ref to roll back before its first commit, so setup is
 // intentionally a single worktree-add operation rather than CreateBranch plus
 // CreateWorktree like the commit-backed path below.
-func createOrphanWorktree(repoPath, worktreePath, branchName string) error {
-	_, err := RunOutput(repoPath, "worktree", "add", "--orphan", "-b", branchName, worktreePath)
+func createOrphanWorktreeContext(ctx context.Context, repoPath, worktreePath, branchName string) error {
+	_, err := RunOutputContext(ctx, repoPath, "worktree", "add", "--orphan", "-b", branchName, worktreePath)
 	return err
 }
 
@@ -33,24 +43,24 @@ func RemoveWorktree(repoPath, worktreePath string) error {
 }
 
 func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseBranch string, fetch bool) error {
-	if fetch && HasRemote(repoPath, "origin") {
+	if fetch && HasRemoteContext(ctx, repoPath, "origin") {
 		if err := FetchOriginContext(ctx, repoPath); err != nil {
 			return fmt.Errorf("fetch: %w", err)
 		}
 	}
 
 	startRef := "origin/" + baseBranch
-	if !RefExists(repoPath, startRef) {
+	if !RefExistsContext(ctx, repoPath, startRef) {
 		startRef = baseBranch
 	}
 
-	if !RefExists(repoPath, startRef) {
-		if initialBranch, ok := unbornBranch(repoPath); ok {
+	if !RefExistsContext(ctx, repoPath, startRef) {
+		if initialBranch, ok := unbornBranchContext(ctx, repoPath); ok {
 			if baseBranch != initialBranch {
 				return fmt.Errorf("base branch %q does not resolve to a commit; repository HEAD is unborn branch %q (omit --base or use --base %q)", baseBranch, initialBranch, initialBranch)
 			}
 
-			if err := createOrphanWorktree(repoPath, worktreePath, branchName); err != nil {
+			if err := createOrphanWorktreeContext(ctx, repoPath, worktreePath, branchName); err != nil {
 				return fmt.Errorf("create orphan worktree (repositories without commits require Git 2.42 or newer): %w", err)
 			}
 
@@ -58,12 +68,15 @@ func SetupSession(ctx context.Context, repoPath, worktreePath, branchName, baseB
 		}
 	}
 
-	if err := CreateBranch(repoPath, branchName, startRef); err != nil {
+	if err := CreateBranchContext(ctx, repoPath, branchName, startRef); err != nil {
 		return fmt.Errorf("create branch: %w", err)
 	}
 
-	if err := CreateWorktree(repoPath, worktreePath, branchName); err != nil {
-		_ = DeleteBranch(repoPath, branchName)
+	if err := CreateWorktreeContext(ctx, repoPath, worktreePath, branchName); err != nil {
+		if ctx.Err() == nil {
+			_ = DeleteBranchContext(ctx, repoPath, branchName)
+		}
+
 		return fmt.Errorf("create worktree: %w", err)
 	}
 
@@ -76,7 +89,7 @@ func SetupReadOnlySession(ctx context.Context, repoPath, worktreePath, branch st
 		return "", err
 	}
 
-	if err := CreateDetachedWorktree(repoPath, worktreePath, revision); err != nil {
+	if err := CreateDetachedWorktreeContext(ctx, repoPath, worktreePath, revision); err != nil {
 		return "", fmt.Errorf("create read-only worktree: %w", err)
 	}
 
@@ -95,11 +108,11 @@ func RefreshReadOnlySession(ctx context.Context, repoPath, worktreePath, branch 
 			return "", fmt.Errorf("refresh read-only worktree: %w", err)
 		}
 	case errors.Is(statErr, os.ErrNotExist):
-		if err := PruneWorktrees(repoPath); err != nil {
+		if err := PruneWorktreesContext(ctx, repoPath); err != nil {
 			return "", fmt.Errorf("prune read-only worktrees: %w", err)
 		}
 
-		if err := CreateDetachedWorktree(repoPath, worktreePath, revision); err != nil {
+		if err := CreateDetachedWorktreeContext(ctx, repoPath, worktreePath, revision); err != nil {
 			return "", fmt.Errorf("recreate read-only worktree: %w", err)
 		}
 	case statErr == nil:
@@ -112,13 +125,13 @@ func RefreshReadOnlySession(ctx context.Context, repoPath, worktreePath, branch 
 }
 
 func resolveReadOnlyBranch(ctx context.Context, repoPath, branch string, fetch bool) (string, error) {
-	if fetch && HasRemote(repoPath, "origin") {
+	if fetch && HasRemoteContext(ctx, repoPath, "origin") {
 		if err := FetchOriginContext(ctx, repoPath); err != nil {
 			return "", fmt.Errorf("fetch: %w", err)
 		}
 	}
 
-	revision, err := ResolveBranchCommit(repoPath, branch)
+	revision, err := ResolveBranchCommitContext(ctx, repoPath, branch)
 	if err != nil {
 		return "", err
 	}
@@ -174,6 +187,11 @@ func DiscoverDefaultBranchOrHEAD(repoPath string) (string, error) {
 
 func PruneWorktrees(repoPath string) error {
 	_, err := RunOutput(repoPath, "worktree", "prune")
+	return err
+}
+
+func PruneWorktreesContext(ctx context.Context, repoPath string) error {
+	_, err := RunOutputContext(ctx, repoPath, "worktree", "prune")
 	return err
 }
 
