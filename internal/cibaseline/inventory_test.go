@@ -213,7 +213,7 @@ func TestInventorySurfacesIncludeOnlyTrackedRepositoryInputs(t *testing.T) {
 	tracked := append([]string{}, ciConfigurationPaths...)
 	tracked = append(tracked, ciEntrypointPaths...)
 
-	tracked = append(tracked, ".github/workflows/scripts/braw.js", "scripts/canny.sh")
+	tracked = append(tracked, "scripts/canny.sh")
 	for _, path := range tracked {
 		fullPath := filepath.Join(repo, filepath.FromSlash(path))
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
@@ -253,7 +253,7 @@ func TestInventorySurfacesIncludeOnlyTrackedRepositoryInputs(t *testing.T) {
 		paths[surface.Path] = true
 	}
 
-	for _, path := range append(ciEntrypointPaths, ".github/workflows/scripts/braw.js", "scripts/canny.sh") {
+	for _, path := range append(ciEntrypointPaths, "scripts/canny.sh") {
 		if !paths[path] {
 			t.Errorf("tracked surface %q is missing", path)
 		}
@@ -263,6 +263,33 @@ func TestInventorySurfacesIncludeOnlyTrackedRepositoryInputs(t *testing.T) {
 		if paths[path] {
 			t.Errorf("untracked surface %q was inventoried", path)
 		}
+	}
+}
+
+func TestInventorySurfacesRejectWorkflowScriptHelpers(t *testing.T) {
+	repo := t.TempDir()
+
+	tracked := append([]string{}, ciConfigurationPaths...)
+	tracked = append(tracked, ciEntrypointPaths...)
+	tracked = append(tracked, ".github/workflows/scripts/braw.js")
+
+	for _, path := range tracked {
+		fullPath := filepath.Join(repo, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(fullPath, []byte("braw\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "add", "--", ".")
+
+	if _, err := inventorySurfaces(repo); err == nil ||
+		!strings.Contains(err.Error(), "retired workflow script helper surface .github/workflows/scripts/braw.js is tracked") {
+		t.Fatalf("inventorySurfaces() error = %v, want retired workflow-script helper rejection", err)
 	}
 }
 

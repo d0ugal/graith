@@ -1,7 +1,7 @@
 ---
 weight: 36
 title: CI policy manifest
-description: Validate and replay the CI north-star policy manifest
+description: Validate the CI north-star policy manifest
 icon: shield-check
 toc: true
 ---
@@ -24,7 +24,7 @@ language.
 The checked-in manifest is validated by the Go package tests:
 
 ```bash
-go test ./internal/cipolicy ./cmd/cipolicy
+go test ./internal/cipolicy
 ```
 
 The manifest drift tests fail closed for stale generated data, unknown
@@ -41,43 +41,6 @@ package-owned update gate:
 go test ./internal/cipolicy -run TestCommittedManifestMatchesInventory -update
 ```
 
-## Replay a run plan
-
-Use `cmd/cipolicy plan` to replay the Go policy evaluator locally from a GitHub
-event identity and an exact newline-delimited changed-file list:
-
-```bash
-go run ./cmd/cipolicy \
-  -changed-files /tmp/changed-files.txt \
-  -event pull_request \
-  -ref refs/pull/17/merge \
-  -base-ref refs/heads/main \
-  -head-ref refs/heads/canny \
-  -head-repository d0ugal/graith \
-  -same-repository-agent \
-  -commit 1111111111111111111111111111111111111111 \
-  -tree 2222222222222222222222222222222222222222 \
-  plan
-```
-
-The command emits canonical JSON with a `plan_digest`, source commit and tree,
-policy digest, detector version and digest, event and trust tier, detected
-capabilities, `exact_file_list`, `changed_files_digest`, required mode
-coordinates, unsupported decisions, and an expiry. Omitting `-changed-files` is
-treated as an unknown file list and selects the safe superset. Passing an empty
-changed-file file is also fail-closed: the plan records an empty exact-list
-digest and expands to the safe superset instead of treating the run as
-unchanged.
-
-For pull requests, choose exactly one trust context flag for the PR code being
-proved: `-fork`, `-same-repository-agent`, or `-trusted-base`, and pass the PR
-head repository explicitly. Pushes to `refs/heads/main` use `trusted-base`
-unless `-publication` is set; version tag pushes classify as
-`trusted-publication`. The current P1 manifest has no required publication,
-tag, schedule, or dynamic-service coordinates, so those event identities
-currently fail the zero-job plan check until policy adds required modes for
-them.
-
 ## Regenerate from P0
 
 Regenerate the manifest only as part of a reviewed policy change that also
@@ -91,9 +54,11 @@ After regeneration, run:
 go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
 ```
 
-The local `cmd/cipolicy` command intentionally exposes only `plan` replay.
-Manifest generation and validation remain package owned so unused command
-modes do not become a second public policy surface.
+`cmd/cipolicy plan` remains a checked-in workflow helper. The dev-release
+pull-request classifier runs it from the trusted base checkout so unknown paths,
+policy edits, generated input drift, lockfiles, release metadata, and detector
+errors expand to the safe dev-release superset instead of narrowing silently.
+Manifest generation and validation remain package owned.
 
 ## Downstream use
 

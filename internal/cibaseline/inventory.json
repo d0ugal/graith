@@ -2825,18 +2825,18 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract",
       "git_mode": "100644",
-      "sha256": "b09b473a319fb69e3d6df869635e4feb973b83fc83a6b2e25a7de11fbdf2c627",
-      "executable_contract": "preserve current retained-JS surface contracts and semantic replacement metadata for retired workflow-script tests",
+      "sha256": "9b9962654cd671b444570fb7232bd890c35db9bcc569de91dd3a3643f5510833",
+      "executable_contract": "preserve workflow YAML summary parsing helpers used by current semantic workflow policy tests",
       "disposition": "grandfathered",
-      "retirement_criterion": "remove only after all P11 JS surfaces are retired or represented by a newer owner-approved contract"
+      "retirement_criterion": "remove only after equivalent workflow parsing coverage exists"
     },
     {
       "path": "internal/cipolicy/p11_js_surface_test.go",
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "9746d413d3477b7a28fa54acb168d1b2a300c57788b66e3e13842cc1c700dccc",
-      "executable_contract": "preserve regen credential, trust, scalar sweep, git-index enumeration, and repository-command detection assertions formerly held by regen-auth.test.js",
+      "sha256": "6b3857314d5138a4871b293ffab6dd94db645b03c5f0fd1bebd3085586b2e6b1",
+      "executable_contract": "preserve regen credential, trust, scalar sweep, and repository-command detection assertions formerly held by regen-auth.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement"
     },
@@ -3536,5 +3536,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "208faf8255ee0e3ce264a9981508877ee8ebf4337d210d245c09ea9820097d33"
+  "digest": "1a6d9e5125dda7368501b192c2dff87ad57ac19351f805535cfdef89312135e1"
 }

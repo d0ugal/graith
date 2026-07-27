@@ -705,10 +705,7 @@ func assertCredentialChecks(t *testing.T, plan RunPlan, checks []deterministicCr
 
 			planErr := validateCredentialOperationPlanBinding(check.operation, policy, plan)
 			if planErr == nil {
-				planErr = validateP11CredentialTrustAllowance(check.name, P11CredentialExpectation{
-					Operation: check.operation,
-					Allowed:   true,
-				}, plan)
+				planErr = validateCredentialTrustAllowance(check.operation, plan)
 			}
 
 			if check.wantPlanError != "" {

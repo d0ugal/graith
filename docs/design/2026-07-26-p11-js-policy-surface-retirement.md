@@ -26,20 +26,21 @@ supply-chain rules. Some files are runtime helpers invoked by workflows; others
 are tests that guard workflow text because the current behavior still executes
 inside GitHub Actions YAML and shell blocks.
 
-P0 already inventories the files as policy surfaces, while P2/P3 provide the
-Go manifest, plan, result, fan-in, credential-operation, and hermetic fixture
-APIs. P11 consumes those APIs. A helper deletion is allowed only when the
-replacement is named, checksum-bound, covered by tests, and represented in the
-acceptance projection as a closed-world rebind from the exact retired JS path.
+P0 already inventories the files as policy surfaces, while current Go workflow
+policy tests preserve the live routing and credential semantics. The original
+P11 closed-world compatibility and checksum rebind harness proved useful during
+the migration, but it is no longer an active policy surface once the retained
+JavaScript helper set is empty.
 
 ## Problem
 
 Replacing JavaScript tests with Go tests looks mechanically simple, but each
 edit changes signed P0 inventory checksums and the P1 manifest digest. The
-serialized epoch therefore has to update generated metadata and acceptance
-together. The acceptance projection must not generically ignore helper churn:
-unlisted helper removals, unknown additions, replacement checksum drift, and
-authoritative job/context changes remain failures.
+serialized epoch therefore has to update generated metadata together with the
+semantic Go tests that own the replacement behavior. Helper churn must not be
+ignored generically: a tracked helper under `.github/workflows/scripts/` is now
+rejected by the P0 inventory generator, while authoritative job/context changes
+remain manifest drift failures.
 
 ## Goals
 
@@ -53,11 +54,11 @@ authoritative job/context changes remain failures.
   `internal/docspreview`.
 - Keep the regen trust assertions semantic in Go, including whole-document
   credential scalar sweep, explicit plan-to-credential trust allowlist,
-  non-superset negative sample, git-index helper enumeration, and strict
-  repository-command detection.
+  non-superset negative sample, P0 rejection of tracked workflow script helpers,
+  and strict repository-command detection.
 - Regenerate P0 inventory and P1 manifest after deletion.
-- Add an acceptance rebind that maps each retired JS path/checksum to named Go
-  replacement path/checksum identities and fails closed for anything else.
+- Remove the empty retained-JavaScript inventory contract and compatibility
+  sample harness after their migration objective is complete.
 
 ### Non-Goals
 
@@ -66,17 +67,17 @@ authoritative job/context changes remain failures.
   JavaScript remains outside this tranche.
 - Aggregating live Actions history, cross-workflow durations, or check-run
   completion state through C2.
-- Loosening acceptance to ignore helper-surface changes outside the named
-  retired-JS-to-Go rebinds.
+- Loosening acceptance to ignore helper-surface changes outside the P0
+  inventory guard and semantic workflow policy tests.
 
 ## Platform support
 
 | Surface | Decision | Rationale |
 |---------|----------|-----------|
-| CLI/server | Targeted | P11 contracts and comparisons live in Go under `internal/cipolicy`. |
+| CLI/server | Targeted | Workflow parsing and semantic policy tests live in Go under `internal/cipolicy`. |
 | macOS | Excluded | This tranche changes policy metadata and tests only. |
 | iOS | Excluded | This tranche has no GUI runtime behavior. |
-| GitHub Actions | Targeted | Workflow policy behavior is parsed and asserted; C2 also moves its diagnostic summary renderer into `cmd/cipolicy`. |
+| GitHub Actions | Targeted | Workflow policy behavior is parsed and asserted by Go tests. |
 
 ## Proposals
 
@@ -89,11 +90,11 @@ replacement path for regex-based security assertions.
 
 ### Proposal 1: Serialized Go Replacement (Recommended)
 
-Add or reuse Go-owned P11 surface inventory, comparison, and workflow parsing
-contracts, then delete only the named test-only JS files in the same baseline
-epoch. The harness records compatibility samples as data, loads current P0/P1
-inputs, builds hermetic Go plans, fans in synthetic successful observations,
-and validates credential operations against the P3 fixture policy.
+Add or reuse Go-owned workflow parsing and semantic policy tests, then delete
+only the named test-only JS files in the same baseline epoch. After every
+helper under `.github/workflows/scripts/` was retired, the empty retained-JS
+inventory contract and compatibility sample harness stopped being active
+policy surfaces.
 
 The `regen.yml` shadow test parses YAML into structured jobs, steps, `env`, and
 `with` maps. Comments and formatting cannot satisfy it. It asserts:
@@ -113,16 +114,18 @@ The `regen.yml` shadow test parses YAML into structured jobs, steps, `env`, and
   allowing trusted-publication regeneration within its boundary.
 
 This creates executable evidence and updates the baseline-bound files together.
-The acceptance projection admits only the exact deleted JS path/checksum to Go
-replacement path/checksum mapping approved for this tranche.
+Once the retained JavaScript set is empty, the P0 inventory guard rejects any
+tracked workflow script helper instead of carrying an empty compatibility
+mapping forward.
 
 ### Proposal 2: Generic Helper Churn Exemption
 
 Allow acceptance to ignore any workflow-helper test deletion once Go tests
 exist. Rejected because it is not closed-world: an unrelated helper removal,
 missing replacement, mismatched checksum, or authoritative workflow change
-could be masked as test migration. C2/P11 instead uses exact path and checksum
-rebinds.
+could be masked as test migration. The retained guard is explicit instead: any
+tracked helper under `.github/workflows/scripts/` fails P0 inventory, while
+workflow behavior stays covered by semantic Go tests.
 
 ## Helper Inventory
 
@@ -270,14 +273,14 @@ Required chain for this epoch:
 2. Add or update the named Go semantic replacements and their focused tests.
 3. Regenerate P0 inventory:
    `go run ./cmd/cibaseline -output internal/cibaseline/inventory.json generate`.
-4. Add the owner-approved P0 inventory rebind/acceptance metadata for the new
-   policy-surface checksum delta. The validator admits only the exact retired
-   JS path/checksum to Go path/checksum mapping for this epoch.
+4. Keep the P0 inventory guard that rejects any tracked helper under
+   `.github/workflows/scripts/`; do not reintroduce an empty retained-JS
+   compatibility mapping.
 5. Regenerate P1 manifest from the rebound inventory:
    `go test ./internal/cipolicy -run TestCommittedManifestMatchesInventory -update`.
-6. Run `go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy`,
-   JS workflow-script tests, actionlint/shellcheck where relevant, and the
-   wider validation required by the changed baseline epoch.
+6. Run `go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy`,
+   actionlint/shellcheck where relevant, and the wider validation required by
+   the changed baseline epoch.
 
 Pre-deletion hardening satisfied by the `regen-auth.test.js` replacement:
 
@@ -285,15 +288,14 @@ Pre-deletion hardening satisfied by the `regen-auth.test.js` replacement:
   `secrets.RELEASE_TOKEN`, `github.token`, and `GITHUB_TOKEN` cannot hide in
   fields not projected into the structural workflow summary.
 - Replace declarative credential trust-tier fields with an explicit
-  plan-trust-to-credential-trust allowlist, and bind denied credential
-  expectations to the plan when the sample claims a plan-specific boundary.
-- Add a non-superset compatibility sample so generated-metadata capability
+  plan-trust-to-credential-trust allowlist.
+- Keep deterministic non-superset fixtures so generated-metadata capability
   selection and credential-to-plan capability binding can fail for the right
   reason.
-- Align the current-helper enumerator with P0's git-index source of truth, not
-  transient filesystem entries such as ignored `node_modules/`.
+- Keep the baseline inventory fail-closed if a tracked helper reappears under
+  the retired `.github/workflows/scripts/` directory.
 - Make repository-controlled command detection at least as strict as the
-  retained JS assertion for embedded `go test`, `make package-graph`, and
+  retired JS assertion for embedded `go test`, `make package-graph`, and
   `scripts/libghostty-native.sh` invocations.
 
 ## Remaining Tranche Order
@@ -308,14 +310,13 @@ helper tranche under `.github/workflows/scripts/`.
 The replacement tests live in `internal/cipolicy/p11_js_surface_test.go`,
 `internal/cipolicy/renovate_retry_test.go`,
 `internal/cipolicy/workflow_lint_policy_test.go`, and
-`internal/cipolicy/libghostty_policy_test.go`. They validate the retained JS
-inventory against the current script directory and P0 inventory, run the P11
-compatibility matrix through the P2/P3 plan and fan-in APIs, parse `regen.yml`
+`internal/cipolicy/libghostty_policy_test.go`. They parse `regen.yml`
 structurally, execute the Renovate verifier through fake binaries, and keep the
 workflow-lint/native assertions executable in Go.
 
 ### Open questions
 
-- Any later epoch needs owner approval for the exact P0 acceptance rebind shape.
+- Any later epoch needs owner approval for changes to the P0 workflow-script
+  inventory guard shape.
 - The docs-preview tranche's high-fidelity fake GitHub API sample now lives in
   `internal/docspreview`.

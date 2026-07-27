@@ -1,23 +1,14 @@
 package cipolicy
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/d0ugal/graith/internal/cibaseline"
 )
-
-var p11TestNow = p2TestNow
 
 const p11SameRepositoryGuard = "github.event.pull_request.head.repo.full_name == github.repository"
 
@@ -27,311 +18,6 @@ var (
 	p11RepositoryControlledCommandPattern = regexp.MustCompile(`(?:^|[[:space:];|&({"']|` + "`" + `)(?:(?:go|make|node|npm|npx|pnpm|python3?|sh|bash)(?:[[:space:]]|$)|(?:\./|\.\./)[^[:space:];|&)]*)`)
 	p11RepositoryControlledScriptPattern  = regexp.MustCompile(`scripts/libghostty-native\.sh|\.github/workflows/scripts/`)
 )
-
-func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
-	repoRoot := p11RepoRoot()
-
-	inventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	contracts := P11JSSurfaceContracts()
-	if err := ValidateP11JSSurfaceInventory(repoRoot, inventory, contracts); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(contracts) != 0 {
-		t.Fatalf("P11 retained JS contract count = %d, want none: %#v", len(contracts), contracts)
-	}
-
-	retiredPaths := append([]string{}, p11DocsDiffRetiredSurfacePaths...)
-	retiredPaths = append(retiredPaths, p11DocsPreviewRetiredSurfacePaths...)
-
-	for _, path := range retiredPaths {
-		for _, contract := range contracts {
-			if contract.Path == path {
-				t.Fatalf("retired JS surface %s still has a retained JS contract", path)
-			}
-		}
-	}
-}
-
-func TestP11DocsDiffReplacementSamplesCoverPortMatrix(t *testing.T) {
-	repoRoot := p11RepoRoot()
-
-	inventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	requirements := P11DocsDiffCompatibilityRequirements()
-	if err := ValidateP11DocsDiffReplacement(repoRoot, inventory, P11DocsDiffReplacementPath, requirements); err != nil {
-		t.Fatal(err)
-	}
-
-	replacement := P11JSHelperContract{
-		Path:                 P11DocsDiffReplacementPath,
-		CompatibilitySamples: requirements,
-	}
-
-	for _, want := range p11DocsDiffRequiredSampleIDs() {
-		if !p11HasSampleRequirement(replacement, want) {
-			t.Fatalf("%s is missing compatibility sample %s", replacement.Path, want)
-		}
-	}
-}
-
-func TestP11DocsPreviewReplacementSamplesCoverPortMatrix(t *testing.T) {
-	repoRoot := p11RepoRoot()
-
-	inventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	requirements := P11DocsPreviewCompatibilityRequirements()
-	if err := ValidateP11DocsPreviewReplacement(repoRoot, inventory, P11DocsPreviewReplacementPath, requirements); err != nil {
-		t.Fatal(err)
-	}
-
-	replacement := P11JSHelperContract{
-		Path:                 P11DocsPreviewReplacementPath,
-		CompatibilitySamples: requirements,
-	}
-
-	for _, want := range p11DocsPreviewRequiredSampleIDs() {
-		if !p11HasSampleRequirement(replacement, want) {
-			t.Fatalf("%s is missing compatibility sample %s", replacement.Path, want)
-		}
-	}
-}
-
-func TestP11ReplacementRejectsMissingMismatchedAndRetiredSurfaces(t *testing.T) {
-	tests := map[string]p11ReplacementRejectionSuite{
-		"docs-diff": {
-			requirements:        P11DocsDiffCompatibilityRequirements(),
-			replacementPath:     P11DocsDiffReplacementPath,
-			missingPath:         "cmd/docsdiff/missing_test.go",
-			missingWant:         "missing P11 docs-diff Go replacement surface cmd/docsdiff/missing_test.go",
-			mismatchedPath:      "cmd/docsdiff/main.go",
-			missingSampleID:     "png-composite",
-			missingSampleWant:   "missing compatibility sample png-composite",
-			withoutRequirement:  p11DocsDiffRequirementsWithout,
-			validateReplacement: ValidateP11DocsDiffReplacement,
-			retiredSurfaces: map[string]string{
-				".github/workflows/scripts/docs-diff.js":      "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/docs-diff.js",
-				".github/workflows/scripts/package-lock.json": "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/package-lock.json",
-			},
-		},
-		"docs-preview": {
-			requirements:        P11DocsPreviewCompatibilityRequirements(),
-			replacementPath:     P11DocsPreviewReplacementPath,
-			missingPath:         "internal/docspreview/missing_test.go",
-			missingWant:         "missing P11 docs-preview Go replacement surface internal/docspreview/missing_test.go",
-			mismatchedPath:      "internal/docspreview/docspreview.go",
-			missingSampleID:     "docs-preview-rest-api",
-			missingSampleWant:   "missing compatibility sample docs-preview-rest-api",
-			withoutRequirement:  p11DocsPreviewRequirementsWithout,
-			validateReplacement: ValidateP11DocsPreviewReplacement,
-			retiredSurfaces: map[string]string{
-				".github/workflows/scripts/docs-preview.js":      "P0 inventory still references retired P11 docs-preview surface .github/workflows/scripts/docs-preview.js",
-				".github/workflows/scripts/docs-preview.test.js": "P0 inventory still references retired P11 docs-preview surface .github/workflows/scripts/docs-preview.test.js",
-			},
-		},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			p11RunReplacementRejectionCases(t, test)
-		})
-	}
-}
-
-type p11ReplacementRejectionSuite struct {
-	requirements        []P11CompatibilitySampleRequirement
-	replacementPath     string
-	missingPath         string
-	missingWant         string
-	mismatchedPath      string
-	missingSampleID     string
-	missingSampleWant   string
-	withoutRequirement  func([]P11CompatibilitySampleRequirement, string) []P11CompatibilitySampleRequirement
-	validateReplacement func(string, cibaseline.Inventory, string, []P11CompatibilitySampleRequirement) error
-	retiredSurfaces     map[string]string
-}
-
-type p11ReplacementRejectionCase struct {
-	replacementPath string
-	requirements    []P11CompatibilitySampleRequirement
-	mutateInventory func(*cibaseline.Inventory)
-	want            string
-}
-
-func p11RunReplacementRejectionCases(t *testing.T, suite p11ReplacementRejectionSuite) {
-	t.Helper()
-
-	tests := map[string]p11ReplacementRejectionCase{
-		"missing Go replacement": {
-			replacementPath: suite.missingPath,
-			requirements:    suite.requirements,
-			want:            suite.missingWant,
-		},
-		"mismatched Go replacement": {
-			replacementPath: suite.mismatchedPath,
-			requirements:    suite.requirements,
-			want:            "kind = go-policy-helper, want go-policy-contract-test",
-		},
-		"missing compatibility sample": {
-			replacementPath: suite.replacementPath,
-			requirements:    suite.withoutRequirement(suite.requirements, suite.missingSampleID),
-			want:            suite.missingSampleWant,
-		},
-	}
-
-	for path, want := range suite.retiredSurfaces {
-		retiredPath := path
-		tests["retired surface "+retiredPath] = p11ReplacementRejectionCase{
-			replacementPath: suite.replacementPath,
-			requirements:    suite.requirements,
-			mutateInventory: func(inventory *cibaseline.Inventory) {
-				inventory.Surfaces = append(inventory.Surfaces, p11RetiredSurface(retiredPath))
-			},
-			want: want,
-		}
-	}
-
-	repoRoot := p11RepoRoot()
-
-	baseInventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			inventory := baseInventory
-			inventory.Surfaces = append([]cibaseline.Surface(nil), baseInventory.Surfaces...)
-
-			if test.mutateInventory != nil {
-				test.mutateInventory(&inventory)
-				p11ResignInventory(t, &inventory)
-			}
-
-			err := suite.validateReplacement(repoRoot, inventory, test.replacementPath, test.requirements)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("replacement validation error = %v, want containing %q", err, test.want)
-			}
-		})
-	}
-}
-
-func TestP11RegenAuthReplacementSamplesCoverHardeningMatrix(t *testing.T) {
-	replacement := P11JSHelperContract{
-		Path:                 P11RegenAuthReplacementPath,
-		CompatibilitySamples: P11RegenAuthCompatibilityRequirements(),
-	}
-
-	for _, want := range []string{
-		"regen-same-repository-agent",
-		"regen-fork-untrusted",
-		"regen-trusted-base",
-		"regen-push-boundary",
-		"regen-non-superset-negative",
-	} {
-		if !p11HasSampleRequirement(replacement, want) {
-			t.Fatalf("%s is missing compatibility sample %s", replacement.Path, want)
-		}
-	}
-
-	declaredSamples := append([]P11CompatibilitySample{}, p11RegenAuthSamples()...)
-	for _, negative := range p11RegenAuthNegativeSamples() {
-		declaredSamples = append(declaredSamples, negative.Sample)
-	}
-
-	p11AssertSampleMatrixMatchesRequirements(t, replacement, declaredSamples)
-}
-
-func TestP11RegenAuthCompatibilitySamplesUseClosedWorldPlanFixture(t *testing.T) {
-	repoRoot := p11RepoRoot()
-
-	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	knownFiles, err := P11KnownFilesFromRepository(repoRoot, manifest, []string{"internal/protocol/messages.go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	samples := p11RegenAuthSamples()
-
-	comparisons, err := CompareP11CompatibilitySamples(manifest, knownFiles, samples, p11TestNow)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(comparisons) != len(samples) {
-		t.Fatalf("comparison count = %d, want %d", len(comparisons), len(samples))
-	}
-
-	for _, comparison := range comparisons {
-		if comparison.PlanDigest == "" || len(comparison.RequiredModes) == 0 || len(comparison.Coordinates) == 0 {
-			t.Fatalf("comparison %#v did not exercise a successful Go policy compatibility plan", comparison)
-		}
-
-		if !comparison.Superset || !p11HasString(comparison.SupersetReasons, "generated-input") {
-			t.Fatalf("comparison %#v did not bind generated-input superset semantics", comparison)
-		}
-	}
-}
-
-func TestP11RegenAuthNonSupersetNegativeSampleRejectsCredentialPlanBinding(t *testing.T) {
-	repoRoot := p11RepoRoot()
-
-	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, negative := range p11RegenAuthNegativeSamples() {
-		sample := negative.Sample
-
-		t.Run(sample.ID, func(t *testing.T) {
-			if negative.ExpectedErrorSubstr == "" {
-				t.Fatal("negative sample must declare its expected failure")
-			}
-
-			knownFiles, err := P11KnownFilesFromRepository(repoRoot, manifest, sample.PlanOptions.ChangedFiles)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			options := sample.PlanOptions
-			options.Now = p11TestNow
-			options.CreatedAt = p11TestNow.Add(-10 * time.Minute)
-
-			plan, err := BuildP11CompatibilityPlan(manifest, knownFiles, options)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if plan.Superset {
-				t.Fatalf("negative sample plan unexpectedly selected safe superset: %#v", plan.SupersetReasons)
-			}
-
-			if p11HasString(plan.Capabilities, "generated-metadata") {
-				t.Fatalf("negative sample plan capabilities = %#v, want generated-metadata absent", plan.Capabilities)
-			}
-
-			_, err = CompareP11CompatibilitySamples(manifest, knownFiles, []P11CompatibilitySample{sample}, p11TestNow)
-			if err == nil || !strings.Contains(err.Error(), negative.ExpectedErrorSubstr) {
-				t.Fatalf("CompareP11CompatibilitySamples() error = %v, want %q", err, negative.ExpectedErrorSubstr)
-			}
-		})
-	}
-}
 
 func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 	repoRoot := p11RepoRoot()
@@ -542,36 +228,12 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 	p11AssertTrustTier(t, manifest, p11ForkEvent(), "fork-untrusted")
 	p11AssertTrustTier(t, manifest, p11TrustedBaseEvent(), "trusted-base")
 
-	err = ValidateCredentialOperation(CredentialOperation{
-		Operation:  "regeneration-push",
-		TrustTier:  "same-repository-agent",
-		Capability: "generated-metadata",
-		Token: SyntheticToken{
-			Name:         "release",
-			TrustTier:    "same-repository-agent",
-			Class:        syntheticMaintainerToken,
-			Scopes:       []string{"contents:write"},
-			AllowedRoots: []string{"generated"},
-		},
-		Target: "generated/braw.bundle",
-	})
+	err = ValidateCredentialOperation(regenerationPushOperation("same-repository-agent"))
 	if err == nil || !strings.Contains(err.Error(), "same-repository agent branches cannot obtain maintainer credentials") {
 		t.Fatalf("same-repository regeneration credential error = %v", err)
 	}
 
-	if err := ValidateCredentialOperation(CredentialOperation{
-		Operation:  "regeneration-push",
-		TrustTier:  "trusted-publication",
-		Capability: "generated-metadata",
-		Token: SyntheticToken{
-			Name:         "release",
-			TrustTier:    "trusted-publication",
-			Class:        syntheticMaintainerToken,
-			Scopes:       []string{"contents:write"},
-			AllowedRoots: []string{"generated"},
-		},
-		Target: "generated/braw.bundle",
-	}); err != nil {
+	if err := ValidateCredentialOperation(regenerationPushOperation("trusted-publication")); err != nil {
 		t.Fatalf("trusted publication regeneration credential rejected: %v", err)
 	}
 }
@@ -691,105 +353,15 @@ func TestP11RegenWorkflowTrustSemanticsRejectsScalarJobPermissions(t *testing.T)
 }
 
 func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedScriptExecution(t *testing.T) {
-	repoRoot := p11RepoRoot()
-	path := filepath.Join(repoRoot, ".github/workflows/regen.yml")
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	needle := "\n          set -euo pipefail\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
-	replacement := "\n          set -euo pipefail\n          node .github/workflows/scripts/retired-helper.test.js\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
-	workflowSource := string(data)
-
-	if !strings.Contains(workflowSource, needle) {
-		t.Fatalf("push step insertion point %q not found", needle)
-	}
-
-	mutated := strings.Replace(workflowSource, needle, replacement, 1)
-	mutatedPath := filepath.Join(t.TempDir(), "regen.yml")
-
-	// #nosec G703 -- mutatedPath is rooted in t.TempDir and not user-controlled.
-	if err := os.WriteFile(mutatedPath, []byte(mutated), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	workflow, err := ReadP11WorkflowSummary(mutatedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	workflow := p11ReadMutatedRegenWorkflow(
+		t,
+		"\n          set -euo pipefail\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n",
+		"\n          set -euo pipefail\n          node .github/workflows/scripts/retired-helper.test.js\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n",
+	)
 
 	regen := p11WorkflowJob(t, workflow, "regen")
 	if !p11JobRunsRepositoryControlledCode(regen) {
 		t.Fatal("credentialed repository script execution was not surfaced to semantic assertions")
-	}
-}
-
-func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
-	repoRoot := t.TempDir()
-	foreignRepoRoot := t.TempDir()
-
-	scriptsDir := filepath.Join(repoRoot, ".github", "workflows", "scripts")
-	if err := os.MkdirAll(filepath.Join(scriptsDir, "node_modules"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	foreignScriptsDir := filepath.Join(foreignRepoRoot, ".github", "workflows", "scripts")
-	if err := os.MkdirAll(foreignScriptsDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	for path, data := range map[string]string{
-		filepath.Join(repoRoot, ".gitignore"):                                 ".github/workflows/scripts/node_modules/\n",
-		filepath.Join(scriptsDir, "retained-helper.test.js"):                  "'use strict';\n",
-		filepath.Join(scriptsDir, "untracked-helper.test.js"):                 "'use strict';\n",
-		filepath.Join(scriptsDir, "node_modules", "ignored-helper.test.js"):   "'use strict';\n",
-		filepath.Join(repoRoot, "internal", "cipolicy", "unrelated.testdata"): "braw\n",
-	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-			t.Fatal(err)
-		}
-
-		// #nosec G703 -- test paths are rooted in t.TempDir.
-		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	p11RunGit(t, repoRoot, "init")
-	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/retained-helper.test.js")
-
-	foreignHelper := filepath.Join(foreignScriptsDir, "foreign-helper.test.js")
-	// #nosec G703 -- foreignHelper is rooted in t.TempDir.
-	if err := os.WriteFile(foreignHelper, []byte("'use strict';\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	p11RunGit(t, foreignRepoRoot, "init")
-	p11RunGit(t, foreignRepoRoot, "add", ".github/workflows/scripts/foreign-helper.test.js")
-
-	t.Setenv("GIT_DIR", filepath.Join(foreignRepoRoot, ".git"))
-	t.Setenv("GIT_WORK_TREE", foreignRepoRoot)
-	t.Setenv("GIT_INDEX_FILE", filepath.Join(foreignRepoRoot, ".git", "index"))
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "core.bare")
-	t.Setenv("GIT_CONFIG_VALUE_0", "true")
-
-	paths, err := currentP11ScriptPaths(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/retained-helper.test.js"}) {
-		t.Fatalf("currentP11ScriptPaths() = %#v, want only git-index tracked helper", paths)
-	}
-}
-
-func TestP11CurrentScriptPathsReportsGitIndexFailureDetails(t *testing.T) {
-	_, err := currentP11ScriptPaths(t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
-		t.Fatalf("currentP11ScriptPaths() error = %v, want git stderr details", err)
 	}
 }
 
@@ -823,7 +395,7 @@ func TestP11RegenWorkflowTrustSemanticsRejectsDefaultTokenVariants(t *testing.T)
 	}
 }
 
-func TestP11RepositoryControlledCommandDetectionMatchesRetainedJSEmbeddedCommands(t *testing.T) {
+func TestP11RepositoryControlledCommandDetectionMatchesRepositoryCommands(t *testing.T) {
 	tests := map[string]string{
 		"embedded go test":                  "if go test ./internal/protocol -run TestManifestUpToDate; then",
 		"embedded make package graph":       "env GRAITH_CHECK=braw make package-graph",
@@ -882,109 +454,23 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing
 	}
 }
 
-func TestP11RegenAuthCompatibilitySamplesBindCredentialsToPlan(t *testing.T) {
-	repoRoot := p11RepoRoot()
-
-	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	knownFiles, err := P11KnownFilesFromRepository(repoRoot, manifest, []string{"internal/protocol/messages.go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tests := map[string]struct {
-		mutate func([]P11CompatibilitySample)
-		want   string
-	}{
-		"missing capability": {
-			mutate: func(samples []P11CompatibilitySample) {
-				p11MutateCredentialExpectation(samples, "regen-push-boundary", func(expectation *P11CredentialExpectation) {
-					expectation.Operation.Capability = ""
-				})
-			},
-			want: "requires plan capability identity",
-		},
-		"missing plan trust tier binding": {
-			mutate: func(samples []P11CompatibilitySample) {
-				for index := range samples {
-					if samples[index].ID == "regen-push-boundary" {
-						samples[index].ExpectedTrustTier = ""
-					}
-				}
-			},
-			want: "requires explicit plan trust tier binding",
-		},
-		"wrong sample trust tier binding": {
-			mutate: func(samples []P11CompatibilitySample) {
-				for index := range samples {
-					if samples[index].ID == "regen-push-boundary" {
-						samples[index].ExpectedTrustTier = "same-repository-agent"
-					}
-				}
-			},
-			want: "trust tier = trusted-base, want same-repository-agent",
-		},
-		"missing credential trust tier binding": {
-			mutate: func(samples []P11CompatibilitySample) {
-				p11MutateCredentialExpectation(samples, "regen-push-boundary", func(expectation *P11CredentialExpectation) {
-					expectation.Operation.TrustTier = ""
-				})
-			},
-			want: "requires explicit credential trust tier binding",
-		},
-		"denied credential still requires plan binding": {
-			mutate: func(samples []P11CompatibilitySample) {
-				for index := range samples {
-					if samples[index].ID == "regen-same-repository-agent" {
-						samples[index].ExpectedTrustTier = ""
-					}
-				}
-			},
-			want: "requires explicit plan trust tier binding",
-		},
-		"denied credential requires exact error binding": {
-			mutate: func(samples []P11CompatibilitySample) {
-				p11MutateCredentialExpectation(samples, "regen-same-repository-agent", func(expectation *P11CredentialExpectation) {
-					expectation.WantErrorSubstr = ""
-				})
-			},
-			want: "requires an expected error binding",
-		},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			samples := p11RegenAuthSamples()
-			test.mutate(samples)
-
-			_, err := CompareP11CompatibilitySamples(manifest, knownFiles, samples, p11TestNow)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("CompareP11CompatibilitySamples() error = %v, want %q", err, test.want)
-			}
-		})
-	}
-}
-
-func TestP11CredentialTrustAllowlistMatchesCredentialOperations(t *testing.T) {
+func TestCredentialTrustAllowlistMatchesCredentialOperations(t *testing.T) {
 	validPlanTiers := map[string]bool{
 		"same-repository-agent": true,
 		"trusted-base":          true,
 	}
 
 	for operation, policy := range credentialOperationPolicies {
-		allowances, ok := p11CredentialTrustAllowlist[operation]
+		allowances, ok := credentialTrustAllowlist[operation]
 		if !ok {
-			t.Fatalf("credential operation %s is missing from P11 plan-to-credential trust allowlist", operation)
+			t.Fatalf("credential operation %s is missing from plan-to-credential trust allowlist", operation)
 		}
 
 		if len(allowances) == 0 {
-			t.Fatalf("credential operation %s has no P11 plan-to-credential trust allowances", operation)
+			t.Fatalf("credential operation %s has no plan-to-credential trust allowances", operation)
 		}
 
-		seen := map[p11CredentialTrustAllowance]bool{}
+		seen := map[credentialTrustAllowance]bool{}
 
 		for _, allowance := range allowances {
 			if allowance.PlanTrustTier == "" || allowance.CredentialTrustTier == "" {
@@ -1000,62 +486,44 @@ func TestP11CredentialTrustAllowlistMatchesCredentialOperations(t *testing.T) {
 			}
 
 			if seen[allowance] {
-				t.Fatalf("credential operation %s has duplicate P11 trust allowance %#v", operation, allowance)
+				t.Fatalf("credential operation %s has duplicate trust allowance %#v", operation, allowance)
 			}
 
 			seen[allowance] = true
 		}
 	}
 
-	for operation := range p11CredentialTrustAllowlist {
+	for operation := range credentialTrustAllowlist {
 		if _, ok := credentialOperationPolicies[operation]; !ok {
-			t.Fatalf("P11 plan-to-credential trust allowlist references unknown credential operation %s", operation)
+			t.Fatalf("plan-to-credential trust allowlist references unknown credential operation %s", operation)
 		}
 	}
 }
 
-func TestP11CredentialTrustAllowlistRejectsCredentialTrustNotAllowedForPlan(t *testing.T) {
-	repoRoot := p11RepoRoot()
+func TestCredentialTrustAllowlistRejectsCredentialTrustNotAllowedForPlan(t *testing.T) {
+	manifest := loadManifest(t)
+	plan := buildTestPlan(
+		t,
+		manifest,
+		p11TrustedBaseEvent(),
+		[]string{"docs/design/2026-07-24-ci-north-star.md"},
+		nil,
+		true,
+	)
 
-	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
-	if err != nil {
-		t.Fatal(err)
+	operation := docsPreviewWriteOperation("same-repository-agent", syntheticRepositoryWriteToken)
+	if err := ValidateCredentialOperation(operation); err != nil {
+		t.Fatalf("ValidateCredentialOperation() error = %v", err)
 	}
 
-	sample := P11CompatibilitySample{
-		ID:                "docs-preview-trusted-base-credential-negative",
-		HelperPath:        P11RegenAuthReplacementPath,
-		Description:       "trusted-base plan must not borrow same-repository docs-preview write credentials",
-		PlanOptions:       p11PlanOptionsWithChangedFiles(p11TrustedBaseEvent(), []string{"docs/design/2026-07-24-ci-north-star.md"}),
-		ExpectedTrustTier: "trusted-base",
-		CredentialExpectations: []P11CredentialExpectation{
-			{
-				Operation: CredentialOperation{
-					Operation:  "docs-preview-write",
-					TrustTier:  "same-repository-agent",
-					Capability: "docs-preview",
-					Token: SyntheticToken{
-						Name:         "repository-write",
-						TrustTier:    "same-repository-agent",
-						Class:        syntheticRepositoryWriteToken,
-						Scopes:       []string{"contents:write", "pull-requests:write"},
-						AllowedRoots: []string{"screenshots"},
-					},
-					Target: "screenshots/braw.png",
-				},
-				Allowed: true,
-			},
-		},
+	policy := credentialOperationPolicies[operation.Operation]
+	if err := validateCredentialOperationPlanBinding(operation, policy, plan); err != nil {
+		t.Fatalf("validateCredentialOperationPlanBinding() error = %v", err)
 	}
 
-	knownFiles, err := P11KnownFilesFromRepository(repoRoot, manifest, sample.PlanOptions.ChangedFiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = CompareP11CompatibilitySamples(manifest, knownFiles, []P11CompatibilitySample{sample}, p11TestNow)
+	err := validateCredentialTrustAllowance(operation, plan)
 	if err == nil || !strings.Contains(err.Error(), "credential trust tier same-repository-agent is not allowed for plan trust tier trusted-base") {
-		t.Fatalf("CompareP11CompatibilitySamples() error = %v, want explicit plan-to-credential trust allowlist rejection", err)
+		t.Fatalf("validateCredentialTrustAllowance() error = %v, want explicit plan-to-credential trust allowlist rejection", err)
 	}
 }
 
@@ -1091,232 +559,8 @@ func p11ReadMutatedRegenWorkflow(t *testing.T, needle, replacement string) P11Wo
 	return workflow
 }
 
-func p11RunGit(t *testing.T, repoRoot string, args ...string) {
-	t.Helper()
-
-	commandArgs := append([]string{"-C", repoRoot}, args...)
-	// #nosec G204 -- test-only git invocation with explicit arguments and no shell.
-	cmd := exec.Command("git", commandArgs...)
-	cmd.Env = p11IsolatedGitEnv()
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s failed: %v\n%s", strings.Join(commandArgs, " "), err, output)
-	}
-}
-
 func p11RepoRoot() string {
 	return filepath.Join("..", "..")
-}
-
-func p11RegenAuthSamples() []P11CompatibilitySample {
-	return []P11CompatibilitySample{
-		{
-			ID:                      "regen-same-repository-agent",
-			HelperPath:              P11RegenAuthReplacementPath,
-			Description:             "same-repository generated-file PR selects generated-metadata while soft regen jobs stay outside the required plan and maintainer credentials stay unavailable",
-			PlanOptions:             p11PlanOptions(p11SameRepoEvent()),
-			ExpectedTrustTier:       "same-repository-agent",
-			ExpectedCapabilities:    []string{"generated-metadata"},
-			ExpectedSupersetReasons: []string{"generated-input"},
-			ExpectedManifestModes:   p11RegenModeExpectations(),
-			ExpectedAbsentCoordinates: []string{
-				"regen/prepare",
-				"regen/regen",
-				"regen/validate",
-			},
-			CredentialExpectations: []P11CredentialExpectation{
-				{
-					Operation: CredentialOperation{
-						Operation:  "regeneration-push",
-						TrustTier:  "same-repository-agent",
-						Capability: "generated-metadata",
-						Token: SyntheticToken{
-							Name:         "release",
-							TrustTier:    "same-repository-agent",
-							Class:        syntheticMaintainerToken,
-							Scopes:       []string{"contents:write"},
-							AllowedRoots: []string{"generated"},
-						},
-						Target: "generated/braw.bundle",
-					},
-					Allowed:         false,
-					BindToPlan:      true,
-					WantErrorSubstr: "same-repository agent branches cannot obtain maintainer credentials",
-				},
-			},
-		},
-		{
-			ID:                      "regen-fork-untrusted",
-			HelperPath:              P11RegenAuthReplacementPath,
-			Description:             "fork generated-file PR is fork-untrusted while same-repository workflow guards keep credentialed regen jobs unreachable",
-			PlanOptions:             p11PlanOptions(p11ForkEvent()),
-			ExpectedTrustTier:       "fork-untrusted",
-			ExpectedCapabilities:    []string{"generated-metadata"},
-			ExpectedSupersetReasons: []string{"generated-input"},
-			ExpectedManifestModes:   p11RegenModeExpectations(),
-			ExpectedAbsentCoordinates: []string{
-				"regen/prepare",
-				"regen/regen",
-				"regen/validate",
-			},
-			CredentialExpectations: []P11CredentialExpectation{
-				{
-					Operation: CredentialOperation{
-						Operation:  "regeneration-push",
-						TrustTier:  "fork-untrusted",
-						Capability: "generated-metadata",
-						Token: SyntheticToken{
-							Name:         "release",
-							TrustTier:    "fork-untrusted",
-							Class:        syntheticMaintainerToken,
-							Scopes:       []string{"contents:write"},
-							AllowedRoots: []string{"generated"},
-						},
-						Target: "generated/braw.bundle",
-					},
-					Allowed:         false,
-					BindToPlan:      true,
-					WantErrorSubstr: "fork pull requests may use only synthetic read tokens",
-				},
-			},
-		},
-		{
-			ID:                      "regen-trusted-base",
-			HelperPath:              P11RegenAuthReplacementPath,
-			Description:             "trusted-base PR replay keeps soft regen modes tied to generated-metadata policy",
-			PlanOptions:             p11PlanOptions(p11TrustedBaseEvent()),
-			ExpectedTrustTier:       "trusted-base",
-			ExpectedCapabilities:    []string{"generated-metadata"},
-			ExpectedSupersetReasons: []string{"generated-input"},
-			ExpectedManifestModes:   p11RegenModeExpectations(),
-			ExpectedAbsentCoordinates: []string{
-				"regen/prepare",
-				"regen/regen",
-				"regen/validate",
-			},
-		},
-		{
-			ID:                      "regen-push-boundary",
-			HelperPath:              P11RegenAuthReplacementPath,
-			Description:             "trusted-publication regeneration credential is valid only for generated metadata while workflow push semantics verify the generated commit",
-			PlanOptions:             p11PlanOptions(p11TrustedBaseEvent()),
-			ExpectedTrustTier:       "trusted-base",
-			ExpectedCapabilities:    []string{"generated-metadata"},
-			ExpectedSupersetReasons: []string{"generated-input"},
-			ExpectedManifestModes:   p11RegenModeExpectations(),
-			ExpectedAbsentCoordinates: []string{
-				"regen/prepare",
-				"regen/regen",
-				"regen/validate",
-			},
-			CredentialExpectations: []P11CredentialExpectation{
-				{
-					Operation: CredentialOperation{
-						Operation:  "regeneration-push",
-						TrustTier:  "trusted-publication",
-						Capability: "generated-metadata",
-						Token: SyntheticToken{
-							Name:         "release",
-							TrustTier:    "trusted-publication",
-							Class:        syntheticMaintainerToken,
-							Scopes:       []string{"contents:write"},
-							AllowedRoots: []string{"generated"},
-						},
-						Target: "generated/braw.bundle",
-					},
-					Allowed: true,
-				},
-			},
-		},
-	}
-}
-
-type p11NegativeCompatibilitySample struct {
-	Sample              P11CompatibilitySample
-	ExpectedErrorSubstr string
-}
-
-func p11RegenAuthNegativeSamples() []p11NegativeCompatibilitySample {
-	return []p11NegativeCompatibilitySample{
-		{
-			Sample:              p11RegenAuthNonSupersetNegativeSample(),
-			ExpectedErrorSubstr: "requires plan capability generated-metadata",
-		},
-	}
-}
-
-func p11RegenAuthNonSupersetNegativeSample() P11CompatibilitySample {
-	return P11CompatibilitySample{
-		ID:                "regen-non-superset-negative",
-		HelperPath:        P11RegenAuthReplacementPath,
-		Description:       "docs-only PR plan is not a safe superset and cannot bind regeneration credentials to absent generated-metadata capability",
-		PlanOptions:       p11PlanOptionsWithChangedFiles(p11TrustedBaseEvent(), []string{"docs/design/2026-07-24-ci-north-star.md"}),
-		ExpectedTrustTier: "trusted-base",
-		CredentialExpectations: []P11CredentialExpectation{
-			{
-				Operation: CredentialOperation{
-					Operation:  "regeneration-push",
-					TrustTier:  "trusted-publication",
-					Capability: "generated-metadata",
-					Token: SyntheticToken{
-						Name:         "release",
-						TrustTier:    "trusted-publication",
-						Class:        syntheticMaintainerToken,
-						Scopes:       []string{"contents:write"},
-						AllowedRoots: []string{"generated"},
-					},
-					Target: "generated/braw.bundle",
-				},
-				Allowed: true,
-			},
-		},
-	}
-}
-
-func p11MutateCredentialExpectation(samples []P11CompatibilitySample, sampleID string, mutate func(*P11CredentialExpectation)) {
-	for sampleIndex := range samples {
-		if samples[sampleIndex].ID != sampleID {
-			continue
-		}
-
-		for expectationIndex := range samples[sampleIndex].CredentialExpectations {
-			mutate(&samples[sampleIndex].CredentialExpectations[expectationIndex])
-		}
-	}
-}
-
-func p11RegenModeExpectations() []P11ManifestModeExpectation {
-	return []P11ManifestModeExpectation{
-		p11RegenModeExpectation("legacy/regen/prepare", "regen/prepare"),
-		p11RegenModeExpectation("legacy/regen/regen", "regen/regen"),
-		p11RegenModeExpectation("legacy/regen/validate", "regen/validate"),
-	}
-}
-
-func p11RegenModeExpectation(modeID, coordinateID string) P11ManifestModeExpectation {
-	return P11ManifestModeExpectation{
-		ID:           modeID,
-		Capability:   "generated-metadata",
-		Requiredness: "soft",
-		TrustTiers:   []string{"same-repository-agent", "trusted-base"},
-		Coordinates: []P11ManifestCoordinateExpectation{
-			{ID: coordinateID, Requiredness: "soft"},
-		},
-	}
-}
-
-func p11PlanOptions(event EventInput) PlanOptions {
-	return p11PlanOptionsWithChangedFiles(event, []string{"internal/protocol/messages.go"})
-}
-
-func p11PlanOptionsWithChangedFiles(event EventInput, changedFiles []string) PlanOptions {
-	return PlanOptions{
-		Event:          event,
-		ChangedFiles:   append([]string(nil), changedFiles...),
-		ExactFileList:  true,
-		DetectorErrors: nil,
-	}
 }
 
 func p11SameRepoEvent() EventInput {
@@ -1360,93 +604,6 @@ func p11AssertTrustTier(t *testing.T, manifest Manifest, event EventInput, want 
 
 	if got != want {
 		t.Fatalf("trust tier = %s, want %s", got, want)
-	}
-}
-
-func p11HasSampleRequirement(contract P11JSHelperContract, id string) bool {
-	for _, sample := range contract.CompatibilitySamples {
-		if sample.ID == id {
-			return true
-		}
-	}
-
-	return false
-}
-
-func p11DocsDiffRequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
-	return p11RequirementsWithout(requirements, id)
-}
-
-func p11DocsPreviewRequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
-	return p11RequirementsWithout(requirements, id)
-}
-
-func p11RequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
-	filtered := make([]P11CompatibilitySampleRequirement, 0, len(requirements))
-
-	for _, requirement := range requirements {
-		if requirement.ID != id {
-			filtered = append(filtered, requirement)
-		}
-	}
-
-	return filtered
-}
-
-func p11RetiredSurface(path string) cibaseline.Surface {
-	return cibaseline.Surface{
-		Path:        path,
-		Owner:       "graith-maintainers",
-		Kind:        "workflow-helper",
-		GitMode:     "100644",
-		SHA256:      strings.Repeat("0", 64),
-		Contract:    "retired JS surface must not remain in closed-world inventory",
-		Disposition: "grandfathered",
-		Retirement:  "owned Go replacement has equivalent executable coverage",
-	}
-}
-
-func p11ResignInventory(t *testing.T, inventory *cibaseline.Inventory) {
-	t.Helper()
-
-	inventory.Digest = ""
-
-	data, err := json.Marshal(inventory)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	digest := sha256.Sum256(data)
-	inventory.Digest = hex.EncodeToString(digest[:])
-}
-
-func p11AssertSampleMatrixMatchesRequirements(t *testing.T, contract P11JSHelperContract, samples []P11CompatibilitySample) {
-	t.Helper()
-
-	requirements := map[string]bool{}
-
-	for _, requirement := range contract.CompatibilitySamples {
-		requirements[requirement.ID] = true
-	}
-
-	executed := map[string]bool{}
-
-	for _, sample := range samples {
-		if sample.HelperPath != contract.Path {
-			t.Fatalf("sample %s helper path = %s, want %s", sample.ID, sample.HelperPath, contract.Path)
-		}
-
-		if !requirements[sample.ID] {
-			t.Fatalf("sample %s is executed but not declared in %s", sample.ID, contract.Path)
-		}
-
-		executed[sample.ID] = true
-	}
-
-	for id := range requirements {
-		if !executed[id] {
-			t.Fatalf("compatibility sample %s is declared but not executed", id)
-		}
 	}
 }
 
@@ -1868,14 +1025,4 @@ func p11ScalarExpressionCount(values []string, pattern *regexp.Regexp) int {
 	}
 
 	return count
-}
-
-func p11HasString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-
-	return false
 }

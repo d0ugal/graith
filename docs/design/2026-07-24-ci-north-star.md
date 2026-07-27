@@ -288,14 +288,14 @@ before more code is added.
 | Release rendering and publish scripts | Keep | Current trusted publication workflows depend on them; no new publication boundary is introduced. | Existing release workflows and secrets. | Script-specific revert. |
 | macOS release helpers | Keep | Existing optional signing/notarization and archive checks stay as current release logic. | Current release workflows. | Helper-specific revert. |
 | `cmd/cibaseline/**` | Simplify | A local inventory command is useful; GitHub-history collection and retained proof are no longer part of acceptance. | Corrected static inventory package. | Remove command or revert to previous local-only behavior. |
-| `internal/cibaseline/inventory.go`, `inventory_test.go`, `inventory.json` | Keep | Static workflow inventory can feed the shadow summary and drift tests. | Current workflow files. | Regenerate or delete with the summary PR. |
+| `internal/cibaseline/inventory.go`, `inventory_test.go`, `inventory.json` | Keep | Static workflow inventory feeds drift tests and keeps required contexts explicit. | Current workflow files. | Regenerate or delete with the inventory PR. |
 | `internal/cibaseline/github.go`, `evidence.go`, `acceptance.go`, retained evidence fixtures | Revert/delete | Historical windows, retained live evidence, and mature-run acceptance are outside the corrected evidence model. | None after the design reset. | Delete in one PR; rollback restores files only. |
-| `cmd/cipolicy/**` | Simplify | A local validation/report command may be useful, but not a gate or deployment artifact. | Static summary and deterministic fixtures. | Remove command if no caller lands. |
+| `cmd/cipolicy/**` | Keep | `dev-release.yml` still invokes `go run ./cmd/cipolicy` from the trusted base checkout for pull-request routing; CI-FU-03 confirmed it is active behavior, not migration scaffolding. | Dev-release workflow classifier and local command tests. | Restore command, tests, architecture row, inventory surfaces, and `ciPolicyPrefixes` together if accidentally removed. |
 | `internal/cipolicy/manifest.go`, `build.go`, `validate.go`, `io.go`, `manifest.json` | Simplify | Keep only the parts needed for current workflow inventory and local validation. | Current workflows. | Regenerate or delete with static inventory PR. |
 | `internal/cipolicy/plan.go`, `result.go`, `fixture.go` | Revert/delete unless a concrete C2/C4 caller lands first | Full plan/result fan-in was designed for the external gate. Do not preserve it as speculative infrastructure. | A direct summary or fixture caller, otherwise none. | Delete in the helper-pruning PR; rollback restores files only. |
 | `internal/cipolicy/artifact.go` and tests | Retired by #1758 | Follow-up caller inventory found no workflow, script, command, or local consumer for the artifact manifest/producer-result library. Native/release artifact protections remain in the current workflow, shell, and libghostty policy tests. | None. | Revert the focused deletion if a concrete caller is restored. |
 | `internal/cipolicy/cache.go` and tests | Retired by #1737 | The helper-pruning PR removed cross-run cache authority after no current native/release caller was retained. | None. | Revert that focused deletion if a concrete caller is restored. |
-| `internal/cipolicy/p11_js_surface.go` and tests | Simplify | Retain inventory and semantic comparison value; drop broad porting assumptions. | Workflow script tests. | Revert individual helper-retirement PR. |
+| `internal/cipolicy/p11_js_surface.go` and tests | Simplify | Retain workflow parsing, regen trust-boundary assertions, and repository-controlled command detection; drop empty retained-JS inventory contracts and compatibility sample scaffolding. | Workflow policy tests. | Revert individual helper-retirement PR. |
 | `cmd/cigate/**` | Revert/delete | The command exists for an external evaluator and live proof path that is prohibited. | None in current workflows. | Delete command and architecture metadata in one PR. |
 | `internal/cigate/**` | Revert/delete | It requires App contracts, webhook signatures, replay storage, live proof bundles, deployment digests, and `merge_group`. | None in current workflows. | Delete package and tests in one PR. |
 | `website/content/docs/contributing/ci-gate.md` | Revert/delete | User documentation should not describe an external gate outside the corrected rollout. | `cmd/cigate` removal. | Revert docs deletion if the command is restored later. |
@@ -321,7 +321,7 @@ before more code is added.
 - Epic #1700 and sub-issues #1705, #1707, #1708, #1709, #1710, #1711, and #1712:
   current issue hierarchy to close, rewrite, or replace after this design lands.
 - Current workflows under `.github/workflows/`.
-- Current workflow helpers under `.github/workflows/scripts/`.
+- Retired workflow helper directory `.github/workflows/scripts/`.
 - Current native and release scripts under `scripts/` and `macos/service/`.
 - P11 helper-retirement design:
   `docs/design/2026-07-26-p11-js-policy-surface-retirement.md`.

@@ -272,8 +272,7 @@ remain non-required.
 Acceptance commands:
 
 ```bash
-go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
-node --test .github/workflows/scripts/*.test.js
+go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy
 git diff --check
 ```
 
@@ -308,7 +307,8 @@ Expected files:
   retained evidence fixtures;
 - simplify or delete `internal/cipolicy/manifest.go`, `build.go`,
   `validate.go`, `io.go`, and `manifest.json` based on the C2/C4 caller shape;
-- simplify or delete `cmd/cipolicy/**` based on the retained local caller;
+- keep `cmd/cipolicy/**` while `dev-release.yml` still invokes its plan command
+  from the trusted base checkout;
 - delete `internal/cipolicy/plan.go`, `result.go`, and `fixture.go` unless C2
   or C4 already imports them directly;
 - treat `internal/cipolicy/cache.go` as already deleted by #1737;
@@ -321,7 +321,7 @@ or docs.
 Acceptance commands:
 
 ```bash
-go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
+go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy
 go test ./...
 git diff --check
 ```
@@ -375,7 +375,6 @@ Acceptance commands:
 
 ```bash
 go test ./internal/cibaseline ./internal/cipolicy
-node --test .github/workflows/scripts/*.test.js
 git diff --check
 ```
 
@@ -435,7 +434,6 @@ Acceptance commands:
 
 ```bash
 go test ./...
-node --test .github/workflows/scripts/*.test.js
 scripts/libghostty-native.sh test-archive-cleanup
 scripts/libghostty-native.sh test-linux-archive
 git diff --check
@@ -480,7 +478,6 @@ Acceptance:
 Acceptance commands:
 
 ```bash
-node --test .github/workflows/scripts/*.test.js
 go test ./...
 git diff --check
 ```
@@ -581,7 +578,7 @@ settings change. No package depends on a fixed elapsed time window.
 - P11 helper-retirement design:
   `docs/design/2026-07-26-p11-js-policy-surface-retirement.md`.
 - Current workflows under `.github/workflows/`.
-- Current workflow helpers under `.github/workflows/scripts/`.
+- Retired workflow helper directory `.github/workflows/scripts/`.
 - Current native/release helpers under `scripts/` and `macos/service/`.
 - Corrective issue #1715 and superseded rollout issues #1700, #1705, and
   #1707-#1712.
