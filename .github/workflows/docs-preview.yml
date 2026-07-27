@@ -42,8 +42,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-          # Screenshots are pushed via github-script (its own GITHUB_TOKEN),
-          # not the checkout's persisted credentials.
+          # Screenshots are pushed via the Go helper's GITHUB_TOKEN, not the
+          # checkout's persisted credentials.
           persist-credentials: false
 
       - name: Install Hugo (extended) + Dart Sass
@@ -217,156 +217,18 @@ jobs:
           echo "Published diff assets:"; ls -la shots/out
 
       - name: Publish screenshots and comment
-        if: steps.changed.outputs.count != '0'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            // Shared compare-and-retry loop for the single `screenshots` branch
-            // every docs-preview writer contends over (issue #765). Resolved
-            // relative to the workspace, per the github-script require docs.
-            // Fork PRs get a read-only GITHUB_TOKEN regardless of the job's
-            // requested permissions, so pushing the screenshots branch and
-            // upserting the comment would 403 and fail the job (#783). Publish
-            // only for same-repo PRs; forks still ran build/screenshot above,
-            // so their docs render is validated — just not previewed.
-            //
-            // Decide this INLINE, before requiring the workspace helper: for a
-            // `pull_request` event the workflow YAML is taken from the trusted
-            // base, but the checked-out workspace (including docs-preview.js)
-            // is the fork's PR merge ref. Reading the guard from that module
-            // would let a fork PR that also edits docs-preview.js bypass it and
-            // re-trigger the 403. The mirror of this check lives in the helper's
-            // `isSameRepoPR` (used by the base-pinned cleanup job) and is unit
-            // tested. Fail closed: a missing/deleted head repo skips publish.
-            const headRepo = context.payload.pull_request.head.repo;
-            const sameRepo =
-              !!headRepo && headRepo.full_name === `${context.repo.owner}/${context.repo.repo}`;
-            if (!sameRepo) {
-              core.info('Fork PR — screenshots are published only for same-repo PRs (fork PRs get a read-only token). Skipping publish.');
-              return;
-            }
-            // Same-repo PR: its head branch lives in the base repo, so the
-            // checked-out helper is trusted. Safe to require and run its writes.
-            const { commitToBranch } = require('./.github/workflows/scripts/docs-preview.js');
-            const { owner, repo } = context.repo;
-            const pr = context.payload.pull_request.number;
-            const shortSha = context.sha.substring(0, 7);
-            const branch = 'screenshots';
-            // Include run id + attempt so re-runs on the same commit get a
-            // fresh storage path — otherwise GitHub's image CDN (camo) can
-            // serve a stale, cached screenshot from the previous run.
-            const runId = context.runId;
-            const runAttempt = process.env.GITHUB_RUN_ATTEMPT || '1';
-            // Leading YYYYMMDD (UTC) makes the run-dir's age cheap to read
-            // back for the scheduled stale-prune job.
-            const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-            const dir = `pr-${pr}/${ymd}-${shortSha}-${runId}.${runAttempt}`;
+        # This trusted-base YAML guard is intentional: fork PRs still render and
+        # diff, but the write-token branch/comment mutation helper is not run
+        # from fork-controlled checkouts.
+        if: steps.changed.outputs.count != '0' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./cmd/docspreview publish
 
-            // The diff step wrote the images to publish plus
-            // a manifest describing each page × viewport: kind `diff` (a
-            // base-|-head crop of the changed bands), `new` (full render of a
-            // page with no baseline), or `same` (renders identically — no image,
-            // just a note).
-            const outDir = path.join('shots', 'out');
-            let manifest = {};
-            try {
-              manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf8'));
-            } catch (e) {
-              core.info(`No diff manifest (${e.message}) — nothing to publish.`);
-              return;
-            }
-            const files = [
-              ...new Set(
-                Object.values(manifest)
-                  .flatMap(vps => Object.values(vps))
-                  .filter(v => v.file)
-                  .map(v => v.file),
-              ),
-            ].sort();
-            if (Object.keys(manifest).length === 0) { core.info('No changed pages.'); return; }
-
-            // Build the blobs for the screenshots. Blobs are content-addressed,
-            // so this is independent of the branch tip — done once, outside the
-            // retry loop.
-            const tree = [];
-            for (const f of files) {
-              const content = fs.readFileSync(path.join(outDir, f)).toString('base64');
-              const blob = await github.rest.git.createBlob({ owner, repo, content, encoding: 'base64' });
-              tree.push({ path: `${dir}/${f}`, mode: '100644', type: 'blob', sha: blob.data.sha });
-            }
-
-            // Append onto the current tip (chaining via base_tree so existing
-            // screenshots are preserved), creating an orphan root commit if the
-            // branch doesn't exist yet. commitToBranch re-invokes buildCommit on
-            // a lost race so the commit always chains onto the re-read tip, and
-            // only falls back to createRef on a genuine branch-absent case —
-            // never by swallowing an unrelated updateRef failure.
-            // Only commit when there are actually images to push — a PR whose
-            // markdown edits produce no visual change (every page `same`) still
-            // gets a comment below, but nothing goes on the branch.
-            if (files.length > 0) {
-              await commitToBranch({
-                github, core, owner, repo,
-                createIfAbsent: true,
-                buildCommit: async (tip) => {
-                  const treeObj = await github.rest.git.createTree({
-                    owner, repo, tree, base_tree: tip ? tip.treeSha : undefined,
-                  });
-                  const commit = await github.rest.git.createCommit({
-                    owner, repo,
-                    message: `docs preview: PR #${pr} @ ${shortSha}`,
-                    tree: treeObj.data.sha,
-                    parents: tip ? [tip.commitSha] : [],
-                  });
-                  return commit.data.sha;
-                },
-              });
-            }
-
-            // Render the comment from the manifest. `diff`/`new`/`deleted`
-            // entries show an image; `same` shows a note. A diff crop is
-            // base-|-head so it's ~twice as wide as a single render — size the
-            // columns to fit.
-            const raw = f => `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${dir}/${f}`;
-            const cell = (v, width) => {
-              if (!v) return '—';
-              if (v.kind === 'same') return '_no visual change_';
-              return `<img src="${raw(v.file)}" width="${width}">`;
-            };
-            const kinds = names => names.flatMap(n => Object.values(manifest[n]).map(v => v.kind));
-            const names = Object.keys(manifest).sort();
-            const allKinds = new Set(kinds(names));
-            let body = `<!-- docs-preview -->\n### 📸 Docs preview\n\n`;
-            body += `Diffed ${names.length} changed page(s) against \`${context.payload.pull_request.base.ref}\` at commit \`${shortSha}\`. `;
-            body += `Each image shows only the changed regions — **base │ head**, cropped with context.\n\n`;
-            if (allKinds.has('new')) body += `_Pages new in this PR (no baseline) are shown in full._\n\n`;
-            if (allKinds.has('deleted')) body += `_Pages removed in this PR are shown as their last render on \`${context.payload.pull_request.base.ref}\`._\n\n`;
-            for (const name of names) {
-              const p = manifest[name];
-              const removed = p.desktop?.kind === 'deleted' || p.mobile?.kind === 'deleted';
-              body += `<details><summary><b>${name}</b>${removed ? ' — removed' : ''}</summary>\n\n`;
-              body += `| Desktop | Mobile |\n|---|---|\n`;
-              body += `| ${cell(p.desktop, 620)} | ${cell(p.mobile, 300)} |\n\n</details>\n\n`;
-            }
-            // Only link the branch storage when we actually committed images —
-            // an all-`same` PR skips the commit, so <dir> never exists.
-            if (files.length > 0) {
-              body += `_Screenshots stored on the [\`${branch}\`](https://github.com/${owner}/${repo}/tree/${branch}/${dir}) branch._`;
-            } else {
-              body += `_No visual changes to preview._`;
-            }
-
-            // Upsert a single sticky comment.
-            const marker = '<!-- docs-preview -->';
-            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number: pr, body });
-            }
+      - name: Skip screenshot publish for fork PRs
+        if: steps.changed.outputs.count != '0' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "Fork PR — screenshots are published only for same-repo PRs (fork PRs get a read-only token). Skipping publish."
 
   cleanup:
     name: Clean up screenshots
@@ -377,24 +239,29 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # Only the helper script is needed — check it out sparsely (screenshots
-      # are read/written via the API, never the working tree) and don't
-      # persist git credentials (the branch is rewritten via github-script's
-      # token, not `git push`). Pin to the PR *base* SHA: this job runs with a
-      # write-scoped token and then executes the checked-out script, so it must
-      # run the trusted base version, never PR-controlled code from the default
-      # merge ref (the workflow YAML itself is already taken from the base).
+      # Only the docs-preview Go command is needed — check it out sparsely
+      # (screenshots are read/written via the API, never the working tree) and
+      # don't persist git credentials. Pin to the PR *base* SHA: this job runs
+      # with a write-scoped token and then executes checked-out code, so it
+      # must run the trusted base version, never PR-controlled code from the
+      # default merge ref (the workflow YAML itself is already taken from the
+      # base).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-          sparse-checkout: .github/workflows/scripts
-      - name: Remove PR screenshots from the screenshots branch
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+          sparse-checkout: |
+            cmd/docspreview
+            internal/docspreview
+            go.mod
+            go.sum
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          script: |
-            const { cleanup } = require('./.github/workflows/scripts/docs-preview.js');
-            await cleanup({ github, context, core });
+          go-version-file: go.mod
+      - name: Remove PR screenshots from the screenshots branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./cmd/docspreview cleanup
 
   prune:
     name: Prune stale screenshots
@@ -404,16 +271,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Only the helper script is needed — see the cleanup job's checkout note.
+      # Only the docs-preview Go command is needed — see the cleanup job's
+      # checkout note.
       # No `ref` pin needed here: the schedule trigger checks out the default
       # branch (trusted), never PR-controlled content.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          sparse-checkout: .github/workflows/scripts
-      - name: Remove screenshot dirs older than 30 days
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+          sparse-checkout: |
+            cmd/docspreview
+            internal/docspreview
+            go.mod
+            go.sum
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          script: |
-            const { prune } = require('./.github/workflows/scripts/docs-preview.js');
-            await prune({ github, context, core });
+          go-version-file: go.mod
+      - name: Remove screenshot dirs older than 30 days
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./cmd/docspreview prune

@@ -41,24 +41,17 @@ func TestP11JSSurfaceContractsCoverCurrentInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(contracts) != 2 {
-		t.Fatalf("P11 retained JS contract count = %d, want docs-preview helper and test only: %#v", len(contracts), contracts)
+	if len(contracts) != 0 {
+		t.Fatalf("P11 retained JS contract count = %d, want none: %#v", len(contracts), contracts)
 	}
 
-	for path, disposition := range map[string]string{
-		".github/workflows/scripts/docs-preview.js":      "wrap",
-		".github/workflows/scripts/docs-preview.test.js": "port",
-	} {
-		contract := p11ContractByPath(t, contracts, path)
-		if contract.Disposition != disposition {
-			t.Fatalf("%s disposition = %s, want %s", path, contract.Disposition, disposition)
-		}
-	}
+	retiredPaths := append([]string{}, p11DocsDiffRetiredSurfacePaths...)
+	retiredPaths = append(retiredPaths, p11DocsPreviewRetiredSurfacePaths...)
 
-	for _, path := range p11DocsDiffRetiredSurfacePaths {
+	for _, path := range retiredPaths {
 		for _, contract := range contracts {
 			if contract.Path == path {
-				t.Fatalf("retired docs-diff surface %s still has a retained JS contract", path)
+				t.Fatalf("retired JS surface %s still has a retained JS contract", path)
 			}
 		}
 	}
@@ -89,53 +82,130 @@ func TestP11DocsDiffReplacementSamplesCoverPortMatrix(t *testing.T) {
 	}
 }
 
-func TestP11DocsDiffReplacementRejectsMissingMismatchedAndRetiredSurfaces(t *testing.T) {
+func TestP11DocsPreviewReplacementSamplesCoverPortMatrix(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	inventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requirements := P11DocsPreviewCompatibilityRequirements()
+	if err := ValidateP11DocsPreviewReplacement(repoRoot, inventory, P11DocsPreviewReplacementPath, requirements); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement := P11JSHelperContract{
+		Path:                 P11DocsPreviewReplacementPath,
+		CompatibilitySamples: requirements,
+	}
+
+	for _, want := range p11DocsPreviewRequiredSampleIDs() {
+		if !p11HasSampleRequirement(replacement, want) {
+			t.Fatalf("%s is missing compatibility sample %s", replacement.Path, want)
+		}
+	}
+}
+
+func TestP11ReplacementRejectsMissingMismatchedAndRetiredSurfaces(t *testing.T) {
+	tests := map[string]p11ReplacementRejectionSuite{
+		"docs-diff": {
+			requirements:        P11DocsDiffCompatibilityRequirements(),
+			replacementPath:     P11DocsDiffReplacementPath,
+			missingPath:         "cmd/docsdiff/missing_test.go",
+			missingWant:         "missing P11 docs-diff Go replacement surface cmd/docsdiff/missing_test.go",
+			mismatchedPath:      "cmd/docsdiff/main.go",
+			missingSampleID:     "png-composite",
+			missingSampleWant:   "missing compatibility sample png-composite",
+			withoutRequirement:  p11DocsDiffRequirementsWithout,
+			validateReplacement: ValidateP11DocsDiffReplacement,
+			retiredSurfaces: map[string]string{
+				".github/workflows/scripts/docs-diff.js":      "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/docs-diff.js",
+				".github/workflows/scripts/package-lock.json": "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/package-lock.json",
+			},
+		},
+		"docs-preview": {
+			requirements:        P11DocsPreviewCompatibilityRequirements(),
+			replacementPath:     P11DocsPreviewReplacementPath,
+			missingPath:         "internal/docspreview/missing_test.go",
+			missingWant:         "missing P11 docs-preview Go replacement surface internal/docspreview/missing_test.go",
+			mismatchedPath:      "internal/docspreview/docspreview.go",
+			missingSampleID:     "docs-preview-rest-api",
+			missingSampleWant:   "missing compatibility sample docs-preview-rest-api",
+			withoutRequirement:  p11DocsPreviewRequirementsWithout,
+			validateReplacement: ValidateP11DocsPreviewReplacement,
+			retiredSurfaces: map[string]string{
+				".github/workflows/scripts/docs-preview.js":      "P0 inventory still references retired P11 docs-preview surface .github/workflows/scripts/docs-preview.js",
+				".github/workflows/scripts/docs-preview.test.js": "P0 inventory still references retired P11 docs-preview surface .github/workflows/scripts/docs-preview.test.js",
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			p11RunReplacementRejectionCases(t, test)
+		})
+	}
+}
+
+type p11ReplacementRejectionSuite struct {
+	requirements        []P11CompatibilitySampleRequirement
+	replacementPath     string
+	missingPath         string
+	missingWant         string
+	mismatchedPath      string
+	missingSampleID     string
+	missingSampleWant   string
+	withoutRequirement  func([]P11CompatibilitySampleRequirement, string) []P11CompatibilitySampleRequirement
+	validateReplacement func(string, cibaseline.Inventory, string, []P11CompatibilitySampleRequirement) error
+	retiredSurfaces     map[string]string
+}
+
+type p11ReplacementRejectionCase struct {
+	replacementPath string
+	requirements    []P11CompatibilitySampleRequirement
+	mutateInventory func(*cibaseline.Inventory)
+	want            string
+}
+
+func p11RunReplacementRejectionCases(t *testing.T, suite p11ReplacementRejectionSuite) {
+	t.Helper()
+
+	tests := map[string]p11ReplacementRejectionCase{
+		"missing Go replacement": {
+			replacementPath: suite.missingPath,
+			requirements:    suite.requirements,
+			want:            suite.missingWant,
+		},
+		"mismatched Go replacement": {
+			replacementPath: suite.mismatchedPath,
+			requirements:    suite.requirements,
+			want:            "kind = go-policy-helper, want go-policy-contract-test",
+		},
+		"missing compatibility sample": {
+			replacementPath: suite.replacementPath,
+			requirements:    suite.withoutRequirement(suite.requirements, suite.missingSampleID),
+			want:            suite.missingSampleWant,
+		},
+	}
+
+	for path, want := range suite.retiredSurfaces {
+		retiredPath := path
+		tests["retired surface "+retiredPath] = p11ReplacementRejectionCase{
+			replacementPath: suite.replacementPath,
+			requirements:    suite.requirements,
+			mutateInventory: func(inventory *cibaseline.Inventory) {
+				inventory.Surfaces = append(inventory.Surfaces, p11RetiredSurface(retiredPath))
+			},
+			want: want,
+		}
+	}
+
 	repoRoot := p11RepoRoot()
 
 	baseInventory, err := ReadInventory(filepath.Join(repoRoot, DefaultInventoryPath))
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	requirements := P11DocsDiffCompatibilityRequirements()
-
-	tests := map[string]struct {
-		replacementPath string
-		requirements    []P11CompatibilitySampleRequirement
-		mutateInventory func(*cibaseline.Inventory)
-		want            string
-	}{
-		"missing Go replacement": {
-			replacementPath: "cmd/docsdiff/missing_test.go",
-			requirements:    requirements,
-			want:            "missing P11 docs-diff Go replacement surface cmd/docsdiff/missing_test.go",
-		},
-		"mismatched Go replacement": {
-			replacementPath: "cmd/docsdiff/main.go",
-			requirements:    requirements,
-			want:            "kind = go-policy-helper, want go-policy-contract-test",
-		},
-		"missing compatibility sample": {
-			replacementPath: P11DocsDiffReplacementPath,
-			requirements:    p11DocsDiffRequirementsWithout(requirements, "png-composite"),
-			want:            "missing compatibility sample png-composite",
-		},
-		"retired JS helper surface": {
-			replacementPath: P11DocsDiffReplacementPath,
-			requirements:    requirements,
-			mutateInventory: func(inventory *cibaseline.Inventory) {
-				inventory.Surfaces = append(inventory.Surfaces, p11RetiredSurface(".github/workflows/scripts/docs-diff.js"))
-			},
-			want: "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/docs-diff.js",
-		},
-		"retired pngjs lock surface": {
-			replacementPath: P11DocsDiffReplacementPath,
-			requirements:    requirements,
-			mutateInventory: func(inventory *cibaseline.Inventory) {
-				inventory.Surfaces = append(inventory.Surfaces, p11RetiredSurface(".github/workflows/scripts/package-lock.json"))
-			},
-			want: "P0 inventory still references retired P11 docs-diff surface .github/workflows/scripts/package-lock.json",
-		},
 	}
 
 	for name, test := range tests {
@@ -148,9 +218,9 @@ func TestP11DocsDiffReplacementRejectsMissingMismatchedAndRetiredSurfaces(t *tes
 				p11ResignInventory(t, &inventory)
 			}
 
-			err := ValidateP11DocsDiffReplacement(repoRoot, inventory, test.replacementPath, test.requirements)
+			err := suite.validateReplacement(repoRoot, inventory, test.replacementPath, test.requirements)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("ValidateP11DocsDiffReplacement() error = %v, want containing %q", err, test.want)
+				t.Fatalf("replacement validation error = %v, want containing %q", err, test.want)
 			}
 		})
 	}
@@ -630,7 +700,7 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedScriptExecution(t *tes
 	}
 
 	needle := "\n          set -euo pipefail\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
-	replacement := "\n          set -euo pipefail\n          node .github/workflows/scripts/docs-preview.test.js\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
+	replacement := "\n          set -euo pipefail\n          node .github/workflows/scripts/retired-helper.test.js\n          remote_sha=\"$(git ls-remote origin \"refs/heads/$HEAD_REF\" | awk '{print $1}')\"\n"
 	workflowSource := string(data)
 
 	if !strings.Contains(workflowSource, needle) {
@@ -672,7 +742,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 
 	for path, data := range map[string]string{
 		filepath.Join(repoRoot, ".gitignore"):                                 ".github/workflows/scripts/node_modules/\n",
-		filepath.Join(scriptsDir, "docs-preview.test.js"):                     "'use strict';\n",
+		filepath.Join(scriptsDir, "retained-helper.test.js"):                  "'use strict';\n",
 		filepath.Join(scriptsDir, "untracked-helper.test.js"):                 "'use strict';\n",
 		filepath.Join(scriptsDir, "node_modules", "ignored-helper.test.js"):   "'use strict';\n",
 		filepath.Join(repoRoot, "internal", "cipolicy", "unrelated.testdata"): "braw\n",
@@ -688,7 +758,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 	}
 
 	p11RunGit(t, repoRoot, "init")
-	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/docs-preview.test.js")
+	p11RunGit(t, repoRoot, "add", ".gitignore", ".github/workflows/scripts/retained-helper.test.js")
 
 	foreignHelper := filepath.Join(foreignScriptsDir, "foreign-helper.test.js")
 	// #nosec G703 -- foreignHelper is rooted in t.TempDir.
@@ -711,7 +781,7 @@ func TestP11CurrentScriptPathsUseGitIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/docs-preview.test.js"}) {
+	if !reflect.DeepEqual(paths, []string{".github/workflows/scripts/retained-helper.test.js"}) {
 		t.Fatalf("currentP11ScriptPaths() = %#v, want only git-index tracked helper", paths)
 	}
 }
@@ -758,7 +828,7 @@ func TestP11RepositoryControlledCommandDetectionMatchesRetainedJSEmbeddedCommand
 		"embedded go test":                  "if go test ./internal/protocol -run TestManifestUpToDate; then",
 		"embedded make package graph":       "env GRAITH_CHECK=braw make package-graph",
 		"embedded native helper":            "cd /tmp && scripts/libghostty-native.sh verify-dependency-unit",
-		"embedded node helper":              "env GRAITH_CHECK=braw node .github/workflows/scripts/docs-preview.test.js",
+		"embedded node helper":              "env GRAITH_CHECK=braw node .github/workflows/scripts/retired-helper.test.js",
 		"embedded python helper":            "changed=$(python3 scripts/braw.py)",
 		"embedded shell helper":             "if sh scripts/braw.sh; then",
 		"backtick package graph":            "GENERATED=`make package-graph`",
@@ -1293,20 +1363,6 @@ func p11AssertTrustTier(t *testing.T, manifest Manifest, event EventInput, want 
 	}
 }
 
-func p11ContractByPath(t *testing.T, contracts []P11JSHelperContract, path string) P11JSHelperContract {
-	t.Helper()
-
-	for _, contract := range contracts {
-		if contract.Path == path {
-			return contract
-		}
-	}
-
-	t.Fatalf("contract for %s not found", path)
-
-	return P11JSHelperContract{}
-}
-
 func p11HasSampleRequirement(contract P11JSHelperContract, id string) bool {
 	for _, sample := range contract.CompatibilitySamples {
 		if sample.ID == id {
@@ -1318,6 +1374,14 @@ func p11HasSampleRequirement(contract P11JSHelperContract, id string) bool {
 }
 
 func p11DocsDiffRequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
+	return p11RequirementsWithout(requirements, id)
+}
+
+func p11DocsPreviewRequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
+	return p11RequirementsWithout(requirements, id)
+}
+
+func p11RequirementsWithout(requirements []P11CompatibilitySampleRequirement, id string) []P11CompatibilitySampleRequirement {
 	filtered := make([]P11CompatibilitySampleRequirement, 0, len(requirements))
 
 	for _, requirement := range requirements {
@@ -1336,7 +1400,7 @@ func p11RetiredSurface(path string) cibaseline.Surface {
 		Kind:        "workflow-helper",
 		GitMode:     "100644",
 		SHA256:      strings.Repeat("0", 64),
-		Contract:    "retired docs-diff surface must not remain in closed-world inventory",
+		Contract:    "retired JS surface must not remain in closed-world inventory",
 		Disposition: "grandfathered",
 		Retirement:  "owned Go replacement has equivalent executable coverage",
 	}

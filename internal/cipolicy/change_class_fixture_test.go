@@ -497,7 +497,7 @@ func assertSharedSummaryInventoryVisible(t *testing.T, summary string) {
 		"Validate regeneration credentials",
 		"Build and verify stable Linux artifacts",
 		"Build and verify Linux dev archive",
-		"workflow scripts",
+		"workflow policy tests",
 		"shellcheck",
 		"zizmor",
 		"internal/cipolicy/shadow_summary.go",

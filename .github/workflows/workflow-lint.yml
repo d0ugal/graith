@@ -163,17 +163,16 @@ jobs:
         run: zizmor --min-confidence=medium .github/workflows/
 
   scripts:
-    name: workflow scripts
-    # Unit tests for the JS helpers used by github-script steps (e.g.
-    # docs-preview cleanup/prune). Uses the Node built-in test runner — no
-    # package.json or dependencies. Guards the #763 truncation-safety fix.
+    name: workflow policy tests
+    # Unit tests for repository-owned workflow helpers and semantic workflow
+    # policy checks that used to live under .github/workflows/scripts.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Run workflow script tests
-        # Let bash expand the glob so Node receives explicit file paths — this
-        # works on every Node ≥ 18, whereas Node's own `--test` glob support
-        # only landed in v21 and the runner's system Node isn't pinned here.
-        run: node --test .github/workflows/scripts/*.test.js
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run workflow policy tests
+        run: go test ./internal/cipolicy ./internal/docspreview ./cmd/docspreview

@@ -972,7 +972,7 @@
       "path": ".github/workflows/docs-preview.yml",
       "name": "Docs Preview",
       "owner": "docs-owners",
-      "file_sha256": "2f2a8409869df63be6c3cee9725855e3596b57e2f1a339b84e4ee8089cd5720b",
+      "file_sha256": "6dbd90498d3bda30660a3d7331aba8ae3600ce151ce1c3376096c4d2f55321ed",
       "events": {
         "pull_request": {
           "paths": [
@@ -1020,7 +1020,25 @@
           ],
           "action_pins": [
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -1050,7 +1068,6 @@
           ],
           "action_pins": [
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
             "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
           ],
           "toolchains": [
@@ -1094,7 +1111,25 @@
           ],
           "action_pins": [
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         }
       ]
@@ -2327,7 +2362,7 @@
       "path": ".github/workflows/workflow-lint.yml",
       "name": "Workflow Lint",
       "owner": "graith-maintainers",
-      "file_sha256": "aaeb98350f56e5c713fcc1177387f15dc1e14214b7ca9c3b076f79a83b776a5e",
+      "file_sha256": "6c5717461cf5c23ef38e3fc27b7a19e3ac29fba702d0b0bdaef60edd577366eb",
       "events": {
         "pull_request": {
           "paths": [
@@ -2415,7 +2450,7 @@
         },
         {
           "id": "scripts",
-          "name": "workflow scripts",
+          "name": "workflow policy tests",
           "capability": "legacy-proof/workflow-lint/scripts",
           "owner": "graith-maintainers",
           "runner": "ubuntu-latest",
@@ -2428,10 +2463,29 @@
             "workflow-lint/scripts"
           ],
           "github_names": [
-            "workflow scripts"
+            "workflow policy tests"
           ],
           "action_pins": [
-            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -2645,26 +2699,6 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
-      "path": ".github/workflows/scripts/docs-preview.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-helper",
-      "git_mode": "100644",
-      "sha256": "be731bb7a2d82342fbabb4b2a53825937e5a42de1374aa69114fb71e25600566",
-      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": ".github/workflows/scripts/docs-preview.test.js",
-      "owner": "graith-maintainers",
-      "kind": "workflow-contract-test",
-      "git_mode": "100644",
-      "sha256": "2f11cb4d6592e981bb1617beffb36fa91400e229cee53f0961170fd43b360df0",
-      "executable_contract": "preserve the current workflow trust and behavior assertions until replaced by semantic Go contracts",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
       "path": ".golangci.yml",
       "owner": "graith-maintainers",
       "kind": "ci-configuration",
@@ -2765,6 +2799,26 @@
       "retirement_criterion": "remove only after equivalent docs-preview screenshot-diff parity coverage exists"
     },
     {
+      "path": "cmd/docspreview/main.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "f5e6c33d1aa697c9421782865196785c7b3250b0a1061b0e086e8a1ccba787d6",
+      "executable_contract": "preserve docs-preview publish, cleanup, and prune workflow command behavior formerly held by docs-preview.js and github-script call sites",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with the docs-preview branch/comment workflow caller or an owner-approved replacement helper"
+    },
+    {
+      "path": "cmd/docspreview/main_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "32d442584d88899bfd52e322cf0a9830a4a22bd6c191a5b942270a66051a06c7",
+      "executable_contract": "preserve docs-preview command fork no-op behavior before manifest reads or GitHub writes",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent docs-preview command boundary coverage exists"
+    },
+    {
       "path": "cmd/libghosttyarchive/main.go",
       "owner": "graith-maintainers",
       "kind": "go-policy-helper",
@@ -2819,7 +2873,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract",
       "git_mode": "100644",
-      "sha256": "b422349aa7ad786916a80f22a4a9c8f3429c04fb44213f799f4b7ad4cde029ea",
+      "sha256": "b09b473a319fb69e3d6df869635e4feb973b83fc83a6b2e25a7de11fbdf2c627",
       "executable_contract": "preserve current retained-JS surface contracts and semantic replacement metadata for retired workflow-script tests",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only after all P11 JS surfaces are retired or represented by a newer owner-approved contract"
@@ -2829,7 +2883,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "f9b1edb25ecebbd08bf181a76477634b816d572d8f84651a2e6876124348054c",
+      "sha256": "9746d413d3477b7a28fa54acb168d1b2a300c57788b66e3e13842cc1c700dccc",
       "executable_contract": "preserve regen credential, trust, scalar sweep, git-index enumeration, and repository-command detection assertions formerly held by regen-auth.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement"
@@ -2859,7 +2913,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "45f58aade5d088a34f33cf1aa78068fb9b54b56283c00616ff00d2805f51714c",
+      "sha256": "90deb1cc7c85df5f12dd9fe4366e430729cb352d5f00fb8b1681e9363b0dabcc",
       "executable_contract": "preserve diagnostic wording, detector fallback, helper language, and no-live-aggregation assertions for the CI shadow summary",
       "disposition": "grandfathered",
       "retirement_criterion": "delete with the CI shadow summary helper or replace only after equivalent summary contract coverage exists"
@@ -2873,6 +2927,46 @@
       "executable_contract": "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/docspreview/docspreview.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "e612d2264b4221598fcc9cf09047f7aa5cab2fa25b1c8179c57eccba1282c234",
+      "executable_contract": "preserve docs-preview screenshots branch mutation policy: same-repository write guards, full-tree rewrite safety, empty-tree commits, stale-run pruning, sticky comments, and compare-and-retry branch updates",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with the docs-preview branch/comment workflow caller or an owner-approved replacement helper"
+    },
+    {
+      "path": "internal/docspreview/docspreview_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "be3f6f851c8ea5c33ff802e79e4e72b5079d7583c05d287b9b039072c078ad4a",
+      "executable_contract": "preserve high-fidelity fake GitHub state-transition coverage for docs-preview fork skip, same-repo publish, cleanup prefix deletion, truncated-tree rejection, empty-tree commits, stale pruning, sticky comments, and ref-race retries",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent docs-preview branch/comment mutation coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/docspreview/github.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "3071ad4d2eef64d6419f80c776949112f06e5d107655191946d6ba5065e8483f",
+      "executable_contract": "preserve GitHub REST request semantics for docs-preview refs, trees, commits, blobs, paginated issue comments, bearer token use, fast-forward ref updates, and omitted force/base_tree fields where required",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with the docs-preview branch/comment workflow caller or an owner-approved replacement GitHub API adapter"
+    },
+    {
+      "path": "internal/docspreview/github_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "2c17ba3a31043f12fc444a18836f664e8c8d74f393f4e470012df6689ccbc247",
+      "executable_contract": "preserve docs-preview GitHub REST adapter request-path, payload, pagination, authorization, and status-error semantics",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent GitHub API request-shape coverage exists"
     },
     {
       "path": "internal/libghosttyarchive/archive.go",
@@ -3516,5 +3610,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "d57edbd8ddf521cb0f7bbd05e4de13ed5c6968d3bd419db524cf008e7f56a4f6"
+  "digest": "dde4f83ee6b0b3bdf7031fa22b08f8b1c4f811ddfbb438c77b1d02f8f99654d1"
 }
