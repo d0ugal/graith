@@ -14,6 +14,15 @@ func TestLibghosttyIntegrationCoverageRemainsRuntimeValidated(t *testing.T) {
 	ci := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/ci.yml"))
 	native := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native.yml"))
 
+	assertContains(t, native, "name: libghostty core runtime")
+	assertContains(t, native, "name: Core runtime and pinned artifact (macOS arm64)")
+	assertContains(t, native, "name: Core runtime source build (${{ matrix.target }})")
+	assertContains(t, native, "name: Native backend gate")
+	assertContains(t, native, "macOS arm64 core runtime")
+	assertContains(t, native, "Linux core runtime matrix")
+	assertNotContains(t, native, "Adapter and pinned artifact")
+	assertNotContains(t, native, "Adapter source build")
+
 	if got := regexp.MustCompile(`go test -v -race -count=1 -run '\^\$' -tags=integration \./internal/integration/\.\.\.`).FindAllString(ci, -1); len(got) != 2 {
 		t.Fatalf("generic integration compile-only command count = %d, want Linux and macOS", len(got))
 	}

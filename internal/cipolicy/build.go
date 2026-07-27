@@ -695,7 +695,7 @@ func capabilityDescription(capabilityID string) string {
 	case "gui":
 		return "macOS and iOS GUI build and test proof."
 	case "native":
-		return "Native libghostty producer, adapter, and consumer proof."
+		return "Core libghostty runtime source-build, artifact, and consumer proof."
 	case "native-publication":
 		return "Main-only native dependency publication proof."
 	case "release-automation":

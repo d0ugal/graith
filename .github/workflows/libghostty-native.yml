@@ -1,4 +1,4 @@
-name: libghostty-vt native backend
+name: libghostty core runtime
 
 on:
   workflow_dispatch:
@@ -78,7 +78,7 @@ jobs:
           fi
 
   apple-adapter:
-    name: Adapter and pinned artifact (macOS arm64)
+    name: Core runtime and pinned artifact (macOS arm64)
     needs: changes
     if: >-
       !cancelled() &&
@@ -163,7 +163,7 @@ jobs:
           if-no-files-found: error
 
   linux-adapter:
-    name: Adapter source build (${{ matrix.target }})
+    name: Core runtime source build (${{ matrix.target }})
     needs: changes
     if: >-
       !cancelled() &&
@@ -540,8 +540,8 @@ jobs:
           if [ "$APPLE_ADAPTER_RESULT" != "success" ] || \
             { [ "$linux_required" = "true" ] && [ "$LINUX_ADAPTER_RESULT" != "success" ]; }; then
             echo "Required native jobs did not pass:" >&2
-            echo "  macOS arm64 adapter: $APPLE_ADAPTER_RESULT" >&2
-            echo "  Linux adapter matrix: $LINUX_ADAPTER_RESULT" >&2
+            echo "  macOS arm64 core runtime: $APPLE_ADAPTER_RESULT" >&2
+            echo "  Linux core runtime matrix: $LINUX_ADAPTER_RESULT" >&2
             exit 1
           fi
           echo "Required native jobs passed."
