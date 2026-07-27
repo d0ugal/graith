@@ -567,9 +567,9 @@
     {
       "id": "libghostty-native",
       "path": ".github/workflows/libghostty-native.yml",
-      "name": "libghostty-vt native backend",
+      "name": "libghostty core runtime",
       "owner": "native-owners",
-      "file_sha256": "6ae05e35535c0ae1d5c0e1132691a8870dccc57833f2d1d163c7f6d190c00bc2",
+      "file_sha256": "53c45079b3e51aab7bace5b19f7bbbf6f67cf028dc6019d88a094fa9b10ba539",
       "events": {
         "pull_request": null,
         "workflow_dispatch": {
@@ -602,7 +602,7 @@
       "jobs": [
         {
           "id": "apple-adapter",
-          "name": "Adapter and pinned artifact (macOS arm64)",
+          "name": "Core runtime and pinned artifact (macOS arm64)",
           "capability": "legacy-proof/libghostty-native/apple-adapter",
           "owner": "native-owners",
           "runner": "macos-26",
@@ -616,7 +616,7 @@
             "libghostty-native/apple-adapter"
           ],
           "github_names": [
-            "Adapter and pinned artifact (macOS arm64)"
+            "Core runtime and pinned artifact (macOS arm64)"
           ],
           "action_pins": [
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -676,7 +676,7 @@
         },
         {
           "id": "linux-adapter",
-          "name": "Adapter source build (${{ matrix.target }})",
+          "name": "Core runtime source build (${{ matrix.target }})",
           "capability": "legacy-proof/libghostty-native/linux-adapter",
           "owner": "native-owners",
           "runner": "ubuntu-latest",
@@ -705,8 +705,8 @@
             "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
           ],
           "github_names": [
-            "Adapter source build (x86_64-linux-gnu)",
-            "Adapter source build (aarch64-linux-gnu)"
+            "Core runtime source build (x86_64-linux-gnu)",
+            "Core runtime source build (aarch64-linux-gnu)"
           ],
           "action_pins": [
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -2809,7 +2809,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "22958fe9e5cb3a418b0a77bc7619234928388aa19ca29541fc975499a1086387",
+      "sha256": "8c4124d52b42441d114ecdd92ec51ee037804385045b248d72cf894c465e2e5c",
       "executable_contract": "preserve native/release/coverage routing and libghostty artifact trust assertions formerly held by libghostty-policy.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent native policy coverage and zero unexplained replay disagreement"
@@ -3516,5 +3516,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "7f3dcc8348038129767e0058d4a15f17a6c43bb23295a58a749c065298bd61bf"
+  "digest": "d57edbd8ddf521cb0f7bbd05e4de13ed5c6968d3bd419db524cf008e7f56a4f6"
 }
