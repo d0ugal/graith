@@ -1836,6 +1836,10 @@ func TestCheckEnvironment(t *testing.T) {
 		t.Errorf("expected Messages DB check, got: %q", passed)
 	}
 
+	if !strings.Contains(passed, "Daemon stderr log") || !strings.Contains(passed, filepath.Join(dir, "daemon.stderr.log")) {
+		t.Errorf("expected daemon stderr log path in Environment checks, got: %q", passed)
+	}
+
 	warned := strings.Join(checkResults(dc, "warn"), "\n")
 	if !strings.Contains(warned, "Sandbox disabled") {
 		t.Errorf("expected sandbox-disabled warn, got: %q", warned)
@@ -1901,6 +1905,63 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 
 	if int64(len(got)) != oneMB {
 		t.Errorf("autofix should have truncated daemon log to exactly 1 MB, size now %d", len(got))
+	}
+
+	if want := bytes.Repeat([]byte("T"), oneMB); !bytes.Equal(got, want) {
+		t.Errorf("autofix kept the wrong bytes: expected the 1 MB 'T' tail, got head bytes present=%v", bytes.Contains(got, []byte("H")))
+	}
+}
+
+func TestCheckEnvironmentLargeDaemonStderrLog(t *testing.T) {
+	oldCfg, oldPaths, oldCfgFile := cfg, paths, cfgFile
+
+	t.Cleanup(func() { cfg, paths, cfgFile = oldCfg, oldPaths, oldCfgFile })
+
+	discardOut(t)
+
+	dir := t.TempDir()
+
+	cfgFile = filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("[sandbox]\nenabled = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const oneMB = 1024 * 1024
+
+	stderrPath := filepath.Join(dir, "daemon.stderr.log")
+
+	content := append(bytes.Repeat([]byte("H"), 10*oneMB), bytes.Repeat([]byte("T"), oneMB)...)
+
+	if err := os.WriteFile(stderrPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths = config.Paths{
+		DataDir:         dir,
+		DaemonLog:       filepath.Join(dir, "daemon.log"),
+		DaemonStderrLog: stderrPath,
+	}
+
+	cfg = &config.Config{}
+	cfg.Sandbox = config.SandboxConfig{Enabled: false}
+
+	doctorAutofix = true // restored by discardOut
+
+	dc := newDoctorContext()
+	dc.checkEnvironment()
+
+	warned := strings.Join(checkResults(dc, "warn"), "\n")
+	if !strings.Contains(warned, "Daemon stderr log") {
+		t.Errorf("expected daemon-stderr-log size warn, got: %q", warned)
+	}
+
+	got, err := os.ReadFile(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if int64(len(got)) != oneMB {
+		t.Errorf("autofix should have truncated daemon stderr log to exactly 1 MB, size now %d", len(got))
 	}
 
 	if want := bytes.Repeat([]byte("T"), oneMB); !bytes.Equal(got, want) {

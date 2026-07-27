@@ -208,7 +208,7 @@ func TestStartDaemonRejectsGoTestBinaryWithoutLaunching(t *testing.T) {
 
 	launched := false
 
-	err = startDaemonWithLauncher("", func(string, []string) error {
+	err = startDaemonWithLauncher("", config.Paths{}, func(string, []string, config.Paths) error {
 		launched = true
 		return nil
 	})
@@ -229,7 +229,9 @@ func TestStartDaemonExecutableLaunchesGraithBinary(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "gr")
 	launched := false
 
-	err := startDaemonExecutable("", executable, false, func(gotExecutable string, args []string) error {
+	paths := config.Paths{DataDir: "/bothy"}
+
+	err := startDaemonExecutable("", executable, paths, false, func(gotExecutable string, args []string, gotPaths config.Paths) error {
 		launched = true
 
 		if gotExecutable != executable {
@@ -240,6 +242,10 @@ func TestStartDaemonExecutableLaunchesGraithBinary(t *testing.T) {
 			t.Errorf("launcher args = %v, want [daemon start]", args)
 		}
 
+		if gotPaths.DataDir != paths.DataDir {
+			t.Errorf("launcher paths = %#v, want %#v", gotPaths, paths)
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -248,6 +254,66 @@ func TestStartDaemonExecutableLaunchesGraithBinary(t *testing.T) {
 
 	if !launched {
 		t.Fatal("expected regular graith binary to be launched")
+	}
+}
+
+func TestPrepareDaemonCommandCapturesRuntimeStderrAppendOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	script := filepath.Join(dir, "braw-stderr.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$1\" >&2\nprintf 'stdout:%s\\n' \"$1\"\n"), 0o755); err != nil { //nolint:gosec // G306: executable shell fixture.
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{DataDir: filepath.Join(dir, "data")}
+
+	runPreparedDaemonCommand(t, script, []string{"dreich"}, paths)
+	runPreparedDaemonCommand(t, script, []string{"canny"}, paths)
+
+	stderrPath := filepath.Join(paths.DataDir, "daemon.stderr.log")
+
+	got, err := os.ReadFile(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "dreich\ncanny\n" {
+		t.Fatalf("daemon stderr log = %q, want appended runtime stderr only", got)
+	}
+
+	info, err := os.Stat(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("daemon stderr log mode = %o, want 0600", mode)
+	}
+}
+
+func TestPrepareDaemonCommandReportsBlockedStderrLog(t *testing.T) {
+	dir := t.TempDir()
+
+	blocker := filepath.Join(dir, "data")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd, cleanup, err := prepareDaemonCommand("braw", nil, config.Paths{DataDir: blocker})
+	if cleanup != nil {
+		cleanup()
+	}
+
+	if err == nil {
+		t.Fatal("expected blocked stderr log path to fail")
+	}
+
+	if cmd != nil {
+		t.Fatalf("prepareDaemonCommand returned cmd %#v despite stderr log failure", cmd)
+	}
+
+	if !strings.Contains(err.Error(), "create daemon stderr log directory") {
+		t.Fatalf("prepareDaemonCommand error = %v, want stderr log directory failure", err)
 	}
 }
 
@@ -298,6 +364,20 @@ func TestDaemonStartArgsEmptyConfigFile(t *testing.T) {
 
 	if len(args) != 2 || args[0] != "daemon" || args[1] != "start" {
 		t.Errorf("expected [daemon start] for empty config, got %v", args)
+	}
+}
+
+func runPreparedDaemonCommand(t *testing.T, executable string, args []string, paths config.Paths) {
+	t.Helper()
+
+	cmd, cleanup, err := prepareDaemonCommand(executable, args, paths)
+	if err != nil {
+		t.Fatalf("prepareDaemonCommand: %v", err)
+	}
+	defer cleanup()
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("daemon command run: %v", err)
 	}
 }
 

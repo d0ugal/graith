@@ -16,20 +16,21 @@ const baseAppName = "graith"
 var validProfile = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type Paths struct {
-	Profile        string
-	AppName        string
-	ConfigFile     string
-	DataDir        string
-	RuntimeDir     string
-	SocketPath     string
-	PIDFile        string
-	StateFile      string
-	HumanTokenFile string
-	LogDir         string
-	DaemonLog      string
-	MessagesDB     string
-	TodosDB        string
-	TmpDir         string
+	Profile         string
+	AppName         string
+	ConfigFile      string
+	DataDir         string
+	RuntimeDir      string
+	SocketPath      string
+	PIDFile         string
+	StateFile       string
+	HumanTokenFile  string
+	LogDir          string
+	DaemonLog       string
+	DaemonStderrLog string
+	MessagesDB      string
+	TodosDB         string
+	TmpDir          string
 }
 
 func ResolveProfile() (profile string, appName string, err error) {
@@ -76,20 +77,21 @@ func ResolvePaths() (Paths, error) {
 	runtimeDir := runtimeDirForApp(appName)
 
 	return Paths{
-		Profile:        profile,
-		AppName:        appName,
-		ConfigFile:     configFile,
-		DataDir:        dataDir,
-		RuntimeDir:     runtimeDir,
-		SocketPath:     filepath.Join(runtimeDir, "graith.sock"),
-		PIDFile:        filepath.Join(runtimeDir, "graith.pid"),
-		StateFile:      filepath.Join(dataDir, "state.json"),
-		HumanTokenFile: filepath.Join(dataDir, "human.token"),
-		LogDir:         filepath.Join(dataDir, "logs"),
-		DaemonLog:      filepath.Join(dataDir, "daemon.log"),
-		MessagesDB:     filepath.Join(dataDir, "messages.sqlite"),
-		TodosDB:        filepath.Join(dataDir, "todos.sqlite"),
-		TmpDir:         filepath.Join(dataDir, "tmp"),
+		Profile:         profile,
+		AppName:         appName,
+		ConfigFile:      configFile,
+		DataDir:         dataDir,
+		RuntimeDir:      runtimeDir,
+		SocketPath:      filepath.Join(runtimeDir, "graith.sock"),
+		PIDFile:         filepath.Join(runtimeDir, "graith.pid"),
+		StateFile:       filepath.Join(dataDir, "state.json"),
+		HumanTokenFile:  filepath.Join(dataDir, "human.token"),
+		LogDir:          filepath.Join(dataDir, "logs"),
+		DaemonLog:       filepath.Join(dataDir, "daemon.log"),
+		DaemonStderrLog: filepath.Join(dataDir, "daemon.stderr.log"),
+		MessagesDB:      filepath.Join(dataDir, "messages.sqlite"),
+		TodosDB:         filepath.Join(dataDir, "todos.sqlite"),
+		TmpDir:          filepath.Join(dataDir, "tmp"),
 	}, nil
 }
 
@@ -133,6 +135,7 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 	p.HumanTokenFile = filepath.Join(dataDir, "human.token")
 	p.LogDir = filepath.Join(dataDir, "logs")
 	p.DaemonLog = filepath.Join(dataDir, "daemon.log")
+	p.DaemonStderrLog = filepath.Join(dataDir, "daemon.stderr.log")
 	p.MessagesDB = filepath.Join(dataDir, "messages.sqlite")
 	p.TodosDB = filepath.Join(dataDir, "todos.sqlite")
 
@@ -148,6 +151,22 @@ func (p Paths) WithDataDir(dataDir string) Paths {
 	}
 
 	return p
+}
+
+func (p Paths) DaemonStderrLogPath() string {
+	if p.DaemonStderrLog != "" {
+		return p.DaemonStderrLog
+	}
+
+	if p.DataDir != "" {
+		return filepath.Join(p.DataDir, "daemon.stderr.log")
+	}
+
+	if p.DaemonLog != "" {
+		return filepath.Join(filepath.Dir(p.DaemonLog), "daemon.stderr.log")
+	}
+
+	return ""
 }
 
 func (p Paths) EnsureDirs() error {

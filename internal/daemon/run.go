@@ -20,6 +20,7 @@ import (
 	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/d0ugal/graith/internal/version"
+	"golang.org/x/sys/unix"
 )
 
 var errUpgradeRejected = errors.New("upgrade rejected before daemon state mutation")
@@ -34,6 +35,61 @@ func publicUpgradeFailure(public string, err error) error {
 }
 
 var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedService
+
+func shouldRedirectDaemonRuntimeStderr() bool {
+	executable, err := os.Executable()
+	if err != nil {
+		return true
+	}
+
+	return !testprocess.IsGoTestBinary(executable, false)
+}
+
+func openDaemonRuntimeStderrLog(paths config.Paths) (*os.File, error) {
+	stderrPath := paths.DaemonStderrLogPath()
+	if stderrPath == "" {
+		return nil, errors.New("daemon stderr log path is empty")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(stderrPath), 0o700); err != nil {
+		return nil, fmt.Errorf("create daemon stderr log directory: %w", err)
+	}
+
+	stderrLog, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open daemon stderr log: %w", err)
+	}
+
+	if err := stderrLog.Chmod(0o600); err != nil {
+		_ = stderrLog.Close()
+
+		return nil, fmt.Errorf("secure daemon stderr log: %w", err)
+	}
+
+	return stderrLog, nil
+}
+
+func redirectDaemonRuntimeStderr(paths config.Paths) error {
+	stderrLog, err := openDaemonRuntimeStderrLog(paths)
+	if err != nil {
+		return err
+	}
+
+	targetFD := int(os.Stderr.Fd())
+	if int(stderrLog.Fd()) == targetFD {
+		os.Stderr = stderrLog
+
+		return nil
+	}
+
+	if err := unix.Dup2(int(stderrLog.Fd()), targetFD); err != nil {
+		_ = stderrLog.Close()
+
+		return fmt.Errorf("dup daemon stderr: %w", err)
+	}
+
+	return stderrLog.Close()
+}
 
 // stateLoadRefusal classifies cold-start state errors that must stop the daemon
 // before it opens a listener or runs lifecycle recovery.
@@ -477,6 +533,16 @@ func run(
 
 		if _, err := backupStateSnapshotBeforeMigration(paths.StateFile, manifest.StateSnapshot); err != nil {
 			return adoptionStateLoadRefusal(err)
+		}
+	}
+
+	if shouldRedirectDaemonRuntimeStderr() {
+		if err := redirectDaemonRuntimeStderr(paths); err != nil {
+			if adoptFrom == "" {
+				ReleasePIDFile(paths.PIDFile)
+			}
+
+			return fmt.Errorf("redirect daemon stderr: %w", err)
 		}
 	}
 

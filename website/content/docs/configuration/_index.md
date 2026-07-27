@@ -126,6 +126,7 @@ graith follows the XDG base directory spec (override `data_dir` to change the ba
 | `~/.local/share/graith/state.json` | Persisted session state |
 | `~/.local/share/graith/messages.sqlite` | Inter-agent message store |
 | `~/.local/share/graith/daemon.log` | Daemon log (slog, JSON format) |
+| `~/.local/share/graith/daemon.stderr.log` | Daemon runtime stderr (panic tracebacks, SIGQUIT goroutine dumps, race detector output) |
 | `~/.local/share/graith/worktrees/<repo>/<hash>/<id>/` | Session worktrees |
 | `~/.local/share/graith/store/<repo-name>-<hash>/` | Per-repo document stores |
 | `~/.local/share/graith/store/shared/` | Shared document store |

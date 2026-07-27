@@ -271,8 +271,11 @@ func TestStopDriverForConvertEscalates(t *testing.T) {
 // lets the old driver exit so its watcher fires, and asserts the post-convert
 // state survives.
 func TestConvertStaleWatcherDoesNotClobber(t *testing.T) {
+	const ready = "braw-signal-ready"
+
 	sm := convertTestManager(t)
-	driver := startConvertFake(t, sm, "braw", "trap 'exit 0' INT; sleep 30")
+	driver := startConvertFake(t, sm, "braw", `trap 'exit 0' INT; sh -c 'trap "exit 0" INT; printf "braw-signal-ready\n"; IFS= read -r _'`)
+	waitForConvertFakeOutput(t, driver, ready)
 
 	sm.sessions["braw"] = driver
 	sm.state.Sessions["braw"] = &SessionState{
