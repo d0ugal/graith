@@ -4597,7 +4597,7 @@ func TestDisplayPR(t *testing.T) {
 		{"open passing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ✓"},
 		{"open failing", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "failing"}}, "#56 ✗"},
 		{"conflict beats CI", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠"},
-		{"draft pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
+		{"draft pending", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft"}, CI: &protocol.CIInfo{State: "pending"}}, "#9D ·"},
 		// The review decision is now its own column (displayReview); displayPR must
 		// NOT append it, so the PR/CI token colour never bleeds onto the review glyph.
 		{"review omitted from PR token (approved)", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", ReviewDecision: "approved"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ✓"},
@@ -4606,7 +4606,7 @@ func TestDisplayPR(t *testing.T) {
 		{"review omitted with conflict", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open", Conflicting: true, ReviewDecision: "changes_requested"}, CI: &protocol.CIInfo{State: "passing"}}, "#56 ⚠"},
 		{"merged", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 583, State: "merged", ReviewDecision: "approved"}}, "#583 merged"},
 		{"closed", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 584, State: "closed", ReviewDecision: "changes_requested"}}, "#584 closed"},
-		{"draft omits review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft", ReviewDecision: "review_required"}, CI: &protocol.CIInfo{State: "pending"}}, "#9d ·"},
+		{"draft omits review", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 9, State: "draft", ReviewDecision: "review_required"}, CI: &protocol.CIInfo{State: "pending"}}, "#9D ·"},
 		// Counts: while CI runs/fails, show passed/total progress in place of the
 		// bare indicator, falling back when no count is available (Total == 0).
 		{"pending with counts", protocol.SessionInfo{PullRequest: &protocol.PRInfo{Number: 56, State: "open"}, CI: &protocol.CIInfo{State: "pending", Passed: 16, Total: 22}}, "#56 16/22"},
@@ -4658,6 +4658,81 @@ func TestPRColor(t *testing.T) {
 	}
 }
 
+func TestRenderPRCellHighlightsDraftMarker(t *testing.T) {
+	info := protocol.SessionInfo{
+		PullRequest: &protocol.PRInfo{Number: 9, State: "draft"},
+		CI:          &protocol.CIInfo{State: "pending"},
+	}
+
+	const width = 8
+
+	got := renderTUIColumnCell(prTUIColumn(t), info, width)
+
+	wantPlain := pad("#9D ·", width)
+	if stripped := ansi.Strip(got); stripped != wantPlain {
+		t.Fatalf("renderPRCell stripped = %q, want %q", stripped, wantPlain)
+	}
+
+	if !draftPRMarkerStyle().GetUnderline() {
+		t.Fatal("draft marker style should use underline so it stays distinct on selected pending-CI rows")
+	}
+
+	wantMarker := draftPRMarkerStyle().Render(draftPRMarker)
+	if !strings.Contains(got, wantMarker) {
+		t.Fatalf("draft marker should be amber, bold, and underlined; rendered cell %q does not contain marker %q", got, wantMarker)
+	}
+
+	selected := highlightSelectedRow(got, width)
+	if stripped := ansi.Strip(selected); stripped != wantPlain {
+		t.Fatalf("selected renderPRCell stripped = %q, want %q", stripped, wantPlain)
+	}
+
+	if !strings.Contains(selected, wantMarker) {
+		t.Fatalf("selected draft marker should retain underline styling; rendered cell %q does not contain marker %q", selected, wantMarker)
+	}
+}
+
+func TestRenderPRCellNonDraftKeepsSinglePRStyle(t *testing.T) {
+	info := protocol.SessionInfo{
+		PullRequest: &protocol.PRInfo{Number: 9, State: "open"},
+		CI:          &protocol.CIInfo{State: "passing"},
+	}
+
+	const width = 8
+
+	col := prTUIColumn(t)
+	got := renderTUIColumnCell(col, info, width)
+
+	wantPlain := pad("#9 ✓", width)
+	if stripped := ansi.Strip(got); stripped != wantPlain {
+		t.Fatalf("renderPRCell stripped = %q, want %q", stripped, wantPlain)
+	}
+
+	wantRendered := col.TUIStyle(info).Render(wantPlain)
+	if got != wantRendered {
+		t.Fatalf("non-draft PR cell should keep the single PR style:\n got %q\nwant %q", got, wantRendered)
+	}
+
+	unexpectedMarker := draftPRMarkerStyle().Render(draftPRMarker)
+	if strings.Contains(got, unexpectedMarker) {
+		t.Fatalf("non-draft PR cell should not include the draft marker style, got %q", got)
+	}
+}
+
+func prTUIColumn(t *testing.T) SessionColumn {
+	t.Helper()
+
+	for _, c := range tuiColumns() {
+		if c.Key == "pr" {
+			return c
+		}
+	}
+
+	t.Fatal("PR TUI column not found")
+
+	return SessionColumn{}
+}
+
 func TestFormatPRSection(t *testing.T) {
 	// Conflicting PR must render a visible conflict marker in the status bar.
 	info := statusBarInfo{prNumber: 56, prState: "open", prConflicting: true}
@@ -4669,7 +4744,8 @@ func TestFormatPRSection(t *testing.T) {
 		t.Errorf("no PR should render empty, got %q", got)
 	}
 	// Draft PR must carry the "d" suffix so it is distinguishable from a
-	// plain open PR, mirroring the overlay column's "#Nd" (#776).
+	// plain open PR. Overlay rows render the draft marker more strongly, while
+	// the status bar keeps this compact suffix (#776).
 	if got := ansi.Strip(formatPRSection(statusBarInfo{prNumber: 9, prState: "draft"}, barBg)); got != "PR#9d" {
 		t.Errorf("status bar PR section should mark draft as PR#9d, got %q", got)
 	}
@@ -4805,8 +4881,8 @@ func TestDisplayPR_DraftFallsThroughToCI(t *testing.T) {
 		PullRequest: &protocol.PRInfo{Number: 9, State: "draft"},
 		CI:          &protocol.CIInfo{State: "passing"},
 	}
-	if got := displayPR(s); got != "#9d ✓" {
-		t.Errorf("displayPR draft+passing = %q, want #9d ✓", got)
+	if got := displayPR(s); got != "#9D ✓" {
+		t.Errorf("displayPR draft+passing = %q, want #9D ✓", got)
 	}
 }
 
@@ -5408,12 +5484,12 @@ func TestDisplayPRAllStates2(t *testing.T) {
 			"#7 ⚠",
 		},
 		{
-			"draft passing adds d and check",
+			"draft passing adds D and check",
 			protocol.SessionInfo{
 				PullRequest: &protocol.PRInfo{Number: 8, State: "draft"},
 				CI:          &protocol.CIInfo{State: "passing"},
 			},
-			"#8d ✓",
+			"#8D ✓",
 		},
 		{
 			"open failing",

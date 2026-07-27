@@ -341,7 +341,7 @@ func TestTUIColumnCellsGolden(t *testing.T) {
 	for _, c := range tuiColumns() {
 		w := cols.col(c.Key)
 		padded := pad(c.TUIValue(s), w)
-		cell := c.TUIStyle(s).Render(padded)
+		cell := renderTUIColumnCell(c, s, w)
 
 		if strings.Contains(cell, "\x1b[") {
 			sawANSI = true

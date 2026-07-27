@@ -59,6 +59,9 @@ type SessionColumn struct {
 	// TUIStyle returns the lipgloss style (foreground/bold) for the TUI cell.
 	// The zero style renders text unchanged.
 	TUIStyle func(s protocol.SessionInfo) lipgloss.Style
+	// TUIRender optionally renders a TUI cell with mixed styling. When nil, the
+	// renderer applies TUIStyle to the padded TUIValue.
+	TUIRender func(s protocol.SessionInfo, width int, base lipgloss.Style) string
 }
 
 // SessionColumns returns every trailing column in a single display order. Each
@@ -125,6 +128,7 @@ func SessionColumns() []SessionColumn {
 			TUIStyle: func(s protocol.SessionInfo) lipgloss.Style {
 				return lipgloss.NewStyle().Foreground(prColor(s))
 			},
+			TUIRender: renderPRCell,
 		},
 		{
 			// Review decision is its own column so it carries a colour driven by the
@@ -169,6 +173,15 @@ func SessionColumns() []SessionColumn {
 			CLIValue: cliAttached,
 		},
 	}
+}
+
+func renderTUIColumnCell(c SessionColumn, s protocol.SessionInfo, width int) string {
+	base := c.TUIStyle(s)
+	if c.TUIRender != nil {
+		return c.TUIRender(s, width, base)
+	}
+
+	return base.Render(pad(c.TUIValue(s), width))
 }
 
 // displayStatus is the merged status shown in the TUI status column: the agent
