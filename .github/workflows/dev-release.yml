@@ -774,8 +774,29 @@ jobs:
           FORMULA
 
           tap_dir="$(mktemp -d)"
+          askpass="$(mktemp)"
+          cleanup_tap_credentials() {
+            unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN
+            rm -f "$askpass"
+            rm -rf "$tap_dir"
+          }
+          trap cleanup_tap_credentials EXIT
+
+          cat > "$askpass" <<'ASKPASS'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          case "${1:-}" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "${RELEASE_TOKEN:?}" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS
+          chmod 700 "$askpass"
+          export GIT_ASKPASS="$askpass"
+          export GIT_TERMINAL_PROMPT=0
+
           cd "$tap_dir"
-          git clone "https://x-access-token:${RELEASE_TOKEN}@github.com/d0ugal/homebrew-tap.git" .
+          git clone "https://github.com/d0ugal/homebrew-tap.git" .
           cp /tmp/graith-dev.rb graith-dev.rb
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
