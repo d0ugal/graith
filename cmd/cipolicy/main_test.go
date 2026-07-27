@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,17 +12,11 @@ import (
 	"github.com/d0ugal/graith/internal/cipolicy"
 )
 
-func TestOutputFlagIsOnlyValidForPlan(t *testing.T) {
-	err := run([]string{"-output", filepath.Join(t.TempDir(), "canny.json"), "summary"})
-	if err == nil || !strings.Contains(err.Error(), "-output is only valid with plan") {
-		t.Fatalf("run() error = %v, want output flag rejection", err)
-	}
-}
-
 func TestRemovedPolicyModesAreUnavailable(t *testing.T) {
 	tests := map[string]string{
 		"digest":   "unknown command",
 		"generate": "unknown command",
+		"summary":  "unknown command",
 		"validate": "unknown command",
 	}
 
@@ -230,79 +223,6 @@ func TestPlanWithoutChangedFilesSelectsUnknownFileListSuperset(t *testing.T) {
 	}
 }
 
-func TestSummaryWritesDiagnosticMarkdown(t *testing.T) {
-	tempDir := t.TempDir()
-	manifestPath := filepath.Join("..", "..", "internal", "cipolicy", "manifest.json")
-	inventoryPath := filepath.Join("..", "..", "internal", "cibaseline", "inventory.json")
-	changedFiles := filepath.Join(tempDir, "braw-files.txt")
-
-	if err := os.WriteFile(changedFiles, []byte(".github/workflows/ci.yml\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	manifest, err := cipolicy.ReadManifest(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	plan, err := cipolicy.BuildPlan(manifest, cipolicy.PlanOptions{
-		Event: cipolicy.EventInput{
-			GitHubEvent:         "pull_request",
-			Ref:                 "refs/pull/17/merge",
-			BaseRef:             "refs/heads/main",
-			HeadRef:             "refs/heads/canny",
-			BaseRepository:      cipolicy.DefaultRepository,
-			HeadRepository:      cipolicy.DefaultRepository,
-			Commit:              strings.Repeat("1", 40),
-			Tree:                strings.Repeat("2", 40),
-			SameRepositoryAgent: true,
-		},
-		ChangedFiles:  []string{".github/workflows/ci.yml"},
-		ExactFileList: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	planData, err := plan.MarshalCanonical()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	planPath := filepath.Join(tempDir, "canny-plan.json")
-	if err := os.WriteFile(planPath, planData, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	output := captureStdout(t, func() error {
-		return run([]string{
-			"-inventory", inventoryPath,
-			"-manifest", manifestPath,
-			"-plan-input", planPath,
-			"-changed-files", changedFiles,
-			"-event", "pull_request",
-			"-ref", "refs/pull/17/merge",
-			"-head-sha", strings.Repeat("1", 40),
-			"-run-url", "https://github.com/d0ugal/graith/actions/runs/123",
-			"-macos-detector-result", "success",
-			"-macos-detector-output", "false",
-			"summary",
-		})
-	})
-
-	for _, want := range []string{
-		"# CI shadow summary",
-		"Diagnostic only",
-		"Current required checks still decide mergeability",
-		"`Native backend gate`",
-		"does not aggregate repository-wide observed job results",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("summary output missing %q:\n%s", want, output)
-		}
-	}
-}
-
 func stableCLIPlanTime(t *testing.T) time.Time {
 	t.Helper()
 
@@ -338,39 +258,4 @@ func stableCLIPlanTime(t *testing.T) time.Time {
 	}
 
 	return candidate
-}
-
-func captureStdout(t *testing.T, fn func() error) string {
-	t.Helper()
-
-	original := os.Stdout
-
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	os.Stdout = writer
-	runErr := fn()
-	closeErr := writer.Close()
-	os.Stdout = original
-
-	if runErr != nil {
-		t.Fatal(runErr)
-	}
-
-	if closeErr != nil {
-		t.Fatal(closeErr)
-	}
-
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	return string(data)
 }

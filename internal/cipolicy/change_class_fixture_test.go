@@ -12,14 +12,11 @@ type deterministicChangeClassFixture struct {
 	files                    []string
 	event                    EventInput
 	detectorErrors           []string
-	macOSDetectorResult      string
-	macOSDetectorOutput      string
 	wantTrustTier            string
 	wantDetectedCapabilities []string
 	wantCapabilities         []string
 	wantSupersetReasons      []string
 	wantPolicyModes          []deterministicPolicyModeCheck
-	wantSummaryContains      []string
 	wantCredentialChecks     []deterministicCredentialCheck
 }
 
@@ -50,9 +47,10 @@ type deterministicCredentialCheck struct {
 
 func TestDeterministicChangeClassFixtures(t *testing.T) {
 	manifest := loadManifest(t)
-	inventory := shadowSummaryInventory(t)
+	inventory := loadInventory(t)
 
 	assertAuthoritativeRequiredContexts(t, inventory)
+	assertCIMacOSFailSafeJobs(t, inventory)
 
 	tests := map[string]deterministicChangeClassFixture{
 		"docs-only": {
@@ -64,12 +62,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			wantPolicyModes: []deterministicPolicyModeCheck{
 				detectedPolicyMode("legacy/docs-preview/preview"),
 				detectedPolicyMode("legacy/docs-preview/cleanup"),
-			},
-			wantSummaryContains: []string{
-				"documentation preview (docs-preview)",
-				"documentation publication (docs-publication)",
-				"No macOS-relevant paths detected; macOS jobs are skipped at job level.",
-				"No safe-superset escalation reason was reported by the local policy detector.",
 			},
 			wantCredentialChecks: []deterministicCredentialCheck{
 				{
@@ -96,11 +88,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			wantPolicyModes: []deterministicPolicyModeCheck{
 				detectedPolicyMode("legacy/docs-preview/preview"),
 				releaseMetadataPolicyMode("legacy/goreleaser/build-linux"),
-			},
-			wantSummaryContains: []string{
-				"Safe-superset selected: generated-input, release-metadata.",
-				"generated-input: Generated-file inputs changed and require broad validation.",
-				"release-metadata: Release metadata changed and requires release-shaped validation.",
 			},
 			wantCredentialChecks: []deterministicCredentialCheck{
 				{
@@ -131,10 +118,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				generatedInputPolicyMode("legacy/regen/regen"),
 				generatedInputPolicyMode("legacy/regen/validate"),
 			},
-			wantSummaryContains: []string{
-				"Safe-superset selected: generated-input.",
-				"generated-input: Generated-file inputs changed and require broad validation.",
-			},
 		},
 		"go-only": {
 			files:                    []string{"internal/client/passthrough.go"},
@@ -142,14 +125,9 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			wantDetectedCapabilities: []string{"go-core"},
 			wantCapabilities:         pullRequestCapabilityFloor(),
 			wantSupersetReasons:      []string{},
-			wantSummaryContains: []string{
-				"Go core (go-core)",
-				"No safe-superset escalation reason was reported by the local policy detector.",
-			},
 		},
 		"gui-only": {
 			files:                    []string{"gui/macos/Sources/GraithGUI/ContentView.swift"},
-			macOSDetectorOutput:      "true",
 			wantTrustTier:            "same-repository-agent",
 			wantDetectedCapabilities: []string{"gui"},
 			wantCapabilities:         pullRequestCapabilityFloor("gui"),
@@ -157,14 +135,9 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			wantPolicyModes: []deterministicPolicyModeCheck{
 				detectedPolicyMode("legacy/gui-ci/build"),
 			},
-			wantSummaryContains: []string{
-				"GUI/iOS (gui)",
-				"macOS-relevant changes detected; macOS test/integration jobs run.",
-			},
 		},
 		"libghostty-runtime": {
 			files:                    []string{"internal/libghosttydeps/lock.go"},
-			macOSDetectorOutput:      "true",
 			wantTrustTier:            "same-repository-agent",
 			wantDetectedCapabilities: []string{"go-core", "native"},
 			wantCapabilities:         pullRequestCapabilityFloor(),
@@ -173,9 +146,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				detectedPolicyMode("legacy/libghostty-native/linux-adapter"),
 				detectedPolicyMode("legacy/libghostty-native/apple-adapter"),
 				detectedPolicyMode("legacy/libghostty-native/native-gate"),
-			},
-			wantSummaryContains: []string{
-				"libghostty/native core runtime (native)",
 			},
 		},
 		"release-path": {
@@ -189,10 +159,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				releaseMetadataPolicyMode("legacy/goreleaser/assemble-stable"),
 				releaseMetadataPolicyMode("legacy/dev-release/build-linux"),
 				releaseMetadataPolicyMode("legacy/dev-release/assemble-dev"),
-			},
-			wantSummaryContains: []string{
-				"Safe-superset selected: release-metadata.",
-				"release-metadata: Release metadata changed and requires release-shaped validation.",
 			},
 			wantCredentialChecks: []deterministicCredentialCheck{
 				{
@@ -220,11 +186,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				generatedInputPolicyMode("legacy/regen/regen"),
 				generatedInputPolicyMode("legacy/regen/validate"),
 			},
-			wantSummaryContains: []string{
-				"documentation preview (docs-preview)",
-				"Safe-superset selected: generated-input.",
-				"Regenerate generated files",
-			},
 			wantCredentialChecks: []deterministicCredentialCheck{
 				{
 					name:       "same-repository docs-preview write guard is explicit",
@@ -241,7 +202,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 		"sandbox": {
 			files:                    []string{"internal/sandbox/nono.go"},
 			detectorErrors:           []string{"dreich detector failure"},
-			macOSDetectorResult:      "failure",
 			wantTrustTier:            "same-repository-agent",
 			wantDetectedCapabilities: []string{"go-core", "sandbox"},
 			wantCapabilities:         allManifestCapabilities(),
@@ -250,17 +210,11 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				detectedPolicyMode("legacy/sandbox/linux-nono"),
 				detectedPolicyMode("legacy/sandbox/macos-safehouse"),
 			},
-			wantSummaryContains: []string{
-				"sandbox isolation (sandbox)",
-				"Safe-superset selected: detector-error.",
-				"detector-error: Changed-file parsing or detector execution reported an error.",
-				"Detector did not succeed; dependent macOS jobs fail safe toward running.",
-			},
 		},
 		"workflow-script": {
 			files: []string{
 				"scripts/libghostty-native.sh",
-				"internal/cipolicy/shadow_summary.go",
+				"internal/cipolicy/p11_js_surface.go",
 			},
 			wantTrustTier:            "same-repository-agent",
 			wantDetectedCapabilities: []string{"workflow-policy"},
@@ -271,10 +225,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				detectedPolicyMode("legacy/workflow-lint/scripts"),
 				detectedPolicyMode("legacy/workflow-lint/shellcheck"),
 				detectedPolicyMode("legacy/workflow-lint/zizmor"),
-			},
-			wantSummaryContains: []string{
-				"workflow policy (workflow-policy)",
-				"Safe-superset selected: ci-policy-change.",
 			},
 		},
 	}
@@ -289,7 +239,6 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			}
 
 			plan := buildTestPlan(t, manifest, event, test.files, test.detectorErrors, true)
-			summary := renderFixtureSummary(t, inventory, plan, test)
 
 			if plan.TrustTier != test.wantTrustTier {
 				t.Fatalf("trust tier = %s, want %s", plan.TrustTier, test.wantTrustTier)
@@ -301,44 +250,9 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 			assertRequiredModesEqual(t, plan.RequiredModes)
 			assertStringsEqual(t, "capabilities", plan.Capabilities, test.wantCapabilities)
 			assertPolicyModesVisible(t, manifest, plan, test.wantPolicyModes)
-			assertSharedSummaryInventoryVisible(t, summary)
-			assertSummaryContains(t, summary, test.wantSummaryContains)
 			assertCredentialChecks(t, plan, test.wantCredentialChecks)
 		})
 	}
-}
-
-func renderFixtureSummary(
-	t *testing.T,
-	inventory cibaseline.Inventory,
-	plan RunPlan,
-	fixture deterministicChangeClassFixture,
-) string {
-	t.Helper()
-
-	macOSResult := defaultString(fixture.macOSDetectorResult, "success")
-	macOSOutput := fixture.macOSDetectorOutput
-
-	if macOSOutput == "" && macOSResult == "success" {
-		macOSOutput = "false"
-	}
-
-	summary, err := RenderShadowSummary(ShadowSummaryInput{
-		Inventory:           inventory,
-		Plan:                &plan,
-		ChangedFiles:        fixture.files,
-		EventName:           plan.Event.GitHubEvent,
-		Ref:                 plan.Event.Ref,
-		HeadSHA:             plan.Source.Commit,
-		RunURL:              "https://github.com/d0ugal/graith/actions/runs/17",
-		MacOSDetectorResult: macOSResult,
-		MacOSDetectorOutput: macOSOutput,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return summary
 }
 
 func assertAuthoritativeRequiredContexts(t *testing.T, inventory cibaseline.Inventory) {
@@ -353,6 +267,39 @@ func assertAuthoritativeRequiredContexts(t *testing.T, inventory cibaseline.Inve
 		"Test (ubuntu-latest)",
 		"macOS (safehouse / Seatbelt)",
 	})
+}
+
+func assertCIMacOSFailSafeJobs(t *testing.T, inventory cibaseline.Inventory) {
+	t.Helper()
+
+	const wantCondition = "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')"
+
+	for _, jobID := range []string{"integration-macos", "test-macos"} {
+		job := findInventoryJob(t, inventory, "ci", jobID)
+		if job.Condition != wantCondition {
+			t.Fatalf("ci/%s condition = %q, want %q", jobID, job.Condition, wantCondition)
+		}
+	}
+}
+
+func findInventoryJob(t *testing.T, inventory cibaseline.Inventory, workflowID, jobID string) cibaseline.Job {
+	t.Helper()
+
+	for _, workflow := range inventory.Workflows {
+		if workflow.ID != workflowID {
+			continue
+		}
+
+		for _, job := range workflow.Jobs {
+			if job.ID == jobID {
+				return job
+			}
+		}
+	}
+
+	t.Fatalf("missing inventory job %s/%s", workflowID, jobID)
+
+	return cibaseline.Job{}
 }
 
 func authoritativeRequiredModes() []string {
@@ -477,40 +424,6 @@ func assertPolicyModeEvidence(t *testing.T, plan RunPlan, mode Mode, check deter
 
 	default:
 		t.Fatalf("policy mode %s has unknown evidence source %q", check.mode, check.evidence)
-	}
-}
-
-func assertSharedSummaryInventoryVisible(t *testing.T, summary string) {
-	t.Helper()
-
-	assertSummaryContains(t, summary, []string{
-		"Build (ubuntu-latest)",
-		"Test (ubuntu-latest)",
-		"Go coverage",
-		"Screenshot changed pages",
-		"Build & Test (macOS)",
-		"`Test (macos-latest)`",
-		"`Native backend gate`",
-		"Core runtime source build",
-		"native source-build, artifact, manifest, archive, and consumer coverage",
-		"Regenerate generated files",
-		"Validate regeneration credentials",
-		"Build and verify stable Linux artifacts",
-		"Build and verify Linux dev archive",
-		"workflow policy tests",
-		"shellcheck",
-		"zizmor",
-		"internal/cipolicy/shadow_summary.go",
-	})
-}
-
-func assertSummaryContains(t *testing.T, summary string, wants []string) {
-	t.Helper()
-
-	for _, want := range wants {
-		if !strings.Contains(summary, want) {
-			t.Fatalf("summary missing %q:\n%s", want, summary)
-		}
 	}
 }
 

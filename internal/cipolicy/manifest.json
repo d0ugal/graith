@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy_version": "ci-policy-v1",
-  "policy_digest": "e1ddc37e2f8278b74181e8e889670df293f0866d3f54a12e5496337b3f9c9961",
+  "policy_digest": "5f9243be5e79a2b1580d944f635f02ee7c9079ce68f957c87d5822b12e90c321",
   "source": {
     "id": "github-actions",
     "repository": "d0ugal/graith",
@@ -10,7 +10,7 @@
     "baseline_inventory": {
       "path": "internal/cibaseline/inventory.json",
       "schema_version": 2,
-      "digest": "faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2",
+      "digest": "cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273",
       "observation_state": "p0-observation-in-progress"
     }
   },
@@ -264,7 +264,6 @@
       "modes": [
         "legacy/ci/build",
         "legacy/ci/changes",
-        "legacy/ci/ci-shadow-summary",
         "legacy/ci/govulncheck",
         "legacy/ci/integration",
         "legacy/ci/integration-macos",
@@ -415,28 +414,28 @@
           "github_name": "Build (ubuntu-latest)",
           "evidence_refs": [
             "github-check-name:Build (ubuntu-latest)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/build"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/build"
           ],
           "trace": {
             "inventory_mapping": "ci/build",
             "legacy_workflow": "ci",
             "legacy_job": "build",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/build"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/build"
       ],
       "trace": {
         "inventory_mapping": "job:ci/build",
         "legacy_workflow": "ci",
         "legacy_job": "build",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -476,90 +475,29 @@
           "github_name": "Detect macOS-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect macOS-relevant changes",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/changes"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/changes"
           ],
           "trace": {
             "inventory_mapping": "ci/changes",
             "legacy_workflow": "ci",
             "legacy_job": "changes",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/changes"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/changes"
       ],
       "trace": {
         "inventory_mapping": "job:ci/changes",
         "legacy_workflow": "ci",
         "legacy_job": "changes",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "",
-        "skip_semantics": "github-skipped-is-distinct-from-passed"
-      }
-    },
-    {
-      "id": "legacy/ci/ci-shadow-summary",
-      "capability": "go-core",
-      "owner": "graith-maintainers",
-      "requiredness": "soft",
-      "cost_class": "linux-fast",
-      "proof_type": "soft",
-      "source_events": [
-        {
-          "source": "github-actions",
-          "event": "pull-request"
-        },
-        {
-          "source": "github-actions",
-          "event": "push-main"
-        },
-        {
-          "source": "github-actions",
-          "event": "workflow-dispatch"
-        }
-      ],
-      "trust_tiers": [
-        "fork-untrusted",
-        "same-repository-agent",
-        "trusted-base"
-      ],
-      "coordinates": [
-        {
-          "id": "ci/ci-shadow-summary",
-          "platform": "ubuntu-latest",
-          "matrix": {},
-          "requiredness": "soft",
-          "github_name": "CI shadow summary",
-          "evidence_refs": [
-            "github-check-name:CI shadow summary",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/ci-shadow-summary"
-          ],
-          "trace": {
-            "inventory_mapping": "ci/ci-shadow-summary",
-            "legacy_workflow": "ci",
-            "legacy_job": "ci-shadow-summary",
-            "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
-            "legacy_condition": "${{ always() \u0026\u0026 !cancelled() }}",
-            "skip_semantics": "github-skipped-is-distinct-from-passed"
-          }
-        }
-      ],
-      "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/ci-shadow-summary"
-      ],
-      "trace": {
-        "inventory_mapping": "job:ci/ci-shadow-summary",
-        "legacy_workflow": "ci",
-        "legacy_job": "ci-shadow-summary",
-        "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
-        "legacy_condition": "${{ always() \u0026\u0026 !cancelled() }}",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
     },
@@ -598,28 +536,28 @@
           "github_name": "Vulnerability Check",
           "evidence_refs": [
             "github-check-name:Vulnerability Check",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/govulncheck"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/govulncheck"
           ],
           "trace": {
             "inventory_mapping": "ci/govulncheck",
             "legacy_workflow": "ci",
             "legacy_job": "govulncheck",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/govulncheck"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/govulncheck"
       ],
       "trace": {
         "inventory_mapping": "job:ci/govulncheck",
         "legacy_workflow": "ci",
         "legacy_job": "govulncheck",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -659,28 +597,28 @@
           "github_name": "Integration (ubuntu-latest)",
           "evidence_refs": [
             "github-check-name:Integration (ubuntu-latest)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/integration"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/integration"
           ],
           "trace": {
             "inventory_mapping": "ci/integration",
             "legacy_workflow": "ci",
             "legacy_job": "integration",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/integration"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/integration"
       ],
       "trace": {
         "inventory_mapping": "job:ci/integration",
         "legacy_workflow": "ci",
         "legacy_job": "integration",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -720,28 +658,28 @@
           "github_name": "Integration (macos-latest)",
           "evidence_refs": [
             "github-check-name:Integration (macos-latest)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/integration-macos"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/integration-macos"
           ],
           "trace": {
             "inventory_mapping": "ci/integration-macos",
             "legacy_workflow": "ci",
             "legacy_job": "integration-macos",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/integration-macos"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/integration-macos"
       ],
       "trace": {
         "inventory_mapping": "job:ci/integration-macos",
         "legacy_workflow": "ci",
         "legacy_job": "integration-macos",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -781,28 +719,28 @@
           "github_name": "Lint",
           "evidence_refs": [
             "github-check-name:Lint",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/lint"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/lint"
           ],
           "trace": {
             "inventory_mapping": "ci/lint",
             "legacy_workflow": "ci",
             "legacy_job": "lint",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/lint"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/lint"
       ],
       "trace": {
         "inventory_mapping": "job:ci/lint",
         "legacy_workflow": "ci",
         "legacy_job": "lint",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -842,28 +780,28 @@
           "github_name": "Test (ubuntu-latest)",
           "evidence_refs": [
             "github-check-name:Test (ubuntu-latest)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/test"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/test"
           ],
           "trace": {
             "inventory_mapping": "ci/test",
             "legacy_workflow": "ci",
             "legacy_job": "test",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/test"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/test"
       ],
       "trace": {
         "inventory_mapping": "job:ci/test",
         "legacy_workflow": "ci",
         "legacy_job": "test",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -903,28 +841,28 @@
           "github_name": "Test (macos-latest)",
           "evidence_refs": [
             "github-check-name:Test (macos-latest)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/test-macos"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/test-macos"
           ],
           "trace": {
             "inventory_mapping": "ci/test-macos",
             "legacy_workflow": "ci",
             "legacy_job": "test-macos",
             "workflow_path": ".github/workflows/ci.yml",
-            "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+            "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
             "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
             "skip_semantics": "github-skipped-is-distinct-from-passed"
           }
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#ci/test-macos"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#ci/test-macos"
       ],
       "trace": {
         "inventory_mapping": "job:ci/test-macos",
         "legacy_workflow": "ci",
         "legacy_job": "test-macos",
         "workflow_path": ".github/workflows/ci.yml",
-        "workflow_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+        "workflow_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
         "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
         "skip_semantics": "github-skipped-is-distinct-from-passed"
       }
@@ -964,7 +902,7 @@
           "github_name": "Analyze (Go)",
           "evidence_refs": [
             "github-check-name:Analyze (Go)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#codeql/analyze"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#codeql/analyze"
           ],
           "trace": {
             "inventory_mapping": "codeql/analyze",
@@ -978,7 +916,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#codeql/analyze"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#codeql/analyze"
       ],
       "trace": {
         "inventory_mapping": "job:codeql/analyze",
@@ -1021,7 +959,7 @@
           "github_name": "Conventional commits",
           "evidence_refs": [
             "github-check-name:Conventional commits",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#commits/commitsar"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#commits/commitsar"
           ],
           "trace": {
             "inventory_mapping": "commits/commitsar",
@@ -1035,7 +973,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#commits/commitsar"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#commits/commitsar"
       ],
       "trace": {
         "inventory_mapping": "job:commits/commitsar",
@@ -1074,7 +1012,7 @@
           "github_name": "Detect gui changes",
           "evidence_refs": [
             "github-check-name:Detect gui changes",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/changes"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/changes"
           ],
           "trace": {
             "inventory_mapping": "coverage/changes",
@@ -1088,7 +1026,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/changes"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/changes"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/changes",
@@ -1126,7 +1064,7 @@
           "github_name": "Coverage comment",
           "evidence_refs": [
             "github-check-name:Coverage comment",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/comment"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/comment"
           ],
           "trace": {
             "inventory_mapping": "coverage/comment",
@@ -1140,7 +1078,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/comment"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/comment"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/comment",
@@ -1179,7 +1117,7 @@
           "github_name": "Go coverage",
           "evidence_refs": [
             "github-check-name:Go coverage",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/go-coverage"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/go-coverage"
           ],
           "trace": {
             "inventory_mapping": "coverage/go-coverage",
@@ -1193,7 +1131,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/go-coverage"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/go-coverage"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/go-coverage",
@@ -1232,7 +1170,7 @@
           "github_name": "Swift coverage",
           "evidence_refs": [
             "github-check-name:Swift coverage",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/swift-coverage"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/swift-coverage"
           ],
           "trace": {
             "inventory_mapping": "coverage/swift-coverage",
@@ -1246,7 +1184,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#coverage/swift-coverage"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#coverage/swift-coverage"
       ],
       "trace": {
         "inventory_mapping": "job:coverage/swift-coverage",
@@ -1285,7 +1223,7 @@
           "github_name": "Dependency Review",
           "evidence_refs": [
             "github-check-name:Dependency Review",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dependency-review/dependency-review"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dependency-review/dependency-review"
           ],
           "trace": {
             "inventory_mapping": "dependency-review/dependency-review",
@@ -1299,7 +1237,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dependency-review/dependency-review"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dependency-review/dependency-review"
       ],
       "trace": {
         "inventory_mapping": "job:dependency-review/dependency-review",
@@ -1342,7 +1280,7 @@
           "github_name": "Aggregate dev release",
           "evidence_refs": [
             "github-check-name:Aggregate dev release",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/assemble-dev"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/assemble-dev"
           ],
           "trace": {
             "inventory_mapping": "dev-release/assemble-dev",
@@ -1356,7 +1294,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/assemble-dev"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/assemble-dev"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/assemble-dev",
@@ -1395,7 +1333,7 @@
           "github_name": "Attest Linux dev archive (amd64)",
           "evidence_refs": [
             "github-check-name:Attest Linux dev archive (amd64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/attest-linux[goarch=amd64]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/attest-linux[goarch=amd64]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/attest-linux[goarch=amd64]",
@@ -1417,7 +1355,7 @@
           "github_name": "Attest Linux dev archive (arm64)",
           "evidence_refs": [
             "github-check-name:Attest Linux dev archive (arm64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/attest-linux[goarch=arm64]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/attest-linux[goarch=arm64]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/attest-linux[goarch=arm64]",
@@ -1431,7 +1369,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/attest-linux"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/attest-linux"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/attest-linux",
@@ -1474,7 +1412,7 @@
           "github_name": "Build and verify Darwin dev archives",
           "evidence_refs": [
             "github-check-name:Build and verify Darwin dev archives",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/build-darwin"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/build-darwin"
           ],
           "trace": {
             "inventory_mapping": "dev-release/build-darwin",
@@ -1488,7 +1426,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/build-darwin"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/build-darwin"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/build-darwin",
@@ -1534,7 +1472,7 @@
           "github_name": "Build and verify Linux dev archive (amd64)",
           "evidence_refs": [
             "github-check-name:Build and verify Linux dev archive (amd64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
@@ -1557,7 +1495,7 @@
           "github_name": "Build and verify Linux dev archive (arm64)",
           "evidence_refs": [
             "github-check-name:Build and verify Linux dev archive (arm64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
@@ -1571,7 +1509,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/build-linux"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/build-linux"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/build-linux",
@@ -1614,7 +1552,7 @@
           "github_name": "Detect dev-release-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect dev-release-relevant changes",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/changes"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/changes"
           ],
           "trace": {
             "inventory_mapping": "dev-release/changes",
@@ -1628,7 +1566,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/changes"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/changes"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/changes",
@@ -1674,7 +1612,7 @@
           "github_name": "Execute Linux dev archive (amd64)",
           "evidence_refs": [
             "github-check-name:Execute Linux dev archive (amd64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
@@ -1697,7 +1635,7 @@
           "github_name": "Execute Linux dev archive (arm64)",
           "evidence_refs": [
             "github-check-name:Execute Linux dev archive (arm64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
           ],
           "trace": {
             "inventory_mapping": "dev-release/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
@@ -1711,7 +1649,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/execute-linux"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/execute-linux"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/execute-linux",
@@ -1749,7 +1687,7 @@
           "github_name": "Publish dev release",
           "evidence_refs": [
             "github-check-name:Publish dev release",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/publish-dev"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/publish-dev"
           ],
           "trace": {
             "inventory_mapping": "dev-release/publish-dev",
@@ -1763,7 +1701,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/publish-dev"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/publish-dev"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/publish-dev",
@@ -1806,7 +1744,7 @@
           "github_name": "Select dev release context",
           "evidence_refs": [
             "github-check-name:Select dev release context",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/release-context"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/release-context"
           ],
           "trace": {
             "inventory_mapping": "dev-release/release-context",
@@ -1820,7 +1758,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#dev-release/release-context"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#dev-release/release-context"
       ],
       "trace": {
         "inventory_mapping": "job:dev-release/release-context",
@@ -1859,7 +1797,7 @@
           "github_name": "Clean up screenshots",
           "evidence_refs": [
             "github-check-name:Clean up screenshots",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs-preview/cleanup"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs-preview/cleanup"
           ],
           "trace": {
             "inventory_mapping": "docs-preview/cleanup",
@@ -1873,7 +1811,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs-preview/cleanup"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs-preview/cleanup"
       ],
       "trace": {
         "inventory_mapping": "job:docs-preview/cleanup",
@@ -1912,7 +1850,7 @@
           "github_name": "Screenshot changed pages",
           "evidence_refs": [
             "github-check-name:Screenshot changed pages",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs-preview/preview"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs-preview/preview"
           ],
           "trace": {
             "inventory_mapping": "docs-preview/preview",
@@ -1926,7 +1864,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs-preview/preview"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs-preview/preview"
       ],
       "trace": {
         "inventory_mapping": "job:docs-preview/preview",
@@ -1963,7 +1901,7 @@
           "github_name": "Prune stale screenshots",
           "evidence_refs": [
             "github-check-name:Prune stale screenshots",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs-preview/prune"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs-preview/prune"
           ],
           "trace": {
             "inventory_mapping": "docs-preview/prune",
@@ -1977,7 +1915,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs-preview/prune"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs-preview/prune"
       ],
       "trace": {
         "inventory_mapping": "job:docs-preview/prune",
@@ -2018,7 +1956,7 @@
           "github_name": "Build",
           "evidence_refs": [
             "github-check-name:Build",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs/build"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs/build"
           ],
           "trace": {
             "inventory_mapping": "docs/build",
@@ -2032,7 +1970,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs/build"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs/build"
       ],
       "trace": {
         "inventory_mapping": "job:docs/build",
@@ -2074,7 +2012,7 @@
           "github_name": "Deploy",
           "evidence_refs": [
             "github-check-name:Deploy",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs/deploy"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs/deploy"
           ],
           "trace": {
             "inventory_mapping": "docs/deploy",
@@ -2088,7 +2026,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#docs/deploy"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#docs/deploy"
       ],
       "trace": {
         "inventory_mapping": "job:docs/deploy",
@@ -2131,7 +2069,7 @@
           "github_name": "Aggregate complete stable release",
           "evidence_refs": [
             "github-check-name:Aggregate complete stable release",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/assemble-stable"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/assemble-stable"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/assemble-stable",
@@ -2145,7 +2083,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/assemble-stable"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/assemble-stable"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/assemble-stable",
@@ -2182,7 +2120,7 @@
           "github_name": "Finalize and attest stable release",
           "evidence_refs": [
             "github-check-name:Finalize and attest stable release",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/attest-stable"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/attest-stable"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/attest-stable",
@@ -2196,7 +2134,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/attest-stable"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/attest-stable"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/attest-stable",
@@ -2239,7 +2177,7 @@
           "github_name": "Build and verify stable Darwin archives",
           "evidence_refs": [
             "github-check-name:Build and verify stable Darwin archives",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/build-darwin"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/build-darwin"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/build-darwin",
@@ -2253,7 +2191,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/build-darwin"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/build-darwin"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/build-darwin",
@@ -2299,7 +2237,7 @@
           "github_name": "Build and verify stable Linux artifacts (amd64)",
           "evidence_refs": [
             "github-check-name:Build and verify stable Linux artifacts (amd64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/build-linux[goarch=amd64,target=x86_64-linux-gnu]",
@@ -2322,7 +2260,7 @@
           "github_name": "Build and verify stable Linux artifacts (arm64)",
           "evidence_refs": [
             "github-check-name:Build and verify stable Linux artifacts (arm64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/build-linux[goarch=arm64,target=aarch64-linux-gnu]",
@@ -2336,7 +2274,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/build-linux"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/build-linux"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/build-linux",
@@ -2379,7 +2317,7 @@
           "github_name": "Detect stable-release-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect stable-release-relevant changes",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/changes"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/changes"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/changes",
@@ -2393,7 +2331,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/changes"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/changes"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/changes",
@@ -2439,7 +2377,7 @@
           "github_name": "Execute stable Linux artifacts (amd64)",
           "evidence_refs": [
             "github-check-name:Execute stable Linux artifacts (amd64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/execute-linux[goarch=amd64,runner=ubuntu-24.04]",
@@ -2462,7 +2400,7 @@
           "github_name": "Execute stable Linux artifacts (arm64)",
           "evidence_refs": [
             "github-check-name:Execute stable Linux artifacts (arm64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/execute-linux[goarch=arm64,runner=ubuntu-24.04-arm]",
@@ -2476,7 +2414,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/execute-linux"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/execute-linux"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/execute-linux",
@@ -2513,7 +2451,7 @@
           "github_name": "Publish verified stable release",
           "evidence_refs": [
             "github-check-name:Publish verified stable release",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/publish-stable"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/publish-stable"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/publish-stable",
@@ -2527,7 +2465,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/publish-stable"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/publish-stable"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/publish-stable",
@@ -2570,7 +2508,7 @@
           "github_name": "Bind stable release context",
           "evidence_refs": [
             "github-check-name:Bind stable release context",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/release-context"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/release-context"
           ],
           "trace": {
             "inventory_mapping": "goreleaser/release-context",
@@ -2584,7 +2522,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#goreleaser/release-context"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#goreleaser/release-context"
       ],
       "trace": {
         "inventory_mapping": "job:goreleaser/release-context",
@@ -2631,7 +2569,7 @@
           "github_name": "Build \u0026 Test (macOS)",
           "evidence_refs": [
             "github-check-name:Build \u0026 Test (macOS)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#gui-ci/build"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#gui-ci/build"
           ],
           "trace": {
             "inventory_mapping": "gui-ci/build",
@@ -2645,7 +2583,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#gui-ci/build"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#gui-ci/build"
       ],
       "trace": {
         "inventory_mapping": "job:gui-ci/build",
@@ -2690,7 +2628,7 @@
           "github_name": "publish (amd64, x86_64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:publish (amd64, x86_64-linux-gnu)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native-publish/publish[goarch=amd64,target=x86_64-linux-gnu]",
@@ -2713,7 +2651,7 @@
           "github_name": "publish (arm64, aarch64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:publish (arm64, aarch64-linux-gnu)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native-publish/publish[goarch=arm64,target=aarch64-linux-gnu]",
@@ -2727,7 +2665,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native-publish/publish"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native-publish/publish"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native-publish/publish",
@@ -2770,7 +2708,7 @@
           "github_name": "Core runtime and pinned artifact (macOS arm64)",
           "evidence_refs": [
             "github-check-name:Core runtime and pinned artifact (macOS arm64)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/apple-adapter"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/apple-adapter"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/apple-adapter",
@@ -2784,7 +2722,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/apple-adapter"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/apple-adapter"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/apple-adapter",
@@ -2827,7 +2765,7 @@
           "github_name": "Detect libghostty-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect libghostty-relevant changes",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/changes"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/changes"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/changes",
@@ -2841,7 +2779,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/changes"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/changes"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/changes",
@@ -2888,7 +2826,7 @@
           "github_name": "Core runtime source build (x86_64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:Core runtime source build (x86_64-linux-gnu)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/linux-adapter[goarch=amd64,run_tests=true,target=x86_64-linux-gnu]",
@@ -2912,7 +2850,7 @@
           "github_name": "Core runtime source build (aarch64-linux-gnu)",
           "evidence_refs": [
             "github-check-name:Core runtime source build (aarch64-linux-gnu)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/linux-adapter[goarch=arm64,run_tests=false,target=aarch64-linux-gnu]",
@@ -2926,7 +2864,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/linux-adapter"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/linux-adapter"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/linux-adapter",
@@ -2969,7 +2907,7 @@
           "github_name": "Native backend gate",
           "evidence_refs": [
             "github-check-name:Native backend gate",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/native-gate"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/native-gate"
           ],
           "trace": {
             "inventory_mapping": "libghostty-native/native-gate",
@@ -2983,7 +2921,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#libghostty-native/native-gate"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#libghostty-native/native-gate"
       ],
       "trace": {
         "inventory_mapping": "job:libghostty-native/native-gate",
@@ -3021,7 +2959,7 @@
           "github_name": "Prepare regenerated files",
           "evidence_refs": [
             "github-check-name:Prepare regenerated files",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#regen/prepare"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#regen/prepare"
           ],
           "trace": {
             "inventory_mapping": "regen/prepare",
@@ -3035,7 +2973,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#regen/prepare"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#regen/prepare"
       ],
       "trace": {
         "inventory_mapping": "job:regen/prepare",
@@ -3073,7 +3011,7 @@
           "github_name": "Regenerate generated files",
           "evidence_refs": [
             "github-check-name:Regenerate generated files",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#regen/regen"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#regen/regen"
           ],
           "trace": {
             "inventory_mapping": "regen/regen",
@@ -3087,7 +3025,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#regen/regen"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#regen/regen"
       ],
       "trace": {
         "inventory_mapping": "job:regen/regen",
@@ -3125,7 +3063,7 @@
           "github_name": "Validate regeneration credentials",
           "evidence_refs": [
             "github-check-name:Validate regeneration credentials",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#regen/validate"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#regen/validate"
           ],
           "trace": {
             "inventory_mapping": "regen/validate",
@@ -3139,7 +3077,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#regen/validate"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#regen/validate"
       ],
       "trace": {
         "inventory_mapping": "job:regen/validate",
@@ -3176,7 +3114,7 @@
           "github_name": "release-please",
           "evidence_refs": [
             "github-check-name:release-please",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#release-please/release-please"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#release-please/release-please"
           ],
           "trace": {
             "inventory_mapping": "release-please/release-please",
@@ -3190,7 +3128,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#release-please/release-please"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#release-please/release-please"
       ],
       "trace": {
         "inventory_mapping": "job:release-please/release-please",
@@ -3233,7 +3171,7 @@
           "github_name": "Detect sandbox-relevant changes",
           "evidence_refs": [
             "github-check-name:Detect sandbox-relevant changes",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#sandbox/changes"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#sandbox/changes"
           ],
           "trace": {
             "inventory_mapping": "sandbox/changes",
@@ -3247,7 +3185,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#sandbox/changes"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#sandbox/changes"
       ],
       "trace": {
         "inventory_mapping": "job:sandbox/changes",
@@ -3290,7 +3228,7 @@
           "github_name": "Linux (nono / Landlock)",
           "evidence_refs": [
             "github-check-name:Linux (nono / Landlock)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#sandbox/linux-nono"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#sandbox/linux-nono"
           ],
           "trace": {
             "inventory_mapping": "sandbox/linux-nono",
@@ -3304,7 +3242,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#sandbox/linux-nono"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#sandbox/linux-nono"
       ],
       "trace": {
         "inventory_mapping": "job:sandbox/linux-nono",
@@ -3347,7 +3285,7 @@
           "github_name": "macOS (safehouse / Seatbelt)",
           "evidence_refs": [
             "github-check-name:macOS (safehouse / Seatbelt)",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#sandbox/macos-safehouse"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#sandbox/macos-safehouse"
           ],
           "trace": {
             "inventory_mapping": "sandbox/macos-safehouse",
@@ -3361,7 +3299,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#sandbox/macos-safehouse"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#sandbox/macos-safehouse"
       ],
       "trace": {
         "inventory_mapping": "job:sandbox/macos-safehouse",
@@ -3406,7 +3344,7 @@
           "github_name": "Scorecard analysis",
           "evidence_refs": [
             "github-check-name:Scorecard analysis",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#scorecard/analysis"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#scorecard/analysis"
           ],
           "trace": {
             "inventory_mapping": "scorecard/analysis",
@@ -3420,7 +3358,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#scorecard/analysis"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#scorecard/analysis"
       ],
       "trace": {
         "inventory_mapping": "job:scorecard/analysis",
@@ -3471,7 +3409,7 @@
           "github_name": "Gitleaks",
           "evidence_refs": [
             "github-check-name:Gitleaks",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#secret-scan/gitleaks"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#secret-scan/gitleaks"
           ],
           "trace": {
             "inventory_mapping": "secret-scan/gitleaks",
@@ -3485,7 +3423,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#secret-scan/gitleaks"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#secret-scan/gitleaks"
       ],
       "trace": {
         "inventory_mapping": "job:secret-scan/gitleaks",
@@ -3536,7 +3474,7 @@
           "github_name": "TruffleHog",
           "evidence_refs": [
             "github-check-name:TruffleHog",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#secret-scan/trufflehog"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#secret-scan/trufflehog"
           ],
           "trace": {
             "inventory_mapping": "secret-scan/trufflehog",
@@ -3550,7 +3488,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#secret-scan/trufflehog"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#secret-scan/trufflehog"
       ],
       "trace": {
         "inventory_mapping": "job:secret-scan/trufflehog",
@@ -3593,7 +3531,7 @@
           "github_name": "actionlint",
           "evidence_refs": [
             "github-check-name:actionlint",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/actionlint"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/actionlint"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/actionlint",
@@ -3607,7 +3545,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/actionlint"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/actionlint"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/actionlint",
@@ -3650,7 +3588,7 @@
           "github_name": "Renovate native dependency fixtures",
           "evidence_refs": [
             "github-check-name:Renovate native dependency fixtures",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/renovate"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/renovate"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/renovate",
@@ -3664,7 +3602,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/renovate"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/renovate"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/renovate",
@@ -3707,7 +3645,7 @@
           "github_name": "workflow policy tests",
           "evidence_refs": [
             "github-check-name:workflow policy tests",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/scripts"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/scripts"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/scripts",
@@ -3721,7 +3659,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/scripts"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/scripts"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/scripts",
@@ -3764,7 +3702,7 @@
           "github_name": "shellcheck",
           "evidence_refs": [
             "github-check-name:shellcheck",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/shellcheck"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/shellcheck"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/shellcheck",
@@ -3778,7 +3716,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/shellcheck"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/shellcheck"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/shellcheck",
@@ -3821,7 +3759,7 @@
           "github_name": "zizmor",
           "evidence_refs": [
             "github-check-name:zizmor",
-            "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/zizmor"
+            "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/zizmor"
           ],
           "trace": {
             "inventory_mapping": "workflow-lint/zizmor",
@@ -3835,7 +3773,7 @@
         }
       ],
       "evidence_refs": [
-        "p0-inventory:faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2#workflow-lint/zizmor"
+        "p0-inventory:cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273#workflow-lint/zizmor"
       ],
       "trace": {
         "inventory_mapping": "job:workflow-lint/zizmor",

@@ -78,33 +78,6 @@ tag, schedule, or dynamic-service coordinates, so those event identities
 currently fail the zero-job plan check until policy adds required modes for
 them.
 
-## Render the shadow summary
-
-The `summary` command renders the diagnostic CI shadow summary used by the
-`ci-shadow-summary` job. It consumes the P0 inventory plus the optional plan
-and plan-error files produced by the same workflow:
-
-```bash
-go run ./cmd/cipolicy \
-  -inventory internal/cibaseline/inventory.json \
-  -manifest internal/cipolicy/manifest.json \
-  -plan-input /tmp/cipolicy-plan.json \
-  -plan-error /tmp/cipolicy-plan.err \
-  -changed-files /tmp/changed-files.txt \
-  -event pull_request \
-  -ref refs/pull/17/merge \
-  -head-sha 1111111111111111111111111111111111111111 \
-  -run-url https://github.com/d0ugal/graith/actions/runs/17 \
-  -macos-detector-result success \
-  -macos-detector-output true \
-  summary
-```
-
-The summary is diagnostic only. It records source identity, visible change
-classes, local detector decisions, skip and escalation reasons, required
-contexts, expected workflows and jobs, helper surfaces, and native runtime
-notes. Current required checks still decide mergeability.
-
 ## Regenerate from P0
 
 Regenerate the manifest only as part of a reviewed policy change that also
@@ -118,9 +91,9 @@ After regeneration, run:
 go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolicy
 ```
 
-The local `cmd/cipolicy` command intentionally exposes only the workflow-called
-`plan` and `summary` modes. Manifest generation and validation remain package
-owned so unused command modes do not become a second public policy surface.
+The local `cmd/cipolicy` command intentionally exposes only `plan` replay.
+Manifest generation and validation remain package owned so unused command
+modes do not become a second public policy surface.
 
 ## Downstream use
 

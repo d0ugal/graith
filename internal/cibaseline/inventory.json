@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
+      "file_sha256": "ed7f1f85ad7c2bf0d430d8310abd7d5614c0bb1a2c800576a5efa70926ce1a3f",
       "events": {
         "pull_request": null,
         "push": {
@@ -82,49 +82,6 @@
           ],
           "github_names": [
             "Detect macOS-relevant changes"
-          ]
-        },
-        {
-          "id": "ci-shadow-summary",
-          "name": "CI shadow summary",
-          "capability": "legacy-proof/ci/ci-shadow-summary",
-          "owner": "graith-maintainers",
-          "runner": "ubuntu-latest",
-          "condition": "${{ always() \u0026\u0026 !cancelled() }}",
-          "skip_semantics": "github-skipped-is-distinct-from-passed",
-          "proof_type": "soft",
-          "requiredness": "soft",
-          "permissions": {
-            "contents": "read"
-          },
-          "environment": null,
-          "coordinates": [
-            "ci/ci-shadow-summary"
-          ],
-          "github_names": [
-            "CI shadow summary"
-          ],
-          "action_pins": [
-            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
-          ],
-          "toolchains": [
-            {
-              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
-              "name": null,
-              "with": {
-                "go-version-file": "go.mod"
-              }
-            }
-          ],
-          "cache_actions": [
-            {
-              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
-              "name": null,
-              "with": {
-                "go-version-file": "go.mod"
-              }
-            }
           ]
         },
         {
@@ -2722,18 +2679,18 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-helper",
       "git_mode": "100644",
-      "sha256": "3cffb5ee0183a5c9e16260191b464c056ef9717ec2ef319b3e1dfbaf6aaf40bc",
-      "executable_contract": "preserve the checked-in cipolicy CLI behavior invoked by workflow policy detection and the CI shadow summary",
+      "sha256": "c16799e7bd507612db839075347affc71f10ae4dfadaea41f939f371c4bfb6bf",
+      "executable_contract": "preserve checked-in cipolicy CLI plan replay behavior, manifest loading, file-list parsing, detector-error binding, and canonical output",
       "disposition": "grandfathered",
-      "retirement_criterion": "remove only with the cipolicy workflow caller or an owner-approved replacement command"
+      "retirement_criterion": "remove only with the local cipolicy plan replay surface or an owner-approved replacement command"
     },
     {
       "path": "cmd/cipolicy/main_test.go",
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "9aff1a1765d541559f461a297b850a01ee53ca17d26708242e9081c72adada41",
-      "executable_contract": "preserve CLI coverage for policy plan and diagnostic summary command behavior",
+      "sha256": "209272725b8f74afba36ef7d1e59852be68506564386e3c29448859b2e3ba075",
+      "executable_contract": "preserve CLI coverage for policy plan command behavior, file-list parsing, detector-error flags, output permissions, and safe-superset behavior",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only after equivalent cipolicy command coverage is added"
     },
@@ -2856,26 +2813,6 @@
       "executable_contract": "preserve bounded transient Renovate retry behavior formerly held by renovate-retry.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent retry fixture coverage and zero unexplained replay disagreement"
-    },
-    {
-      "path": "internal/cipolicy/shadow_summary.go",
-      "owner": "graith-maintainers",
-      "kind": "go-policy-helper",
-      "git_mode": "100644",
-      "sha256": "8913e6b2beb9447448256ee4e147436ebe98d5d5b1550d577b27c8798858b7b3",
-      "executable_contract": "preserve non-authoritative CI shadow summary rendering, required-context inventory listing, native coverage note, and no-live-aggregation boundary",
-      "disposition": "grandfathered",
-      "retirement_criterion": "delete with the CI shadow summary job or replace only after equivalent diagnostic summary tests cover the same authority boundary"
-    },
-    {
-      "path": "internal/cipolicy/shadow_summary_test.go",
-      "owner": "graith-maintainers",
-      "kind": "go-policy-contract-test",
-      "git_mode": "100644",
-      "sha256": "90deb1cc7c85df5f12dd9fe4366e430729cb352d5f00fb8b1681e9363b0dabcc",
-      "executable_contract": "preserve diagnostic wording, detector fallback, helper language, and no-live-aggregation assertions for the CI shadow summary",
-      "disposition": "grandfathered",
-      "retirement_criterion": "delete with the CI shadow summary helper or replace only after equivalent summary contract coverage exists"
     },
     {
       "path": "internal/cipolicy/workflow_lint_policy_test.go",
@@ -3080,14 +3017,6 @@
       "legacy_coordinate": "ci/changes",
       "skip_semantics": "github-skipped-is-distinct-from-passed",
       "new_mode": "legacy/ci/changes",
-      "owner": "graith-maintainers",
-      "new_obligation": false
-    },
-    {
-      "legacy_coordinate": "ci/ci-shadow-summary",
-      "legacy_condition": "${{ always() \u0026\u0026 !cancelled() }}",
-      "skip_semantics": "github-skipped-is-distinct-from-passed",
-      "new_mode": "legacy/ci/ci-shadow-summary",
       "owner": "graith-maintainers",
       "new_obligation": false
     },
@@ -3561,5 +3490,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2"
+  "digest": "cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273"
 }
