@@ -28,21 +28,21 @@ go test ./internal/cipolicy -run TestDeterministicChangeClassFixtures
 ```
 
 Policy changes already touch `internal/cipolicy`, so this coverage runs in the
-existing Go test gate whenever the evaluator, manifest contracts, summary
-renderer, or replacement-test bindings change.
+existing Go test gate whenever the evaluator, manifest contracts, or
+replacement-test bindings change.
 
 ## Deterministic Change Classes
 
 `TestDeterministicChangeClassFixtures` builds local plans from checked-in path
-sets and renders the CI shadow summary with the committed baseline inventory.
-It covers these sample classes without elapsed-time gates, live GitHub history,
-or a second repository:
+sets and checks the committed baseline inventory for the authoritative required
+contexts and macOS fail-safe job conditions. It covers these sample classes
+without elapsed-time gates, live GitHub history, or a second repository:
 
 | Class | Local evidence |
 | --- | --- |
 | Go-only | Go core paths select exactly the pull-request capability floor, keep the seven authoritative required modes, and do not select release or publication capabilities. |
-| Docs-only | Docs-preview and docs-publication classes are detected, same-repository screenshot writes stay explicitly scoped, and supplied macOS skip results render as job-level skip text. |
-| GUI-only | GUI/iOS routing is detected, GUI policy modes stay applicable for the plan tier, and supplied macOS detector results render the run decision. |
+| Docs-only | Docs-preview and docs-publication classes are detected, same-repository screenshot writes stay explicitly scoped, and the plan does not escalate beyond the required pull-request floor. |
+| GUI-only | GUI/iOS routing is detected and GUI policy modes stay applicable for the plan tier. |
 | Sandbox | Sandbox paths retain the nono and safehouse modes, while detector failures remain explicit and select the full fail-safe capability set. |
 | Libghostty runtime | Native runtime paths detect Go and native capabilities and keep the native source-build, adapter, and gate modes tied to detected runtime evidence. |
 | Generated metadata | Generated inputs escalate to the safe superset and keep regen prepare, mutation, and validation modes tied to the generated-input reason. |
@@ -51,11 +51,11 @@ or a second repository:
 | Fork PR | Publication credentials, docs-preview writes, and regeneration mutation are denied under fork trust. |
 | Same-repository mutation | Same-repository docs-preview writes are scoped, while regeneration still cannot borrow maintainer credentials from repository location. |
 
-Each class also checks that the rendered shadow summary still includes the
-shared committed inventory blocks for required contexts, workflow job rows,
-helper surfaces, and core runtime coverage. Those shared rows prove summary
-inventory rendering stays visible; the class rows above describe only
-fixture-specific detection, routing, escalation, and credential evidence.
+Shared assertions also check that the committed inventory still lists the seven
+authoritative required contexts and that `ci/test-macos` and
+`ci/integration-macos` retain their fail-safe detector conditions. The class
+rows above describe fixture-specific detection, routing, escalation, required
+mode, and credential evidence.
 
 ## What It Proves
 

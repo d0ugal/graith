@@ -21,11 +21,10 @@ proof types, requiredness, owners, legacy coordinate mappings, and repository
 policy surfaces. Policy-surface identity includes file digests and stage-zero
 Git index modes, so unreviewed content or chmod drift fails closed.
 
-`cmd/cipolicy summary` uses this inventory to render the diagnostic CI shadow
-summary. The [CI policy manifest]({{< relref "/docs/contributing/ci-policy.md" >}})
-validation path also uses the inventory as the source for current static
-workflow and job shape. Current mergeability still comes from the normal GitHub
-required checks.
+The [CI policy manifest]({{< relref "/docs/contributing/ci-policy.md" >}})
+validation path uses the inventory as the source for current static workflow
+and job shape. Current mergeability still comes from the normal GitHub required
+checks.
 
 ## Validate the inventory
 
@@ -68,8 +67,7 @@ go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy ./cmd/cipolic
 ```
 
 If a workflow or job is renamed intentionally, update the inventory in the same
-change so the shadow summary and policy manifest still agree on the static
-coordinate set.
+change so the policy manifest still agrees on the static coordinate set.
 
 ## Command surface
 

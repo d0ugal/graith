@@ -64,8 +64,6 @@ var ciGoPolicySurfacePaths = []string{
 	"internal/cipolicy/p11_js_surface.go",
 	"internal/cipolicy/p11_js_surface_test.go",
 	"internal/cipolicy/renovate_retry_test.go",
-	"internal/cipolicy/shadow_summary.go",
-	"internal/cipolicy/shadow_summary_test.go",
 	"internal/cipolicy/workflow_lint_policy_test.go",
 	"internal/docspreview/docspreview.go",
 	"internal/docspreview/docspreview_test.go",
@@ -104,12 +102,12 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 	},
 	"cmd/cipolicy/main.go": {
 		kind:       "go-policy-helper",
-		contract:   "preserve the checked-in cipolicy CLI behavior invoked by workflow policy detection and the CI shadow summary",
-		retirement: "remove only with the cipolicy workflow caller or an owner-approved replacement command",
+		contract:   "preserve checked-in cipolicy CLI plan replay behavior, manifest loading, file-list parsing, detector-error binding, and canonical output",
+		retirement: "remove only with the local cipolicy plan replay surface or an owner-approved replacement command",
 	},
 	"cmd/cipolicy/main_test.go": {
 		kind:       "go-policy-contract-test",
-		contract:   "preserve CLI coverage for policy plan and diagnostic summary command behavior",
+		contract:   "preserve CLI coverage for policy plan command behavior, file-list parsing, detector-error flags, output permissions, and safe-superset behavior",
 		retirement: "remove only after equivalent cipolicy command coverage is added",
 	},
 	"cmd/libghosttyarchive/main.go": {
@@ -146,16 +144,6 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve bounded transient Renovate retry behavior formerly held by renovate-retry.test.js",
 		retirement: "owned replacement has equivalent retry fixture coverage and zero unexplained replay disagreement",
-	},
-	"internal/cipolicy/shadow_summary.go": {
-		kind:       "go-policy-helper",
-		contract:   "preserve non-authoritative CI shadow summary rendering, required-context inventory listing, native coverage note, and no-live-aggregation boundary",
-		retirement: "delete with the CI shadow summary job or replace only after equivalent diagnostic summary tests cover the same authority boundary",
-	},
-	"internal/cipolicy/shadow_summary_test.go": {
-		kind:       "go-policy-contract-test",
-		contract:   "preserve diagnostic wording, detector fallback, helper language, and no-live-aggregation assertions for the CI shadow summary",
-		retirement: "delete with the CI shadow summary helper or replace only after equivalent summary contract coverage exists",
 	},
 	"internal/cipolicy/workflow_lint_policy_test.go": {
 		kind:       "go-policy-contract-test",
@@ -1114,7 +1102,7 @@ func workflowOwner(id string) string {
 var proofTypes = map[string]string{
 	"ci/build": "compile-only", "ci/changes": "source-level",
 	"ci/govulncheck": "source-level", "ci/integration": "runtime", "ci/integration-macos": "runtime",
-	"ci/ci-shadow-summary": "soft", "ci/lint": "compile-only", "ci/test": "runtime", "ci/test-macos": "runtime",
+	"ci/lint": "compile-only", "ci/test": "runtime", "ci/test-macos": "runtime",
 	"coverage/changes": "soft", "coverage/comment": "soft", "coverage/go-coverage": "soft",
 	"coverage/swift-coverage": "soft", "gui-ci/build": "compile-only",
 	"libghostty-native/apple-adapter": "runtime", "libghostty-native/changes": "source-level",
