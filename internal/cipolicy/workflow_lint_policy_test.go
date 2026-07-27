@@ -1,10 +1,12 @@
 package cipolicy
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -90,36 +92,50 @@ func TestWorkflowLintTriggerPathsIncludeLintConfig(t *testing.T) {
 	}
 }
 
-func TestWorkflowLintSupplyChainPolicy(t *testing.T) {
+func TestWorkflowToolInstallSupplyChainPolicy(t *testing.T) {
 	repoRoot := p11RepoRoot()
 
-	workflow, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/workflow-lint.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	tests := map[string]struct {
-		jobID       string
-		stepName    string
-		repository  string
-		installExpr *regexp.Regexp
+		workflowPath   string
+		jobID          string
+		stepName       string
+		repository     string
+		signerWorkflow string
+		installExpr    *regexp.Regexp
 	}{
 		"actionlint": {
-			jobID:       "actionlint",
-			stepName:    "Install actionlint",
-			repository:  "rhysd/actionlint",
-			installExpr: regexp.MustCompile(`tar -xzf|sudo install`),
+			workflowPath:   ".github/workflows/workflow-lint.yml",
+			jobID:          "actionlint",
+			stepName:       "Install actionlint",
+			repository:     "rhysd/actionlint",
+			signerWorkflow: "rhysd/actionlint/.github/workflows/release.yaml",
+			installExpr:    regexp.MustCompile(`tar -xzf|sudo install`),
+		},
+		"nono": {
+			workflowPath:   ".github/workflows/sandbox.yml",
+			jobID:          "linux-nono",
+			stepName:       "Install nono",
+			repository:     "nolabs-ai/nono",
+			signerWorkflow: "nolabs-ai/nono/.github/workflows/release.yml",
+			installExpr:    regexp.MustCompile(`tar -xzf`),
 		},
 		"zizmor": {
-			jobID:       "zizmor",
-			stepName:    "Install zizmor",
-			repository:  "zizmorcore/zizmor",
-			installExpr: regexp.MustCompile(`tar -xzf`),
+			workflowPath:   ".github/workflows/workflow-lint.yml",
+			jobID:          "zizmor",
+			stepName:       "Install zizmor",
+			repository:     "zizmorcore/zizmor",
+			signerWorkflow: "zizmorcore/zizmor/.github/workflows/release-binaries.yml",
+			installExpr:    regexp.MustCompile(`tar -xzf`),
 		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
+			workflow, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, test.workflowPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+
 			job := p11WorkflowJob(t, workflow, test.jobID)
 
 			wantPermissions := map[string]string{"contents": "read", "attestations": "read"}
@@ -136,8 +152,8 @@ func TestWorkflowLintSupplyChainPolicy(t *testing.T) {
 			assertContains(t, code, "set -euo pipefail")
 			assertContains(t, code, "curl -fsSL --proto '=https' --tlsv1.2")
 
-			if !regexp.MustCompile(`gh attestation verify[^\n]*--repo ` + regexp.QuoteMeta(test.repository)).MatchString(code) {
-				t.Fatalf("%s must verify provenance against %s on the attestation command line:\n%s", test.stepName, test.repository, code)
+			if err := validateAttestationVerifyCommand(code, test.stepName, test.repository, test.signerWorkflow); err != nil {
+				t.Fatal(err)
 			}
 
 			verifyAt := strings.Index(code, "gh attestation verify ")
@@ -146,13 +162,256 @@ func TestWorkflowLintSupplyChainPolicy(t *testing.T) {
 			if verifyAt == -1 || installAt == nil || verifyAt > installAt[0] {
 				t.Fatalf("%s must verify provenance before extract/install:\n%s", test.stepName, code)
 			}
+		})
+	}
+}
 
-			if regexp.MustCompile(`gh attestation verify[^\n]*\|\|`).MatchString(code) {
-				t.Fatalf("%s verification must not be guarded with ||", test.stepName)
+func TestWorkflowAttestationVerifyCommandsBindSignerWorkflow(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	var missing []string
+
+	for _, path := range workflowPolicyFiles(t, repoRoot) {
+		workflow, err := ReadP11WorkflowSummary(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for jobID, job := range workflow.Jobs {
+			for _, step := range job.Steps {
+				code := workflowExecutableLines(step.Run)
+
+				commands := workflowAttestationVerifyCommands(code)
+				if len(commands) == 0 {
+					continue
+				}
+
+				if err := validateAttestationVerifySafety(code, fmt.Sprintf("%s/%s/%s", filepath.ToSlash(path), jobID, step.Name)); err != nil {
+					missing = append(missing, err.Error())
+				}
+
+				for _, command := range commands {
+					if !attestationVerifyHasSignerWorkflow(command) {
+						missing = append(missing, fmt.Sprintf("%s/%s/%s: %s", filepath.ToSlash(path), jobID, step.Name, command))
+					}
+				}
 			}
+		}
+	}
 
-			if strings.Contains(code, "set +e") {
-				t.Fatalf("%s must not disable errexit", test.stepName)
+	if len(missing) != 0 {
+		sort.Strings(missing)
+		t.Fatalf("gh attestation verify policy violations:\n%s", strings.Join(missing, "\n"))
+	}
+}
+
+func TestAttestationVerifyCommandPolicyRejectsDetachedSignerAndFailOpen(t *testing.T) {
+	tests := map[string]struct {
+		run  string
+		want string
+	}{
+		"braw fail open on continuation": {
+			run: `gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml || true`,
+			want: "must not be guarded with ||",
+		},
+		"canny signer only echoed later": {
+			run: `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono
+echo 'used --signer-workflow nolabs-ai/nono/.github/workflows/release.yml'`,
+			want: "must bind provenance",
+		},
+		"couthy signer only echoed after semicolon": {
+			run:  `set -euo pipefail; gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono; echo 'used --signer-workflow nolabs-ai/nono/.github/workflows/release.yml'`,
+			want: "must bind provenance",
+		},
+		"dreich signer only in inline comment": {
+			run:  `set -euo pipefail; gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono # --signer-workflow nolabs-ai/nono/.github/workflows/release.yml`,
+			want: "must bind provenance",
+		},
+		"bairn verify in if condition": {
+			run: `set -euo pipefail
+if gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml; then
+  echo verified
+fi`,
+			want: "must not be used as a shell condition",
+		},
+		"thrawn negated verify in if condition": {
+			run: `set -euo pipefail
+if ! gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml; then
+  echo continuing
+fi`,
+			want: "must not be used as a shell condition",
+		},
+		"fankle verify in elif condition": {
+			run: `set -euo pipefail
+if false; then
+  echo skipped
+elif gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml; then
+  echo verified
+fi`,
+			want: "must not be used as a shell condition",
+		},
+		"strath negated verify": {
+			run: `set -euo pipefail
+! gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml`,
+			want: "must not be negated",
+		},
+		"bothy backgrounded verify": {
+			run: `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml &
+tar -xzf "$tmp/$tarball"`,
+			want: "must not be backgrounded",
+		},
+		"glaikit backgrounded verify after other background job": {
+			run: `set -euo pipefail
+sleep 1 & gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml &
+tar -xzf "$tmp/$tarball"`,
+			want: "must not be backgrounded",
+		},
+		"muckle brace grouped verify backgrounded": {
+			run: `set -euo pipefail
+{ gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml; } &
+tar -xzf "$tmp/$tarball"`,
+			want: "must not be backgrounded",
+		},
+		"snell command substitution guarded": {
+			run: `set -euo pipefail
+out=$(gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml) || true`,
+			want: "must not be guarded with ||",
+		},
+		"birl pipeline guarded": {
+			run: `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml | cat || true`,
+			want: "must not be guarded with ||",
+		},
+		"crabbit backtick substitution guarded": {
+			run:  "set -euo pipefail\nout=`gh attestation verify \"$tmp/$tarball\" --repo nolabs-ai/nono \\\n  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml` || true",
+			want: "must not be guarded with ||",
+		},
+		"gleg parenthesized verify guarded": {
+			run: `(gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml ) || true`,
+			want: "must not be guarded with ||",
+		},
+		"blether disabled pipefail": {
+			run: `set -euo pipefail
+set +o pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml | cat`,
+			want: "must not disable pipefail",
+		},
+		"smeddum combined disabled pipefail": {
+			run: `set -euo pipefail
+set +uo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml | cat`,
+			want: "must not disable pipefail",
+		},
+		"scunnered combined disabled errexit": {
+			run: `set -euo pipefail
+set +uo errexit
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml`,
+			want: "must not disable errexit",
+		},
+		"wabbit missing pipefail": {
+			run: `set -eu
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml | cat`,
+			want: "must enable errexit and pipefail",
+		},
+		"kenspeck verify before and list": {
+			run: `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml && true`,
+			want: "must not be guarded with &&",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateAttestationVerifyCommand(workflowExecutableLines(test.run), "Install nono", "nolabs-ai/nono", "nolabs-ai/nono/.github/workflows/release.yml")
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("validateAttestationVerifyCommand() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestAttestationVerifyCommandPolicyAcceptsCompliantForms(t *testing.T) {
+	tests := map[string]string{
+		"braw redirects stderr to stdout": `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml 2>&1`,
+		"canny redirects stdout and stderr": `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+  --signer-workflow nolabs-ai/nono/.github/workflows/release.yml &> "$tmp/verify.log"`,
+		"dreich verifies artifacts in for loop": `set -euo pipefail
+for artifact in "$tmp"/*.tar.gz; do gh attestation verify "$artifact" --repo nolabs-ai/nono --signer-workflow nolabs-ai/nono/.github/workflows/release.yml; done`,
+		"thrawn signer workflow equals form": `set -euo pipefail
+gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono --signer-workflow=nolabs-ai/nono/.github/workflows/release.yml`,
+		"gleg long set options": `set -o errexit -o pipefail
+gh  attestation  verify "$tmp/$tarball" --repo nolabs-ai/nono --signer-workflow=nolabs-ai/nono/.github/workflows/release.yml`,
+	}
+
+	for name, run := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateAttestationVerifyCommand(workflowExecutableLines(run), "Install nono", "nolabs-ai/nono", "nolabs-ai/nono/.github/workflows/release.yml")
+			if err != nil {
+				t.Fatalf("validateAttestationVerifyCommand() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestAttestationVerifySignerWorkflowFlagRequiresValue(t *testing.T) {
+	tests := map[string]struct {
+		command string
+		want    bool
+	}{
+		"braw literal path": {
+			command: `gh attestation verify f --repo nolabs-ai/nono --signer-workflow nolabs-ai/nono/.github/workflows/release.yml`,
+			want:    true,
+		},
+		"canny quoted expression": {
+			command: `gh attestation verify f --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/goreleaser.yml"`,
+			want:    true,
+		},
+		"couthy equals form": {
+			command: `gh attestation verify f --repo nolabs-ai/nono --signer-workflow=nolabs-ai/nono/.github/workflows/release.yml`,
+			want:    true,
+		},
+		"dreich empty double quoted": {
+			command: `gh attestation verify f --repo nolabs-ai/nono --signer-workflow ""`,
+		},
+		"thrawn empty single quoted": {
+			command: `gh attestation verify f --repo nolabs-ai/nono --signer-workflow=''`,
+		},
+		"strath missing": {
+			command: `gh attestation verify f --repo nolabs-ai/nono`,
+		},
+		"fankle whitespace only double quoted": {
+			command: `gh attestation verify f --repo nolabs-ai/nono --signer-workflow "  "`,
+		},
+		"glaikit next flag consumed": {
+			command: `gh attestation verify f --signer-workflow --repo nolabs-ai/nono`,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := attestationVerifyHasSignerWorkflow(test.command); got != test.want {
+				t.Fatalf("attestationVerifyHasSignerWorkflow() = %t, want %t for %q", got, test.want, test.command)
 			}
 		})
 	}
@@ -194,19 +453,398 @@ func TestGolangciLintDockerImageIsDigestPinned(t *testing.T) {
 	assertNotContains(t, renovate, "pinDigests: false")
 }
 
-func workflowExecutableLines(run string) string {
-	lines := strings.Split(run, "\n")
+func validateAttestationVerifyCommand(code, stepName, repository, signerWorkflow string) error {
+	if err := validateAttestationVerifySafety(code, stepName); err != nil {
+		return err
+	}
 
-	filtered := lines[:0]
-	for _, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+	repoFlag := regexp.MustCompile(`(?:^|\s)--repo(?:=|\s+)` + regexp.QuoteMeta(repository) + `(?:\s|$)`)
+	signerFlag := regexp.MustCompile(`(?:^|\s)--signer-workflow(?:=|\s+)` + regexp.QuoteMeta(signerWorkflow) + `(?:\s|$)`)
+
+	commands := workflowAttestationVerifyCommands(code)
+	if len(commands) == 0 {
+		return fmt.Errorf("%s must verify provenance against %s and signer workflow %s on the same attestation command line:\n%s", stepName, repository, signerWorkflow, code)
+	}
+
+	for _, command := range commands {
+		hasRepo := repoFlag.MatchString(command)
+		hasSigner := signerFlag.MatchString(command)
+
+		if !hasSigner {
+			return fmt.Errorf("%s must bind provenance to signer workflow %s:\n%s", stepName, signerWorkflow, code)
+		}
+
+		if !hasRepo {
+			return fmt.Errorf("%s must verify provenance against %s on the attestation command line:\n%s", stepName, repository, code)
+		}
+	}
+
+	return nil
+}
+
+// Attestation verification safety is intentionally step-wide: once a step
+// verifies provenance, later shell changes in that step must not make failures
+// non-fatal before the artifact is consumed.
+func validateAttestationVerifySafety(code, stepName string) error {
+	if attestationVerifyDisablesShellOption(code, 'e', "errexit") {
+		return fmt.Errorf("%s must not disable errexit", stepName)
+	}
+
+	if attestationVerifyDisablesShellOption(code, 0, "pipefail") {
+		return fmt.Errorf("%s must not disable pipefail", stepName)
+	}
+
+	switch operator := attestationVerifyFailOpenOperator(code); operator {
+	case "||":
+		return fmt.Errorf("%s verification must not be guarded with ||", stepName)
+	case "&&":
+		return fmt.Errorf("%s verification must not be guarded with &&", stepName)
+	case "&":
+		return fmt.Errorf("%s verification must not be backgrounded", stepName)
+	}
+
+	if regexp.MustCompile(`(?m)(?:^|[;&|]\s*)(?:if|elif|while|until)\b[^\n;]*\bgh attestation verify\b`).MatchString(code) {
+		return fmt.Errorf("%s verification must not be used as a shell condition", stepName)
+	}
+
+	if regexp.MustCompile(`(?m)(?:^|[;&|]\s*)!\s*gh attestation verify\b`).MatchString(code) {
+		return fmt.Errorf("%s verification must not be negated", stepName)
+	}
+
+	if !attestationVerifyEnablesErrexitAndPipefail(code) {
+		return fmt.Errorf("%s verification must enable errexit and pipefail", stepName)
+	}
+
+	return nil
+}
+
+func attestationVerifyEnablesErrexitAndPipefail(code string) bool {
+	return attestationVerifyShellOptionEnabled(code, 'e', "errexit") &&
+		attestationVerifyShellOptionEnabled(code, 0, "pipefail")
+}
+
+func attestationVerifyDisablesShellOption(code string, shortOption byte, longOption string) bool {
+	return attestationVerifyShellOptionState(code, shortOption, longOption, '+')
+}
+
+func attestationVerifyShellOptionEnabled(code string, shortOption byte, longOption string) bool {
+	return attestationVerifyShellOptionState(code, shortOption, longOption, '-')
+}
+
+func attestationVerifyShellOptionState(code string, shortOption byte, longOption string, prefix byte) bool {
+	for _, line := range strings.Split(code, "\n") {
+		for _, command := range splitShellCommands(line) {
+			fields := strings.Fields(command)
+			if len(fields) == 0 || fields[0] != "set" {
+				continue
+			}
+
+			for index := 1; index < len(fields); index++ {
+				field := fields[index]
+				if !strings.HasPrefix(field, string(prefix)) {
+					continue
+				}
+
+				options := strings.TrimPrefix(field, string(prefix))
+				if shortOption != 0 && strings.ContainsRune(options, rune(shortOption)) {
+					return true
+				}
+
+				if strings.ContainsRune(options, 'o') && index+1 < len(fields) && fields[index+1] == longOption {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func workflowAttestationVerifyCommands(code string) []string {
+	var commands []string
+
+	for _, line := range strings.Split(code, "\n") {
+		for _, command := range splitShellCommands(line) {
+			if isAttestationVerifyCommand(command) {
+				commands = append(commands, command)
+			}
+		}
+	}
+
+	return commands
+}
+
+func isAttestationVerifyCommand(command string) bool {
+	return regexp.MustCompile(`(?:^|[^A-Za-z0-9_./-])gh\s+attestation\s+verify\b`).MatchString(command)
+}
+
+func attestationVerifyHasSignerWorkflow(command string) bool {
+	return regexp.MustCompile(`(?:^|\s)--signer-workflow(?:=|\s+)(?:"[^"\s]+"|'[^'\s]+'|[^\s'"\-][^\s'"]*)(?:\s|$)`).MatchString(command)
+}
+
+func attestationVerifyFailOpenOperator(code string) string {
+	for _, line := range strings.Split(code, "\n") {
+		if operator := lineAttestationVerifyFailOpenOperator(line); operator != "" {
+			return operator
+		}
+	}
+
+	return ""
+}
+
+func lineAttestationVerifyFailOpenOperator(line string) string {
+	var (
+		escaped  bool
+		inSingle bool
+		inDouble bool
+		start    int
+		bgStart  int
+		piped    bool
+	)
+
+	for index := 0; index < len(line); index++ {
+		char := line[index]
+
+		if escaped {
+			escaped = false
 			continue
 		}
 
-		filtered = append(filtered, line)
+		if char == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+
+		switch char {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case ';', '|':
+			if !inSingle && !inDouble {
+				segmentHasVerify := isAttestationVerifyCommand(strings.TrimSpace(line[start:index]))
+				if char == '|' && index+1 < len(line) && line[index+1] == '|' {
+					if segmentHasVerify || piped {
+						return "||"
+					}
+
+					piped = false
+				} else if char == '|' {
+					piped = piped || segmentHasVerify
+				} else {
+					piped = false
+				}
+
+				start = nextShellSegmentStart(line, index)
+				index = start - 1
+			}
+		case '&':
+			if inSingle || inDouble {
+				continue
+			}
+
+			if isShellRedirectionAmpersand(line, index) {
+				continue
+			}
+
+			if index+1 < len(line) && line[index+1] == '&' {
+				if isAttestationVerifyCommand(strings.TrimSpace(line[start:index])) || piped {
+					return "&&"
+				}
+
+				start = index + 2
+				bgStart = start
+				piped = false
+				index++
+
+				continue
+			}
+
+			if isAttestationVerifyCommand(strings.TrimSpace(line[start:index])) ||
+				piped ||
+				backgroundGroupContainsAttestationVerify(line[bgStart:index]) {
+				return "&"
+			}
+
+			start = index + 1
+			bgStart = start
+			piped = false
+		}
+	}
+
+	return ""
+}
+
+func backgroundGroupContainsAttestationVerify(segment string) bool {
+	trimmed := strings.TrimSpace(segment)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "(") {
+		return false
+	}
+
+	return isAttestationVerifyCommand(trimmed)
+}
+
+func nextShellSegmentStart(line string, separatorIndex int) int {
+	if separatorIndex+1 < len(line) && line[separatorIndex+1] == line[separatorIndex] && (line[separatorIndex] == '&' || line[separatorIndex] == '|') {
+		return separatorIndex + 2
+	}
+
+	return separatorIndex + 1
+}
+
+func isShellRedirectionAmpersand(line string, index int) bool {
+	if index+1 < len(line) && line[index+1] == '>' {
+		return true
+	}
+
+	return index > 0 && (line[index-1] == '>' || line[index-1] == '<')
+}
+
+func splitShellCommands(line string) []string {
+	var (
+		commands []string
+		escaped  bool
+		inSingle bool
+		inDouble bool
+		start    int
+	)
+
+	for index := 0; index < len(line); index++ {
+		char := line[index]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if char == '\\' && !inSingle {
+			escaped = true
+			continue
+		}
+
+		switch char {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case ';', '&', '|':
+			if inSingle || inDouble {
+				continue
+			}
+
+			if char == '&' && isShellRedirectionAmpersand(line, index) {
+				continue
+			}
+
+			if command := strings.TrimSpace(line[start:index]); command != "" {
+				commands = append(commands, command)
+			}
+
+			if index+1 < len(line) && line[index+1] == char && (char == '&' || char == '|') {
+				index++
+			}
+
+			start = index + 1
+		}
+	}
+
+	if command := strings.TrimSpace(line[start:]); command != "" {
+		commands = append(commands, command)
+	}
+
+	return commands
+}
+
+func workflowExecutableLines(run string) string {
+	lines := strings.Split(run, "\n")
+
+	var (
+		filtered []string
+		current  string
+	)
+
+	for _, line := range lines {
+		line = strings.TrimRight(stripShellLineComment(line), " \t")
+
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		continued := strings.HasSuffix(trimmed, `\`)
+		if continued {
+			trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, `\`))
+		}
+
+		if current == "" {
+			current = trimmed
+		} else {
+			current += " " + trimmed
+		}
+
+		if !continued {
+			filtered = append(filtered, current)
+			current = ""
+		}
+	}
+
+	if current != "" {
+		filtered = append(filtered, current)
 	}
 
 	return strings.Join(filtered, "\n")
+}
+
+func stripShellLineComment(line string) string {
+	var (
+		escaped      bool
+		inSingle     bool
+		inDouble     bool
+		previousRune rune
+	)
+
+	for index, char := range line {
+		if escaped {
+			escaped = false
+			previousRune = char
+
+			continue
+		}
+
+		if char == '\\' && !inSingle {
+			escaped = true
+			previousRune = char
+
+			continue
+		}
+
+		switch char {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '#':
+			if !inSingle && !inDouble && (index == 0 || previousRune == ' ' || previousRune == '\t') {
+				return line[:index]
+			}
+		}
+
+		previousRune = char
+	}
+
+	return line
 }
 
 func readPolicyFile(t *testing.T, path string) string {

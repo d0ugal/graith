@@ -1908,7 +1908,7 @@
       "path": ".github/workflows/sandbox.yml",
       "name": "Sandbox",
       "owner": "graith-maintainers",
-      "file_sha256": "5e16ba7fe8c2e3338a7cc72b2a345b21fb23d6f9052862360693021f67a85b2a",
+      "file_sha256": "3bb5d4f5e0e3bd4ae87e11730192766770e67e6fb093304e6168ea440b278e3d",
       "events": {
         "pull_request": null,
         "workflow_dispatch": null
@@ -2822,10 +2822,10 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "bb95d3108e2f5e2cd9f4c94750b32cd8728887f6620d0993b6ee12f1155ada11",
-      "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
+      "sha256": "18d6e62eff202a639664064e653415b1216205dbca8c6407c9edb3c4ca0c300a",
+      "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow tool install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
+      "retirement_criterion": "owned replacement has equivalent workflow install and lint policy coverage and zero unexplained replay disagreement"
     },
     {
       "path": "internal/cipolicy/workflow_timeout_policy_test.go",
@@ -3503,5 +3503,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "d7dcc5506c9e032f7e6346bfbf7f108cc842811e706ed29ffe3c6a618302f085"
+  "digest": "3cd60ee801c6bb623df60d90437901d1a515b76f02a6dabc6a4fa94bd2fe7d80"
 }

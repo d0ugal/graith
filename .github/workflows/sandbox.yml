@@ -154,8 +154,12 @@ jobs:
           tmp="$(mktemp -d)"
           curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$tarball"
           # Fail closed: only proceed if the artifact's build provenance verifies
-          # against nolabs-ai/nono (proves nono's own CI produced it).
-          gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono
+          # against nolabs-ai/nono and its release workflow (proves nono's own
+          # release CI produced it). --signer-workflow pins the exact workflow,
+          # not just the repo, so a compromised non-release workflow in the same
+          # repo cannot mint a passing attestation.
+          gh attestation verify "$tmp/$tarball" --repo nolabs-ai/nono \
+            --signer-workflow nolabs-ai/nono/.github/workflows/release.yml
           dest="$HOME/.local/bin"
           mkdir -p "$dest"
           tar -xzf "$tmp/$tarball" -C "$dest" nono
