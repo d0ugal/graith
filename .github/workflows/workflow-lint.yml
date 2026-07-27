@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/**'
+      - '.github/actionlint.yaml'
       - '.github/zizmor.yml'
       - 'internal/libghosttydeps/testdata/renovate/**'
       - 'libghostty-native.lock.json'
@@ -22,6 +23,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/**'
+      - '.github/actionlint.yaml'
       - '.github/zizmor.yml'
       - 'internal/libghosttydeps/testdata/renovate/**'
       - 'libghostty-native.lock.json'

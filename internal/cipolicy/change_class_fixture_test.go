@@ -227,6 +227,19 @@ func TestDeterministicChangeClassFixtures(t *testing.T) {
 				detectedPolicyMode("legacy/workflow-lint/zizmor"),
 			},
 		},
+		"workflow-lint-config": {
+			files:                    []string{".github/actionlint.yaml"},
+			wantTrustTier:            "same-repository-agent",
+			wantDetectedCapabilities: []string{"workflow-policy"},
+			wantCapabilities:         pullRequestCapabilityFloor("workflow-policy"),
+			wantSupersetReasons:      []string{},
+			wantPolicyModes: []deterministicPolicyModeCheck{
+				detectedPolicyMode("legacy/workflow-lint/actionlint"),
+				detectedPolicyMode("legacy/workflow-lint/scripts"),
+				detectedPolicyMode("legacy/workflow-lint/shellcheck"),
+				detectedPolicyMode("legacy/workflow-lint/zizmor"),
+			},
+		},
 	}
 
 	for name, test := range tests {

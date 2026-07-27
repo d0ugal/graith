@@ -2278,11 +2278,12 @@
       "path": ".github/workflows/workflow-lint.yml",
       "name": "Workflow Lint",
       "owner": "graith-maintainers",
-      "file_sha256": "6c5717461cf5c23ef38e3fc27b7a19e3ac29fba702d0b0bdaef60edd577366eb",
+      "file_sha256": "6e8cca4b76dd3a4afabb7e6e45052b634fda01c85b094518e78b1c403f181b3e",
       "events": {
         "pull_request": {
           "paths": [
             ".github/workflows/**",
+            ".github/actionlint.yaml",
             ".github/zizmor.yml",
             "internal/libghosttydeps/testdata/renovate/**",
             "libghostty-native.lock.json",
@@ -2299,6 +2300,7 @@
           ],
           "paths": [
             ".github/workflows/**",
+            ".github/actionlint.yaml",
             ".github/zizmor.yml",
             "internal/libghosttydeps/testdata/renovate/**",
             "libghostty-native.lock.json",
@@ -2819,8 +2821,8 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "15621db57fc90d0f36644bbf25c07c8595086d2ac23c1a14082ecff3cc205e36",
-      "executable_contract": "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
+      "sha256": "bb95d3108e2f5e2cd9f4c94750b32cd8728887f6620d0993b6ee12f1155ada11",
+      "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
     },
@@ -3490,5 +3492,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "b9bf92612d4df18ec7a9cbc071982fc8ed3fba10dfed15f0138ff9db6ad6539a"
+  "digest": "cc657c301cccc903cc50635ed9bc393f723660f43b6f698401124da6609e9b5c"
 }
