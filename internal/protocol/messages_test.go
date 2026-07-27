@@ -147,6 +147,31 @@ func TestTriggerBindingDetailWatcherUsageJSON(t *testing.T) {
 	}
 }
 
+func TestCreateMsgReadOnlyRoundTrip(t *testing.T) {
+	want := CreateMsg{
+		Name: "reader", Agent: "codex", RepoPath: "/croft", Base: "main", ReadOnly: true,
+	}
+
+	data, err := EncodeControl("create", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	envelope, err := DecodeControl(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got CreateMsg
+	if err := DecodePayload(envelope, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if !got.ReadOnly || got.Base != "main" || got.RepoPath != "/croft" {
+		t.Fatalf("CreateMsg = %+v", got)
+	}
+}
+
 func TestMsgPubNoReplyRoundTrip(t *testing.T) {
 	want := MsgPubMsg{
 		Stream: "updates", Body: "morning briefing complete",
@@ -490,6 +515,7 @@ func TestScenarioMirrorRoundTrip(t *testing.T) {
 	want := ScenarioStatusResponse{Scenario: ScenarioRecord{
 		ID: "sc-braw", Name: "strath-readers", Sessions: []ScenarioSessionInfo{
 			{Name: "reader", SessionID: "canny-reader", Mirror: "subject", Status: "running"},
+			{Name: "branch-reader", SessionID: "bothy-reader", ReadOnly: true, Status: "running"},
 		},
 	}}
 
@@ -510,6 +536,10 @@ func TestScenarioMirrorRoundTrip(t *testing.T) {
 
 	if got.Scenario.Sessions[0].Mirror != "subject" {
 		t.Errorf("mirror = %q, want subject", got.Scenario.Sessions[0].Mirror)
+	}
+
+	if !got.Scenario.Sessions[1].ReadOnly {
+		t.Errorf("read_only = false, want true")
 	}
 }
 

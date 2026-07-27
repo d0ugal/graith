@@ -19,8 +19,9 @@ read-only/read-write lists), strips the environment to an allowlist, and gates
 
 **nono** generates a per-session JSON profile and runs
 `nono run --profile <file> --workdir <dir> -- <agent>`. `--workdir` pins nono's
-read-write workdir to the session's worktree/scratch dir, not the process cwd —
-important for `--mirror`, where the cwd is the read-only source. The profile:
+read-write workdir to the session's owned worktree or scratch dir. For
+`--mirror` and branch-backed `--read-only` sessions, the repository path is
+granted read-only and the process cwd is writable scratch. The profile:
 
 - `extends: "default"` — inherits nono's audited deny groups (`deny_credentials`,
   `deny_shell_history`, `deny_shell_configs`, browser/keychain denies) and base

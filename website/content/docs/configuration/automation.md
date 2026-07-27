@@ -254,6 +254,15 @@ already-running bindings on the next reconcile: each is rebuilt with the new
 matcher and its watched directory set reconciled — no source-session restart
 needed.
 
+File-watch bindings are created only for writable, non-mirror sessions. Sessions
+created with `--mirror` and branch-backed `--read-only` sessions are skipped
+before a watcher is bound, so observer and coordination sessions do not
+recursively watch repository trees they cannot usefully edit. This is a
+classification rule, not a per-agent self-service opt-out: use `--mirror` when
+the reader needs another live session's exact worktree, `--read-only` when it
+only needs a current branch reference, and a normal worktree or `--in-place`
+when the session needs to edit, commit, or participate as a watched source.
+
 `watch_max_directories` is a daemon-wide safety budget shared by all live
 file-watch bindings. It is named for compatibility, but on macOS the budget
 counts an estimate of kqueue descriptors (the directory plus its entries), not

@@ -163,9 +163,10 @@ The optional policy block turns on daemon-managed runtime completion and failure
 | `name` | yes | — | Session name (must be unique across all sessions) |
 | `repo` | yes, except shared/mirrored | — | Repository path (`~` is expanded); derived for `shared` members when omitted and always derived for mirrored members |
 | `mirror` | no | — | Name of another member in this scenario whose exact worktree is mounted read-only |
+| `read_only` | no | `false` | Create a branch-backed read-only session for `repo`/`base` instead of a writable worktree |
 | `agent` | no | config default | Agent type (`claude`, `codex`, `cursor`, etc.) |
 | `model` | no | agent default | Model override (fills `{model}` in agent args) |
-| `base` | no | repo default | Base branch for the worktree |
+| `base` | no | repo default | Base branch for the worktree, or branch to reference when `read_only = true` |
 | `role` | no | — | Human-readable role description |
 | `prompt` | no | `task` | Startup instructions sent to a newly created agent; does not seed a todo or form a completion contract (maximum 64 KiB; NUL is rejected) |
 | `task` | no | — | Tracked work title: seeds an assigned todo and participates in completion; also supplies the startup prompt when `prompt` is omitted (maximum 500 raw bytes, or a lower configured todo-title limit; NUL is rejected) |
@@ -214,7 +215,18 @@ Use `prompt` when the instructions are richer than the tracked work title, or wh
 
 **Mirrored sessions:** `mirror` set to another `[[sessions]]` member's `name` creates a normal scenario-owned worker over that member's exact worktree. The worker sees committed and uncommitted files, but the sandbox denies writes to the source worktree and provides the usual writable `GRAITH_TMPDIR` scratch space. Several members can mirror one source without creating Git worktrees or branches.
 
-`mirror` is a scenario-local member reference, never a session ID or filesystem path. A mirrored member must not also set `shared`, `repo`, `base`, or `includes` — repository, base, worktree, and included worktrees derive from its target. The target can itself be mirrored, but references must be acyclic; every session in a source's backing chain must still exist, be running or stopped, and remain non-deleted. Missing targets, duplicate/ambiguous names, stale or cyclic backing chains, sources without a worktree, stopped sources whose saved worktree was already cleaned up or replaced by an unrelated checkout, sources with missing/invalid/unrelated inherited included worktrees, and unavailable sandbox enforcement all fail preflight before any member starts. Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored worker itself.
+`mirror` is a scenario-local member reference, never a session ID or filesystem path. A mirrored member must not also set `shared`, `repo`, `base`, or `includes` — repository, base, worktree, and included worktrees derive from its target. The target can itself be mirrored, but it cannot be a `read_only = true` member; declare another read-only branch member instead. References must be acyclic, and every session in a source's backing chain must still exist, be running or stopped, and remain non-deleted. Missing targets, duplicate/ambiguous names, stale or cyclic backing chains, sources without a worktree, stopped sources whose saved worktree was already cleaned up or replaced by an unrelated checkout, sources with missing/invalid/unrelated inherited included worktrees, and unavailable sandbox enforcement all fail preflight before any member starts. Agent, model, role, prompt, task, hooks, and `star` still configure the mirrored worker itself.
+
+**Read-only branch sessions:** `read_only = true` creates a scenario-owned worker
+backed by a selected repository branch, without another source member. The
+member requires `repo`; `base` selects the branch, or the repository default
+branch when omitted. Graith follows the normal fetch policy at creation,
+launches the agent from a writable scratch directory, exposes the detached
+branch worktree read-only through `GRAITH_WORKTREE_PATH`, and refreshes it on
+resume/restart. The mode requires sandbox enforcement and is mutually exclusive
+with `shared`, `mirror`, and `includes`. Roles on read-only branch members are
+descriptive in status and manifests; scenario watch triggers cannot select them
+because file-watch bindings skip read-only/mirror-classified sessions.
 
 This generic multi-reader scenario attaches two independent readers to an existing source session called `subject`:
 
@@ -248,7 +260,7 @@ task = "Identify missing tests in the subject worktree without modifying it."
 
 **Starred sessions:** `star = true` creates the session already starred, protecting it from an accidental manual `gr delete` and bulk sweeps. `shared = true` only shields a session from scenario stop/delete, not from a manual `gr delete` — use `star` for that.
 
-`includes` and `star` apply only to sessions the scenario creates; a `shared = true` session reuses an existing one as-is, so both are ignored for it.
+`includes` and `star` apply only to sessions the scenario creates; a `shared = true` session reuses an existing one as-is, so both are ignored for it. `gr scenario add` accepts `--read-only` with the same branch-backed read-only semantics as TOML.
 
 ### `[[trigger]]` blocks (scenario-embedded triggers)
 

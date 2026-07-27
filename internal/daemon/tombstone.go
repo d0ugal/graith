@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,14 +17,15 @@ import (
 // live delete paths and by tombstone resume so the teardown rules live in one
 // place.
 type teardownSpec struct {
-	ID           string              `json:"id"`
-	RepoPath     string              `json:"repo_path,omitempty"`
-	WorktreePath string              `json:"worktree_path,omitempty"`
-	Branch       string              `json:"branch,omitempty"`
-	Shared       bool                `json:"shared,omitempty"`
-	InPlace      bool                `json:"in_place,omitempty"`
-	SystemKind   string              `json:"system_kind,omitempty"`
-	Includes     []IncludedRepoState `json:"includes,omitempty"`
+	ID             string              `json:"id"`
+	RepoPath       string              `json:"repo_path,omitempty"`
+	WorktreePath   string              `json:"worktree_path,omitempty"`
+	Branch         string              `json:"branch,omitempty"`
+	Shared         bool                `json:"shared,omitempty"`
+	ReadOnlyBranch bool                `json:"read_only_branch,omitempty"`
+	InPlace        bool                `json:"in_place,omitempty"`
+	SystemKind     string              `json:"system_kind,omitempty"`
+	Includes       []IncludedRepoState `json:"includes,omitempty"`
 }
 
 // tombstone is a durable marker written before a session's teardown begins and
@@ -53,6 +55,11 @@ func (sm *SessionManager) teardownArtifacts(t teardownSpec) error {
 		// DataDir/orchestrator, which the per-session scratch cleanup doesn't
 		// cover. Remove the whole tree.
 		return os.RemoveAll(filepath.Join(sm.paths.DataDir, "orchestrator"))
+	case t.ReadOnlyBranch:
+		return errors.Join(
+			git.TeardownSession(t.RepoPath, t.WorktreePath, ""),
+			os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", t.ID)),
+		)
 	case t.Shared:
 		return os.RemoveAll(filepath.Join(sm.paths.DataDir, "scratch", t.ID))
 	case t.InPlace:
@@ -239,14 +246,15 @@ func (sm *SessionManager) resumeTombstones() {
 						missing = append(missing, missingChildTombstone{
 							name: child.Name,
 							spec: teardownSpec{
-								ID:           child.ID,
-								RepoPath:     child.RepoPath,
-								WorktreePath: child.WorktreePath,
-								Branch:       child.Branch,
-								Shared:       child.Mirror,
-								InPlace:      child.InPlace,
-								SystemKind:   child.SystemKind,
-								Includes:     child.Includes,
+								ID:             child.ID,
+								RepoPath:       child.RepoPath,
+								WorktreePath:   child.WorktreePath,
+								Branch:         child.Branch,
+								Shared:         child.Mirror,
+								ReadOnlyBranch: child.ReadOnlyBranch,
+								InPlace:        child.InPlace,
+								SystemKind:     child.SystemKind,
+								Includes:       child.Includes,
 							},
 							pid:          child.PID,
 							pidStartTime: child.PIDStartTime,

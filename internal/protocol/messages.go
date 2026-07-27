@@ -100,6 +100,7 @@ type CreateMsg struct {
 	Model               string    `json:"model,omitempty"`
 	NoRepo              bool      `json:"no_repo,omitempty"`
 	Mirror              string    `json:"mirror,omitempty"`
+	ReadOnly            bool      `json:"read_only,omitempty"`
 	AgentHooks          bool      `json:"agent_hooks,omitempty"`
 	InPlace             bool      `json:"in_place,omitempty"`
 	AllowConcurrent     bool      `json:"allow_concurrent,omitempty"`
@@ -540,44 +541,46 @@ type SessionListMsg struct {
 }
 
 type SessionInfo struct {
-	ID              string             `json:"id"`
-	ParentID        string             `json:"parent_id,omitempty"`
-	Name            string             `json:"name"`
-	Labels          []string           `json:"labels"`
-	RepoPath        string             `json:"repo_path"`
-	RepoName        string             `json:"repo_name"`
-	WorktreePath    string             `json:"worktree_path"`
-	CWD             string             `json:"cwd"`
-	Branch          string             `json:"branch"`
-	BaseBranch      string             `json:"base_branch"`
-	Agent           string             `json:"agent"`
-	AgentSessionID  string             `json:"agent_session_id,omitempty"`
-	Status          string             `json:"status"`
-	AgentStatus     string             `json:"agent_status,omitempty"`
-	ExitCode        *int               `json:"exit_code,omitempty"`
-	ExitSignal      string             `json:"exit_signal,omitempty"`
-	CreatedAt       string             `json:"created_at"`
-	LastAttachedAt  string             `json:"last_attached_at,omitempty"`
-	StatusChangedAt string             `json:"status_changed_at,omitempty"`
-	Dirty           bool               `json:"dirty,omitempty"`
-	UnpushedCount   int                `json:"unpushed_count,omitempty"`
-	Sandboxed       bool               `json:"sandboxed,omitempty"`
-	Mirror          bool               `json:"mirror,omitempty"`
-	InPlace         bool               `json:"in_place,omitempty"`
-	Model           string             `json:"model,omitempty"`
-	ToolName        string             `json:"tool_name,omitempty"`
-	Includes        []IncludedRepoInfo `json:"includes,omitempty"`
-	ConfigStale     bool               `json:"config_stale,omitempty"`
-	Starred         bool               `json:"starred,omitempty"`
-	SystemKind      string             `json:"system_kind,omitempty"`
-	ScenarioID      string             `json:"scenario_id,omitempty"`
-	ScenarioName    string             `json:"scenario_name,omitempty"`
-	SummaryText     string             `json:"summary_text,omitempty"`
-	SummaryFaded    bool               `json:"summary_faded,omitempty"`
-	LastOutputAt    string             `json:"last_output_at,omitempty"`
-	MigratedFrom    string             `json:"migrated_from,omitempty"`
-	PullRequest     *PRInfo            `json:"pull_request,omitempty"`
-	CI              *CIInfo            `json:"ci,omitempty"`
+	ID               string             `json:"id"`
+	ParentID         string             `json:"parent_id,omitempty"`
+	Name             string             `json:"name"`
+	Labels           []string           `json:"labels"`
+	RepoPath         string             `json:"repo_path"`
+	RepoName         string             `json:"repo_name"`
+	WorktreePath     string             `json:"worktree_path"`
+	CWD              string             `json:"cwd"`
+	Branch           string             `json:"branch"`
+	BaseBranch       string             `json:"base_branch"`
+	Agent            string             `json:"agent"`
+	AgentSessionID   string             `json:"agent_session_id,omitempty"`
+	Status           string             `json:"status"`
+	AgentStatus      string             `json:"agent_status,omitempty"`
+	ExitCode         *int               `json:"exit_code,omitempty"`
+	ExitSignal       string             `json:"exit_signal,omitempty"`
+	CreatedAt        string             `json:"created_at"`
+	LastAttachedAt   string             `json:"last_attached_at,omitempty"`
+	StatusChangedAt  string             `json:"status_changed_at,omitempty"`
+	Dirty            bool               `json:"dirty,omitempty"`
+	UnpushedCount    int                `json:"unpushed_count,omitempty"`
+	Sandboxed        bool               `json:"sandboxed,omitempty"`
+	Mirror           bool               `json:"mirror,omitempty"`
+	ReadOnlyBranch   bool               `json:"read_only_branch,omitempty"`
+	ReadOnlyRevision string             `json:"read_only_revision,omitempty"`
+	InPlace          bool               `json:"in_place,omitempty"`
+	Model            string             `json:"model,omitempty"`
+	ToolName         string             `json:"tool_name,omitempty"`
+	Includes         []IncludedRepoInfo `json:"includes,omitempty"`
+	ConfigStale      bool               `json:"config_stale,omitempty"`
+	Starred          bool               `json:"starred,omitempty"`
+	SystemKind       string             `json:"system_kind,omitempty"`
+	ScenarioID       string             `json:"scenario_id,omitempty"`
+	ScenarioName     string             `json:"scenario_name,omitempty"`
+	SummaryText      string             `json:"summary_text,omitempty"`
+	SummaryFaded     bool               `json:"summary_faded,omitempty"`
+	LastOutputAt     string             `json:"last_output_at,omitempty"`
+	MigratedFrom     string             `json:"migrated_from,omitempty"`
+	PullRequest      *PRInfo            `json:"pull_request,omitempty"`
+	CI               *CIInfo            `json:"ci,omitempty"`
 	// Tokens is the aggregated token usage for the session's current agent, or
 	// nil when unknown (never parsed, unsupported agent, or unreadable). Absent
 	// via omitempty so older clients and pre-token daemons project nothing.
@@ -1060,11 +1063,12 @@ type ScenarioSessionInput struct {
 	// Mirror names another member in this scenario whose session worktree this
 	// member must view read-only. It is a scenario-local reference, not a daemon
 	// session selector or filesystem path.
-	Mirror string `json:"mirror,omitempty"`
-	Agent  string `json:"agent,omitempty"`
-	Model  string `json:"model,omitempty"`
-	Base   string `json:"base,omitempty"`
-	Role   string `json:"role,omitempty"`
+	Mirror   string `json:"mirror,omitempty"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+	Agent    string `json:"agent,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Base     string `json:"base,omitempty"`
+	Role     string `json:"role,omitempty"`
 	// Prompt is the member's startup instructions. When empty, Task remains the
 	// launch prompt for compatibility; unlike Task, Prompt never seeds a todo or
 	// forms a completion contract.
@@ -1254,6 +1258,7 @@ type ScenarioSessionInfo struct {
 	Name      string `json:"name"`
 	SessionID string `json:"session_id"`
 	Mirror    string `json:"mirror,omitempty"`
+	ReadOnly  bool   `json:"read_only,omitempty"`
 	Role      string `json:"role,omitempty"`
 	Prompt    string `json:"prompt,omitempty"`
 	Task      string `json:"task,omitempty"`

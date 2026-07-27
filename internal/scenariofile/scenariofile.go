@@ -36,6 +36,7 @@ type Session struct {
 	Name       string   `toml:"name"`
 	Repo       string   `toml:"repo"`
 	Mirror     string   `toml:"mirror"`
+	ReadOnly   bool     `toml:"read_only"`
 	Agent      string   `toml:"agent"`
 	Model      string   `toml:"model"`
 	Base       string   `toml:"base"`
@@ -72,6 +73,7 @@ type Result struct {
 type MirrorMember struct {
 	Name     string
 	Mirror   string
+	ReadOnly bool
 	Repo     string
 	Base     string
 	Shared   bool
@@ -99,6 +101,17 @@ func ValidateMirrorMembers(members []MirrorMember) ([]int, error) {
 	}
 
 	for i, member := range members {
+		if member.ReadOnly {
+			switch {
+			case member.Shared:
+				return nil, fmt.Errorf("session %q: read_only and shared are mutually exclusive", member.Name)
+			case member.Includes > 0:
+				return nil, fmt.Errorf("session %q: read_only and includes are mutually exclusive (read-only branch sessions do not support included repos)", member.Name)
+			case member.Mirror == "" && member.Repo == "":
+				return nil, fmt.Errorf("session %q: read_only requires repo", member.Name)
+			}
+		}
+
 		if member.Mirror == "" {
 			continue
 		}
@@ -106,6 +119,8 @@ func ValidateMirrorMembers(members []MirrorMember) ([]int, error) {
 		switch {
 		case member.Shared:
 			return nil, fmt.Errorf("session %q: mirror and shared are mutually exclusive", member.Name)
+		case member.ReadOnly:
+			return nil, fmt.Errorf("session %q: mirror and read_only are mutually exclusive", member.Name)
 		case member.Repo != "":
 			return nil, fmt.Errorf("session %q: mirror and repo are mutually exclusive (repo is derived from the mirror target)", member.Name)
 		case member.Base != "":
@@ -121,6 +136,10 @@ func ValidateMirrorMembers(members []MirrorMember) ([]int, error) {
 
 		if target == i {
 			return nil, fmt.Errorf("session %q: mirror reference is cyclic (a member cannot mirror itself)", member.Name)
+		}
+
+		if members[target].ReadOnly {
+			return nil, fmt.Errorf("session %q: mirror target %q is read_only; declare a separate read_only member instead", member.Name, member.Mirror)
 		}
 
 		targets[i] = target
@@ -215,7 +234,7 @@ func Parse(data []byte) (*File, error) {
 	members := make([]MirrorMember, len(sf.Sessions))
 	for i, s := range sf.Sessions {
 		members[i] = MirrorMember{
-			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Name: s.Name, Mirror: s.Mirror, ReadOnly: s.ReadOnly, Repo: s.Repo, Base: s.Base,
 			Shared: s.Shared, Includes: len(s.Includes),
 		}
 	}
@@ -280,7 +299,7 @@ func (sf *File) DefinedOwnedMembers() map[string]bool {
 func (sf *File) DefinedRoles() map[string]bool {
 	roles := make(map[string]bool, len(sf.Sessions))
 	for _, s := range sf.Sessions {
-		if s.Role != "" && !s.Shared && s.Mirror == "" {
+		if s.Role != "" && !s.Shared && s.Mirror == "" && !s.ReadOnly {
 			roles[s.Role] = true
 		}
 	}
@@ -453,6 +472,7 @@ func SessionInputs(sf *File) ([]protocol.ScenarioSessionInput, error) {
 			Name:       s.Name,
 			Repo:       s.Repo,
 			Mirror:     s.Mirror,
+			ReadOnly:   s.ReadOnly,
 			Agent:      s.Agent,
 			Model:      s.Model,
 			Base:       s.Base,

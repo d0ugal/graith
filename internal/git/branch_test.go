@@ -134,6 +134,34 @@ func TestDiscoverDefaultBranchUnborn(t *testing.T) {
 	}
 }
 
+func TestResolveBranchCommitPrefersOriginBranch(t *testing.T) {
+	dir := setupTestRepo(t)
+	addBareOrigin(t, dir)
+
+	if _, err := RunOutput(dir, "checkout", "-b", "canny"); err != nil {
+		t.Fatalf("checkout canny: %v", err)
+	}
+
+	originRev := commitFile(t, dir, "canny.txt", "origin\n", "origin canny")
+	if _, err := RunOutput(dir, "push", "origin", "canny"); err != nil {
+		t.Fatalf("push canny: %v", err)
+	}
+
+	localRev := commitFile(t, dir, "canny.txt", "local\n", "local canny")
+	if localRev == originRev {
+		t.Fatal("local commit did not diverge from origin")
+	}
+
+	got, err := ResolveBranchCommit(dir, "canny")
+	if err != nil {
+		t.Fatalf("ResolveBranchCommit: %v", err)
+	}
+
+	if got != originRev {
+		t.Fatalf("ResolveBranchCommit = %q, want origin branch %q", got, originRev)
+	}
+}
+
 func TestCreateBranch(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -588,6 +588,13 @@
           "optional": true
         },
         {
+          "name": "read_only",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
           "name": "agent_hooks",
           "type": {
             "kind": "bool"
@@ -3447,6 +3454,13 @@
           "optional": true
         },
         {
+          "name": "read_only",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
           "name": "role",
           "type": {
             "kind": "string"
@@ -3569,6 +3583,13 @@
           "name": "mirror",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "read_only",
+          "type": {
+            "kind": "bool"
           },
           "optional": true
         },
@@ -4233,6 +4254,20 @@
           "name": "mirror",
           "type": {
             "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "read_only_branch",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "read_only_revision",
+          "type": {
+            "kind": "string"
           },
           "optional": true
         },

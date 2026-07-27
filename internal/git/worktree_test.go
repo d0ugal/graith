@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,169 @@ func makeWorktree(t *testing.T, repo, branch string) string {
 	}
 
 	return wt
+}
+
+func commitFile(t *testing.T, repo, path, content, message string) string {
+	t.Helper()
+
+	writeFile(t, filepath.Join(repo, path), content)
+
+	if _, err := RunOutput(repo, "add", path); err != nil {
+		t.Fatalf("git add %s: %v", path, err)
+	}
+
+	if _, err := RunOutput(repo, "commit", "-m", message); err != nil {
+		t.Fatalf("git commit %q: %v", message, err)
+	}
+
+	rev, err := RunOutput(repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+
+	return rev
+}
+
+func TestSetupReadOnlySessionCreatesDetachedWorktreeAtBranchRevision(t *testing.T) {
+	repo := setupTestRepo(t)
+	if _, err := RunOutput(repo, "checkout", "-b", "canny"); err != nil {
+		t.Fatalf("checkout canny: %v", err)
+	}
+
+	wantRev := commitFile(t, repo, "canny.txt", "canny\n", "canny branch")
+	if _, err := RunOutput(repo, "checkout", "main"); err != nil {
+		t.Fatalf("checkout main: %v", err)
+	}
+
+	wt := filepath.Join(t.TempDir(), "reader")
+
+	gotRev, err := SetupReadOnlySession(context.Background(), repo, wt, "canny", false)
+	if err != nil {
+		t.Fatalf("SetupReadOnlySession: %v", err)
+	}
+
+	if gotRev != wantRev {
+		t.Fatalf("revision = %q, want %q", gotRev, wantRev)
+	}
+
+	head, err := RunOutput(wt, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("worktree HEAD: %v", err)
+	}
+
+	if head != wantRev {
+		t.Errorf("worktree HEAD = %q, want %q", head, wantRev)
+	}
+
+	branch, err := RunOutput(wt, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		t.Fatalf("worktree branch: %v", err)
+	}
+
+	if branch != "HEAD" {
+		t.Errorf("worktree branch = %q, want detached HEAD", branch)
+	}
+}
+
+func TestRefreshReadOnlySessionFetchesAndMovesDetachedWorktree(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	origin := addBareOrigin(t, repo)
+	if _, err := RunOutput(repo, "checkout", "-b", "canny"); err != nil {
+		t.Fatalf("checkout canny: %v", err)
+	}
+
+	initialRev := commitFile(t, repo, "canny.txt", "auld\n", "auld canny")
+	if _, err := RunOutput(repo, "push", "origin", "canny"); err != nil {
+		t.Fatalf("push canny: %v", err)
+	}
+
+	if _, err := RunOutput(repo, "checkout", "main"); err != nil {
+		t.Fatalf("checkout main: %v", err)
+	}
+
+	wt := filepath.Join(t.TempDir(), "reader")
+
+	gotRev, err := SetupReadOnlySession(context.Background(), repo, wt, "canny", false)
+	if err != nil {
+		t.Fatalf("SetupReadOnlySession: %v", err)
+	}
+
+	if gotRev != initialRev {
+		t.Fatalf("initial revision = %q, want %q", gotRev, initialRev)
+	}
+
+	other := filepath.Join(t.TempDir(), "other")
+	if _, err := RunOutput("", "clone", origin, other); err != nil {
+		t.Fatalf("clone origin: %v", err)
+	}
+
+	if _, err := RunOutput(other, "checkout", "canny"); err != nil {
+		t.Fatalf("checkout other canny: %v", err)
+	}
+
+	wantRev := commitFile(t, other, "canny.txt", "braw\n", "braw canny")
+	if _, err := RunOutput(other, "push", "origin", "canny"); err != nil {
+		t.Fatalf("push moved canny: %v", err)
+	}
+
+	refreshedRev, err := RefreshReadOnlySession(context.Background(), repo, wt, "canny", true)
+	if err != nil {
+		t.Fatalf("RefreshReadOnlySession: %v", err)
+	}
+
+	if refreshedRev != wantRev {
+		t.Fatalf("refreshed revision = %q, want %q", refreshedRev, wantRev)
+	}
+
+	head, err := RunOutput(wt, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("worktree HEAD: %v", err)
+	}
+
+	if head != wantRev {
+		t.Errorf("worktree HEAD = %q, want %q", head, wantRev)
+	}
+}
+
+func TestRefreshReadOnlySessionRecreatesMissingRegisteredWorktree(t *testing.T) {
+	repo := setupTestRepo(t)
+	if _, err := RunOutput(repo, "checkout", "-b", "canny"); err != nil {
+		t.Fatalf("checkout canny: %v", err)
+	}
+
+	wantRev := commitFile(t, repo, "canny.txt", "braw\n", "braw canny")
+	if _, err := RunOutput(repo, "checkout", "main"); err != nil {
+		t.Fatalf("checkout main: %v", err)
+	}
+
+	wt := filepath.Join(t.TempDir(), "reader")
+
+	if _, err := SetupReadOnlySession(context.Background(), repo, wt, "canny", false); err != nil {
+		t.Fatalf("SetupReadOnlySession: %v", err)
+	}
+
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatalf("remove worktree dir: %v", err)
+	}
+
+	refreshedRev, err := RefreshReadOnlySession(context.Background(), repo, wt, "canny", false)
+	if err != nil {
+		t.Fatalf("RefreshReadOnlySession: %v", err)
+	}
+
+	if refreshedRev != wantRev {
+		t.Fatalf("refreshed revision = %q, want %q", refreshedRev, wantRev)
+	}
+
+	head, err := RunOutput(wt, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("recreated worktree HEAD: %v", err)
+	}
+
+	if head != wantRev {
+		t.Errorf("recreated worktree HEAD = %q, want %q", head, wantRev)
+	}
 }
 
 // worktreeCount returns the number of registered worktrees (including the main

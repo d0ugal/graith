@@ -56,8 +56,10 @@ unsuspends actions, and reconciles elapsed deadlines immediately.
 ### `gr scenario add <name>`
 
 Add a member from the orchestrator. Beyond `--name`, `--repo`, `--agent`,
-`--model`, `--role`, `--prompt`, `--task`, and `--base`, policy members accept
-the flags below. `--prompt` supplies startup instructions without tracked work;
+`--model`, `--role`, `--prompt`, `--task`, `--base`, and `--read-only`, policy
+members accept the flags below. `--read-only` creates a branch-backed read-only
+member with the same constraints as scenario TOML. `--prompt` supplies startup
+instructions without tracked work;
 `--task` seeds an assigned todo and doubles as the startup prompt when `--prompt`
 is omitted. `<name>`, `--name`, and `--depends-on` take already-rendered instance
 and member names — `scenario add` doesn't evaluate instance-name templates.

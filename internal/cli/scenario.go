@@ -128,6 +128,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Name:       s.Name,
 			Repo:       repo,
 			Mirror:     s.Mirror,
+			ReadOnly:   s.ReadOnly,
 			Agent:      s.Agent,
 			Model:      s.Model,
 			Base:       s.Base,
@@ -143,7 +144,7 @@ func buildSessionInputs(sf *scenarioFile) ([]protocol.ScenarioSessionInput, erro
 			Policy:     scenarioMemberPolicyInput(s.Policy),
 		}
 		mirrorMembers[i] = scenariofile.MirrorMember{
-			Name: s.Name, Mirror: s.Mirror, Repo: s.Repo, Base: s.Base,
+			Name: s.Name, Mirror: s.Mirror, ReadOnly: s.ReadOnly, Repo: s.Repo, Base: s.Base,
 			Shared: s.Shared, Includes: len(s.Includes),
 		}
 	}
@@ -824,6 +825,7 @@ var scenarioAddCmd = &cobra.Command{
 		task, _ := cmd.Flags().GetString("task")
 		dependsOn, _ := cmd.Flags().GetStringArray("depends-on")
 		base, _ := cmd.Flags().GetString("base")
+		readOnly, _ := cmd.Flags().GetBool("read-only")
 		optional, _ := cmd.Flags().GetBool("optional")
 		timeout, _ := cmd.Flags().GetString("timeout")
 		retries, _ := cmd.Flags().GetInt("retries")
@@ -862,6 +864,7 @@ var scenarioAddCmd = &cobra.Command{
 				Agent:      agent,
 				Model:      model,
 				Base:       base,
+				ReadOnly:   readOnly,
 				Role:       role,
 				Prompt:     prompt,
 				Task:       task,
@@ -1068,6 +1071,7 @@ func registerScenarioCmd() {
 	scenarioAddCmd.Flags().String("task", "", "Tracked task used to seed an assigned todo")
 	scenarioAddCmd.Flags().StringArray("depends-on", nil, "Member whose seeded task must finish first (repeatable)")
 	scenarioAddCmd.Flags().String("base", "", "Base branch")
+	scenarioAddCmd.Flags().Bool("read-only", false, "Mirror the selected repo branch read-only")
 	scenarioResultPutCmd.Flags().StringVar(&scenarioResultFile, "file", "", "Read result body from file")
 	scenarioResultPutCmd.Flags().StringVar(&scenarioResultScenario, "scenario", "", "Scenario name (defaults to GRAITH_SCENARIO_NAME)")
 	scenarioAddCmd.Flags().Bool("optional", false, "Do not require this member for scenario completion")

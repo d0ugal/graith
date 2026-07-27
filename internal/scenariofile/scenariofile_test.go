@@ -378,6 +378,42 @@ role = "auditor"
 	}
 }
 
+func TestParse_ReadOnlyBranchMember(t *testing.T) {
+	data := []byte(`
+version = 1
+[scenario]
+name = "strath-readers"
+[[sessions]]
+name = "reader"
+repo = "~/Code/croft"
+base = "release"
+read_only = true
+role = "observer"
+`)
+
+	sf, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	inputs, err := SessionInputs(sf)
+	if err != nil {
+		t.Fatalf("SessionInputs: %v", err)
+	}
+
+	if len(inputs) != 1 {
+		t.Fatalf("inputs = %d, want 1", len(inputs))
+	}
+
+	if !inputs[0].ReadOnly || inputs[0].Repo != "~/Code/croft" || inputs[0].Base != "release" {
+		t.Fatalf("read-only input = %+v", inputs[0])
+	}
+
+	if roles := sf.DefinedRoles(); len(roles) != 0 {
+		t.Fatalf("read-only branch roles should not be selectable for watch triggers, got %v", roles)
+	}
+}
+
 func TestParseDefersTemplatedMemberGraphToDaemonRenderContext(t *testing.T) {
 	data := []byte(`
 version = 1
@@ -452,6 +488,11 @@ func TestValidateMirrorMembers_RejectsInvalidTopology(t *testing.T) {
 		{"repo conflict", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Repo: "/croft"}}, "mirror and repo"},
 		{"base conflict", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Base: "main"}}, "mirror and base"},
 		{"includes conflict", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", Includes: 1}}, "mirror and includes"},
+		{"read-only mirror", []MirrorMember{{Name: "subject"}, {Name: "reader", Mirror: "subject", ReadOnly: true}}, "mirror and read_only"},
+		{"mirror of read-only target", []MirrorMember{{Name: "subject", Repo: "/croft", ReadOnly: true}, {Name: "reader", Mirror: "subject"}}, "mirror target \"subject\" is read_only"},
+		{"read-only shared", []MirrorMember{{Name: "reader", ReadOnly: true, Shared: true}}, "read_only and shared"},
+		{"read-only missing repo", []MirrorMember{{Name: "reader", ReadOnly: true}}, "read_only requires repo"},
+		{"read-only includes", []MirrorMember{{Name: "reader", ReadOnly: true, Includes: 1}}, "read_only and includes"},
 	}
 
 	for _, test := range tests {
@@ -709,16 +750,17 @@ func TestDefinedRoles(t *testing.T) {
 		{Name: "bairn"},                                  // no role
 		{Name: "auld", Role: "watcher", Shared: true},    // shared → role not selectable
 		{Name: "reader", Role: "auditor", Mirror: "ben"}, // mirror → role not selectable
+		{Name: "observer", Role: "observer", ReadOnly: true},
 	}}
 
 	roles := sf.DefinedRoles()
 	if len(roles) != 2 || !roles["implementer"] || !roles["reviewer"] {
-		t.Fatalf("roles = %v (shared and mirror roles should be excluded)", roles)
+		t.Fatalf("roles = %v (shared, mirror, and read-only roles should be excluded)", roles)
 	}
 
 	members := sf.DefinedMembers()
-	if len(members) != 5 || !members["auld"] || !members["reader"] {
-		t.Fatalf("members = %v (shared and mirror sessions should still be members)", members)
+	if len(members) != 6 || !members["auld"] || !members["reader"] || !members["observer"] {
+		t.Fatalf("members = %v (shared, mirror, and read-only sessions should still be members)", members)
 	}
 }
 

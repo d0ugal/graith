@@ -24,6 +24,7 @@ var (
 	newRepo                string
 	newNoRepo              bool
 	newMirror              string
+	newReadOnly            bool
 	newInPlace             bool
 	newAllowConcurrent     bool
 	newSkipModelValidation bool
@@ -77,6 +78,18 @@ var newCmd = &cobra.Command{
 			return errors.New("--in-place and --mirror are mutually exclusive")
 		}
 
+		if newReadOnly && newNoRepo {
+			return errors.New("--read-only and --no-repo are mutually exclusive")
+		}
+
+		if newReadOnly && newMirror != "" {
+			return errors.New("--read-only and --mirror are mutually exclusive")
+		}
+
+		if newReadOnly && newInPlace {
+			return errors.New("--read-only and --in-place are mutually exclusive")
+		}
+
 		if newInPlace && newBase != "" {
 			return errors.New("--in-place and --base are mutually exclusive (in-place sessions don't create branches)")
 		}
@@ -122,6 +135,7 @@ var newCmd = &cobra.Command{
 			Model:               newModel,
 			NoRepo:              newNoRepo,
 			Mirror:              newMirror,
+			ReadOnly:            newReadOnly,
 			AgentHooks:          true,
 			InPlace:             newInPlace,
 			AllowConcurrent:     newAllowConcurrent,
@@ -219,6 +233,7 @@ func registerNewCmd() {
 	newCmd.Flags().StringVarP(&newRepo, "repo", "C", "", "path to git repo (default: cwd)")
 	newCmd.Flags().BoolVar(&newNoRepo, "no-repo", false, "create session without a git repo or worktree")
 	newCmd.Flags().StringVar(&newMirror, "mirror", "", "mirror another session's worktree (read-only)")
+	newCmd.Flags().BoolVar(&newReadOnly, "read-only", false, "mirror the selected repo branch read-only (use --base to choose the branch)")
 	newCmd.Flags().BoolVar(&newInPlace, "in-place", false, "run agent directly in the repo without creating a worktree")
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")

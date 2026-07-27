@@ -240,6 +240,11 @@ func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint1
 }
 
 func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
+	worktreePort := sm.worktreePort
+	if worktreePort == nil {
+		worktreePort = defaultWorktreePort()
+	}
+
 	// --- Pre-lock: discover GitHub username ---
 	sm.mu.RLock()
 	sessSnap, snapOk := sm.state.Sessions[id]
@@ -371,7 +376,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		return SessionState{}, fmt.Errorf("session %q has no configured cwd", id)
 	}
 
-	if sessState.RepoPath != "" {
+	if sessState.RepoPath != "" && !sessState.Mirror && !sessState.ReadOnlyBranch {
 		if rc, ok := sm.cfg.FindRepo(sessState.RepoPath); ok && rc.Singleton {
 			canonicalRoot := config.ResolvePath(sessState.RepoPath)
 			for _, s := range sm.state.Sessions {
@@ -542,6 +547,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	copy(sessIncludes, sessState.Includes)
 	sessInPlace := sessState.InPlace
 	sessMirror := sessState.Mirror
+	sessReadOnlyBranch := sessState.ReadOnlyBranch
+	sessBranch := sessState.Branch
+	readOnlyFetch := sm.cfg.FetchOnCreate
+	gitFetchTimeout := sm.cfg.Git.FetchTimeoutDuration()
 	sessSystemKind := sessState.SystemKind
 	sessFreshStart := sessState.FreshStart
 	sessToken := newToken
@@ -591,6 +600,27 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			}
 		}
 		sm.mu.Unlock()
+	}
+
+	readOnlyRevision := ""
+
+	if sessReadOnlyBranch {
+		if sessBranch == "" {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("read-only branch session %q has no saved branch", id)
+		}
+
+		gitCtx, gitCancel := context.WithTimeout(ctx, gitFetchTimeout)
+		revision, refreshErr := worktreePort.RefreshReadOnly(gitCtx, sessRepoPath, sessWorktreePath, sessBranch, readOnlyFetch)
+
+		gitCancel()
+
+		if refreshErr != nil {
+			rollbackState()
+			return SessionState{}, fmt.Errorf("refresh read-only branch session: %w", refreshErr)
+		}
+
+		readOnlyRevision = revision
 	}
 
 	resumeArgs, resumeNote := resolveResumeArgs(agent, sessAgent, sessAgentSessionID, sessFreshStart)
@@ -989,6 +1019,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessState.LastMessage = ""
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
+
+	if sessReadOnlyBranch {
+		sessState.ReadOnlyRevision = readOnlyRevision
+	}
 
 	sessState.CreationCfg = &CreationConfig{
 		Agent:         agent,

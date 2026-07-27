@@ -31,6 +31,7 @@ func createOptsFromMsg(c protocol.CreateMsg, agentName string, rows, cols uint16
 		ParentID:            c.ParentID,
 		NoRepo:              c.NoRepo,
 		Mirror:              c.Mirror,
+		ReadOnly:            c.ReadOnly,
 		AgentHooks:          c.AgentHooks,
 		InPlace:             c.InPlace,
 		AllowConcurrent:     c.AllowConcurrent,

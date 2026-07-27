@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 28
+const CurrentStateVersion = 29
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -185,6 +185,10 @@ type SessionState struct {
 	SandboxConfig  *config.SandboxConfig `json:"sandbox_config,omitempty"`
 	Mirror         bool                  `json:"mirror,omitempty"`
 	MirrorSourceID string                `json:"mirror_source_id,omitempty"`
+	// ReadOnlyBranch marks a mirror-classified session whose read-only source is
+	// a Graith-owned detached worktree at Branch, not another session.
+	ReadOnlyBranch   bool   `json:"read_only_branch,omitempty"`
+	ReadOnlyRevision string `json:"read_only_revision,omitempty"`
 	// LegacyMirror / LegacyMirrorSourceID hold the pre-v15 persisted keys for
 	// Mirror / MirrorSourceID (issue #1021 renamed --share-worktree to
 	// --mirror). They exist only so migrateV14ToV15 can copy old state forward;
@@ -470,17 +474,18 @@ type ScenarioCleanupState struct {
 }
 
 type ScenarioSession struct {
-	Name    string                     `json:"name"`
-	Mirror  string                     `json:"mirror,omitempty"`
-	Role    string                     `json:"role"`
-	Prompt  string                     `json:"prompt,omitempty"`
-	Task    string                     `json:"task"`
-	Repo    string                     `json:"repo"`
-	Agent   string                     `json:"agent"`
-	Model   string                     `json:"model,omitempty"`
-	Shared  bool                       `json:"shared,omitempty"`
-	Results []ScenarioResultState      `json:"results,omitempty"`
-	Policy  *ScenarioMemberPolicyState `json:"policy,omitempty"`
+	Name     string                     `json:"name"`
+	Mirror   string                     `json:"mirror,omitempty"`
+	ReadOnly bool                       `json:"read_only,omitempty"`
+	Role     string                     `json:"role"`
+	Prompt   string                     `json:"prompt,omitempty"`
+	Task     string                     `json:"task"`
+	Repo     string                     `json:"repo"`
+	Agent    string                     `json:"agent"`
+	Model    string                     `json:"model,omitempty"`
+	Shared   bool                       `json:"shared,omitempty"`
+	Results  []ScenarioResultState      `json:"results,omitempty"`
+	Policy   *ScenarioMemberPolicyState `json:"policy,omitempty"`
 }
 
 func (s ScenarioSession) startupPrompt() string {
@@ -852,6 +857,7 @@ var migrations = map[int]func(*State) error{
 	25: migrateV25ToV26,
 	26: migrateV26ToV27,
 	27: migrateV27ToV28,
+	28: migrateV28ToV29,
 }
 
 func generateToken() (string, error) {
@@ -1157,6 +1163,12 @@ func migrateV27ToV28(state *State) error {
 
 	return nil
 }
+
+// migrateV28ToV29 is a compatibility boundary for branch-backed read-only
+// sessions. V29 adds persisted read_only_branch/read_only_revision semantics;
+// older binaries would treat those sessions as ordinary mirrors with no backing
+// source and skip detached-worktree cleanup on delete.
+func migrateV28ToV29(_ *State) error { return nil }
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

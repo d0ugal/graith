@@ -84,6 +84,7 @@ func (sm *SessionManager) Delete(id string) error {
 	worktreePath := sessState.WorktreePath
 	branch := sessState.Branch
 	shared := sessState.Mirror
+	readOnlyBranch := sessState.ReadOnlyBranch
 	inPlace := sessState.InPlace
 	agentName := sessState.Agent
 	sessSystemKind := sessState.SystemKind
@@ -122,14 +123,15 @@ func (sm *SessionManager) Delete(id string) error {
 	// if it can't be written, fail closed — revert the session and abort rather
 	// than tear down a worktree with no recovery marker.
 	spec := teardownSpec{
-		ID:           id,
-		RepoPath:     repoPath,
-		WorktreePath: worktreePath,
-		Branch:       branch,
-		Shared:       shared,
-		InPlace:      inPlace,
-		SystemKind:   sessSystemKind,
-		Includes:     sessionIncludes,
+		ID:             id,
+		RepoPath:       repoPath,
+		WorktreePath:   worktreePath,
+		Branch:         branch,
+		Shared:         shared,
+		ReadOnlyBranch: readOnlyBranch,
+		InPlace:        inPlace,
+		SystemKind:     sessSystemKind,
+		Includes:       sessionIncludes,
 	}
 	if err := sm.writeTombstone(tombstone{
 		teardownSpec: spec,
@@ -480,31 +482,33 @@ func (sm *SessionManager) rejectUnsafeDeleteDescendantsLocked(id string, exclude
 // bulkDeleteSnapshot captures the per-session data DeleteWithChildren needs to
 // tear a session down outside the manager lock.
 type bulkDeleteSnapshot struct {
-	id           string
-	name         string
-	agent        string
-	repoPath     string
-	worktreePath string
-	branch       string
-	shared       bool
-	inPlace      bool
-	prevStatus   SessionStatus
-	includes     []IncludedRepoState
-	ptySess      sessionDriver
-	client       *attachedClient
-	pid          int
-	pidStartTime int64
+	id             string
+	name           string
+	agent          string
+	repoPath       string
+	worktreePath   string
+	branch         string
+	shared         bool
+	readOnlyBranch bool
+	inPlace        bool
+	prevStatus     SessionStatus
+	includes       []IncludedRepoState
+	ptySess        sessionDriver
+	client         *attachedClient
+	pid            int
+	pidStartTime   int64
 }
 
 func (s bulkDeleteSnapshot) teardownSpec() teardownSpec {
 	return teardownSpec{
-		ID:           s.id,
-		RepoPath:     s.repoPath,
-		WorktreePath: s.worktreePath,
-		Branch:       s.branch,
-		Shared:       s.shared,
-		InPlace:      s.inPlace,
-		Includes:     s.includes,
+		ID:             s.id,
+		RepoPath:       s.repoPath,
+		WorktreePath:   s.worktreePath,
+		Branch:         s.branch,
+		Shared:         s.shared,
+		ReadOnlyBranch: s.readOnlyBranch,
+		InPlace:        s.inPlace,
+		Includes:       s.includes,
 	}
 }
 
@@ -777,16 +781,17 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 		}
 
 		s := bulkDeleteSnapshot{
-			id:           did,
-			name:         sess.Name,
-			agent:        sess.Agent,
-			repoPath:     sess.RepoPath,
-			worktreePath: sess.WorktreePath,
-			branch:       sess.Branch,
-			shared:       sess.Mirror,
-			inPlace:      sess.InPlace,
-			prevStatus:   sess.Status,
-			includes:     make([]IncludedRepoState, len(sess.Includes)),
+			id:             did,
+			name:           sess.Name,
+			agent:          sess.Agent,
+			repoPath:       sess.RepoPath,
+			worktreePath:   sess.WorktreePath,
+			branch:         sess.Branch,
+			shared:         sess.Mirror,
+			readOnlyBranch: sess.ReadOnlyBranch,
+			inPlace:        sess.InPlace,
+			prevStatus:     sess.Status,
+			includes:       make([]IncludedRepoState, len(sess.Includes)),
 		}
 		copy(s.includes, sess.Includes)
 
@@ -944,16 +949,17 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 			}
 
 			ls := bulkDeleteSnapshot{
-				id:           sid,
-				name:         sess.Name,
-				agent:        sess.Agent,
-				repoPath:     sess.RepoPath,
-				worktreePath: sess.WorktreePath,
-				branch:       sess.Branch,
-				shared:       sess.Mirror,
-				inPlace:      sess.InPlace,
-				prevStatus:   sess.Status,
-				includes:     make([]IncludedRepoState, len(sess.Includes)),
+				id:             sid,
+				name:           sess.Name,
+				agent:          sess.Agent,
+				repoPath:       sess.RepoPath,
+				worktreePath:   sess.WorktreePath,
+				branch:         sess.Branch,
+				shared:         sess.Mirror,
+				readOnlyBranch: sess.ReadOnlyBranch,
+				inPlace:        sess.InPlace,
+				prevStatus:     sess.Status,
+				includes:       make([]IncludedRepoState, len(sess.Includes)),
 			}
 			copy(ls.includes, sess.Includes)
 

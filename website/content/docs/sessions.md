@@ -56,6 +56,15 @@ requires Git 2.42 or newer.
 
 **Mirror:** `gr new observer --mirror my-session` mounts another session's worktree read-only, for observation or review. Add `--headless -p "…"` to opt into a one-shot stream-json session. Requires Graith's enforceable sandbox for the read-only guarantee.
 
+**Read-only branch:** `gr new observer --repo ~/Code/app --read-only --base main` creates a detached worktree at the selected branch revision, launches the agent from a writable scratch directory, and mounts the repository state read-only. If `--base` is omitted, Graith uses the repository default branch. Creation follows the normal fetch policy (`fetch_on_create`, with `--no-fetch` as a creation-time override); resume/restart refreshes the detached worktree to the latest resolved branch revision. Requires Graith's enforceable sandbox. Read-only branch sessions do not support `includes`, and can't be combined with `--mirror`, `--in-place`, or `--no-repo`.
+
+Mirrors and read-only branch sessions are both classified as read-only/mirror
+sessions, so file-watch triggers skip them before creating bindings. Use
+`--mirror` when the session should inspect another live session's exact worktree,
+including uncommitted changes. Use `--read-only` when the session only needs a
+current repository branch reference. Use a normal worktree or `--in-place` for
+agents that need to edit or commit.
+
 ### Headless sessions
 
 **Experimental.** `gr new watcher --headless -p "…"` runs the agent in Claude Code's stream-json mode instead of a PTY — **non-interactive**, for fire-and-forget work like review judges, one-shot helpers, and trigger actions. graith parses the typed event stream, so `gr logs -f` renders it and cost/token usage comes from the result envelope. v1 is Claude-only, one-shot (one prompt, run to completion, exit), requires a prompt, uses the same optional Graith sandbox setting as PTY sessions, and implies `--background`. It's inert unless `[headless] experimental = true`, and can't be resumed as headless once it exits. See [Configuration → Headless sessions]({{< relref "configuration/sessions.md#headless-sessions" >}}).
@@ -155,14 +164,21 @@ Claude and Codex are supported as migration *sources* (transcript formats graith
 gr delete fix-auth-bug
 ```
 
-Deletion:
+`gr delete` is a recoverable soft delete: it stops the agent if needed, hides
+the session from normal lists, and preserves its state and artifacts for the
+configured retention window. Recover with `gr restore`.
+
+`gr purge` or retention cleanup performs destructive teardown:
 
 1. Kills the agent process (if running)
-2. Removes the git worktree
-3. Deletes the branch
+2. Removes owned worktrees and scratch directories
+3. Deletes generated branches when the session owns one
 4. Removes the session from state
 
-With uncommitted changes or unpushed commits, graith prompts for confirmation; `-f` skips.
+Normal worktree sessions own a generated branch and worktree. In-place sessions
+do not own the repository checkout. Session mirrors do not remove the source
+worktree they observe. Branch-backed read-only sessions own a detached worktree
+and writable scratch directory, but no generated branch.
 
 ## Parent-child relationships
 
@@ -189,7 +205,7 @@ The daemon sets these in every agent process:
 | `GRAITH_SESSION_ID` | Unique session ID |
 | `GRAITH_SESSION_NAME` | Human-readable session name |
 | `GRAITH_AGENT_TYPE` | Agent type (e.g. `claude`, `codex`) |
-| `GRAITH_WORKTREE_PATH` | Absolute path to the worktree |
+| `GRAITH_WORKTREE_PATH` | Absolute path to the worktree. For mirror and read-only branch sessions, this is the read-only repository path; the process cwd is writable scratch. |
 | `GRAITH_REPO_PATH` | Absolute path to the source repository (canonical) |
 | `GRAITH_TMPDIR` | Per-repo temporary directory (persists across sessions) |
 | `TMPDIR` | Set to `GRAITH_TMPDIR` |
@@ -202,7 +218,7 @@ When includes are configured:
 
 ## State persistence
 
-Session state lives in `state.json` in the data directory, loaded on daemon start and saved on every mutation, so sessions survive restarts. This includes the authoritative cwd assigned at launch, which can differ from the Git worktree for mirror and system sessions and is reused on resume. Runtime-only state (hook reports, attached clients) isn't persisted — it's rebuilt on restart.
+Session state lives in `state.json` in the data directory, loaded on daemon start and saved on every mutation, so sessions survive restarts. This includes the authoritative cwd assigned at launch, which can differ from the Git worktree for mirror, read-only branch, and system sessions and is reused on resume. Runtime-only state (hook reports, attached clients) isn't persisted — it's rebuilt on restart. Status and protocol JSON expose `read_only_branch` and `read_only_revision` for branch-backed read-only sessions, alongside the source `repo_path`, selected `branch`, and `base_branch`.
 
 ## Labels
 

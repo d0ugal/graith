@@ -16,11 +16,24 @@ import (
 )
 
 type recordingWorktreePort struct {
-	calls          []string
-	setup          error
-	teardown       error
-	branchStarted  chan struct{}
-	branchContinue chan struct{}
+	calls             []string
+	setup             error
+	readOnlySetup     error
+	readOnlyRev       string
+	readOnlySetupCall *recordingReadOnlyCall
+	refresh           error
+	refreshRev        string
+	refreshCall       *recordingReadOnlyCall
+	teardown          error
+	branchStarted     chan struct{}
+	branchContinue    chan struct{}
+}
+
+type recordingReadOnlyCall struct {
+	repoPath     string
+	worktreePath string
+	branch       string
+	fetch        bool
 }
 
 func (p *recordingWorktreePort) IsInsideRepo(string) bool { return true }
@@ -53,6 +66,49 @@ func (p *recordingWorktreePort) DiscoverDefaultBranchOrHEAD(string) (string, err
 func (p *recordingWorktreePort) Setup(context.Context, string, string, string, string, bool) error {
 	p.calls = append(p.calls, "setup")
 	return p.setup
+}
+
+func (p *recordingWorktreePort) setupReadOnly(repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	p.readOnlySetupCall = &recordingReadOnlyCall{
+		repoPath: repoPath, worktreePath: worktreePath, branch: branch, fetch: fetch,
+	}
+
+	p.calls = append(p.calls, "setup-read-only")
+
+	if p.readOnlyRev == "" {
+		p.readOnlyRev = "braw-revision"
+	}
+
+	return p.readOnlyRev, p.readOnlySetup
+}
+
+func (p *recordingWorktreePort) SetupReadOnly(_ context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	if p.readOnlySetup == nil {
+		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
+			return "", err
+		}
+	}
+
+	return p.setupReadOnly(repoPath, worktreePath, branch, fetch)
+}
+
+func (p *recordingWorktreePort) RefreshReadOnly(_ context.Context, repoPath, worktreePath, branch string, fetch bool) (string, error) {
+	p.refreshCall = &recordingReadOnlyCall{
+		repoPath: repoPath, worktreePath: worktreePath, branch: branch, fetch: fetch,
+	}
+
+	p.calls = append(p.calls, "refresh-read-only")
+	if p.refreshRev == "" {
+		p.refreshRev = "canny-revision"
+	}
+
+	if p.refresh == nil {
+		if err := os.MkdirAll(worktreePath, 0o700); err != nil {
+			return "", err
+		}
+	}
+
+	return p.refreshRev, p.refresh
 }
 
 func (p *recordingWorktreePort) Teardown(_, worktreePath, _ string) error {
