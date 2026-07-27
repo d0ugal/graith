@@ -769,7 +769,7 @@
       "path": ".github/workflows/libghostty-native-publish.yml",
       "name": "Publish pinned Linux libghostty artifacts",
       "owner": "native-owners",
-      "file_sha256": "135c5bea295b4dfcd2e2a6d48c21054fa7f74134d9735bbda35d80b686b4c892",
+      "file_sha256": "46fc708495b8e4f7e97afa368302fffb0f834bc4b59f2781443adb235ff52fe9",
       "events": {
         "push": {
           "branches": [
@@ -2795,6 +2795,26 @@
       "retirement_criterion": "remove only after equivalent cipolicy command coverage is added"
     },
     {
+      "path": "cmd/libghosttyarchive/main.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "e329b75d9b3d9e01ebf5a68387f21d59f2566b4435d3a1f5c2c82d1adb4ef810",
+      "executable_contract": "preserve libghostty Linux archive helper pack, inspect, test, diagnostics, and exit-code behavior invoked by native producer and consumer workflows",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with equivalent native producer and consumer archive validation owned by the repository"
+    },
+    {
+      "path": "cmd/libghosttyarchive/main_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "bfb8a15441f249edc262707d5cc372154652ee99f121b54097963e623ccf9d93",
+      "executable_contract": "preserve libghostty archive helper CLI contract coverage for successful operation, usage errors, validation failures, and self-test behavior",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent command contract coverage is added"
+    },
+    {
       "path": "gui/ios/Makefile",
       "owner": "gui-owners",
       "kind": "ci-entrypoint",
@@ -2819,7 +2839,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "a9996e0020535d53bf657c7fe23f419040db703efcbffc6496a4847f8902e609",
+      "sha256": "22958fe9e5cb3a418b0a77bc7619234928388aa19ca29541fc975499a1086387",
       "executable_contract": "preserve native/release/coverage routing and libghostty artifact trust assertions formerly held by libghostty-policy.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent native policy coverage and zero unexplained replay disagreement"
@@ -2869,7 +2889,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "a8b018258cf1d674c74304ba44192b84c8be2111253981e877705ce22efb5a5a",
+      "sha256": "45f58aade5d088a34f33cf1aa78068fb9b54b56283c00616ff00d2805f51714c",
       "executable_contract": "preserve diagnostic wording, detector fallback, helper language, and no-live-aggregation assertions for the CI shadow summary",
       "disposition": "grandfathered",
       "retirement_criterion": "delete with the CI shadow summary helper or replace only after equivalent summary contract coverage exists"
@@ -2883,6 +2903,26 @@
       "executable_contract": "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": "internal/libghosttyarchive/archive.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-helper",
+      "git_mode": "100644",
+      "sha256": "bd8d339de44f12e3550e7d41a0e1c2e4c3b96f091844f235057bf8430d8fd47b",
+      "executable_contract": "preserve deterministic libghostty Linux archive construction, metadata normalization, member validation, and malformed archive rejection",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only with equivalent archive construction and validation coverage owned by the repository"
+    },
+    {
+      "path": "internal/libghosttyarchive/archive_test.go",
+      "owner": "graith-maintainers",
+      "kind": "go-policy-contract-test",
+      "git_mode": "100644",
+      "sha256": "8d9884d15e2e5f288ecdbd19589c567b7a8c4e0827c73b9f54cd26defa3a4642",
+      "executable_contract": "preserve old-vs-new parity, deterministic tar metadata, traversal rejection, malformed input rejection, and pack validation coverage",
+      "disposition": "grandfathered",
+      "retirement_criterion": "remove only after equivalent archive parity and failure-mode coverage exists"
     },
     {
       "path": "libghostty-native.lock.json",
@@ -2925,21 +2965,11 @@
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
     },
     {
-      "path": "scripts/libghostty-linux-archive.py",
-      "owner": "graith-maintainers",
-      "kind": "root-script-policy",
-      "git_mode": "100644",
-      "sha256": "cb86feb6175679f6efbb54ce1ab595a365583660e27c4dcec755abf095238007",
-      "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
-      "disposition": "grandfathered",
-      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
-    },
-    {
       "path": "scripts/libghostty-native.sh",
       "owner": "graith-maintainers",
       "kind": "root-script-policy",
       "git_mode": "100755",
-      "sha256": "099c5bd5db5d839eb5fda18dee37f1f6e27b894b5f4c4010316eea726d183a58",
+      "sha256": "c15c877ab279011bc80aa2f4531148ad0cc4f3908bda420132c88c5f18c9305a",
       "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -3516,5 +3546,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "32f19fbbeefec1b281a04bba9df4c6ef16f15caa2bdded9c27c5f2ef5d5349b2"
+  "digest": "9a613c0bb6787218847f50f8e092c5beb5a6bef11b84d7bcc16bcc6ddc6d7a24"
 }

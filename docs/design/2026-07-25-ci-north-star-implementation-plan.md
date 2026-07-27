@@ -403,8 +403,9 @@ Expected files may include:
 - `.github/workflows/dev-release.yml`;
 - `.github/workflows/goreleaser.yml`;
 - `internal/cipolicy/libghostty_policy_test.go`;
+- `cmd/libghosttyarchive/**`;
+- `internal/libghosttyarchive/**`;
 - `scripts/libghostty-native.sh`;
-- `scripts/libghostty-linux-archive.py`;
 - release and macOS service helper docs/tests when touched.
 
 Dependencies: C2 and the libghostty sample class from C4.

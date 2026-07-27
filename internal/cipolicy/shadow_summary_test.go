@@ -84,9 +84,9 @@ func TestRenderShadowSummaryHandlesPlanErrorFallback(t *testing.T) {
 func TestShadowSummaryHelperLanguageClassification(t *testing.T) {
 	tests := map[string]string{
 		".github/workflows/scripts/docs-preview.js": "JavaScript",
+		"cmd/libghosttyarchive/main.go":             "Go",
 		"internal/cipolicy/shadow_summary.go":       "Go",
 		"scripts/libghostty-native.sh":              "Shell",
-		"scripts/libghostty-linux-archive.py":       "Python",
 		"Makefile":                                  "Make",
 	}
 
