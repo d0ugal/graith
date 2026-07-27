@@ -8,19 +8,32 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
 
+const (
+	serverShutdownGrace     = 5 * time.Second
+	serverShutdownForceWait = time.Second
+)
+
 type Server struct {
-	listener net.Listener
-	handler  func(ctx context.Context, conn net.Conn)
-	wg       sync.WaitGroup
-	log      *slog.Logger
+	listener          net.Listener
+	listenerCloseOnce sync.Once
+	handler           func(ctx context.Context, conn net.Conn)
+	wg                sync.WaitGroup
+	log               *slog.Logger
 
 	mu     sync.Mutex
-	conns  map[net.Conn]struct{}
+	conns  map[net.Conn]serverConnInfo
 	closed bool
+}
+
+type serverConnInfo struct {
+	acceptedAt time.Time
+	localAddr  string
+	remoteAddr string
 }
 
 func Listen(sockPath string) (net.Listener, error) {
@@ -45,7 +58,7 @@ func Listen(sockPath string) (net.Listener, error) {
 }
 
 func NewServer(l net.Listener, handler func(ctx context.Context, conn net.Conn), log *slog.Logger) *Server {
-	return &Server{listener: l, handler: handler, log: log, conns: make(map[net.Conn]struct{})}
+	return &Server{listener: l, handler: handler, log: log, conns: make(map[net.Conn]serverConnInfo)}
 }
 
 // trackConn registers an accepted connection and enrolls it in the wait group,
@@ -62,7 +75,11 @@ func (s *Server) trackConn(c net.Conn) bool {
 		return false
 	}
 
-	s.conns[c] = struct{}{}
+	s.conns[c] = serverConnInfo{
+		acceptedAt: time.Now(),
+		localAddr:  addrString(c.LocalAddr()),
+		remoteAddr: addrString(c.RemoteAddr()),
+	}
 	s.wg.Add(1)
 
 	return true
@@ -74,11 +91,48 @@ func (s *Server) untrackConn(c net.Conn) {
 	s.mu.Unlock()
 }
 
+func addrString(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+
+	return addr.String()
+}
+
+func (s *Server) activeHandlerSnapshot(now time.Time) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	handlers := make([]string, 0, len(s.conns))
+	for _, info := range s.conns {
+		age := now.Sub(info.acceptedAt)
+		if age < 0 {
+			age = 0
+		}
+
+		handlers = append(handlers, fmt.Sprintf("local=%s remote=%s age=%s", info.localAddr, info.remoteAddr, age.Truncate(time.Millisecond)))
+	}
+
+	sort.Strings(handlers)
+
+	return handlers
+}
+
+func (s *Server) closeListenerPreservingSocket() {
+	s.listenerCloseOnce.Do(func() {
+		if unixListener, ok := s.listener.(*net.UnixListener); ok {
+			unixListener.SetUnlinkOnClose(false)
+		}
+
+		_ = s.listener.Close()
+	})
+}
+
 func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 
-		_ = s.listener.Close()
+		s.closeListenerPreservingSocket()
 	}()
 
 	for {
@@ -113,15 +167,21 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) Shutdown() {
-	_ = s.listener.Close()
+	s.shutdown(serverShutdownGrace, serverShutdownForceWait)
+}
+
+func (s *Server) shutdown(grace, forceWait time.Duration) {
+	s.closeListenerPreservingSocket()
 
 	// Give handlers a short window to finish gracefully.
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(grace)
 
 	// Mark closed under the mutex before waiting on the group. This is the write
 	// half of the barrier with trackConn: once closed is set, no further wg.Add
 	// can happen (Serve's trackConn returns false), so the wg.Wait below cannot
-	// race a concurrent wg.Add.
+	// race a concurrent wg.Add. The waits below are deliberately bounded: a
+	// handler can be parked in a non-context-aware child wait even after its
+	// connection is closed.
 	s.mu.Lock()
 	s.closed = true
 
@@ -137,15 +197,57 @@ func (s *Server) Shutdown() {
 		close(done)
 	}()
 
+	if waitForServerDrain(done, grace) {
+		return
+	}
+
+	handlers := s.activeHandlerSnapshot(time.Now())
+	if s.log != nil {
+		s.log.Warn("server graceful shutdown timed out; force-closing active handlers",
+			"active_handlers", len(handlers),
+			"handlers", handlers,
+			"grace", grace,
+		)
+	}
+
+	// Force-close any remaining connections.
+	s.mu.Lock()
+	for c := range s.conns {
+		_ = c.Close()
+	}
+	s.mu.Unlock()
+
+	if waitForServerDrain(done, forceWait) {
+		return
+	}
+
+	handlers = s.activeHandlerSnapshot(time.Now())
+	if s.log != nil {
+		s.log.Warn("server handler drain still blocked after force close",
+			"active_handlers", len(handlers),
+			"handlers", handlers,
+			"force_wait", forceWait,
+		)
+	}
+}
+
+func waitForServerDrain(done <-chan struct{}, d time.Duration) bool {
+	if d <= 0 {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
-		// Force-close any remaining connections.
-		s.mu.Lock()
-		for c := range s.conns {
-			_ = c.Close()
-		}
-		s.mu.Unlock()
-		s.wg.Wait()
+		return true
+	case <-timer.C:
+		return false
 	}
 }
