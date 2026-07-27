@@ -241,5 +241,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+      - name: Load CI tool versions
+        run: grep -E '^(HUGO_VERSION|K6_IMAGE|GOVULNCHECK_VERSION)=' .github/ci-tool-versions.env >> "$GITHUB_ENV"
+      - run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
       - run: govulncheck ./...

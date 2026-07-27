@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "dbac6d786f568a5033fe5380405dfed34c49a82f6dc3468c64af124f0b82f12c",
+      "file_sha256": "38afad450229bb3d1979d54dada06b982c29d429682292d8700c39bf7002a043",
       "events": {
         "pull_request": null,
         "push": {
@@ -888,11 +888,12 @@
       "path": ".github/workflows/docs-preview.yml",
       "name": "Docs Preview",
       "owner": "docs-owners",
-      "file_sha256": "836594991a96264fae5eade725bd9a42fb70cc09d228c6eed9240993451a3caa",
+      "file_sha256": "13aae9a9d1ce58750fd8ef0870019562b2ad4e743abafb5eb06b279e2ec97fc8",
       "events": {
         "pull_request": {
           "paths": [
             "website/**",
+            ".github/ci-tool-versions.env",
             ".github/workflows/docs.yml",
             ".github/workflows/docs-preview.yml"
           ],
@@ -973,9 +974,7 @@
             "pull-requests": "write"
           },
           "environment": {
-            "BASE_URL": "http://localhost:8080",
-            "HUGO_VERSION": "0.154.5",
-            "K6_IMAGE": "grafana/k6:1.8.0-with-browser"
+            "BASE_URL": "http://localhost:8080"
           },
           "coordinates": [
             "docs-preview/preview"
@@ -2301,13 +2300,14 @@
       "path": ".github/workflows/workflow-lint.yml",
       "name": "Workflow Lint",
       "owner": "graith-maintainers",
-      "file_sha256": "07e24ff5fc1cb968b02e38468e558f46283ca7c854ed6ee511fcf39ce3751eb2",
+      "file_sha256": "c605fa996b3b3fcdf8790aa9f23b67f276a9a7322acc79ac28a6287f816704ba",
       "events": {
         "pull_request": {
           "paths": [
             ".github/workflows/**",
             ".github/actionlint.yaml",
             ".github/zizmor.yml",
+            ".github/ci-tool-versions.env",
             "internal/libghosttydeps/testdata/renovate/**",
             "libghostty-native.lock.json",
             "renovate.json5",
@@ -2325,6 +2325,7 @@
             ".github/workflows/**",
             ".github/actionlint.yaml",
             ".github/zizmor.yml",
+            ".github/ci-tool-versions.env",
             "internal/libghosttydeps/testdata/renovate/**",
             "libghostty-native.lock.json",
             "renovate.json5",
@@ -2483,7 +2484,7 @@
       "path": ".github/workflows/docs.yml",
       "name": "Docs",
       "owner": "docs-owners",
-      "file_sha256": "a114f93477395d89aa444fcbf5f6d2f24e49d424102543f396499ea0bc536931",
+      "file_sha256": "88b02564a0731bff02e85aec41578b1b27b7211968cc6b22a6161dc9080bd71c",
       "events": {
         "push": {
           "branches": [
@@ -2495,6 +2496,7 @@
             "internal/**/*.go",
             "go.mod",
             "go.sum",
+            ".github/ci-tool-versions.env",
             ".github/workflows/docs.yml"
           ]
         },
@@ -2519,8 +2521,7 @@
             "pages": "read"
           },
           "environment": {
-            "HUGO_ENVIRONMENT": "production",
-            "HUGO_VERSION": "0.154.5"
+            "HUGO_ENVIRONMENT": "production"
           },
           "coordinates": [
             "docs/build"
@@ -2635,6 +2636,16 @@
       "kind": "ci-configuration",
       "git_mode": "100644",
       "sha256": "a645ae28f9e1d747e1319bfc58d20fc967ab3859ce004342baa4be2ed09adbbb",
+      "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
+      "disposition": "grandfathered",
+      "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
+    },
+    {
+      "path": ".github/ci-tool-versions.env",
+      "owner": "graith-maintainers",
+      "kind": "ci-configuration",
+      "git_mode": "100644",
+      "sha256": "c5a30ad3b85482b443b6a163cd5a766ac8b08a65fcb7e2634eaea479ccaa8dbe",
       "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -2834,7 +2845,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "efb8ecb70a985a2e5fc55f5281bf909a47d1a267374fb22a3112ced5f80da21e",
+      "sha256": "5a259d106f21ee9c9a6f968b70486e48c8da7dd7c23394850663d7a2e5a68454",
       "executable_contract": "preserve bounded transient Renovate retry behavior formerly held by renovate-retry.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent retry fixture coverage and zero unexplained replay disagreement"
@@ -2844,7 +2855,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "18d6e62eff202a639664064e653415b1216205dbca8c6407c9edb3c4ca0c300a",
+      "sha256": "7a4800ccd7e7d12f02ca6b697c7a6712fd938d65333875a0a103897accfcd291",
       "executable_contract": "preserve ShellCheck coverage, workflow-lint trigger path coverage, and provenance-verified workflow tool install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent workflow install and lint policy coverage and zero unexplained replay disagreement"
@@ -2934,7 +2945,7 @@
       "owner": "graith-maintainers",
       "kind": "ci-configuration",
       "git_mode": "100644",
-      "sha256": "30d2743d798c47a68e647281cdfebde7416f13ca685c0bce0f9cc6fbe2c0f790",
+      "sha256": "197a07577e3c52a220ae81241215addd52827333bcd444a2007d6fe666ce9f03",
       "executable_contract": "preserve the checked-in CI tool or release configuration consumed by current workflow proof",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -3034,7 +3045,7 @@
       "owner": "graith-maintainers",
       "kind": "root-script-policy",
       "git_mode": "100755",
-      "sha256": "03acdbd53b6cc7c5d1d2edea309df6904a973c12e1b5f19042f14c023fbdeecd",
+      "sha256": "819ee8a8fb0928513e63b9034846a3449a707297af127b5fbe95c3d3f8035fe8",
       "executable_contract": "preserve the checked-in script's current executable behavior under its existing callers and tests",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent executable coverage and zero unexplained replay disagreement"
@@ -3525,5 +3536,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "85c1a90983ced3c04ea7027b3547121db2ca5ab272e3421e07a01ac207097322"
+  "digest": "208faf8255ee0e3ce264a9981508877ee8ebf4337d210d245c09ea9820097d33"
 }

@@ -34,6 +34,7 @@ var requiredContexts = map[string]bool{
 
 var ciConfigurationPaths = []string{
 	".github/actionlint.yaml",
+	".github/ci-tool-versions.env",
 	".golangci.yml",
 	".goreleaser-dev.yaml",
 	".goreleaser-linux.yaml",

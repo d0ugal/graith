@@ -14,6 +14,7 @@ func TestDocsPreviewWorkflowRoutesPreMergeHugoBuildInputs(t *testing.T) {
 
 	assertStringsEqual(t, "pull_request paths", docsPreviewPullRequestPaths(t, workflowPath), []string{
 		"website/**",
+		".github/ci-tool-versions.env",
 		".github/workflows/docs.yml",
 		".github/workflows/docs-preview.yml",
 	})
@@ -27,10 +28,12 @@ func TestDocsPreviewWorkflowRoutesPreMergeHugoBuildInputs(t *testing.T) {
 	changed := p11WorkflowStep(t, preview, "Determine changed pages")
 
 	for _, want := range []string{
-		`git diff --name-only "$BASE" "$HEAD" -- website/ .github/workflows/docs.yml .github/workflows/docs-preview.yml`,
+		`git diff --name-only "$BASE" "$HEAD" -- website/ .github/ci-tool-versions.env .github/workflows/docs.yml .github/workflows/docs-preview.yml`,
 		"detector_failed=1",
 		`grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"`,
-		`grep -qE '^website/|^\.github/workflows/(docs|docs-preview)\.yml$' <<<"$changed"`,
+		`grep -qx '.github/ci-tool-versions.env' <<<"$changed"`,
+		`grep -qE '^website/|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$' <<<"$changed"`,
+		`emit "website/content/docs/_index.md" false`,
 		`echo "build=$build"`,
 		"find website/content/docs -name '*.md'",
 	} {
