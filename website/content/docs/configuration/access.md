@@ -100,11 +100,14 @@ connection immediately.
 Listener replacement is deliberately fail-closed: graith closes the old
 generation before binding the new one. If the new port can't bind, an auth-key
 file can't be read, TLS setup fails, or another transport step fails, the
-reload reports remote access as degraded and closed while unrelated settings
-from that config generation still apply. (`gr config show` reads the edited
-file directly, so it can display the candidate.) Correct the setting and reload
-again; the daemon retries remote preparation and the local Unix socket stays
-available throughout.
+reload applies the config generation and reports remote access as degraded and
+closed while unrelated settings from that generation still take effect.
+(`gr config show` reads the edited file directly, so it can display the
+candidate.) Correct the setting or dependency and reload again; the daemon
+retries remote preparation and the local Unix socket stays available
+throughout. In `remote.mode = "interface"`, if the host Tailscale daemon is not
+running, start `tailscaled` and run `gr daemon reload` again to reopen remote
+access.
 
 A tsnet auth key is consumed when its listener generation starts. If an
 unchanged `auth_key_file` later becomes unreadable, graith keeps the

@@ -387,10 +387,43 @@ var daemonReloadCmd = &cobra.Command{
 			return fmt.Errorf("%s", e.Message)
 		}
 
-		out.Printf("Config reloaded\n")
-
-		return nil
+		return printDaemonReloadResult(resp)
 	},
+}
+
+func printDaemonReloadResult(resp protocol.Envelope) error {
+	if resp.Type != "reloaded" {
+		return fmt.Errorf("unexpected reload response: %s", resp.Type)
+	}
+
+	var result protocol.ReloadedMsg
+	if err := protocol.DecodePayload(resp, &result); err != nil {
+		return fmt.Errorf("invalid reload response: %w", err)
+	}
+
+	out.Printf("Config reloaded\n")
+
+	if result.RemoteDegraded {
+		state := result.RemoteState
+		if state == "" {
+			state = "degraded"
+		}
+
+		prefix := "Remote access degraded"
+		if state == "closed" {
+			prefix = "Remote access degraded and closed"
+		} else if state != "degraded" {
+			prefix = fmt.Sprintf("Remote access degraded (%s)", state)
+		}
+
+		if result.RemoteDegradedReason == "" {
+			out.Printf("%s\n", prefix)
+		} else {
+			out.Printf("%s: %s\n", prefix, result.RemoteDegradedReason)
+		}
+	}
+
+	return nil
 }
 
 // upgradeExchangeConn is the connection surface execUpgrade drives for the

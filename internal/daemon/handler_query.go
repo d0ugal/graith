@@ -205,10 +205,18 @@ func handleReload(sm *SessionManager, auth authContext, send func(string, any)) 
 		return
 	}
 
-	if err := sm.ReloadConfig(); err != nil {
+	result, err := sm.ReloadConfigDetailed()
+	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 	} else {
-		send("reloaded", struct{}{})
+		resp := protocol.ReloadedMsg{Applied: true}
+		if result.RemoteDegraded() {
+			resp.RemoteDegraded = true
+			resp.RemoteState = "closed"
+			resp.RemoteDegradedReason = result.RemoteDegradedReason
+		}
+
+		send("reloaded", resp)
 	}
 }
 

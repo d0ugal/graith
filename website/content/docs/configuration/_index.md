@@ -30,11 +30,13 @@ reload. Read at daemon start, so changing it takes effect only after a
 `gr daemon restart` (every other setting re-reads on reload).
 
 A reload publishes one config generation. If an optional runtime cannot be
-prepared, the command or watcher reports the affected subsystem as degraded
-while unrelated settings still take effect. Remote listener replacement remains
+prepared, the command reports the affected subsystem as degraded while
+unrelated settings still take effect. Remote listener replacement remains
 fail-closed: graith closes the old listener before the new bind, so a failed
-remote-transport reload publishes the other settings with remote access closed
-until a corrected reload succeeds. See
+remote-transport reload publishes the generation with remote access closed
+until a corrected reload succeeds. For `remote.mode = "interface"`, start
+`tailscaled` and run `gr daemon reload` again after the dependency is available.
+See
 [Orchestrator & remote access]({{< relref "access.md#hot-reload-and-revocation" >}}).
 
 > **Full default config.** The complete, annotated defaults live in
