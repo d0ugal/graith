@@ -142,7 +142,6 @@ type UnsupportedDecision struct {
 	Requiredness      string   `json:"requiredness"`
 	Owner             string   `json:"owner"`
 	Rationale         string   `json:"rationale"`
-	Expires           string   `json:"expires"`
 	SilentPassAllowed bool     `json:"silent_pass_allowed"`
 	EvidenceRefs      []string `json:"evidence_refs"`
 }

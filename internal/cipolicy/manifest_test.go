@@ -49,9 +49,9 @@ func TestCommittedManifestMatchesInventory(t *testing.T) {
 	if len(manifest.Unsupported) != 1 ||
 		manifest.Unsupported[0].Mode != "dynamic/dependabot/update-graph" ||
 		manifest.Unsupported[0].Owner != "graith-maintainers" ||
-		manifest.Unsupported[0].Expires != "2026-08-31" ||
+		!strings.Contains(manifest.Unsupported[0].Rationale, "explicit reviewed implementation or retirement change") ||
 		!slices.Contains(manifest.Unsupported[0].EvidenceRefs, "p0-acceptance:gap-external-dependabot-update-graph-30152132020") {
-		t.Fatalf("external observed mode row = %#v, want owned expiring unsupported decision", manifest.Unsupported)
+		t.Fatalf("external observed mode row = %#v, want owned unsupported decision", manifest.Unsupported)
 	}
 }
 
@@ -480,7 +480,13 @@ func TestManifestValidationFailures(t *testing.T) {
 			edit: func(manifest *Manifest) {
 				manifest.Unsupported[0].Rationale = ""
 			},
-			want: "lacks owner, rationale, or expiry",
+			want: "lacks owner or rationale",
+		},
+		"unsupported missing owner": {
+			edit: func(manifest *Manifest) {
+				manifest.Unsupported[0].Owner = ""
+			},
+			want: "lacks owner or rationale",
 		},
 		"unsupported collides with required coordinate": {
 			edit: func(manifest *Manifest) {
@@ -613,18 +619,6 @@ func TestManifestValidationFailures(t *testing.T) {
 			},
 			want: "policy digest mismatch",
 		},
-		"unsupported expired": {
-			edit: func(manifest *Manifest) {
-				manifest.Unsupported[0].Expires = "2026-07-25"
-			},
-			want: "expired on",
-		},
-		"unsupported expiry beyond renewal window": {
-			edit: func(manifest *Manifest) {
-				manifest.Unsupported[0].Expires = "9999-12-31"
-			},
-			want: "three-month renewal window",
-		},
 		"empty mode section": {
 			edit: func(manifest *Manifest) {
 				manifest.Modes = nil
@@ -646,6 +640,15 @@ func TestManifestValidationFailures(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want containing %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestValidateAtDoesNotExpireUnsupportedDecisionsByCalendar(t *testing.T) {
+	manifest := generatedManifest(t)
+	signManifest(t, &manifest)
+
+	if err := manifest.ValidateAt(time.Date(2046, 7, 26, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("ValidateAt() error = %v, want unsupported decision to remain valid until policy changes", err)
 	}
 }
 

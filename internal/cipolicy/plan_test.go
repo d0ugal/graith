@@ -2,7 +2,6 @@ package cipolicy
 
 import (
 	"encoding/json"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -12,34 +11,7 @@ import (
 var p2TestNow = p2StableTestTime()
 
 func p2StableTestTime() time.Time {
-	data, err := os.ReadFile("manifest.json")
-	if err != nil {
-		return time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
-	}
-
-	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
-	}
-
-	var earliest time.Time
-
-	for _, decision := range manifest.Unsupported {
-		expires, err := time.Parse(time.DateOnly, decision.Expires)
-		if err != nil {
-			continue
-		}
-
-		if earliest.IsZero() || expires.Before(earliest) {
-			earliest = expires
-		}
-	}
-
-	if earliest.IsZero() {
-		return time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
-	}
-
-	return earliest.AddDate(0, -1, 0).Add(10 * time.Hour).UTC()
+	return time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
 }
 
 func TestPlanClassifiesEventTrustBoundaries(t *testing.T) {
@@ -716,6 +688,16 @@ func TestPlanValidationRejectsInvalidPlanMetadata(t *testing.T) {
 				t.Fatalf("ValidateAt() error = %v, want %q", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestPlanValidateAtRequiresValidationTime(t *testing.T) {
+	manifest := loadManifest(t)
+	plan := buildTestPlan(t, manifest, planEvent(nil), []string{"internal/daemon/session.go"}, nil, true)
+
+	if err := plan.ValidateAt(manifest, time.Time{}); err == nil ||
+		!strings.Contains(err.Error(), "plan validation time is required") {
+		t.Fatalf("ValidateAt(time.Time{}) error = %v, want plan validation time rejection", err)
 	}
 }
 

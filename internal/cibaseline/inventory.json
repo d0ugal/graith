@@ -2689,7 +2689,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "209272725b8f74afba36ef7d1e59852be68506564386e3c29448859b2e3ba075",
+      "sha256": "b536e3694f5f9b172ee55a7cccefdc3e27cbfa1a1a1e928fcb7aeecf74cc7ba6",
       "executable_contract": "preserve CLI coverage for policy plan command behavior, file-list parsing, detector-error flags, output permissions, and safe-superset behavior",
       "disposition": "grandfathered",
       "retirement_criterion": "remove only after equivalent cipolicy command coverage is added"
@@ -3490,5 +3490,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "cb6d0aadaa9f53552ebc5a97a8787a341541f7141a14e6d34552f5b44ae5a273"
+  "digest": "048c9d8ae1dd30468e0364492b636cb636ec38099a60a1b33ec11a5d5a8f0a44"
 }
