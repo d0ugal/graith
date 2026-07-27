@@ -7,7 +7,7 @@
       "path": ".github/workflows/ci.yml",
       "name": "CI",
       "owner": "graith-maintainers",
-      "file_sha256": "79377ba8a56ae2c666a92c95c3015d7a2872aaeea2e9a7970c931be1451e8b62",
+      "file_sha256": "9bb20d49cd8d7c880b9b9affd0dbd146eaf9f52e5b0ab57e88abb4835b16e1e7",
       "events": {
         "pull_request": null,
         "push": {
@@ -39,47 +39,6 @@
           ],
           "github_names": [
             "Build (ubuntu-latest)"
-          ],
-          "action_pins": [
-            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
-          ],
-          "toolchains": [
-            {
-              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
-              "name": null,
-              "with": {
-                "go-version-file": "go.mod"
-              }
-            }
-          ],
-          "cache_actions": [
-            {
-              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
-              "name": null,
-              "with": {
-                "go-version-file": "go.mod"
-              }
-            }
-          ]
-        },
-        {
-          "id": "build-macos",
-          "name": "Build (macos-latest)",
-          "capability": "legacy-proof/ci/build-macos",
-          "owner": "graith-maintainers",
-          "runner": "macos-latest",
-          "condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
-          "skip_semantics": "github-skipped-is-distinct-from-passed",
-          "proof_type": "compile-only",
-          "requiredness": "soft",
-          "permissions": null,
-          "environment": null,
-          "coordinates": [
-            "ci/build-macos"
-          ],
-          "github_names": [
-            "Build (macos-latest)"
           ],
           "action_pins": [
             "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -2903,7 +2862,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-helper",
       "git_mode": "100644",
-      "sha256": "95a67539b44e9b4a158a27246253a8669728a1bb503f904bd4cd45f88e774fc2",
+      "sha256": "8913e6b2beb9447448256ee4e147436ebe98d5d5b1550d577b27c8798858b7b3",
       "executable_contract": "preserve non-authoritative CI shadow summary rendering, required-context inventory listing, native coverage note, and no-live-aggregation boundary",
       "disposition": "grandfathered",
       "retirement_criterion": "delete with the CI shadow summary job or replace only after equivalent diagnostic summary tests cover the same authority boundary"
@@ -3114,14 +3073,6 @@
       "legacy_coordinate": "ci/build",
       "skip_semantics": "github-skipped-is-distinct-from-passed",
       "new_mode": "legacy/ci/build",
-      "owner": "graith-maintainers",
-      "new_obligation": false
-    },
-    {
-      "legacy_coordinate": "ci/build-macos",
-      "legacy_condition": "!cancelled() \u0026\u0026 (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')",
-      "skip_semantics": "github-skipped-is-distinct-from-passed",
-      "new_mode": "legacy/ci/build-macos",
       "owner": "graith-maintainers",
       "new_obligation": false
     },
@@ -3610,5 +3561,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "dde4f83ee6b0b3bdf7031fa22b08f8b1c4f811ddfbb438c77b1d02f8f99654d1"
+  "digest": "faab71a243cddcbe173bacd1b7ab136acdddcb623c63c1d2c54a09aa066df9c2"
 }

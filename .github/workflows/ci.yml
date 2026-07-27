@@ -10,7 +10,7 @@ on:
   # PR — with enforce_admins, unmergeably.
   #
   # macOS runner minutes are ~10x Linux and the hosted macOS pool is scarce, so
-  # the macOS legs (Build/Test/Integration on macos-latest) are instead gated
+  # the macOS legs (Test/Integration on macos-latest) are instead gated
   # per-JOB via `if:` on the `changes` job below. A job skipped by `if:` still
   # reports a "skipped" conclusion, which branch protection treats as success —
   # so the required `Test (macos-latest)` context is satisfied on Go-only PRs
@@ -25,9 +25,9 @@ permissions:
   contents: read
 
 jobs:
-  # Decide whether the macOS legs need to run. These jobs run `go build` /
-  # `go test -race ./...` on darwin, so they matter when a change can compile or
-  # behave differently on macOS:
+  # Decide whether the macOS legs need to run. These jobs run
+  # `go test -race ./...` and integration compile checks on darwin, so they
+  # matter when a change can compile or behave differently on macOS:
   #   - darwin-only-compiled Go: internal/pty (procstart_darwin.go) and
   #     internal/sandbox (safehouse/Seatbelt) — a Linux build never compiles
   #     these, so they'd otherwise get zero pre-merge coverage;
@@ -284,31 +284,6 @@ jobs:
             scripts/libghostty-native.sh verify-default-binary "$binary"
           done
 
-  build-macos:
-    name: Build (macos-latest)
-    needs: changes
-    # Run when the detector says macOS is relevant — but also when the detector
-    # itself did NOT cleanly succeed (failed/timed out). With `needs:` and a
-    # custom `if:` lacking a status function, a *failed* `changes` job would
-    # otherwise skip this job, and a skipped REQUIRED check counts as success —
-    # a silent merge-gate bypass. Failing safe toward running closes that hole.
-    # `!cancelled()` still lets a superseded run bow out (the newer run re-checks).
-    if: >-
-      !cancelled() &&
-      (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
-    runs-on: macos-latest
-    # Cap scarce macOS runner minutes: a hang can't hold one for GitHub's 6h
-    # default. Well above the normal build/test/integration runtime.
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: go build -v ./cmd/graith
-
   test:
     name: Test (ubuntu-latest)
     runs-on: ubuntu-latest
@@ -343,7 +318,7 @@ jobs:
       (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
     runs-on: macos-latest
     # Cap scarce macOS runner minutes: a hang can't hold one for GitHub's 6h
-    # default. Well above the normal build/test/integration runtime.
+    # default. Well above the normal test/integration runtime.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -384,7 +359,7 @@ jobs:
       (needs.changes.result != 'success' || needs.changes.outputs.macos == 'true')
     runs-on: macos-latest
     # Cap scarce macOS runner minutes: a hang can't hold one for GitHub's 6h
-    # default. Well above the normal build/test/integration runtime.
+    # default. Well above the normal test/integration runtime.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

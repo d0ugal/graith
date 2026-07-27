@@ -1112,7 +1112,7 @@ func workflowOwner(id string) string {
 }
 
 var proofTypes = map[string]string{
-	"ci/build": "compile-only", "ci/build-macos": "compile-only", "ci/changes": "source-level",
+	"ci/build": "compile-only", "ci/changes": "source-level",
 	"ci/govulncheck": "source-level", "ci/integration": "runtime", "ci/integration-macos": "runtime",
 	"ci/ci-shadow-summary": "soft", "ci/lint": "compile-only", "ci/test": "runtime", "ci/test-macos": "runtime",
 	"coverage/changes": "soft", "coverage/comment": "soft", "coverage/go-coverage": "soft",
