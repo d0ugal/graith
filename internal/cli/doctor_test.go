@@ -678,7 +678,7 @@ func TestCheckWatcherResourcesThresholds(t *testing.T) {
 		"healthy usage passes": {
 			diag:      protocol.WatcherDiagnostic{EstimatedDescriptorCost: 10, Budget: 100, BudgetPercent: 10},
 			wantLevel: "ok",
-			wantText:  "File-watch budget: 10/100 estimated descriptors",
+			wantText:  "File-watch budget: 10/100 estimated watch units",
 		},
 		"near budget warns": {
 			diag:      protocol.WatcherDiagnostic{EstimatedDescriptorCost: 91, Budget: 100, BudgetPercent: 91, NearBudget: true},

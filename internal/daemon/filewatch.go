@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +65,7 @@ var mandatoryWatchIgnores = []string{".git/", ".git"}
 
 // RunFileWatchLoop is the daemon-owned file-watch (#593) trigger source. It
 // reconciles bindings (watch trigger × matching live writable session) against
-// live fsnotify watchers each tick, and feeds debounced, filtered events into
+// live file-watch backends each tick, and feeds debounced, filtered events into
 // the shared trigger action executor.
 func (sm *SessionManager) RunFileWatchLoop(ctx context.Context) {
 	// The reconcile cadence is read once at loop start from [triggers.advanced]
@@ -310,7 +309,7 @@ func (sm *SessionManager) sessionForBindingKey(key string) watchSession {
 	return watchSession{id: id, name: s.Name, worktree: s.WorktreePath}
 }
 
-// createBinding sets up a recursive fsnotify watcher for a binding and starts
+// createBinding sets up a recursive file watcher for a binding and starts
 // its event goroutine. If the watcher degrades (e.g. the inotify watch limit is
 // exhausted) the binding is recorded as degraded with a backoff-scheduled retry
 // rather than running; the reconcile loop recreates it once nextRetryAt passes.
@@ -351,25 +350,12 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		history = snapshotWatchBindingHistory(prev)
 	}
 
-	// A watcher we can't even allocate (e.g. the inotify *instance* limit) is a
-	// degraded outcome like a failed Add — record it with a backoff so a retry
-	// doesn't busy-loop on every reconcile tick.
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		sm.recordDegradedBinding(key, t, sess, "fsnotify.NewWatcher failed: "+err.Error(), prevRetries+1, now, builtinFP, carry, history)
-		return
-	}
-
-	// A newly-un-ignored directory that the fresh policy now wants watched but that
-	// fails to register (e.g. the inotify watch limit) must route the binding
-	// through the degraded/backoff retry path rather than stamping success — a
-	// recreate for an ignore-policy change re-walks the whole tree here, so an
-	// add-failure on a previously-pruned directory is surfaced exactly like any
-	// other creation-time degradation (issue #1309, building on #1029).
-	watchPaths := make(map[string]int)
-	if degraded := sm.addWatchRecursiveBudgeted(watcher, sess.worktree, matcher, watchPaths); degraded != "" {
-		_ = watcher.Close()
-
+	// A watcher we can't allocate or start (e.g. the inotify instance limit, the
+	// fsnotify directory budget, or an FSEvents stream start failure) is a
+	// degraded outcome. Record it with a backoff so a retry doesn't busy-loop on
+	// every reconcile tick.
+	backend, watchPaths, degraded := sm.newWatchBackend(sess.worktree, matcher)
+	if degraded != "" {
 		sm.recordDegradedBinding(key, t, sess, degraded, prevRetries+1, now, builtinFP, carry, history)
 
 		return
@@ -386,7 +372,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 		worktree:           sess.worktree,
 		fingerprint:        triggerFingerprint(t),
 		builtinFingerprint: builtinFP,
-		watcher:            watcher,
+		backend:            backend,
 		watchPaths:         watchPaths,
 		changed:            make(map[string]bool),
 		lastRun:            history.lastRun,
@@ -404,7 +390,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	}) {
 		cancel()
 
-		_ = watcher.Close()
+		_ = backend.Close()
 
 		sm.triggers.mu.Lock()
 		if sm.triggers.bindings[key] == b {
@@ -430,7 +416,7 @@ func (sm *SessionManager) createBinding(ctx context.Context, t *config.TriggerCo
 	sm.triggers.mu.Lock()
 	watchUsed := sm.triggers.watchDirs
 	sm.triggers.mu.Unlock()
-	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree, "watch_dirs", watchDirs, "watch_budget_used", watchUsed, "watch_budget", watchBudget)
+	sm.log.Info("trigger: watching", "trigger", t.Name, "session", sess.name, "worktree", sess.worktree, "watch_backend", backend.Name(), "watch_dirs", watchDirs, "watch_budget_used", watchUsed, "watch_budget", watchBudget)
 }
 
 // recarryChanges re-notes changes carried across a binding recreate, filtered by
@@ -499,33 +485,24 @@ func (sm *SessionManager) recordDegradedBinding(key string, t *config.TriggerCon
 	sm.triggers.mu.Unlock()
 }
 
-// watchAddFunc returns the directory-registration function used when building a
-// binding's watch set. It normally delegates to the fsnotify watcher; tests
-// override sm.watchAdd to simulate an exhausted watch limit.
-func (sm *SessionManager) watchAddFunc(w *fsnotify.Watcher) func(string) error {
-	if sm.watchAdd != nil {
-		return func(path string) error { return sm.watchAdd(w, path) }
-	}
-
-	return w.Add
-}
-
 // runBinding is the per-binding event loop: filter events, coalesce with a
 // debounce timer, and fire on quiet.
 func (sm *SessionManager) runBinding(ctx context.Context, triggerName string, b *watchBinding, matcher *watchMatcher) {
 	debounce := sm.bindingDebounce(triggerName)
+	events := b.backend.Events()
+	errors := b.backend.Errors()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-b.watcher.Events:
+		case ev, ok := <-events:
 			if !ok {
 				return
 			}
 
 			sm.handleWatchEvent(ctx, triggerName, b, matcher, ev, debounce)
-		case err, ok := <-b.watcher.Errors:
+		case err, ok := <-errors:
 			if !ok {
 				return
 			}
@@ -544,18 +521,27 @@ func (sm *SessionManager) bindingDebounce(triggerName string) time.Duration {
 	return t.Watch.DebounceDuration()
 }
 
-func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName string, b *watchBinding, matcher *watchMatcher, ev fsnotify.Event, debounce time.Duration) {
-	// A newly created directory needs recursive registration + scan.
-	if ev.Op&fsnotify.Create != 0 {
+func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName string, b *watchBinding, matcher *watchMatcher, ev watchEvent, debounce time.Duration) {
+	if ev.Scan {
+		sm.reloadIgnores(b, matcher)
+		sm.scanChangedSubtree(ctx, b, matcher, ev.Name, debounce, triggerName, ev.LossyScan)
+
+		return
+	}
+
+	// A newly created or moved-in directory needs recursive registration + scan.
+	if ev.Op&(fsnotify.Create|fsnotify.Rename) != 0 {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			rel := matcher.rel(ev.Name)
 			if matcher.shouldWatchDir(rel) && !matcher.ignoredDir(rel) {
-				// Best-effort: a post-creation Add failure (e.g. the watch limit
-				// exhausted only after a healthy start) is not routed through the
-				// degraded/retry path — that covers creation-time degradation only
-				// (#1029). Runtime subtree-add recovery is a separate follow-up.
-				if err := sm.registerWatchPath(b, ev.Name); err != nil {
-					sm.log.Warn("trigger: new directory watch skipped", "trigger", triggerName, "path", ev.Name, "err", err)
+				if b.backend != nil && !b.backend.Recursive() {
+					// Best-effort: a post-creation Add failure (e.g. the watch limit
+					// exhausted only after a healthy start) is not routed through the
+					// degraded/retry path — that covers creation-time degradation only
+					// (#1029). Runtime subtree-add recovery is a separate follow-up.
+					if err := sm.registerWatchPath(b, ev.Name); err != nil {
+						sm.log.Warn("trigger: new directory watch skipped", "trigger", triggerName, "path", ev.Name, "err", err)
+					}
 				}
 
 				sm.scanNewDir(ctx, b, matcher, ev.Name, debounce, triggerName)
@@ -608,6 +594,10 @@ func (sm *SessionManager) reloadIgnores(b *watchBinding, matcher *watchMatcher) 
 // only subsequent events fire it — so merely un-ignoring a populated tree does
 // not synthesise a burst of changes. Runs in the binding's event goroutine.
 func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatcher) {
+	if b.backend == nil || b.backend.Recursive() {
+		return
+	}
+
 	desired := make(map[string]bool)
 
 	_ = filepath.WalkDir(b.worktree, func(path string, d os.DirEntry, err error) error {
@@ -639,7 +629,7 @@ func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatc
 	// Prune directories that are now ignored but still watched. WatchList holds
 	// only this binding's paths (each binding owns its watcher); the rel guard is
 	// belt-and-braces so a stray entry outside the worktree is never touched.
-	for _, w := range b.watcher.WatchList() {
+	for _, w := range b.backend.WatchList() {
 		if desired[w] {
 			continue
 		}
@@ -650,10 +640,48 @@ func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatc
 	}
 }
 
+// scanChangedSubtree handles a backend event that names a changed subtree rather
+// than a precise file. FSEvents can legally coalesce or drop detail this way; the
+// conservative response is to scan the subtree and note every matching file.
+// If the path is already gone, note the subtree itself when its descendants
+// could have matched, so deletion-only lossy events still trigger.
+// If lossy is true, also note an eligible surviving subtree when the scan finds
+// no matching files, because the triggering files may already have disappeared.
+func (sm *SessionManager) scanChangedSubtree(ctx context.Context, b *watchBinding, matcher *watchMatcher, name string, debounce time.Duration, triggerName string, lossy bool) {
+	info, err := os.Stat(name)
+	if err != nil {
+		rel := matcher.rel(name)
+		if rel != "" && rel != "." && (matcher.fires(rel) || matcher.subtreeCanFire(rel)) {
+			sm.noteChange(ctx, triggerName, b, rel, debounce)
+		}
+
+		return
+	}
+
+	if !info.IsDir() {
+		rel := matcher.rel(name)
+		if matcher.fires(rel) {
+			sm.noteChange(ctx, triggerName, b, rel, debounce)
+		}
+
+		return
+	}
+
+	if sm.scanNewDir(ctx, b, matcher, name, debounce, triggerName) {
+		return
+	}
+
+	rel := matcher.rel(name)
+	if lossy && matcher.subtreeCanFire(rel) {
+		sm.noteChange(ctx, triggerName, b, rel, debounce)
+	}
+}
+
 // scanNewDir handles a newly-created (or moved-in) directory: it registers
 // watches for the whole non-ignored subtree and notes any existing files as
 // changes, so a tool that atomically creates a nested tree isn't missed.
-func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, matcher *watchMatcher, dir string, debounce time.Duration, triggerName string) {
+func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, matcher *watchMatcher, dir string, debounce time.Duration, triggerName string) bool {
+	noted := false
 	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // skip unreadable entries, keep walking
@@ -673,8 +701,10 @@ func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, match
 				return filepath.SkipDir
 			}
 
-			if err := sm.registerWatchPath(b, path); err != nil {
-				sm.log.Warn("trigger: new subtree watch skipped", "trigger", triggerName, "path", path, "err", err)
+			if b.backend != nil && !b.backend.Recursive() {
+				if err := sm.registerWatchPath(b, path); err != nil {
+					sm.log.Warn("trigger: new subtree watch skipped", "trigger", triggerName, "path", path, "err", err)
+				}
 			}
 
 			return nil
@@ -682,10 +712,14 @@ func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, match
 
 		if matcher.fires(rel) {
 			sm.noteChange(ctx, triggerName, b, rel, debounce)
+
+			noted = true
 		}
 
 		return nil
 	})
+
+	return noted
 }
 
 // noteChange records a changed path and (re)arms the debounce timer.
@@ -814,18 +848,17 @@ func (sm *SessionManager) watchFire(ctx context.Context, triggerName string, b *
 	sm.fireWatch(ctx, t, fc, b)
 }
 
-// stopWatcherResources shuts down a file watcher's goroutine and fsnotify
-// handle, then marks it canceled and stops any pending debounce under bmu.
-// cancel and watcher are read by the caller before the lock (matching the
-// original code), while canceled/debounce are touched under bmu (both are
-// goroutine-mutated).
-func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mutex, canceled *bool, debounce **time.Timer, debounceUntil *time.Time, release func()) {
+// stopWatcherResources shuts down a file watcher's goroutine and backend handle,
+// then marks it canceled and stops any pending debounce under bmu. cancel and
+// backend are read by the caller before the lock (matching the original code),
+// while canceled/debounce are touched under bmu (both are goroutine-mutated).
+func stopWatcherResources(cancel func(), backend watchBackend, bmu *sync.Mutex, canceled *bool, debounce **time.Timer, debounceUntil *time.Time, release func()) {
 	if cancel != nil {
 		cancel()
 	}
 
-	if watcher != nil {
-		_ = watcher.Close()
+	if backend != nil {
+		_ = backend.Close()
 	}
 
 	bmu.Lock()
@@ -848,18 +881,18 @@ func stopWatcherResources(cancel func(), watcher *fsnotify.Watcher, bmu *sync.Mu
 // addWatchRecursiveBudgeted registers only directories that can contain a
 // configured include and reserves them against the daemon-wide budget. A
 // failed reservation or Add leaves no resources owned by the caller.
-func (sm *SessionManager) addWatchRecursiveBudgeted(w *fsnotify.Watcher, root string, matcher *watchMatcher, paths map[string]int) string {
+func (sm *SessionManager) addWatchRecursiveBudgeted(backend watchBackend, root string, matcher *watchMatcher, paths map[string]int) string {
 	add := func(path string) error {
 		if _, ok := paths[path]; ok {
 			return nil
 		}
 
-		cost := watchPathCost(path)
+		cost := fsnotifyWatchPathCost(path)
 		if err := sm.reserveWatchPath(path, cost); err != nil {
 			return err
 		}
 
-		if err := sm.watchAddFunc(w)(path); err != nil {
+		if err := backend.Add(path); err != nil {
 			sm.releaseWatchCount(cost)
 			return err
 		}
@@ -884,33 +917,12 @@ func (sm *SessionManager) reserveWatchPath(path string, cost int) error {
 	defer sm.triggers.mu.Unlock()
 
 	if sm.triggers.watchDirs+cost > budget {
-		return fmt.Errorf("watch descriptor budget exhausted (used %d/%d; cost %d; path %q)", sm.triggers.watchDirs, budget, cost, path)
+		return fmt.Errorf("watch backend budget exhausted (used %d/%d; cost %d; path %q)", sm.triggers.watchDirs, budget, cost, path)
 	}
 
 	sm.triggers.watchDirs += cost
 
 	return nil
-}
-
-// macOS's kqueue backend uses one descriptor for the directory and, in
-// practice, another for each entry in that directory. Keep the daemon-wide
-// budget conservative on that platform so a dense worktree cannot exhaust the
-// process descriptor limit even when its directory count is modest.
-func watchPathCost(path string) int {
-	return watchPathCostForGOOS(runtime.GOOS, path)
-}
-
-func watchPathCostForGOOS(goos, path string) int {
-	if goos != "darwin" {
-		return 1
-	}
-
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return 1
-	}
-
-	return 1 + len(entries)
 }
 
 func watchPathCostSum(paths map[string]int) int {
@@ -957,12 +969,12 @@ func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error 
 	}
 	b.bmu.Unlock()
 
-	cost := watchPathCost(path)
+	cost := fsnotifyWatchPathCost(path)
 	if err := sm.reserveWatchPath(path, cost); err != nil {
 		return err
 	}
 
-	if err := sm.watchAddFunc(b.watcher)(path); err != nil {
+	if err := b.backend.Add(path); err != nil {
 		sm.releaseWatchCount(cost)
 		return err
 	}
@@ -970,7 +982,7 @@ func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error 
 	b.bmu.Lock()
 	if b.canceled {
 		b.bmu.Unlock()
-		_ = b.watcher.Remove(path)
+		_ = b.backend.Remove(path)
 
 		sm.releaseWatchCount(cost)
 
@@ -989,7 +1001,7 @@ func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error 
 }
 
 func (sm *SessionManager) unregisterWatchPath(b *watchBinding, path string) {
-	_ = b.watcher.Remove(path)
+	_ = b.backend.Remove(path)
 
 	b.bmu.Lock()
 
@@ -1040,7 +1052,7 @@ func (sm *SessionManager) teardownBinding(key string) {
 		return
 	}
 
-	stopWatcherResources(b.cancel, b.watcher, &b.bmu, &b.canceled, &b.debounce, &b.debounceUntil, func() {
+	stopWatcherResources(b.cancel, b.backend, &b.bmu, &b.canceled, &b.debounce, &b.debounceUntil, func() {
 		b.bmu.Lock()
 		cost := watchPathCostSum(b.watchPaths)
 		b.watchPaths = nil
@@ -1174,6 +1186,18 @@ func (m *watchMatcher) shouldWatchDir(rel string) bool {
 	}
 
 	return false
+}
+
+func (m *watchMatcher) subtreeCanFire(rel string) bool {
+	if rel == "" {
+		rel = "."
+	}
+
+	if !m.shouldWatchDir(rel) {
+		return false
+	}
+
+	return rel == "." || !m.ignoredDir(rel)
 }
 
 func (m *watchMatcher) includePatterns() []string {

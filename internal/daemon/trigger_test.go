@@ -25,13 +25,16 @@ func newTriggerTestSM(t *testing.T, triggers ...config.TriggerConfig) *SessionMa
 	cfg.Triggers = triggers
 	cfg.Orchestrator.Enabled = true
 
-	return &SessionManager{
+	sm := &SessionManager{
 		state:    NewState(),
 		cfg:      cfg,
 		paths:    config.Paths{StateFile: filepath.Join(dir, "state.json"), DataDir: dir},
 		log:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 		triggers: newTriggerState(),
 	}
+	forceFSNotifyWatchBackend(sm)
+
+	return sm
 }
 
 func TestTriggerFingerprint(t *testing.T) {
@@ -626,7 +629,7 @@ func TestWatcherDiagnosticAttribution(t *testing.T) {
 		sessionID:   "canny",
 		worktree:    "/work/canny",
 		changed:     make(map[string]bool),
-		degraded:    "watcher.Add failed: watch descriptor budget exhausted (used 18/20; cost 4; path \"/work/canny\")",
+		degraded:    "watch backend budget exhausted (used 18/20; cost 4; path \"/work/canny\")",
 		retryCount:  2,
 		nextRetryAt: now.Add(time.Minute),
 	}

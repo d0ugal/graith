@@ -223,6 +223,10 @@ type SessionManager struct {
 	// simulate an exhausted watch limit (fs.inotify.max_user_watches) and its
 	// subsequent recovery.
 	watchAdd func(w *fsnotify.Watcher, path string) error
+	// watchBackend overrides backend selection for watch-trigger bindings. Tests
+	// use it to force fsnotify behavior on platforms where production defaults
+	// to a different native backend.
+	watchBackend func(root string, matcher *watchMatcher) (watchBackend, map[string]int, string)
 
 	// pushNotify guards proactive `gr notify` push-notification gating state:
 	// a rolling window of delivered timestamps (rate limit) and a per-key map of

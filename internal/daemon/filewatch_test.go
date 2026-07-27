@@ -26,14 +26,20 @@ func setWatchBuiltinIgnores(sm *SessionManager, ignores []string) {
 	sm.cfg = &newCfg
 }
 
-// bindingWatches reports whether the binding's live fsnotify watcher currently
+func forceFSNotifyWatchBackend(sm *SessionManager) {
+	sm.watchBackend = func(root string, matcher *watchMatcher) (watchBackend, map[string]int, string) {
+		return sm.newFSNotifyRecursiveWatchBackend(root, matcher)
+	}
+}
+
+// bindingWatches reports whether the binding's live backend currently
 // registers path.
 func bindingWatches(b *watchBinding, path string) bool {
-	if b == nil || b.watcher == nil {
+	if b == nil || b.backend == nil {
 		return false
 	}
 
-	for _, w := range b.watcher.WatchList() {
+	for _, w := range b.backend.WatchList() {
 		if filepath.Clean(w) == filepath.Clean(path) {
 			return true
 		}
@@ -301,7 +307,7 @@ func TestFileWatchBudgetDegradesAndReleases(t *testing.T) {
 	sm.teardownAllBindings()
 }
 
-func TestWatchPathCostForGOOS(t *testing.T) {
+func TestFSNotifyWatchPathCostForGOOS(t *testing.T) {
 	root := t.TempDir()
 	mustMkdir(t, filepath.Join(root, "braw"))
 
@@ -321,8 +327,8 @@ func TestWatchPathCostForGOOS(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := watchPathCostForGOOS(test.goos, root); got != test.want {
-				t.Fatalf("watchPathCostForGOOS(%q) = %d, want %d", test.goos, got, test.want)
+			if got := fsnotifyWatchPathCostForGOOS(test.goos, root); got != test.want {
+				t.Fatalf("fsnotifyWatchPathCostForGOOS(%q) = %d, want %d", test.goos, got, test.want)
 			}
 		})
 	}
@@ -354,7 +360,7 @@ func TestFileWatch_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), builtinFingerprint: watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores()), watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{triggerName: "wf", sessionID: "src", worktree: worktree, fingerprint: triggerFingerprint(&trig), builtinFingerprint: watchBuiltinFingerprint(sm.cfg.TriggersRuntime.WatchBuiltinIgnores()), backend: newFSNotifyWatchBackend(w, nil), changed: make(map[string]bool)}
 	matcher := newWatchMatcher(worktree, trig.Watch, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -912,7 +918,7 @@ func TestWatchBuiltinIgnoresReloadAddFailureDegrades(t *testing.T) {
 		t.Fatalf("expected backoff scheduled, got count=%d next=%v", degraded.retryCount, degraded.nextRetryAt)
 	}
 
-	if degraded.watcher != nil {
+	if degraded.backend != nil {
 		t.Fatal("degraded binding must not retain a live watcher")
 	}
 
@@ -922,7 +928,7 @@ func TestWatchBuiltinIgnoresReloadAddFailureDegrades(t *testing.T) {
 	sm.reconcileBindings(ctx, sm.allTriggers(), degraded.nextRetryAt.Add(time.Millisecond))
 
 	healthy := sm.triggers.bindings[key]
-	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil {
+	if healthy == nil || healthy.degraded != "" || healthy.backend == nil {
 		t.Fatalf("expected recovered healthy binding, got %+v", healthy)
 	}
 
@@ -1081,7 +1087,7 @@ func TestWatchBuiltinIgnoresDegradeRecoveryPreservesChanges(t *testing.T) {
 	sm.reconcileBindings(ctx, sm.allTriggers(), degraded.nextRetryAt.Add(time.Millisecond))
 
 	healthy := sm.triggers.bindings[key]
-	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil {
+	if healthy == nil || healthy.degraded != "" || healthy.backend == nil {
 		t.Fatalf("expected recovered healthy binding, got %+v", healthy)
 	}
 
@@ -1276,8 +1282,8 @@ func TestReconcileBindings_DegradedRecovers(t *testing.T) {
 
 	// The recovered binding must be genuinely live — a real watcher with a running
 	// event goroutine (cancel set) — not merely a cleared degraded flag.
-	if healthy.watcher == nil || healthy.cancel == nil {
-		t.Fatalf("expected recovered binding to be live, got watcher=%v cancel=%v", healthy.watcher != nil, healthy.cancel != nil)
+	if healthy.backend == nil || healthy.cancel == nil {
+		t.Fatalf("expected recovered binding to be live, got backend=%v cancel=%v", healthy.backend != nil, healthy.cancel != nil)
 	}
 
 	sm.teardownAllBindings()
@@ -1310,7 +1316,7 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	sm.recordDegradedBinding(key, &sm.cfg.Triggers[0], sess, "fsnotify.NewWatcher failed: too many open files", 1, t0, builtinFP, nil, history)
 
 	b := sm.triggers.bindings[key]
-	if b == nil || b.degraded == "" || b.watcher != nil || b.cancel != nil {
+	if b == nil || b.degraded == "" || b.backend != nil || b.cancel != nil {
 		t.Fatalf("expected watcher-less degraded binding, got %+v", b)
 	}
 
@@ -1327,7 +1333,7 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	// Before the backoff, reconcile must not thrash.
 	sm.reconcileBindings(context.Background(), sm.allTriggers(), t0.Add(time.Second))
 
-	if got := sm.triggers.bindings[key]; got.watcher != nil {
+	if got := sm.triggers.bindings[key]; got.backend != nil {
 		t.Fatal("expected no recreation before backoff elapses")
 	}
 
@@ -1335,7 +1341,7 @@ func TestRecordDegradedBinding_Recovers(t *testing.T) {
 	sm.reconcileBindings(context.Background(), sm.allTriggers(), b.nextRetryAt.Add(time.Millisecond))
 
 	healthy := sm.triggers.bindings[key]
-	if healthy == nil || healthy.degraded != "" || healthy.watcher == nil || healthy.cancel == nil {
+	if healthy == nil || healthy.degraded != "" || healthy.backend == nil || healthy.cancel == nil {
 		t.Fatalf("expected recovered live binding, got %+v", healthy)
 	}
 
@@ -1465,7 +1471,7 @@ func TestReconcileWatchDirs(t *testing.T) {
 	m.reloadGit()
 
 	sm := newTriggerTestSM(t)
-	b := &watchBinding{worktree: root, watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{worktree: root, backend: newFSNotifyWatchBackend(w, nil), changed: make(map[string]bool)}
 	sm.reconcileWatchDirs(b, m)
 
 	if watchListContains(w, filepath.Join(root, "build")) {
@@ -1512,7 +1518,7 @@ func TestReconcileWatchDirs_AddsUnignored(t *testing.T) {
 	m.reloadGit()
 
 	sm := newTriggerTestSM(t)
-	b := &watchBinding{worktree: root, watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{worktree: root, backend: newFSNotifyWatchBackend(w, nil), changed: make(map[string]bool)}
 	sm.reconcileWatchDirs(b, m)
 
 	if !watchListContains(w, filepath.Join(root, "build")) {
@@ -1544,14 +1550,14 @@ func TestHandleWatchEvent_GitignoreReload(t *testing.T) {
 		Watch:  &config.WatchConfig{Role: "implementer"},
 		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
 	})
-	b := &watchBinding{triggerName: "wf", worktree: root, watcher: w, changed: make(map[string]bool)}
+	b := &watchBinding{triggerName: "wf", worktree: root, backend: newFSNotifyWatchBackend(w, nil), changed: make(map[string]bool)}
 
 	// A new .gitignore that ignores logs/.
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("logs/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	ev := fsnotify.Event{Name: filepath.Join(root, ".gitignore"), Op: fsnotify.Create}
+	ev := watchEvent{Name: filepath.Join(root, ".gitignore"), Op: fsnotify.Create}
 	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Second)
 
 	if !m.ignoredDir("logs") {
@@ -1560,6 +1566,179 @@ func TestHandleWatchEvent_GitignoreReload(t *testing.T) {
 
 	if watchListContains(w, filepath.Join(root, "logs")) {
 		t.Error("logs/ should be pruned from the watch set after the reload")
+	}
+}
+
+func TestHandleWatchEvent_CoalescedSubtreeScan(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "src"))
+
+	if err := os.WriteFile(filepath.Join(root, "src", "braw.go"), []byte("package src\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "src", "notes.md"), []byte("dreich\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+	m := newWatchMatcher(root, sm.cfg.Triggers[0].Watch, nil)
+	b := &watchBinding{triggerName: "wf", worktree: root, changed: make(map[string]bool)}
+
+	ev := watchEvent{Name: filepath.Join(root, "src"), Op: fsnotify.Write, Scan: true, LossyScan: true}
+	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Hour)
+
+	b.bmu.Lock()
+	_, sawGo := b.changed["src/braw.go"]
+	_, sawMarkdown := b.changed["src/notes.md"]
+
+	if b.debounce != nil {
+		b.debounce.Stop()
+	}
+	b.bmu.Unlock()
+
+	if !sawGo {
+		t.Fatal("coalesced subtree scan did not note matching Go file")
+	}
+
+	if sawMarkdown {
+		t.Fatal("coalesced subtree scan noted non-matching Markdown file")
+	}
+}
+
+func TestHandleWatchEvent_LossySubtreeScanNotesEligibleDirectory(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "src"))
+
+	if err := os.WriteFile(filepath.Join(root, "src", "notes.md"), []byte("dreich\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+	m := newWatchMatcher(root, sm.cfg.Triggers[0].Watch, nil)
+	b := &watchBinding{triggerName: "wf", worktree: root, changed: make(map[string]bool)}
+
+	ev := watchEvent{Name: filepath.Join(root, "src"), Op: fsnotify.Write, Scan: true, LossyScan: true}
+	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Hour)
+
+	b.bmu.Lock()
+	_, sawDir := b.changed["src"]
+	_, sawMarkdown := b.changed["src/notes.md"]
+
+	if b.debounce != nil {
+		b.debounce.Stop()
+	}
+	b.bmu.Unlock()
+
+	if !sawDir {
+		t.Fatal("lossy subtree scan did not note eligible directory")
+	}
+
+	if sawMarkdown {
+		t.Fatal("lossy subtree scan noted non-matching Markdown file")
+	}
+}
+
+func TestHandleWatchEvent_LossyMissingSubtreeNotesEligibleDirectory(t *testing.T) {
+	root := t.TempDir()
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+	m := newWatchMatcher(root, sm.cfg.Triggers[0].Watch, nil)
+	b := &watchBinding{triggerName: "wf", worktree: root, changed: make(map[string]bool)}
+
+	ev := watchEvent{Name: filepath.Join(root, "src"), Op: fsnotify.Remove, Scan: true, LossyScan: true}
+	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Hour)
+
+	b.bmu.Lock()
+	_, sawDir := b.changed["src"]
+
+	if b.debounce != nil {
+		b.debounce.Stop()
+	}
+	b.bmu.Unlock()
+
+	if !sawDir {
+		t.Fatal("lossy missing subtree scan did not note eligible directory")
+	}
+}
+
+func TestHandleWatchEvent_RenamedDirectoryScansSubtree(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "src"))
+
+	if err := os.WriteFile(filepath.Join(root, "src", "braw.go"), []byte("package src\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+	m := newWatchMatcher(root, sm.cfg.Triggers[0].Watch, nil)
+	b := &watchBinding{triggerName: "wf", worktree: root, changed: make(map[string]bool)}
+
+	ev := watchEvent{Name: filepath.Join(root, "src"), Op: fsnotify.Rename}
+	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Hour)
+
+	b.bmu.Lock()
+	_, sawGo := b.changed["src/braw.go"]
+
+	if b.debounce != nil {
+		b.debounce.Stop()
+	}
+	b.bmu.Unlock()
+
+	if !sawGo {
+		t.Fatal("renamed directory event did not scan matching subtree")
+	}
+}
+
+func TestHandleWatchEvent_PreciseDirectoryScanDoesNotNoteEmptyEligibleSubtree(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "src"))
+
+	if err := os.WriteFile(filepath.Join(root, "src", "notes.md"), []byte("dreich\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer", Paths: []string{"**/*.go"}},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+	m := newWatchMatcher(root, sm.cfg.Triggers[0].Watch, nil)
+	b := &watchBinding{triggerName: "wf", worktree: root, changed: make(map[string]bool)}
+
+	ev := watchEvent{Name: filepath.Join(root, "src"), Op: fsnotify.Rename, Scan: true}
+	sm.handleWatchEvent(context.Background(), "wf", b, m, ev, time.Hour)
+
+	b.bmu.Lock()
+	_, sawDir := b.changed["src"]
+	_, sawMarkdown := b.changed["src/notes.md"]
+
+	if b.debounce != nil {
+		b.debounce.Stop()
+	}
+	b.bmu.Unlock()
+
+	if sawDir {
+		t.Fatal("precise directory scan noted eligible directory without matching files")
+	}
+
+	if sawMarkdown {
+		t.Fatal("precise directory scan noted non-matching Markdown file")
 	}
 }
 

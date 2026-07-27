@@ -814,7 +814,7 @@ run_history_max          = 20       # per-trigger runs retained in persisted his
 watch_reconcile_interval = "2s"     # how often file-watch bindings are reconciled against live sessions
 watch_retry_base_backoff = "5s"     # first-retry delay for a degraded file-watch binding (then exponential)
 watch_retry_max_backoff  = "5m"     # cap on the degraded-binding retry backoff
-watch_max_directories    = 8192     # daemon-wide estimated file-watch descriptor budget (macOS includes directory entries)
+watch_max_directories    = 8192     # daemon-wide cap on estimated file-watch backend cost
 command_output_cap       = 4096     # bytes of a command action's captured output kept (rest truncated)
 # watch_builtin_ignores: daemon-wide dirs/patterns never watched (".git" is always
 # ignored regardless). Unset uses the default below.

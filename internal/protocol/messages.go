@@ -806,8 +806,9 @@ type TriggerDiagnostic struct {
 
 // WatcherDiagnostic reports the daemon-wide file-watch trigger resource budget
 // and per-binding attribution for gr doctor. The budget is the same estimated
-// descriptor accounting used for admission control; on macOS it includes the
-// directory entries charged by the kqueue-backed estimate.
+// backend-cost accounting used for admission control; fsnotify on macOS includes
+// the directory entries charged by the kqueue-backed estimate, while FSEvents
+// charges one recursive stream.
 type WatcherDiagnostic struct {
 	EstimatedDescriptorCost int                        `json:"estimated_descriptor_cost"`
 	Budget                  int                        `json:"budget"`
@@ -1314,13 +1315,14 @@ type TriggerBindingDetail struct {
 	WorktreePath   string `json:"worktree_path,omitempty"`
 	State          string `json:"state"`
 	PendingChanges int    `json:"pending_changes"`
-	// RegisteredWatchDirectories is the number of active directory registrations
-	// held by this binding. Degraded bindings hold no active registrations, so
-	// this is zero while they wait for retry.
+	// RegisteredWatchDirectories is the legacy-named count of active backend
+	// registrations held by this binding. Degraded bindings hold no active
+	// registrations, so this is zero while they wait for retry.
 	RegisteredWatchDirectories int `json:"registered_watch_directories"`
-	// EstimatedWatchDescriptorCost is the budget cost currently charged to this
-	// binding. It matches daemon admission accounting; on macOS it can be larger
-	// than RegisteredWatchDirectories because directory entries are included.
+	// EstimatedWatchDescriptorCost is the legacy-named budget cost currently
+	// charged to this binding. It matches daemon admission accounting; fsnotify
+	// on macOS can be larger than RegisteredWatchDirectories because directory
+	// entries are included, while FSEvents charges one recursive stream.
 	EstimatedWatchDescriptorCost int     `json:"estimated_watch_descriptor_cost"`
 	WatchBudgetPercent           float64 `json:"watch_budget_percent"`
 	DebounceUntil                string  `json:"debounce_until,omitempty"` // RFC3339 while armed

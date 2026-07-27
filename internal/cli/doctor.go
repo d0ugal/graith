@@ -1169,10 +1169,9 @@ func (dc *doctorContext) checkStorage(diag *protocol.DiagnosticsMsg) {
 	}
 }
 
-// checkWatcherResources surfaces the file-watch trigger descriptor budget and
+// checkWatcherResources surfaces the file-watch trigger backend budget and
 // attributes active registrations back to trigger bindings. It is intentionally
-// scoped to trigger file-watch resources; alternate watch implementations are
-// tracked separately.
+// scoped to trigger file-watch resources.
 func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 	watchers := diag.Watchers
 	if watchers == nil {
@@ -1181,7 +1180,7 @@ func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 
 	dc.section("Watcher Resources")
 
-	usage := fmt.Sprintf("%d/%d estimated descriptors", watchers.EstimatedDescriptorCost, watchers.Budget)
+	usage := fmt.Sprintf("%d/%d estimated watch units", watchers.EstimatedDescriptorCost, watchers.Budget)
 	if watchers.Budget > 0 {
 		usage += fmt.Sprintf(" (%.2f%%)", watchers.BudgetPercent)
 	}
@@ -1290,11 +1289,11 @@ func (dc *doctorContext) checkTriggers(diag *protocol.DiagnosticsMsg) {
 		dc.warnf("triggers", "Watch trigger %q degraded on session %q: %s", t.Name, who, t.Degraded)
 
 		if t.NextRetryAt != "" {
-			dc.hintf("Retried %d time(s); next attempt at %s (recovers automatically when the watch limit clears)", t.RetryCount, t.NextRetryAt)
+			dc.hintf("Retried %d time(s); next attempt at %s (recovers automatically when the watch backend can be recreated)", t.RetryCount, t.NextRetryAt)
 		}
 	}
 
-	dc.hintf("If this persists, raise fs.inotify.max_user_watches (Linux), increase triggers.advanced.watch_max_directories, or reduce the watched tree with [trigger.watch] ignore/paths")
+	dc.hintf("If this persists, raise fs.inotify.max_user_watches (Linux/fsnotify), increase triggers.advanced.watch_max_directories, or reduce the watched tree with [trigger.watch] ignore/paths")
 }
 
 // renderPurgeDiagnostic writes the human-readable view of diagnostics.purge.

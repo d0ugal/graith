@@ -176,7 +176,7 @@ func renderTriggerStatus(w io.Writer, t protocol.TriggerRecord) {
 			_, _ = fmt.Fprintf(w, "Degraded: %s\n", t.Degraded)
 
 			if t.DegradedRetryAt != "" {
-				_, _ = fmt.Fprintf(w, "Next retry: %s (after %d attempt(s); recovers automatically when the watch limit clears)\n", t.DegradedRetryAt, t.DegradedRetryCount)
+				_, _ = fmt.Fprintf(w, "Next retry: %s (after %d attempt(s); recovers automatically when the watch backend can be recreated)\n", t.DegradedRetryAt, t.DegradedRetryCount)
 			}
 		}
 	case "gcx":

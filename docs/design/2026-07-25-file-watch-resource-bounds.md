@@ -75,10 +75,11 @@ Derive a static directory prefix from each include glob. Register its literal
 ancestry, and recurse only where wildcard directory components or `**` can
 contain a match. Every successful registration increments a daemon-owned count;
 teardown, failed adds, and ignore pruning release it. The default budget is
-8192 estimated watcher descriptors and is configurable as
-`triggers.advanced.watch_max_directories`. On macOS the estimate includes the
-directory entries that kqueue commonly registers separately; on other
-platforms it is one unit per watched directory.
+8192 estimated backend watch units and is configurable as
+`triggers.advanced.watch_max_directories`. With the later macOS FSEvents backend
+this cost is one unit per recursive worktree stream; with fsnotify/kqueue the
+estimate includes the directory entries that kqueue commonly registers
+separately. On other fsnotify platforms it is one unit per watched directory.
 
 If a binding cannot reserve another directory, creation degrades with a reason
 including current usage and budget, retains the existing retry/backoff behavior,

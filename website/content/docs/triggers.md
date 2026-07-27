@@ -88,27 +88,37 @@ debounce = "30s"             # quiet-window; lower for fast commands
   reader. This is how a scenario ships its own automation: a
   [scenario-embedded trigger]({{< relref "scenarios.md#trigger-blocks-scenario-embedded-triggers" >}})
   uses a `role` its scenario defines and binds only inside that scenario.
-- `.gitignore` is always honoured — ignored directories (`node_modules/` etc.) are
-  pruned from the watch set. Matching behaves exactly as
-  `git check-ignore` (`*`, `**`, `?`, character classes), applying the repository
-  `.gitignore`, nested per-directory `.gitignore` files, and `.git/info/exclude`.
-  In a linked worktree (graith's normal setup, where `.git` is a pointer file) the
-  shared `.git/info/exclude` in the common git directory applies too.
+- `.gitignore` is always honoured — ignored paths never fire trigger actions.
+  Matching behaves exactly as `git check-ignore` (`*`, `**`, `?`, character
+  classes), applying the repository `.gitignore`, nested per-directory
+  `.gitignore` files, and `.git/info/exclude`. In a linked worktree (graith's
+  normal setup, where `.git` is a pointer file) the shared `.git/info/exclude` in
+  the common git directory applies too. fsnotify backends also prune ignored
+  directories from their registration set; FSEvents watches the root stream and
+  filters ignored paths after delivery.
 - Editing, adding, or removing a `.gitignore` takes effect live without a session
   restart: on the next change to that file the watcher rebuilds its rules, pruning
-  newly-ignored directories and picking up newly-un-ignored ones. (A
+  or filtering newly-ignored directories and picking up newly-un-ignored ones. (A
   `.git/info/exclude` change is re-read on the next `.gitignore` edit or binding
   recreation, since the `.git` directory itself is never watched.)
 - A burst of edits is coalesced into one fire by the `debounce` quiet-window.
-- If a binding can't register its watch (e.g. `fs.inotify.max_user_watches`
-  exhausted) it's marked **degraded** and retried on exponential backoff (5s, 10s,
-  20s, … capped at 5m), recovering on its own once the limit clears — no restart
-  needed. `gr trigger status <name>` and `gr doctor` surface the degraded state and
-  next retry time.
+- On macOS builds with cgo, Graith uses FSEvents for watch-trigger bindings.
+  Each binding watches the worktree root recursively with one FSEvents stream;
+  non-macOS platforms, and macOS builds without cgo, keep the fsnotify backend.
+  FSEvents has its own short latency and may coalesce or batch events before
+  Graith's `debounce` window. When it reports that subtree detail was coalesced
+  or dropped, Graith scans the named subtree through the same include and ignore
+  rules. Rename events are path based and do not include both old and new names.
+- If a binding can't register its watch backend (for example
+  `fs.inotify.max_user_watches` exhausted on Linux/fsnotify) it's marked
+  **degraded** and retried on exponential backoff (5s, 10s, 20s, … capped at 5m),
+  recovering on its own once the backend can be recreated — no restart needed.
+  `gr trigger status <name>` and `gr doctor` surface the degraded state and next
+  retry time.
 - `gr trigger status <name>` keeps the aggregate live binding count and, for
   watch triggers, prints each live binding with session ID/name, worktree, state
   (`idle`, `debouncing`, `running`, `rate-limited`, `skipped`, `failed`, or
-  `degraded`), active registered watcher directory count, estimated descriptor
+  `degraded`), active registered watch registration count, estimated backend
   cost charged against `watch_max_directories`, budget share, pending matching
   change count, debounce deadline, in-flight flag, last per-binding result/error,
   and degraded retry details. `--json` exposes the same rows as
