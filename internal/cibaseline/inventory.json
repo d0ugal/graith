@@ -888,11 +888,12 @@
       "path": ".github/workflows/docs-preview.yml",
       "name": "Docs Preview",
       "owner": "docs-owners",
-      "file_sha256": "b6e3f0ba3480081f9e5e96a04043d171bb9d81403a563cb4483d75e37e890173",
+      "file_sha256": "836594991a96264fae5eade725bd9a42fb70cc09d228c6eed9240993451a3caa",
       "events": {
         "pull_request": {
           "paths": [
             "website/**",
+            ".github/workflows/docs.yml",
             ".github/workflows/docs-preview.yml"
           ],
           "types": [
@@ -3502,5 +3503,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "5522c8f4d22c8d63a7f171d8f5396392bcb59d0108de604e81633912cde4605b"
+  "digest": "d7dcc5506c9e032f7e6346bfbf7f108cc842811e706ed29ffe3c6a618302f085"
 }

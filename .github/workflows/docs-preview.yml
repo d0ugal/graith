@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, closed]
     paths:
       - 'website/**'
+      - '.github/workflows/docs.yml'
       - '.github/workflows/docs-preview.yml'
   # Safety-net prune of stale screenshot dirs (in case an on-close cleanup
   # was ever missed — dropped event, deleted PR, etc.).
@@ -71,13 +72,27 @@ jobs:
         run: |
           BASE="$BASE_SHA"
           HEAD="$HEAD_SHA"
-          changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ || true)"
-          echo "Changed under website/:"; echo "$changed"
+          if changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ .github/workflows/docs.yml .github/workflows/docs-preview.yml)"; then
+            detector_failed=0
+          else
+            detector_failed=1
+            changed=""
+            echo "Could not determine docs-preview changed files; running the Hugo build to be safe."
+          fi
+          echo "Docs-preview relevant changes:"; echo "$changed"
 
-          # A change to theme/config/layout/assets affects every page.
+          build=0
+
+          # A change to theme/config/layout/assets/data affects every page.
           global=0
-          if echo "$changed" | grep -qE '^website/(hugo\.toml|go\.(mod|sum)|layouts/|assets/|\.ci/)'; then
+          if [ "$detector_failed" = 1 ] || grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"; then
             global=1
+          fi
+
+          # Website tooling and workflow changes still need the production Hugo
+          # validation path, even when they do not map to a specific screenshot.
+          if [ "$global" = 1 ] || grep -qE '^website/|^\.github/workflows/(docs|docs-preview)\.yml$' <<<"$changed"; then
+            build=1
           fi
 
           emit() { # path, deleted -> {"url","name","hasBase","deleted"}
@@ -106,7 +121,9 @@ jobs:
 
           {
             if [ "$global" = 1 ]; then
-              for f in website/content/docs/*.md; do emit "$f" false; done
+              find website/content/docs -name '*.md' -print | sort | while read -r f; do
+                emit "$f" false
+              done
             else
               # `|| true` so a no-match grep doesn't abort the step under
               # `set -o pipefail` (e.g. a website/** change that touches no
@@ -138,11 +155,16 @@ jobs:
 
           count="$(jq 'length' pages.json)"
           basecount="$(jq '[.[] | select(.hasBase)] | length' pages.json)"
+          if [ "$count" != "0" ]; then
+            build=1
+          fi
           {
+            echo "build=$build"
             echo "global=$global"
             echo "count=$count"
             echo "basecount=$basecount"
           } >> "$GITHUB_OUTPUT"
+          echo "Build required: $build"
           echo "Pages to screenshot ($count, $basecount with a baseline):"; cat pages.json
 
       # Build the site twice — once at the PR's base commit, once at its head —
@@ -150,12 +172,13 @@ jobs:
       # the row diff aligns. The base build is skipped when every changed page
       # is new (no baseline to diff against).
       - name: Build head + base sites
-        if: steps.changed.outputs.count != '0'
+        if: steps.changed.outputs.build == '1'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
           (cd website && go test ./... && node --test tests/*.test.mjs)
+          make package-graph-check
           hugo --gc --minify --baseURL "${BASE_URL}/" \
             --source website --destination "$PWD/site-head"
           if [ "$BASECOUNT" != "0" ]; then
