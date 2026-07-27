@@ -1,0 +1,13 @@
+title = "graith Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Ignore historical Swift type declaration false positive in TestSigner."
+condition = "AND"
+paths = ['''^gui/shared/Tests/GraithProtocolTests/TestSigner\.swift$''']
+regexes = ['''^Curve25519\.Signing\.PrivateKey$''']
