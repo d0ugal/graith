@@ -2,6 +2,7 @@ package cipolicy
 
 import (
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -189,8 +190,7 @@ func TestLibghosttyLinuxArtifactsRemainTrustedAndLockComplete(t *testing.T) {
 	assertContains(t, nativePublish, `sed "1i prefix=\${pcfiledir}/.."`)
 	assertContains(t, nativePublish, "pkg-config --cflags libghostty-vt-static")
 	assertContains(t, nativePublish, "cp -R gui/shared/Sources/CGhosttyVT/include")
-	assertContains(t, nativePublish, "libghostty-linux-archive.py pack")
-	assertRegexp(t, nativeScript, `libghostty-linux-archive\.py.*inspect`)
+	assertLibghosttyArchiveHelperPolicy(t, nativeScript, nativePublish)
 	assertContains(t, nativeScript, "test-linux-archive-policy")
 	assertContains(t, nativePublish, `prefix=\${pcfiledir}/..`)
 	assertContains(t, nativePublish, `Libs: -L\${prefix} -lghostty-vt`)
@@ -211,6 +211,63 @@ func TestLibghosttyLinuxArtifactsRemainTrustedAndLockComplete(t *testing.T) {
 	assertRegexp(t, nativePublish, `actions/checkout@[0-9a-f]{40}`)
 }
 
+func TestLibghosttyLinuxArtifactPolicyRequiresArchiveHelperChecks(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	nativePublish := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native-publish.yml"))
+	nativeScript := readPolicyFile(t, filepath.Join(repoRoot, "scripts/libghostty-native.sh"))
+
+	tests := map[string]struct {
+		nativeScript  string
+		nativePublish string
+		want          string
+	}{
+		"missing_publish_build": {
+			nativeScript:  nativeScript,
+			nativePublish: strings.Replace(nativePublish, `env -u GOOS -u GOARCH go build -o "$RUNNER_TEMP/libghosttyarchive" ./cmd/libghosttyarchive`, `go build -o "$RUNNER_TEMP/other" ./cmd/other`, 1),
+			want:          "publish workflow must build the Go archive helper for the host",
+		},
+		"missing_publish_pack": {
+			nativeScript:  nativeScript,
+			nativePublish: strings.Replace(nativePublish, `"$RUNNER_TEMP/libghosttyarchive" pack`, `"$RUNNER_TEMP/other" pack`, 1),
+			want:          "publish workflow must pack Linux artifacts with the Go archive helper",
+		},
+		"missing_publish_inspect": {
+			nativeScript:  nativeScript,
+			nativePublish: strings.Replace(nativePublish, `"$RUNNER_TEMP/libghosttyarchive" inspect`, `"$RUNNER_TEMP/other" inspect`, 1),
+			want:          "publish workflow must inspect Linux artifacts with the Go archive helper",
+		},
+		"missing_consumer_build": {
+			nativeScript:  strings.Replace(nativeScript, `env -u GOOS -u GOARCH go build -o "$helper" ./cmd/libghosttyarchive`, `go build -o "$helper" ./cmd/other`, 1),
+			nativePublish: nativePublish,
+			want:          "native consumer must build the Go archive helper for the host",
+		},
+		"missing_consumer_inspect": {
+			nativeScript:  strings.Replace(nativeScript, `libghostty_archive_helper inspect "$archive"`, `other_archive_helper inspect "$archive"`, 1),
+			nativePublish: nativePublish,
+			want:          "native consumer must inspect Linux artifacts with the Go archive helper",
+		},
+		"go_run_caller": {
+			nativeScript:  nativeScript + "\ngo run ./cmd/libghosttyarchive test\n",
+			nativePublish: nativePublish,
+			want:          "archive helper callers must use the built command, not go run",
+		},
+		"retired_python_caller": {
+			nativeScript:  nativeScript + "\npython3 \"$REPO_DIR/scripts/libghostty-linux-archive.py\" test\n",
+			nativePublish: nativePublish,
+			want:          "retired Python archive helper must not be called",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := checkLibghosttyArchiveHelperPolicy(test.nativeScript, test.nativePublish)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("checkLibghosttyArchiveHelperPolicy() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLibghosttyCoverageMeasuresTaggedProductionGraph(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	coverage := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/coverage.yml"))
@@ -225,6 +282,44 @@ func TestLibghosttyCoverageMeasuresTaggedProductionGraph(t *testing.T) {
 	assertContains(t, coverage, "run_cover cover.head.out head")
 	assertContains(t, coverage, "run_cover cover.base.out base")
 	assertContains(t, coverage, "HEAD and BASE use the lock and setup script")
+}
+
+func assertLibghosttyArchiveHelperPolicy(t *testing.T, nativeScript, nativePublish string) {
+	t.Helper()
+
+	if err := checkLibghosttyArchiveHelperPolicy(nativeScript, nativePublish); err != nil {
+		t.Fatal(err)
+	}
+}
+
+//nolint:wsl_v5 // The ordered checks mirror producer then consumer archive-helper obligations.
+func checkLibghosttyArchiveHelperPolicy(nativeScript, nativePublish string) error {
+	if !strings.Contains(nativePublish, `env -u GOOS -u GOARCH go build -o "$RUNNER_TEMP/libghosttyarchive" ./cmd/libghosttyarchive`) {
+		return errors.New("publish workflow must build the Go archive helper for the host")
+	}
+	if !strings.Contains(nativePublish, `"$RUNNER_TEMP/libghosttyarchive" pack`) {
+		return errors.New("publish workflow must pack Linux artifacts with the Go archive helper")
+	}
+	if !strings.Contains(nativePublish, `"$RUNNER_TEMP/libghosttyarchive" inspect`) {
+		return errors.New("publish workflow must inspect Linux artifacts with the Go archive helper")
+	}
+	if !regexp.MustCompile(`env -u GOOS -u GOARCH go build -o "\$helper" \./cmd/libghosttyarchive`).MatchString(nativeScript) {
+		return errors.New("native consumer must build the Go archive helper for the host")
+	}
+	if !regexp.MustCompile(`libghostty_archive_helper inspect "\$archive"`).MatchString(nativeScript) {
+		return errors.New("native consumer must inspect Linux artifacts with the Go archive helper")
+	}
+	if !strings.Contains(nativeScript, `libghostty_archive_helper test`) {
+		return errors.New("native archive policy test must use the Go archive helper")
+	}
+	if strings.Contains(nativeScript, "go run ./cmd/libghosttyarchive") || strings.Contains(nativePublish, "go run ./cmd/libghosttyarchive") {
+		return errors.New("archive helper callers must use the built command, not go run")
+	}
+	if strings.Contains(nativeScript, "libghostty-linux-archive.py") || strings.Contains(nativePublish, "libghostty-linux-archive.py") {
+		return errors.New("retired Python archive helper must not be called")
+	}
+
+	return nil
 }
 
 func nativePathMatcher(t *testing.T, workflow string) *regexp.Regexp {

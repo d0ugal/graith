@@ -53,6 +53,8 @@ var ciEntrypointPaths = []string{
 var ciGoPolicySurfacePaths = []string{
 	"cmd/cipolicy/main.go",
 	"cmd/cipolicy/main_test.go",
+	"cmd/libghosttyarchive/main.go",
+	"cmd/libghosttyarchive/main_test.go",
 	"internal/cipolicy/io.go",
 	"internal/cipolicy/libghostty_policy_test.go",
 	"internal/cipolicy/p11_js_surface.go",
@@ -61,6 +63,8 @@ var ciGoPolicySurfacePaths = []string{
 	"internal/cipolicy/shadow_summary.go",
 	"internal/cipolicy/shadow_summary_test.go",
 	"internal/cipolicy/workflow_lint_policy_test.go",
+	"internal/libghosttyarchive/archive.go",
+	"internal/libghosttyarchive/archive_test.go",
 }
 
 type goPolicySurfaceMetadata struct {
@@ -79,6 +83,16 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve CLI coverage for policy plan and diagnostic summary command behavior",
 		retirement: "remove only after equivalent cipolicy command coverage is added",
+	},
+	"cmd/libghosttyarchive/main.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve libghostty Linux archive helper pack, inspect, test, diagnostics, and exit-code behavior invoked by native producer and consumer workflows",
+		retirement: "remove only with equivalent native producer and consumer archive validation owned by the repository",
+	},
+	"cmd/libghosttyarchive/main_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve libghostty archive helper CLI contract coverage for successful operation, usage errors, validation failures, and self-test behavior",
+		retirement: "remove only after equivalent command contract coverage is added",
 	},
 	"internal/cipolicy/io.go": {
 		kind:       "go-policy-helper",
@@ -119,6 +133,16 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
 		retirement: "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement",
+	},
+	"internal/libghosttyarchive/archive.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve deterministic libghostty Linux archive construction, metadata normalization, member validation, and malformed archive rejection",
+		retirement: "remove only with equivalent archive construction and validation coverage owned by the repository",
+	},
+	"internal/libghosttyarchive/archive_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve old-vs-new parity, deterministic tar metadata, traversal rejection, malformed input rejection, and pack validation coverage",
+		retirement: "remove only after equivalent archive parity and failure-mode coverage exists",
 	},
 }
 

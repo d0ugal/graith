@@ -86,6 +86,15 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required"
 }
 
+libghostty_archive_helper() {
+    local helper="$NATIVE_WORK/libghosttyarchive"
+
+    if [[ ! -x "$helper" ]]; then
+        (cd "$REPO_DIR" && env -u GOOS -u GOARCH go build -o "$helper" ./cmd/libghosttyarchive) || return 1
+    fi
+    "$helper" "$@"
+}
+
 path_has_symlink_component() {
     local path="$1"
 
@@ -370,7 +379,7 @@ linux_artifact() {
     # entries from its display, so tar listings are not a sufficient contract.
     # Keep this diagnostic stable for callers and regression tests.
     # The inspector emits: Linux artifact has unexpected or incomplete archive members.
-    python3 "$REPO_DIR/scripts/libghostty-linux-archive.py" inspect "$archive" || return 1
+    libghostty_archive_helper inspect "$archive" || return 1
     rm -rf -- "$staging"
     mkdir -m 700 "$staging"
     tar -xzf "$archive" -C "$staging" --no-same-owner --no-same-permissions
@@ -465,7 +474,7 @@ test_linux_artifact() {
 }
 
 test_linux_archive_policy() {
-    python3 "$REPO_DIR/scripts/libghostty-linux-archive.py" test
+    libghostty_archive_helper test
 }
 
 build_local() {

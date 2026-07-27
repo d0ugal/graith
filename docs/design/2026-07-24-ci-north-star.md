@@ -262,7 +262,7 @@ creating churn:
 | Go | Prefer for reusable CI contracts, static workflow inventory, deterministic fixtures, and checks that benefit from typed tests. |
 | Shell | Keep for thin runner glue, platform setup, release scripts, and native build orchestration where it already maps directly to command-line tools. |
 | JavaScript | Keep existing tested helpers when they are small, GitHub/Node-oriented, or rely on an existing Node dependency such as `pngjs`. Replace only when the replacement deletes duplicated policy or materially improves reliability. |
-| Python | Keep current archive/manifest helpers where Python's standard library gives a clear, tested implementation. Do not add new Python CI policy surfaces without a concrete reason. |
+| Python | Do not add repository-owned Python CI policy or archive-helper surfaces; C6 migrates the libghostty archive helper to Go and deletes the Python script. |
 | YAML | Keep declarative workflow routing explicit. Avoid putting complicated policy in YAML expressions when a tested helper is clearer. |
 
 The P11 helper-retirement program remains useful only as an inventory and
@@ -284,7 +284,7 @@ before more code is added.
 | `.github/workflows/scripts/libghostty-policy.test.js` | Retired by C2 | Native/release contracts moved to semantic Go policy tests. | Native/release workflows and scripts. | Revert the replacement and restore the JS test. |
 | Other workflow script tests | Partially retired by C2 | Shellcheck, Renovate, and supply-chain verifier behavior moved to semantic Go tests; docs-diff/docs-preview JavaScript tests remain. | Existing workflow-lint job. | Revert individual simplification. |
 | `scripts/libghostty-native.sh` | Keep, then simplify cautiously | Current native artifact/source/consumer checks protect the core runtime. Simplification should remove leftover add-on framing or duplication, not coverage. | Native and release workflows. | Script-specific revert. |
-| `scripts/libghostty-linux-archive.py` | Keep | Deterministic archive shape verification is useful and tested. | Native/release artifact paths. | Script-specific revert. |
+| `cmd/libghosttyarchive/**`, `internal/libghosttyarchive/**` | Migrated by C6 | Deterministic archive shape verification remains useful and tested, but repository-owned archive tooling moves from Python to Go and deletes `scripts/libghostty-linux-archive.py`. | Native/release artifact paths. | Revert the Go helper, restore the Python script, and restore its callers together. |
 | Release rendering and publish scripts | Keep | Current trusted publication workflows depend on them; no new publication boundary is introduced. | Existing release workflows and secrets. | Script-specific revert. |
 | macOS release helpers | Keep | Existing optional signing/notarization and archive checks stay as current release logic. | Current release workflows. | Helper-specific revert. |
 | `cmd/cibaseline/**` | Simplify | A local inventory command is useful; GitHub-history collection and retained proof are no longer part of acceptance. | Corrected static inventory package. | Remove command or revert to previous local-only behavior. |
