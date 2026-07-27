@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/cronx"
-	"github.com/fsnotify/fsnotify"
 )
 
 // triggerState is the daemon-owned, in-memory runtime state for triggers. Its
@@ -33,7 +32,7 @@ type triggerState struct {
 
 	// watch source: bindings keyed by bindingKey(name, sessionID)
 	bindings  map[string]*watchBinding
-	watchDirs int // estimated watcher descriptors currently reserved
+	watchDirs int // estimated backend watch units currently reserved
 
 	// gcx source: one poll binding per trigger definition. The durable seen-ID
 	// cursor lives in TriggerRuntimeState; these process-local fields deliberately
@@ -56,7 +55,7 @@ type watchBinding struct {
 	worktree           string
 	fingerprint        string // definition fingerprint; a change recreates the binding
 	builtinFingerprint string // resolved daemon-wide watch-ignore policy fingerprint; a change recreates the binding
-	watcher            *fsnotify.Watcher
+	backend            watchBackend
 	debounce           *time.Timer
 	changed            map[string]bool // coalesced changed paths since last fire
 	inFlight           bool            // broad serialisation guard for this binding
@@ -68,7 +67,7 @@ type watchBinding struct {
 	lastRun            time.Time       // last per-binding fire attempt/result time
 	lastResult         string          // concise last result: exit 0, published, skipped, rate-limited, etc.
 	lastError          string          // concise last error, never captured command output
-	watchPaths         map[string]int  // path -> estimated descriptor cost
+	watchPaths         map[string]int  // path -> estimated backend cost
 	canceled           bool            // set on teardown; a pending debounce callback checks it
 	cancel             func()          // stops the binding's event goroutine
 }

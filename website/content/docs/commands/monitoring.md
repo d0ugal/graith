@@ -133,7 +133,7 @@ same JSON document.
 When the daemon is reachable, plain output adds a **Purge** section with the effective startup delay, sweep interval, and last/next sweep times; before the first sweep it shows `Last sweep: not yet run` and `Next sweep: awaiting first sweep`. The same values appear under `diagnostics.purge` in `--json`.
 
 Plain output also includes **Watcher Resources** for file-watch triggers. It
-reports the current estimated descriptor usage versus
+reports the current estimated watch backend units versus
 `triggers.advanced.watch_max_directories`, warns when the budget is near or
 blocked by an exhausted binding, and attributes active registrations to trigger
 bindings by session. The same data appears under `diagnostics.watchers` in

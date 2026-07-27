@@ -346,8 +346,8 @@ type TriggersAdvancedConfig struct {
 	// WatchRetryMaxBackoff caps the exponential degraded-binding backoff so a
 	// persistently degraded binding keeps retrying periodically. Default 5m.
 	WatchRetryMaxBackoff string `toml:"watch_retry_max_backoff"`
-	// WatchMaxDirectories caps the total number of directories registered by
-	// all file-watch bindings. Default 8192.
+	// WatchMaxDirectories caps the total estimated backend watch cost across all
+	// file-watch bindings. The name is kept for config compatibility. Default 8192.
 	WatchMaxDirectories int `toml:"watch_max_directories"`
 	// WatchBuiltinIgnores is the daemon-wide set of directories/patterns never
 	// watched by any file-watch trigger (on top of git ignore rules and per-trigger

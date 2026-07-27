@@ -452,7 +452,8 @@ func (sm *SessionManager) watcherDiagnostic() *protocol.WatcherDiagnostic {
 			NextRetryAt:                  detail.DegradedRetryAt,
 		}
 
-		if strings.Contains(detail.Degraded, "watch descriptor budget exhausted") {
+		if strings.Contains(detail.Degraded, "watch backend budget exhausted") ||
+			strings.Contains(detail.Degraded, "watch descriptor budget exhausted") {
 			diag.BudgetExhausted = true
 		}
 

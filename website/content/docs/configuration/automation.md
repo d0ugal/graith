@@ -233,7 +233,7 @@ run_history_max          = 20       # per-trigger runs retained in persisted his
 watch_reconcile_interval = "2s"     # how often file-watch bindings are reconciled against live sessions
 watch_retry_base_backoff = "5s"     # first-retry delay for a degraded file-watch binding (then exponential)
 watch_retry_max_backoff  = "5m"     # cap on the degraded-binding retry backoff
-watch_max_directories    = 8192     # daemon-wide estimated watcher-descriptor budget
+watch_max_directories    = 8192     # daemon-wide estimated file-watch backend budget
 command_output_cap       = 4096     # bytes of a command action's captured output kept (rest truncated)
 watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", "4913", ".DS_Store"]
 ```
@@ -242,17 +242,19 @@ An empty, invalid, or non-positive `watch_retry_base_backoff` or
 `watch_retry_max_backoff` uses its default. If the resolved base exceeds the
 maximum, the maximum also caps the first retry.
 
-`watch_builtin_ignores` is the daemon-wide set of directories/patterns never
-watched by any file-watch trigger (on top of git ignore rules and per-trigger
-`watch.ignore`). `.git` is always ignored regardless (a watched `.git` would
+`watch_builtin_ignores` is the daemon-wide set of directories/patterns that
+never fire any file-watch trigger (on top of git ignore rules and per-trigger
+`watch.ignore`). fsnotify backends also prune ignored directories from
+per-directory registrations; FSEvents watches the root stream and filters ignored
+paths after delivery. `.git` is always ignored regardless (a watched `.git` would
 create a feedback loop). Omitting the key uses the defaults above;
 `watch_builtin_ignores = []` keeps only that mandatory `.git` protection and
 drops every optional built-in ignore.
 
 Reloading `watch_builtin_ignores` (add, remove, or clear to `[]`) applies to
 already-running bindings on the next reconcile: each is rebuilt with the new
-matcher and its watched directory set reconciled — no source-session restart
-needed.
+matcher and its backend-specific watch/filter state reconciled — no
+source-session restart needed.
 
 File-watch bindings are created only for writable, non-mirror sessions. Sessions
 created with `--mirror` and branch-backed `--read-only` sessions are skipped
@@ -264,18 +266,18 @@ only needs a current branch reference, and a normal worktree or `--in-place`
 when the session needs to edit, commit, or participate as a watched source.
 
 `watch_max_directories` is a daemon-wide safety budget shared by all live
-file-watch bindings. It is named for compatibility, but on macOS the budget
-counts an estimate of kqueue descriptors (the directory plus its entries), not
-just directories. A binding that would exceed the remaining budget is marked
-**degraded**, with the reason and current budget shown by `gr trigger status`
-and `gr doctor`, and retried with the normal exponential backoff. This bounds
-descriptor use before the daemon reaches `EMFILE`; it does not silently disable
-the trigger. Prefer precise `paths` includes (for example `cmd/**/*.go`) and
-`ignore` entries for generated or dependency trees to keep bindings below the
-budget. A broad `**/*` watch intentionally consumes more of the shared budget.
-On macOS this is an estimate: kqueue can temporarily add descriptors for new
-files created inside an already-watched directory. Use `[trigger.watch] ignore`
-to prune generated or high-churn trees as an additional mitigation.
+file-watch bindings. The name is kept for compatibility. On macOS builds with
+cgo, watch triggers use FSEvents and charge one unit per recursive worktree
+stream. On macOS builds without cgo, Graith falls back to fsnotify/kqueue and
+keeps the conservative descriptor estimate for directories and their entries.
+On other platforms, fsnotify costs one unit per watched directory. A binding
+that would exceed the remaining budget is marked **degraded**, with the reason
+and current budget shown by `gr trigger status` and `gr doctor`, and retried
+with the normal exponential backoff. This bounds watch backend use before the
+daemon reaches `EMFILE`; it does not silently disable the trigger. Prefer
+precise `paths` includes (for example `cmd/**/*.go`) and `ignore` entries for
+generated or dependency trees to keep bindings below the budget. A broad `**/*`
+watch intentionally consumes more of the shared budget on fsnotify backends.
 
 `scheduler_tick` and `watch_reconcile_interval` are read at daemon start (restart
 to apply); other settings apply on the next reconcile or fire. Both fall back to
