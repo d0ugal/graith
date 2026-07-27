@@ -261,7 +261,7 @@ creating churn:
 | --- | --- |
 | Go | Prefer for reusable CI contracts, static workflow inventory, deterministic fixtures, and checks that benefit from typed tests. |
 | Shell | Keep for thin runner glue, platform setup, release scripts, and native build orchestration where it already maps directly to command-line tools. |
-| JavaScript | Keep existing tested helpers when they are small, GitHub/Node-oriented, or rely on an existing Node dependency such as `pngjs`. Replace only when the replacement deletes duplicated policy or materially improves reliability. |
+| JavaScript | Keep existing tested helpers when they are small or GitHub/Node-oriented. Replace when the owner-approved migration deletes duplicated policy, removes an extra dependency surface such as the retired C6 `pngjs` install, or materially improves reliability. |
 | Python | Do not add repository-owned Python CI policy or archive-helper surfaces; C6 migrates the libghostty archive helper to Go and deletes the Python script. |
 | YAML | Keep declarative workflow routing explicit. Avoid putting complicated policy in YAML expressions when a tested helper is clearer. |
 
@@ -278,11 +278,11 @@ before more code is added.
 | Component | Disposition | Rationale | Dependencies | Rollback boundary |
 | --- | --- | --- | --- | --- |
 | `.github/workflows/*.yml` | Keep | Current workflows are the authoritative checks and publication boundary. | None. | Workflow-specific revert. |
-| `.github/workflows/scripts/docs-diff*` | Keep | Existing PNG diff helper is small, tested, and depends on `pngjs`; porting it is churn. | `pngjs` package lock. | Revert helper change only if a replacement lands. |
+| `.github/workflows/scripts/docs-diff*` | Retired by C6 | The owner-approved Go migration preserves PNG diff semantics, deletes the docs-preview `pngjs` install and package lock, and keeps rollback as one helper/caller restoration. | `cmd/docsdiff` parity tests. | Restore the helper family, package lock, and workflow caller in one revert. |
 | `.github/workflows/scripts/docs-preview*` | Keep, then consider targeted simplification | Same-repository and cleanup logic is security-sensitive and already tested. | Existing docs preview workflow. | Revert docs-preview PR. |
 | `.github/workflows/scripts/regen-auth.test.js` | Retired by C2 | Semantic Go tests now protect the branch-mutation trust boundary. | Regen workflow. | Revert the replacement and restore the JS test. |
 | `.github/workflows/scripts/libghostty-policy.test.js` | Retired by C2 | Native/release contracts moved to semantic Go policy tests. | Native/release workflows and scripts. | Revert the replacement and restore the JS test. |
-| Other workflow script tests | Partially retired by C2 | Shellcheck, Renovate, and supply-chain verifier behavior moved to semantic Go tests; docs-diff/docs-preview JavaScript tests remain. | Existing workflow-lint job. | Revert individual simplification. |
+| Other workflow script tests | Partially retired by C2 and C6 | Shellcheck, Renovate, supply-chain verifier, and docs-diff behavior moved to semantic Go tests; docs-preview JavaScript tests remain. | Existing workflow-lint job. | Revert individual simplification. |
 | `scripts/libghostty-native.sh` | Keep, then simplify cautiously | Current native artifact/source/consumer checks protect the core runtime. Simplification should remove leftover add-on framing or duplication, not coverage. | Native and release workflows. | Script-specific revert. |
 | `cmd/libghosttyarchive/**`, `internal/libghosttyarchive/**` | Migrated by C6 | Deterministic archive shape verification remains useful and tested, but repository-owned archive tooling moves from Python to Go and deletes `scripts/libghostty-linux-archive.py`. | Native/release artifact paths. | Revert the Go helper, restore the Python script, and restore its callers together. |
 | Release rendering and publish scripts | Keep | Current trusted publication workflows depend on them; no new publication boundary is introduced. | Existing release workflows and secrets. | Script-specific revert. |
