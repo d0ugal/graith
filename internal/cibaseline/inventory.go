@@ -53,6 +53,8 @@ var ciEntrypointPaths = []string{
 var ciGoPolicySurfacePaths = []string{
 	"cmd/docsdiff/main.go",
 	"cmd/docsdiff/main_test.go",
+	"cmd/docspreview/main.go",
+	"cmd/docspreview/main_test.go",
 	"cmd/cipolicy/main.go",
 	"cmd/cipolicy/main_test.go",
 	"cmd/libghosttyarchive/main.go",
@@ -65,6 +67,10 @@ var ciGoPolicySurfacePaths = []string{
 	"internal/cipolicy/shadow_summary.go",
 	"internal/cipolicy/shadow_summary_test.go",
 	"internal/cipolicy/workflow_lint_policy_test.go",
+	"internal/docspreview/docspreview.go",
+	"internal/docspreview/docspreview_test.go",
+	"internal/docspreview/github.go",
+	"internal/docspreview/github_test.go",
 	"internal/libghosttyarchive/archive.go",
 	"internal/libghosttyarchive/archive_test.go",
 }
@@ -85,6 +91,16 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve parity coverage for docs-preview screenshot diff row hashing, insert/delete alignment, denoise, hunk padding and merging, manifest ordering, page classifications, exit behavior, and composite PNG geometry",
 		retirement: "remove only after equivalent docs-preview screenshot-diff parity coverage exists",
+	},
+	"cmd/docspreview/main.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve docs-preview publish, cleanup, and prune workflow command behavior formerly held by docs-preview.js and github-script call sites",
+		retirement: "remove only with the docs-preview branch/comment workflow caller or an owner-approved replacement helper",
+	},
+	"cmd/docspreview/main_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve docs-preview command fork no-op behavior before manifest reads or GitHub writes",
+		retirement: "remove only after equivalent docs-preview command boundary coverage exists",
 	},
 	"cmd/cipolicy/main.go": {
 		kind:       "go-policy-helper",
@@ -145,6 +161,26 @@ var ciGoPolicySurfaces = map[string]goPolicySurfaceMetadata{
 		kind:       "go-policy-contract-test",
 		contract:   "preserve ShellCheck coverage and provenance-verified workflow-lint install assertions formerly held by shellcheck-policy.test.js and workflow-lint-supply-chain.test.js",
 		retirement: "owned replacement has equivalent workflow-lint policy coverage and zero unexplained replay disagreement",
+	},
+	"internal/docspreview/docspreview.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve docs-preview screenshots branch mutation policy: same-repository write guards, full-tree rewrite safety, empty-tree commits, stale-run pruning, sticky comments, and compare-and-retry branch updates",
+		retirement: "remove only with the docs-preview branch/comment workflow caller or an owner-approved replacement helper",
+	},
+	"internal/docspreview/docspreview_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve high-fidelity fake GitHub state-transition coverage for docs-preview fork skip, same-repo publish, cleanup prefix deletion, truncated-tree rejection, empty-tree commits, stale pruning, sticky comments, and ref-race retries",
+		retirement: "owned replacement has equivalent docs-preview branch/comment mutation coverage and zero unexplained replay disagreement",
+	},
+	"internal/docspreview/github.go": {
+		kind:       "go-policy-helper",
+		contract:   "preserve GitHub REST request semantics for docs-preview refs, trees, commits, blobs, paginated issue comments, bearer token use, fast-forward ref updates, and omitted force/base_tree fields where required",
+		retirement: "remove only with the docs-preview branch/comment workflow caller or an owner-approved replacement GitHub API adapter",
+	},
+	"internal/docspreview/github_test.go": {
+		kind:       "go-policy-contract-test",
+		contract:   "preserve docs-preview GitHub REST adapter request-path, payload, pagination, authorization, and status-error semantics",
+		retirement: "remove only after equivalent GitHub API request-shape coverage exists",
 	},
 	"internal/libghosttyarchive/archive.go": {
 		kind:       "go-policy-helper",

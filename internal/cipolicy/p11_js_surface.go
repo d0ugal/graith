@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	P11JSSurfaceDirectory       = ".github/workflows/scripts"
-	P11DocsDiffReplacementPath  = "cmd/docsdiff/main_test.go"
-	P11RegenAuthReplacementPath = "internal/cipolicy/p11_js_surface_test.go"
+	P11JSSurfaceDirectory         = ".github/workflows/scripts"
+	P11DocsDiffReplacementPath    = "cmd/docsdiff/main_test.go"
+	P11DocsPreviewReplacementPath = "internal/docspreview/docspreview_test.go"
+	P11RegenAuthReplacementPath   = "internal/cipolicy/p11_js_surface_test.go"
 )
 
 var p11DocsDiffRetiredSurfacePaths = []string{
@@ -26,6 +27,11 @@ var p11DocsDiffRetiredSurfacePaths = []string{
 	".github/workflows/scripts/docs-diff.test.js",
 	".github/workflows/scripts/package.json",
 	".github/workflows/scripts/package-lock.json",
+}
+
+var p11DocsPreviewRetiredSurfacePaths = []string{
+	".github/workflows/scripts/docs-preview.js",
+	".github/workflows/scripts/docs-preview.test.js",
 }
 
 type P11JSHelperContract struct {
@@ -130,47 +136,7 @@ type P11WorkflowStep struct {
 }
 
 func P11JSSurfaceContracts() []P11JSHelperContract {
-	contracts := []P11JSHelperContract{
-		{
-			Path:               ".github/workflows/scripts/docs-preview.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-helper",
-			Callers:            []string{".github/workflows/docs-preview.yml: publish screenshots", ".github/workflows/docs-preview.yml: cleanup closed PR screenshots", ".github/workflows/docs-preview.yml: prune stale screenshots", ".github/workflows/scripts/docs-preview.test.js"},
-			PolicyInputs:       []string{"GitHub pull_request context", "screenshots branch ref/tree", "issue comments", "current wall clock for prune"},
-			PolicyOutputs:      []string{"screenshots branch create/update commits", "sticky PR comment updates", "fork PR write no-op", "fail-closed truncated-tree errors"},
-			Disposition:        "wrap",
-			ExecutableContract: "preserve same-repository write boundary, full-tree rewrite safety, empty-tree handling, and compare-and-retry branch updates",
-			DeletionCriterion:  "GitHub API fixture and Go policy fixture agree on fork skip, same-repo publish, truncated tree rejection, empty-tree commit, and retry outcomes with zero unexplained disagreement",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "docs-preview-fork-skip", Description: "fork PR never reads or writes screenshots branch"},
-				{ID: "docs-preview-truncated-tree", Description: "cleanup and prune reject partial tree listings before rewrite"},
-				{ID: "docs-preview-empty-tree", Description: "last screenshot deletion commits the empty tree SHA"},
-				{ID: "docs-preview-ref-race", Description: "lost create/update ref race re-reads and rebuilds on the winner tip"},
-			},
-			Tranche: "after regen-auth semantic replacement because this helper mutates a write-token branch",
-		},
-		{
-			Path:               ".github/workflows/scripts/docs-preview.test.js",
-			Owner:              "graith-maintainers",
-			Kind:               "workflow-contract-test",
-			Callers:            []string{".github/workflows/workflow-lint.yml: workflow scripts job"},
-			PolicyInputs:       []string{"docs-preview.js API", "fake GitHub git/issues clients", "synthetic PR contexts"},
-			PolicyOutputs:      []string{"Node test pass/fail for docs-preview write-boundary contract"},
-			Disposition:        "port",
-			ExecutableContract: "preserve destructive branch rewrite, fork no-op, sticky comment, and stale-prune assertions",
-			DeletionCriterion:  "Go semantic tests cover the same GitHub API state transitions and P2/P3 credential-operation boundaries",
-			CompatibilitySamples: []P11CompatibilitySampleRequirement{
-				{ID: "cleanup-same-repo", Description: "same-repo cleanup drops only the closed PR prefix"},
-				{ID: "cleanup-fork", Description: "fork cleanup does not touch branch or comments"},
-				{ID: "prune-stale", Description: "prune removes only dated run directories older than 30 days"},
-			},
-			Tranche: "paired with docs-preview.js wrap",
-		},
-	}
-
-	sort.Slice(contracts, func(i, j int) bool { return contracts[i].Path < contracts[j].Path })
-
-	return contracts
+	return nil
 }
 
 func P11DocsDiffCompatibilityRequirements() []P11CompatibilitySampleRequirement {
@@ -187,7 +153,44 @@ func P11DocsDiffCompatibilityRequirements() []P11CompatibilitySampleRequirement 
 	}
 }
 
+func P11DocsPreviewCompatibilityRequirements() []P11CompatibilitySampleRequirement {
+	return []P11CompatibilitySampleRequirement{
+		{ID: "docs-preview-fork-skip", Description: "fork PR publish and cleanup skip before branch reads or writes"},
+		{ID: "docs-preview-same-repo-publish", Description: "same-repository publish creates screenshots branch commits and sticky PR comments"},
+		{ID: "docs-preview-prefix-cleanup", Description: "cleanup removes only the requested PR prefix while preserving unrelated screenshots"},
+		{ID: "docs-preview-truncated-tree", Description: "cleanup and prune reject partial tree listings before destructive rewrites"},
+		{ID: "docs-preview-empty-tree", Description: "last screenshot cleanup and all-stale prune commit the empty tree SHA"},
+		{ID: "docs-preview-stale-prune", Description: "prune removes only dated run directories older than 30 days"},
+		{ID: "docs-preview-ref-race", Description: "lost create/update ref races re-read and rebuild on the winner tip"},
+		{ID: "docs-preview-rest-api", Description: "GitHub REST adapter preserves refs, tree, commit, blob, comment, pagination, and error semantics"},
+	}
+}
+
 func ValidateP11DocsDiffReplacement(repoRoot string, inventory cibaseline.Inventory, replacementPath string, requirements []P11CompatibilitySampleRequirement) error {
+	return validateP11Replacement(
+		repoRoot,
+		inventory,
+		replacementPath,
+		requirements,
+		"P11 docs-diff",
+		p11DocsDiffRetiredSurfacePaths,
+		p11DocsDiffRequiredSampleIDs(),
+	)
+}
+
+func ValidateP11DocsPreviewReplacement(repoRoot string, inventory cibaseline.Inventory, replacementPath string, requirements []P11CompatibilitySampleRequirement) error {
+	return validateP11Replacement(
+		repoRoot,
+		inventory,
+		replacementPath,
+		requirements,
+		"P11 docs-preview",
+		p11DocsPreviewRetiredSurfacePaths,
+		p11DocsPreviewRequiredSampleIDs(),
+	)
+}
+
+func validateP11Replacement(repoRoot string, inventory cibaseline.Inventory, replacementPath string, requirements []P11CompatibilitySampleRequirement, label string, retiredPaths []string, requiredSampleIDs []string) error {
 	if err := inventory.Validate(); err != nil {
 		return fmt.Errorf("validate P0 inventory: %w", err)
 	}
@@ -199,34 +202,34 @@ func ValidateP11DocsDiffReplacement(repoRoot string, inventory cibaseline.Invent
 
 	surface, exists := surfaces[replacementPath]
 	if !exists {
-		return fmt.Errorf("missing P11 docs-diff Go replacement surface %s", replacementPath)
+		return fmt.Errorf("missing %s Go replacement surface %s", label, replacementPath)
 	}
 
 	if surface.Kind != "go-policy-contract-test" {
-		return fmt.Errorf("P11 docs-diff replacement %s kind = %s, want go-policy-contract-test", replacementPath, surface.Kind)
+		return fmt.Errorf("%s replacement %s kind = %s, want go-policy-contract-test", label, replacementPath, surface.Kind)
 	}
 
 	if surface.Owner != "graith-maintainers" {
-		return fmt.Errorf("P11 docs-diff replacement %s owner = %s, want graith-maintainers", replacementPath, surface.Owner)
+		return fmt.Errorf("%s replacement %s owner = %s, want graith-maintainers", label, replacementPath, surface.Owner)
 	}
 
 	sampleIDs := map[string]bool{}
 
 	for _, requirement := range requirements {
 		if requirement.ID == "" || requirement.Description == "" {
-			return fmt.Errorf("P11 docs-diff replacement %s has incomplete compatibility sample", replacementPath)
+			return fmt.Errorf("%s replacement %s has incomplete compatibility sample", label, replacementPath)
 		}
 
 		if sampleIDs[requirement.ID] {
-			return fmt.Errorf("P11 docs-diff replacement %s has duplicate compatibility sample %s", replacementPath, requirement.ID)
+			return fmt.Errorf("%s replacement %s has duplicate compatibility sample %s", label, replacementPath, requirement.ID)
 		}
 
 		sampleIDs[requirement.ID] = true
 	}
 
-	for _, want := range p11DocsDiffRequiredSampleIDs() {
+	for _, want := range requiredSampleIDs {
 		if !sampleIDs[want] {
-			return fmt.Errorf("P11 docs-diff replacement %s is missing compatibility sample %s", replacementPath, want)
+			return fmt.Errorf("%s replacement %s is missing compatibility sample %s", label, replacementPath, want)
 		}
 	}
 
@@ -240,13 +243,13 @@ func ValidateP11DocsDiffReplacement(repoRoot string, inventory cibaseline.Invent
 		currentSet[path] = true
 	}
 
-	for _, path := range p11DocsDiffRetiredSurfacePaths {
+	for _, path := range retiredPaths {
 		if currentSet[path] {
-			return fmt.Errorf("retired P11 docs-diff surface is still tracked: %s", path)
+			return fmt.Errorf("retired %s surface is still tracked: %s", label, path)
 		}
 
 		if _, exists := surfaces[path]; exists {
-			return fmt.Errorf("P0 inventory still references retired P11 docs-diff surface %s", path)
+			return fmt.Errorf("P0 inventory still references retired %s surface %s", label, path)
 		}
 	}
 
@@ -264,6 +267,19 @@ func p11DocsDiffRequiredSampleIDs() []string {
 		"cli-identical",
 		"batch-manifest",
 		"png-composite",
+	}
+}
+
+func p11DocsPreviewRequiredSampleIDs() []string {
+	return []string{
+		"docs-preview-fork-skip",
+		"docs-preview-same-repo-publish",
+		"docs-preview-prefix-cleanup",
+		"docs-preview-truncated-tree",
+		"docs-preview-empty-tree",
+		"docs-preview-stale-prune",
+		"docs-preview-ref-race",
+		"docs-preview-rest-api",
 	}
 }
 

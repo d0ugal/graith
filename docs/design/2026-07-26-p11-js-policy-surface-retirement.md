@@ -12,10 +12,10 @@ informed: ci-north-star rollout owners
 P11 retires the repository-owned JavaScript helpers under
 `.github/workflows/scripts/` one compatibility tranche at a time. This
 serialized deletion tranche removes the small test-only policy scripts whose
-claims now have semantic Go coverage, keeps the docs-preview runtime helper, and
-regenerates the P0/P1 metadata in the same owned epoch. Its original
-docs-diff/`pngjs` retention carve-out was superseded by the owner-approved C6
-Go migration after equivalent parity coverage was established.
+claims now have semantic Go coverage and regenerates the P0/P1 metadata in the
+same owned epoch. Its original docs-diff/`pngjs` and docs-preview runtime-helper
+retention carve-outs were superseded by owner-approved C6 Go migrations after
+equivalent parity coverage was established.
 
 ## Background
 
@@ -46,9 +46,11 @@ authoritative job/context changes remain failures.
 - Inventory every retained file under `.github/workflows/scripts/` with owner,
   callers, policy inputs/outputs, disposition, deletion criterion, and sample
   requirements.
-- Retire the approved test-only JS files with explicit Go replacements:
+- Retire the approved JS files with explicit Go replacements:
   `libghostty_policy_test.go`, `p11_js_surface_test.go`,
-  `renovate_retry_test.go`, and `workflow_lint_policy_test.go`.
+  `renovate_retry_test.go`, `workflow_lint_policy_test.go`, and the
+  docs-preview mutation helper/tests via `cmd/docspreview` and
+  `internal/docspreview`.
 - Keep the regen trust assertions semantic in Go, including whole-document
   credential scalar sweep, explicit plan-to-credential trust allowlist,
   non-superset negative sample, git-index helper enumeration, and strict
@@ -59,9 +61,9 @@ authoritative job/context changes remain failures.
 
 ### Non-Goals
 
-- Retiring the docs-preview runtime helper or its JS tests.
 - Replacing unrelated JavaScript dependencies; the former `pngjs` exception was
-  retired only as part of the C6 docs-diff Go migration.
+  retired only as part of the C6 docs-diff Go migration, and browser-required
+  JavaScript remains outside this tranche.
 - Aggregating live Actions history, cross-workflow durations, or check-run
   completion state through C2.
 - Loosening acceptance to ignore helper-surface changes outside the named
@@ -159,23 +161,29 @@ Every entry below is owned by `graith-maintainers`.
 ### `docs-preview.js`
 
 - Callers: `docs-preview.yml` publish, cleanup, and prune jobs;
-  `docs-preview.test.js`.
+  formerly `docs-preview.test.js`.
 - Inputs: GitHub PR context, screenshots branch ref/tree, comments, wall clock.
 - Outputs: screenshots branch commits, sticky comments, fork write no-op,
   fail-closed truncated-tree errors.
-- Disposition: wrap.
-- Deletion criterion: GitHub API fixture and Go policy fixture agree on fork
-  skip, same-repo publish, truncated tree rejection, empty-tree commit, and ref
-  race retries.
+- Disposition: retired by C6 and replaced by `cmd/docspreview` and
+  `internal/docspreview`.
+- Deletion criterion: satisfied by high-fidelity fake GitHub state-transition
+  tests and REST request-shape tests covering fork skip, same-repo publish,
+  truncated tree rejection, empty-tree commit handling, cleanup/prune rewrites,
+  sticky comments, and ref race retries while preserving the same-repository
+  mutation boundary.
 
 ### `docs-preview.test.js`
 
-- Callers: `workflow-lint.yml` scripts job.
-- Inputs: `docs-preview.js`, fake GitHub clients, synthetic PR contexts.
-- Outputs: Node test pass/fail for branch rewrite and write-boundary behavior.
-- Disposition: port with `docs-preview.js`.
-- Deletion criterion: Go semantic tests cover the same API state transitions
-  and P2/P3 credential-operation boundaries.
+- Callers: formerly `workflow-lint.yml` scripts job.
+- Inputs: formerly `docs-preview.js`, fake GitHub clients, synthetic PR
+  contexts.
+- Outputs: formerly Node test pass/fail for branch rewrite and write-boundary
+  behavior.
+- Disposition: retired by C6 and replaced by Go semantic tests under
+  `internal/docspreview` and `cmd/docspreview`.
+- Deletion criterion: satisfied by Go state-transition tests that cover the same
+  API mutation paths and P2/P3 credential-operation boundaries.
 
 ### `libghostty-policy.test.js`
 
@@ -290,8 +298,8 @@ Pre-deletion hardening satisfied by the `regen-auth.test.js` replacement:
 
 ## Remaining Tranche Order
 
-1. `docs-preview.test.js` and `docs-preview.js`: wrap GitHub API branch/comment
-   mutation paths after credential-boundary tests are semantic.
+None. The C6 docs-preview Go migration completed the final repository-owned JS
+helper tranche under `.github/workflows/scripts/`.
 
 ## Other Notes
 
@@ -309,5 +317,5 @@ workflow-lint/native assertions executable in Go.
 ### Open questions
 
 - Any later epoch needs owner approval for the exact P0 acceptance rebind shape.
-- The docs-preview tranche needs a retained live or high-fidelity fake GitHub
-  API sample before deleting the JS branch-mutation helper.
+- The docs-preview tranche's high-fidelity fake GitHub API sample now lives in
+  `internal/docspreview`.
