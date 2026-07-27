@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -861,7 +863,7 @@ func restartClean() error {
 		return fmt.Errorf("reserve managed service before clean restart: %w", err)
 	}
 
-	if err := stopExistingDaemon(); err != nil {
+	if err := stopExistingDaemon(true); err != nil {
 		return err
 	}
 
@@ -878,6 +880,7 @@ var (
 	prepareDaemonCleanRestartForCLI = client.PrepareDaemonCleanRestart
 	stopDaemonPIDForCLI             = daemon.StopDaemonPID
 	stopDaemonIdentityForCLI        = client.StopDaemonIdentity
+	forceStopDaemonIdentityForCLI   = client.StopDaemonIdentityForce
 	waitForDaemonSocketGoneForCLI   = client.WaitForDaemonSocketGone
 	connectExistingForCLI           = func(cfg *config.Config, paths config.Paths) (existingDaemonConnection, error) {
 		return client.ConnectExisting(cfg, paths)
@@ -896,7 +899,7 @@ func prepareCleanRestart() error {
 	return prepareDaemonCleanRestartForCLI(ctx, paths)
 }
 
-func stopExistingDaemon() error {
+func stopExistingDaemon(force bool) error {
 	if _, err := os.Stat(paths.SocketPath); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
@@ -923,8 +926,22 @@ func stopExistingDaemon() error {
 		return fmt.Errorf("identify daemon before clean restart: %w", err)
 	}
 
-	if err := stopDaemonIdentityForCLI(identity); err != nil {
+	socketBefore := snapshotDaemonPath(paths.SocketPath)
+	pidBefore := snapshotDaemonPath(paths.PIDFile)
+
+	stop := stopDaemonIdentityForCLI
+	if force {
+		stop = forceStopDaemonIdentityForCLI
+	}
+
+	if err := stop(identity); err != nil {
 		return fmt.Errorf("stop daemon peer: %w", err)
+	}
+
+	if force {
+		if err := removeStoppedDaemonPaths(identity, socketBefore, pidBefore); err != nil {
+			return err
+		}
 	}
 
 	if !waitForDaemonSocketGoneForCLI(paths.SocketPath) {
@@ -932,6 +949,74 @@ func stopExistingDaemon() error {
 	}
 
 	return nil
+}
+
+type daemonPathSnapshot struct {
+	path string
+	info os.FileInfo
+}
+
+func snapshotDaemonPath(path string) daemonPathSnapshot {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return daemonPathSnapshot{path: path}
+	}
+
+	return daemonPathSnapshot{path: path, info: info}
+}
+
+func removeStoppedDaemonPaths(identity client.DaemonIdentity, socketBefore, pidBefore daemonPathSnapshot) error {
+	if err := removeSameDaemonPath(socketBefore, func(mode os.FileMode) bool {
+		return mode&os.ModeSocket != 0
+	}, nil); err != nil {
+		return fmt.Errorf("remove stale daemon socket %s after PID %d exited: %w", socketBefore.path, identity.PID, err)
+	}
+
+	pidText := strconv.Itoa(identity.PID)
+	if err := removeSameDaemonPath(pidBefore, func(mode os.FileMode) bool {
+		return mode.IsRegular()
+	}, func(data []byte) bool { return strings.TrimSpace(string(data)) == pidText }); err != nil {
+		return fmt.Errorf("remove stale daemon PID file %s after PID %d exited: %w", pidBefore.path, identity.PID, err)
+	}
+
+	return nil
+}
+
+func removeSameDaemonPath(snapshot daemonPathSnapshot, removable func(os.FileMode) bool, matches func([]byte) bool) error {
+	if snapshot.path == "" || snapshot.info == nil {
+		return nil
+	}
+
+	current, err := os.Lstat(snapshot.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if !os.SameFile(snapshot.info, current) {
+		return nil
+	}
+
+	mode := current.Mode()
+	if removable == nil || !removable(mode) {
+		return nil
+	}
+
+	if matches != nil {
+		data, err := os.ReadFile(snapshot.path)
+		if err != nil {
+			return err
+		}
+
+		if !matches(data) {
+			return nil
+		}
+	}
+
+	return os.Remove(snapshot.path)
 }
 
 // startCleanDaemon completes a clean restart after the old daemon is known to

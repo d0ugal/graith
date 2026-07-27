@@ -29,7 +29,7 @@ func TestStopDaemonIdentityRejectsGoTestBeforeSignal(t *testing.T) {
 			signalCalled = true
 			return nil
 		},
-		func(func(time.Time) bool) bool { return true },
+		func(time.Duration, func(time.Time) bool) bool { return true },
 	)
 	if err == nil || !strings.Contains(err.Error(), "Go test binary") {
 		t.Fatalf("stopDaemonIdentityWith() error = %v, want Go-test refusal", err)
@@ -97,7 +97,10 @@ func TestRequestUpgradeRejectsGoTestBeforeCandidateResolution(t *testing.T) {
 }
 
 func TestStopDaemonIdentityAllowsProductionPathWithFakeSignal(t *testing.T) {
-	var signals []syscall.Signal
+	var (
+		signals    []syscall.Signal
+		waitBudget time.Duration
+	)
 
 	err := stopDaemonIdentityWith(
 		4242,
@@ -112,13 +115,146 @@ func TestStopDaemonIdentityAllowsProductionPathWithFakeSignal(t *testing.T) {
 
 			return nil
 		},
-		func(check func(time.Time) bool) bool { return check(time.Now()) },
+		func(timeout time.Duration, check func(time.Time) bool) bool {
+			waitBudget = timeout
+
+			return check(time.Now())
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	if waitBudget != daemonStopTimeout {
+		t.Fatalf("stop wait budget = %s, want %s", waitBudget, daemonStopTimeout)
+	}
+
 	if len(signals) != 2 || signals[0] != syscall.SIGTERM || signals[1] != 0 {
 		t.Fatalf("signals = %v, want [SIGTERM signal-0]", signals)
+	}
+}
+
+func TestStopDaemonIdentityTimeoutErrorIsActionable(t *testing.T) {
+	err := stopDaemonIdentityWith(
+		4242,
+		99,
+		allowDaemonLifecycleMutation,
+		func(int) (int64, error) { return 99, nil },
+		func(int, syscall.Signal) error { return nil },
+		func(timeout time.Duration, _ func(time.Time) bool) bool {
+			if timeout != daemonStopTimeout {
+				t.Fatalf("stop wait budget = %s, want %s", timeout, daemonStopTimeout)
+			}
+
+			return false
+		},
+	)
+	if err == nil {
+		t.Fatal("stopDaemonIdentityWith() succeeded despite timeout")
+	}
+
+	for _, want := range []string{"PID 4242", "shutdown may be wedged", "gr daemon restart --force", "kill -9 4242", "gr doctor --autofix"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("timeout error %q missing %q", err, want)
+		}
+	}
+}
+
+func TestStopDaemonIdentityForceEscalatesAfterShutdownBudget(t *testing.T) {
+	alive := true
+
+	var (
+		signals []syscall.Signal
+		waits   []time.Duration
+	)
+
+	err := stopDaemonIdentityWithMode(
+		4242,
+		99,
+		allowDaemonLifecycleMutation,
+		func(int) (int64, error) { return 99, nil },
+		func(_ int, signal syscall.Signal) error {
+			signals = append(signals, signal)
+			if signal == syscall.SIGKILL {
+				alive = false
+			}
+
+			if signal == 0 && !alive {
+				return syscall.ESRCH
+			}
+
+			return nil
+		},
+		func(timeout time.Duration, check func(time.Time) bool) bool {
+			waits = append(waits, timeout)
+
+			return check(time.Now())
+		},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantWaits := []time.Duration{daemonStopTimeout, daemonStopDiagnosticTimeout, daemonStopKillTimeout}
+	if len(waits) != len(wantWaits) {
+		t.Fatalf("waits = %v, want %v", waits, wantWaits)
+	}
+
+	for i := range wantWaits {
+		if waits[i] != wantWaits[i] {
+			t.Fatalf("waits = %v, want %v", waits, wantWaits)
+		}
+	}
+
+	var delivered []syscall.Signal
+
+	for _, signal := range signals {
+		if signal != 0 {
+			delivered = append(delivered, signal)
+		}
+	}
+
+	wantSignals := []syscall.Signal{syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL}
+	if len(delivered) != len(wantSignals) {
+		t.Fatalf("delivered signals = %v, want %v", delivered, wantSignals)
+	}
+
+	for i := range wantSignals {
+		if delivered[i] != wantSignals[i] {
+			t.Fatalf("delivered signals = %v, want %v", delivered, wantSignals)
+		}
+	}
+}
+
+func TestStopDaemonIdentityForceStopsBeforeEscalationOnPIDReuse(t *testing.T) {
+	startTime := int64(99)
+
+	var signals []syscall.Signal
+
+	err := stopDaemonIdentityWithMode(
+		4242,
+		startTime,
+		allowDaemonLifecycleMutation,
+		func(int) (int64, error) { return startTime, nil },
+		func(_ int, signal syscall.Signal) error {
+			signals = append(signals, signal)
+			return nil
+		},
+		func(_ time.Duration, check func(time.Time) bool) bool {
+			startTime = 100
+
+			return check(time.Now())
+		},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, signal := range signals {
+		if signal == syscall.SIGQUIT || signal == syscall.SIGKILL {
+			t.Fatalf("signals = %v, want no escalation after PID reuse", signals)
+		}
 	}
 }

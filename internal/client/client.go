@@ -645,13 +645,14 @@ func WaitForDaemonSocketGone(sockPath string) bool {
 // Unix-socket handshake and only while its start time still matches. It waits
 // for that exact identity to disappear before a new daemon may start.
 func stopDaemonIdentity(pid int, startTime int64) error {
-	return stopDaemonIdentityWith(
+	return stopDaemonIdentityWithMode(
 		pid,
 		startTime,
 		testprocess.RefuseDaemonLifecycleMutation,
 		grpty.ProcessStartTime,
 		syscall.Kill,
-		pollDaemonReady,
+		pollDaemonReadyWithin,
+		false,
 	)
 }
 
@@ -661,7 +662,19 @@ func stopDaemonIdentityWith(
 	guard func(string) error,
 	processStartTime func(int) (int64, error),
 	signal func(int, syscall.Signal) error,
-	wait func(func(time.Time) bool) bool,
+	wait func(time.Duration, func(time.Time) bool) bool,
+) error {
+	return stopDaemonIdentityWithMode(pid, startTime, guard, processStartTime, signal, wait, false)
+}
+
+func stopDaemonIdentityWithMode(
+	pid int,
+	startTime int64,
+	guard func(string) error,
+	processStartTime func(int) (int64, error),
+	signal func(int, syscall.Signal) error,
+	wait func(time.Duration, func(time.Time) bool) bool,
+	force bool,
 ) error {
 	if err := guard("stop daemon identity"); err != nil {
 		return err
@@ -692,25 +705,128 @@ func stopDaemonIdentityWith(
 		return fmt.Errorf("SIGTERM daemon PID %d: %w", pid, err)
 	}
 
-	if wait(func(time.Time) bool {
-		if err := signal(pid, 0); errors.Is(err, syscall.ESRCH) {
-			return true
-		}
+	identityGone := func(time.Time) bool {
+		return daemonIdentityGone(pid, startTime, processStartTime, signal)
+	}
 
-		observed, err := processStartTime(pid)
-
-		return err == nil && observed != startTime
-	}) {
+	if wait(daemonStopTimeout, identityGone) {
 		return nil
 	}
 
-	return fmt.Errorf("daemon PID %d did not exit within %s", pid, daemonStartTimeout)
+	if !force {
+		return daemonStopTimeoutError(pid, daemonStopTimeout)
+	}
+
+	stillCurrent, err := daemonIdentityStillCurrent(pid, startTime, processStartTime, signal, "SIGQUIT")
+	if err != nil {
+		return err
+	}
+
+	if !stillCurrent {
+		return nil
+	}
+
+	if err := signal(pid, syscall.SIGQUIT); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+
+		return fmt.Errorf("SIGQUIT daemon PID %d for shutdown diagnostics: %w", pid, err)
+	}
+
+	if wait(daemonStopDiagnosticTimeout, identityGone) {
+		return nil
+	}
+
+	stillCurrent, err = daemonIdentityStillCurrent(pid, startTime, processStartTime, signal, "SIGKILL")
+	if err != nil {
+		return err
+	}
+
+	if !stillCurrent {
+		return nil
+	}
+
+	if err := signal(pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+
+		return fmt.Errorf("SIGKILL daemon PID %d after wedged shutdown: %w", pid, err)
+	}
+
+	if wait(daemonStopKillTimeout, identityGone) {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"daemon PID %d remained after SIGTERM, SIGQUIT, and SIGKILL; shutdown is wedged and manual recovery is required: run `kill -9 %d`, then `gr doctor --autofix` before retrying",
+		pid,
+		pid,
+	)
+}
+
+func daemonIdentityGone(
+	pid int,
+	startTime int64,
+	processStartTime func(int) (int64, error),
+	signal func(int, syscall.Signal) error,
+) bool {
+	if err := signal(pid, 0); errors.Is(err, syscall.ESRCH) {
+		return true
+	}
+
+	observed, err := processStartTime(pid)
+
+	return err == nil && observed != startTime
+}
+
+func daemonIdentityStillCurrent(
+	pid int,
+	startTime int64,
+	processStartTime func(int) (int64, error),
+	signal func(int, syscall.Signal) error,
+	nextSignal string,
+) (bool, error) {
+	current, err := processStartTime(pid)
+	if err != nil {
+		if killErr := signal(pid, 0); errors.Is(killErr, syscall.ESRCH) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("verify daemon PID %d before %s: %w", pid, nextSignal, err)
+	}
+
+	return current == startTime, nil
+}
+
+func daemonStopTimeoutError(pid int, timeout time.Duration) error {
+	return fmt.Errorf(
+		"daemon PID %d did not exit within %s after SIGTERM; shutdown may be wedged while draining sessions or background work. Recovery: run `gr daemon restart --force` or `kill -9 %d` followed by `gr doctor --autofix`",
+		pid,
+		timeout,
+		pid,
+	)
 }
 
 // StopDaemonIdentity signals a previously authenticated daemon process while
 // guarding against PID reuse.
 func StopDaemonIdentity(identity DaemonIdentity) error {
 	return stopDaemonIdentity(identity.PID, identity.StartTime)
+}
+
+// StopDaemonIdentityForce stops a previously authenticated daemon process and
+// escalates to SIGQUIT/SIGKILL if the daemon exceeds its shutdown budget.
+func StopDaemonIdentityForce(identity DaemonIdentity) error {
+	return stopDaemonIdentityWithMode(
+		identity.PID,
+		identity.StartTime,
+		testprocess.RefuseDaemonLifecycleMutation,
+		grpty.ProcessStartTime,
+		syscall.Kill,
+		pollDaemonReadyWithin,
+		true,
+	)
 }
 
 // ConnectFast is a fast-path connect for hooks. It dials the daemon socket

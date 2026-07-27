@@ -18,6 +18,9 @@ Start the daemon — normally automatic and rarely needed.
 Stop the daemon gracefully. On a supported packaged macOS installation this
 leaves the Graith user service registered but dormant. It does not restart at
 login or after a crash; the next ordinary `gr` command starts it on demand.
+Graith waits for the daemon's normal shutdown budget rather than the shorter
+startup budget. If the daemon still does not exit, the error includes the daemon
+PID and exact recovery commands.
 Stopping a daemon is not the same as removing its background-item registration.
 Daemon stop, restart, service removal, and replacement are human-only controls;
 commands run from an agent session are refused. Session agents can still use
@@ -32,7 +35,7 @@ Restart the daemon, preserving live sessions via exec.
 
 | Flag | Description |
 |------|-------------|
-| `--force` | Clean stop/start that kills running sessions |
+| `--force` | Clean stop/start that kills running sessions; escalates from `SIGTERM` to diagnostic `SIGQUIT` and then `SIGKILL` if shutdown wedges |
 
 After rebuilding `gr`, run `gr daemon restart` to pick up the new daemon binary.
 Crossing from the approval-era protocol to the non-interactive Graith protocol is
@@ -90,6 +93,15 @@ deadline, the error and daemon log identify every active holder by an opaque
 lease ID, operation, bounded caller identity, and age. Payloads, tokens, and
 message contents are never included. Wait for the named work to finish and
 retry; use `--force` only when intentionally interrupting it.
+
+With `--force`, graith still first authenticates the daemon socket peer and
+checks its process identity so it does not signal an unrelated recycled PID. If
+the daemon ignores the graceful stop budget, graith asks the Go runtime for a
+`SIGQUIT` diagnostic dump and then sends `SIGKILL` to the same verified process.
+After a forced exit it removes only the stale socket and PID file entries that
+still match the stopped daemon, then starts a fresh daemon. If even this fails,
+the error names the PID and gives the manual `kill -9` and `gr doctor --autofix`
+recovery commands.
 
 ### `gr daemon reload`
 

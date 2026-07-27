@@ -61,8 +61,14 @@ var (
 	daemonHandshakeTimeout  = 5 * time.Second
 	daemonStartTimeout      = 5 * time.Second
 	daemonStartPollInterval = 50 * time.Millisecond
-	upgradeNegotiationFloor = protocol.UpgradeNegotiationTimeout
-	upgradeReadinessFloor   = protocol.UpgradeReadinessTimeout
+	// daemonStopTimeout matches the daemon's shutdown phases rather than the
+	// startup budget: server drain, lifecycle/mutation drain, and StopAll each
+	// have their own bounded window.
+	daemonStopTimeout           = 30 * time.Second
+	daemonStopDiagnosticTimeout = 2 * time.Second
+	daemonStopKillTimeout       = 5 * time.Second
+	upgradeNegotiationFloor     = protocol.UpgradeNegotiationTimeout
+	upgradeReadinessFloor       = protocol.UpgradeReadinessTimeout
 
 	// Remote daemon (TLS over TCP): used by ConnectRemote and PairRemote.
 	remoteDialTimeout      = 10 * time.Second
