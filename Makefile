@@ -11,8 +11,10 @@ GOLANGCI_LINT_CACHE_ARGS := \
 	-e GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint
 GOLANGCI_LINT_DOCKER_BASE := docker run --rm $(GOLANGCI_LINT_CACHE_ARGS) -v $(CURDIR):/app -w /app
 GOLANGCI_LINT_DOCKER := $(GOLANGCI_LINT_DOCKER_BASE) $(GOLANGCI_LINT_IMAGE)
+GOLANGCI_LINT_LIBGHOSTTY_GOARCH ?=
+GOLANGCI_LINT_LIBGHOSTTY_PACKAGES := ./internal/pty ./internal/daemon ./cmd/graith
 
-.PHONY: build test architecture-check lint lint-only lint-darwin lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
+.PHONY: build test architecture-check lint lint-only lint-darwin lint-libghostty lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
 
 build:
 	GRAITH_LIBGHOSTTY_LDFLAGS="-s -w" scripts/libghostty-native.sh build-local
@@ -55,10 +57,38 @@ lint:
 lint-only:
 	$(GOLANGCI_LINT_DOCKER) golangci-lint run $(GOLANGCI_LINT_RUN_ARGS)
 
-# Lint with GOOS=darwin so Darwin-only files (e.g. *_darwin.go) are compiled and
-# checked. CI lints on Linux, which never sees these files (issue #784).
+# Lint with GOOS=darwin so non-cgo Darwin-only files (e.g. *_darwin.go) are
+# compiled and checked. CI lints on Linux, which never sees these files
+# (issue #784); darwin+cgo surfaces are covered by native macOS build/test lanes.
 lint-darwin:
-	$(GOLANGCI_LINT_DOCKER_BASE) -e GOOS=darwin $(GOLANGCI_LINT_IMAGE) golangci-lint run $(GOLANGCI_LINT_RUN_ARGS)
+	$(GOLANGCI_LINT_DOCKER_BASE) -e GOOS=darwin -e CGO_ENABLED=0 $(GOLANGCI_LINT_IMAGE) golangci-lint run $(GOLANGCI_LINT_RUN_ARGS)
+
+# Lint the supported Linux libghostty+cgo surface. The pinned artifact setup
+# runs outside the golangci-lint container so the host-side lock parsing,
+# download, and bind-mounted artifact preparation happen before analysis uses
+# the single .golangci.yml config.
+lint-libghostty:
+	@goarch="$(GOLANGCI_LINT_LIBGHOSTTY_GOARCH)"; \
+	if [ -z "$$goarch" ]; then \
+		image_arch="$$(docker run --rm $(GOLANGCI_LINT_IMAGE) uname -m)"; \
+		case "$$image_arch" in \
+			x86_64) goarch=amd64 ;; \
+			aarch64|arm64) goarch=arm64 ;; \
+			*) echo "unsupported golangci-lint container architecture: $$image_arch" >&2; exit 1 ;; \
+		esac; \
+	fi; \
+	case "$$goarch" in \
+		amd64|arm64) ;; \
+		*) echo "unsupported libghostty lint GOARCH: $$goarch" >&2; exit 1 ;; \
+	esac; \
+	work="$(CURDIR)/.lint-libghostty-linux-$$goarch"; \
+	GRAITH_LIBGHOSTTY_WORK="$$work" scripts/libghostty-native.sh prepare-linux-artifact "$$goarch" >/dev/null; \
+	$(GOLANGCI_LINT_DOCKER_BASE) \
+		-e GOOS=linux \
+		-e GOARCH="$$goarch" \
+		-e CGO_ENABLED=1 \
+		-e PKG_CONFIG_PATH="/app/.lint-libghostty-linux-$$goarch/pkgconfig" \
+		$(GOLANGCI_LINT_IMAGE) golangci-lint run --build-tags=integration,libghostty $(GOLANGCI_LINT_RUN_ARGS) $(GOLANGCI_LINT_LIBGHOSTTY_PACKAGES)
 
 lint-profile:
 	$(GOLANGCI_LINT_DOCKER) golangci-lint run -v $(GOLANGCI_LINT_RUN_ARGS)
@@ -79,7 +109,7 @@ fmt:
 
 clean:
 	rm -f gr
-	rm -rf macos/build
+	rm -rf macos/build .lint-libghostty-linux-*
 
 package-graph:
 	cd website && GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/packagegraph -repo ..

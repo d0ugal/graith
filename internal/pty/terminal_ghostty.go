@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	libghostty "go.mitchellh.com/libghostty"
 )
@@ -54,19 +55,20 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 		if recover() != nil {
 			err = errGhosttyBindingPanic
 		}
+
 		if err != nil && gt != nil {
 			_ = gt.Close()
 			gt = nil
 		}
 	}()
 
-	cols, rows, err = validateGhosttySize(cols, rows)
+	cols, rows, cols16, rows16, err := validateGhosttySize16(cols, rows)
 	if err != nil {
 		return nil, err
 	}
 
 	terminal, err := libghostty.NewTerminal(
-		libghostty.WithSize(uint16(cols), uint16(rows)),
+		libghostty.WithSize(cols16, rows16),
 		// Graith's bounded raw Scrollback is authoritative and is replayed when
 		// reconstructing a helper. The native backend only needs the visible
 		// viewport; retaining historical native lines multiplies memory by width
@@ -95,12 +97,15 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 	if err = terminal.SetKittyImageStorageLimit(&zero); err != nil {
 		return nil, fmt.Errorf("disable Kitty image storage: %w", err)
 	}
+
 	if err = terminal.SetKittyImageMediumFile(false); err != nil {
 		return nil, fmt.Errorf("disable Kitty file medium: %w", err)
 	}
+
 	if err = terminal.SetKittyImageMediumTempFile(false); err != nil {
 		return nil, fmt.Errorf("disable Kitty temporary-file medium: %w", err)
 	}
+
 	if err = terminal.SetKittyImageMediumSharedMem(false); err != nil {
 		return nil, fmt.Errorf("disable Kitty shared-memory medium: %w", err)
 	}
@@ -109,10 +114,12 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("create go-libghostty render state: %w", err)
 	}
+
 	gt.rowIterator, err = libghostty.NewRenderStateRowIterator()
 	if err != nil {
 		return nil, fmt.Errorf("create go-libghostty row iterator: %w", err)
 	}
+
 	gt.rowCells, err = libghostty.NewRenderStateRowCells()
 	if err != nil {
 		return nil, fmt.Errorf("create go-libghostty cell iterator: %w", err)
@@ -132,6 +139,7 @@ func (gt *ghosttyTerminal) Write(p []byte) (n int, err error) {
 	if gt.terminal == nil {
 		return 0, errGhosttyClosed
 	}
+
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -178,11 +186,13 @@ func (gt *ghosttyTerminal) Resize(cols, rows int) (err error) {
 	if gt.terminal == nil {
 		return errGhosttyClosed
 	}
-	cols, rows, err = validateGhosttySize(cols, rows)
+
+	cols, rows, cols16, rows16, err := validateGhosttySize16(cols, rows)
 	if err != nil {
 		return err
 	}
-	if err := gt.terminal.Resize(uint16(cols), uint16(rows), 8, 16); err != nil {
+
+	if err := gt.terminal.Resize(cols16, rows16, 8, 16); err != nil {
 		return fmt.Errorf("resize go-libghostty terminal: %w", err)
 	}
 
@@ -215,10 +225,12 @@ func (gt *ghosttyTerminal) cursor() (int, int, bool, error) {
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("read go-libghostty cursor x: %w", err)
 	}
+
 	y, err := gt.terminal.CursorY()
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("read go-libghostty cursor y: %w", err)
 	}
+
 	visible, err := gt.terminal.CursorVisible()
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("read go-libghostty cursor visibility: %w", err)
@@ -231,6 +243,7 @@ func (gt *ghosttyTerminal) Cell(x, y int) Cell {
 	if x < 0 || x >= gt.cols || y < 0 || y >= gt.rows {
 		return Cell{Content: " "}
 	}
+
 	if err := gt.refreshCells(); err != nil {
 		return Cell{Content: " "}
 	}
@@ -249,10 +262,12 @@ func (gt *ghosttyTerminal) Snapshot() (snapshot TerminalSnapshot, err error) {
 	if err := gt.refreshCells(); err != nil {
 		return TerminalSnapshot{}, err
 	}
+
 	cursorX, cursorY, cursorVisible, err := gt.cursor()
 	if err != nil {
 		return TerminalSnapshot{}, err
 	}
+
 	cells := make([]Cell, len(gt.cells))
 	copy(cells, gt.cells)
 
@@ -277,18 +292,22 @@ func (gt *ghosttyTerminal) Close() (err error) {
 		gt.rowCells.Close()
 		gt.rowCells = nil
 	}
+
 	if gt.rowIterator != nil {
 		gt.rowIterator.Close()
 		gt.rowIterator = nil
 	}
+
 	if gt.renderState != nil {
 		gt.renderState.Close()
 		gt.renderState = nil
 	}
+
 	if gt.terminal != nil {
 		gt.terminal.Close()
 		gt.terminal = nil
 	}
+
 	gt.cells = nil
 
 	return nil
@@ -298,12 +317,15 @@ func (gt *ghosttyTerminal) refreshCells() error {
 	if gt.terminal == nil || gt.renderState == nil || gt.rowIterator == nil || gt.rowCells == nil {
 		return errGhosttyClosed
 	}
+
 	if !gt.dirty {
 		return nil
 	}
+
 	if err := gt.renderState.Update(gt.terminal); err != nil {
 		return fmt.Errorf("update go-libghostty render state: %w", err)
 	}
+
 	if err := gt.renderState.RowIterator(gt.rowIterator); err != nil {
 		return fmt.Errorf("read go-libghostty rows: %w", err)
 	}
@@ -315,6 +337,7 @@ func (gt *ghosttyTerminal) refreshCells() error {
 		gt.cells = gt.cells[:count]
 		clear(gt.cells)
 	}
+
 	for i := range gt.cells {
 		gt.cells[i].Content = " "
 	}
@@ -323,11 +346,13 @@ func (gt *ghosttyTerminal) refreshCells() error {
 		if err := gt.rowIterator.Cells(gt.rowCells); err != nil {
 			return fmt.Errorf("read go-libghostty row %d cells: %w", y, err)
 		}
+
 		for x := 0; x < gt.cols && gt.rowCells.Next(); x++ {
 			cell, err := gt.convertCell()
 			if err != nil {
 				return fmt.Errorf("read go-libghostty cell %d,%d: %w", x, y, err)
 			}
+
 			gt.cells[y*gt.cols+x] = cell
 		}
 	}
@@ -342,20 +367,24 @@ func (gt *ghosttyTerminal) convertCell() (Cell, error) {
 	if err != nil {
 		return Cell{}, err
 	}
+
 	style, err := gt.rowCells.Style()
 	if err != nil {
 		return Cell{}, err
 	}
+
 	graphemes, err := gt.rowCells.Graphemes()
 	if err != nil {
 		return Cell{}, err
 	}
 
 	content := ghosttyGraphemes(graphemes)
+
 	wide, err := raw.Wide()
 	if err != nil {
 		return Cell{}, err
 	}
+
 	if len(graphemes) == 0 &&
 		(wide == libghostty.CellWideSpacerTail || wide == libghostty.CellWideSpacerHead) {
 		content = ""
@@ -383,18 +412,21 @@ func (gt *ghosttyTerminal) convertCell() (Cell, error) {
 		if err != nil {
 			return Cell{}, err
 		}
+
 		switch tag {
 		case libghostty.CellContentBgColorPalette:
 			palette, err := raw.ColorPalette()
 			if err != nil {
 				return Cell{}, err
 			}
+
 			cell.Style.BG = Color{Kind: ColorIndexed, Value: uint32(palette)}
 		case libghostty.CellContentBgColorRGB:
 			rgb, err := raw.ColorRGB()
 			if err != nil {
 				return Cell{}, err
 			}
+
 			cell.Style.BG = ghosttyRGB(rgb)
 		}
 	}
@@ -406,16 +438,30 @@ func ghosttyGraphemes(codepoints []uint32) string {
 	if len(codepoints) == 0 {
 		return " "
 	}
+
 	if len(codepoints) == 1 {
-		return string(rune(codepoints[0]))
+		return string(ghosttyRune(codepoints[0]))
 	}
 
 	var content strings.Builder
 	for _, codepoint := range codepoints {
-		content.WriteRune(rune(codepoint))
+		content.WriteRune(ghosttyRune(codepoint))
 	}
 
 	return content.String()
+}
+
+func ghosttyRune(codepoint uint32) rune {
+	if codepoint > utf8.MaxRune {
+		return utf8.RuneError
+	}
+
+	r := rune(codepoint)
+	if !utf8.ValidRune(r) {
+		return utf8.RuneError
+	}
+
+	return r
 }
 
 func ghosttyStyleColor(color libghostty.StyleColor) Color {
@@ -439,10 +485,16 @@ func ghosttyRGB(color libghostty.ColorRGB) Color {
 }
 
 func validateGhosttySize(cols, rows int) (int, int, error) {
+	cols, rows, _, _, err := validateGhosttySize16(cols, rows)
+
+	return cols, rows, err
+}
+
+func validateGhosttySize16(cols, rows int) (int, int, uint16, uint16, error) {
 	cols, rows = clampSize(cols, rows)
 	if cols > int(^uint16(0)) || rows > int(^uint16(0)) || cols > maxGhosttyCells/rows {
-		return 0, 0, fmt.Errorf("libghostty terminal size %dx%d exceeds safety limit", cols, rows)
+		return 0, 0, 0, 0, fmt.Errorf("libghostty terminal size %dx%d exceeds safety limit", cols, rows)
 	}
 
-	return cols, rows, nil
+	return cols, rows, uint16(cols), uint16(rows), nil //nolint:gosec // G115: bounds above keep both dimensions within uint16.
 }

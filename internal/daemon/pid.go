@@ -11,16 +11,16 @@ import (
 var ErrDaemonRunning = errors.New("daemon already running")
 
 func AcquirePIDFile(path string) error {
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := os.ReadFile(path); err == nil { // #nosec G703 -- pid file path comes from daemon-controlled config paths.
 		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 		if err == nil && isPIDAlive(pid) {
 			return fmt.Errorf("%w (pid %d)", ErrDaemonRunning, pid)
 		}
 
-		_ = os.Remove(path)
+		_ = os.Remove(path) // #nosec G703 -- stale pid file path is the same daemon-controlled path read above.
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G703 -- pid file path comes from daemon-controlled config paths.
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("%w: concurrent start detected", ErrDaemonRunning)

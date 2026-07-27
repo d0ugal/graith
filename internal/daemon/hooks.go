@@ -334,13 +334,13 @@ func preTrustCursorWorkspace(worktreePath string) error {
 	key := cursorProjectKey(worktreePath)
 
 	dir := filepath.Join(home, ".cursor", "projects", key)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil { // #nosec G703 -- key is sanitized before joining under the current user's home.
 		return fmt.Errorf("create cursor project dir: %w", err)
 	}
 
 	sentinel := filepath.Join(dir, ".workspace-trusted")
 
-	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(sentinel, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600) // #nosec G703 -- sentinel is derived from the sanitized project directory above.
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return nil
@@ -768,7 +768,7 @@ func otherPersistedCursorHooksOwners(owners []cursorHooksOwner, sessionID string
 }
 
 func removeCursorHooksOwnershipMarker(markerPath string) error {
-	if err := os.Remove(markerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(markerPath); err != nil && !errors.Is(err, os.ErrNotExist) { // #nosec G703 -- callers pass ownership marker paths created by this package.
 		return err
 	}
 
@@ -872,7 +872,7 @@ func runCursorHooksRaceHook(point cursorHooksRacePoint) {
 }
 
 func syncCursorHooksDir(path string) error {
-	dir, err := os.Open(path)
+	dir, err := os.Open(path) // #nosec G703 -- path is a package-owned hooks directory or marker parent.
 	if err != nil {
 		return err
 	}
@@ -1064,9 +1064,9 @@ func restoreCursorClaim(quarantine, hooksPath string) error {
 }
 
 func removeCursorClaim(quarantine string) error {
-	err := os.Remove(quarantine)
+	err := os.Remove(quarantine) // #nosec G703 -- quarantine path is reserved by reserveCursorHooksQuarantine.
 	if err == nil || errors.Is(err, os.ErrNotExist) {
-		_ = os.Remove(filepath.Dir(quarantine))
+		_ = os.Remove(filepath.Dir(quarantine)) // #nosec G703 -- parent is the reserved quarantine directory.
 	}
 
 	return err

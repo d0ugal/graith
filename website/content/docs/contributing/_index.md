@@ -79,6 +79,8 @@ CI runs `golangci-lint` via Docker:
 ```bash
 make lint       # lint and autofix
 make lint-only  # lint without fixing
+make lint-darwin # lint non-cgo Darwin-only Go files from the Linux lint container
+make lint-libghostty # lint the supported Linux libghostty+cgo surface
 make lint-profile # lint with verbose timing output
 make lint-cache-clean # remove Docker lint cache volumes
 make shellcheck # lint every tracked shell script (all optional warning/error checks)
@@ -89,6 +91,17 @@ The Docker lint targets keep the Go module cache, Go build cache, and
 `golangci-lint` cache in named Docker volumes so repeated local runs do not
 start cold. Use `make lint-cache-clean` to discard those volumes if a cache gets
 stale or too large.
+
+`make lint-only` uses the shared `.golangci.yml` with the `integration` tag.
+CI also runs `make lint-darwin` for non-cgo Darwin-only files and `make
+lint-libghostty` for the supported Linux native surface. The libghostty lint target
+prepares the pinned Linux artifact locally, then passes its `pkg-config` path
+into the same golangci-lint Docker image. Local runs of `make lint-libghostty`
+need the pinned Zig toolchain on `PATH` so the native artifact verifier can
+inspect the static archive before lint runs. Darwin `cgo` code, including the
+FSEvents filewatcher and Darwin libghostty slice, is not cross-linted from
+Linux; the macOS build/test lanes compile that surface and run the FSEvents and
+native terminal tests instead.
 
 To profile slow linters without leaving Docker, run `make lint-profile`. Extra
 `golangci-lint run` arguments can be passed with `GOLANGCI_LINT_RUN_ARGS`, for
@@ -255,7 +268,7 @@ CI (`ci.yml`) runs on every push to `main` and every PR:
 | Build | untagged compile gate on Ubuntu and macOS; native build runs in the native workflow |
 | Test | `go test -race` on Ubuntu and macOS |
 | Integration | compile-only generic tests; full runtime package executes in native Linux lane |
-| Lint | `golangci-lint run` on Ubuntu |
+| Lint | `golangci-lint run` on Ubuntu for default/integration, non-cgo Darwin-only, and Linux libghostty tag surfaces |
 | Vulnerability Check | `govulncheck ./...` on Ubuntu |
 | Conventional Commits | Validates PR commit messages |
 

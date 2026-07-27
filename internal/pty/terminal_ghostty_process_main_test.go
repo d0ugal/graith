@@ -9,6 +9,7 @@ import (
 
 func TestMain(m *testing.M) {
 	code := m.Run()
+
 	ClosePinnedTerminalExecutable()
 	os.Exit(code)
 }

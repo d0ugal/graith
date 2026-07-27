@@ -201,7 +201,6 @@ func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
 	}, nil
 }
 
-//nolint:unused // used by native terminal implementations.
 func clampSize(cols, rows int) (int, int) {
 	if cols < 1 {
 		cols = 1

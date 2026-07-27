@@ -51,30 +51,44 @@ func TestWaitForUserIdle_WaitsForIdle(t *testing.T) {
 }
 
 func TestWaitForUserIdle_ResetByNewInput(t *testing.T) {
+	const idleTimeout = 500 * time.Millisecond
+
 	s := newIdleSession()
 	s.NotifyUserInput()
+	s.userInputCond.L.Lock()
+	s.lastUserInputAt = time.Now().Add(time.Hour)
+	s.userInputCond.L.Unlock()
 
 	done := make(chan bool, 1)
 	go func() {
-		done <- s.WaitForUserIdle(200*time.Millisecond, 2*time.Second)
+		done <- s.WaitForUserIdle(idleTimeout, 30*time.Second)
 	}()
 
-	// After 100ms, simulate another keystroke — this resets the idle timer.
-	time.Sleep(100 * time.Millisecond)
-	s.NotifyUserInput()
+	// Give the waiter a chance to block while the future input timestamp keeps
+	// the idle condition unsatisfied. This avoids depending on scheduler timing
+	// to beat the idle timeout on loaded CI runners.
+	time.Sleep(20 * time.Millisecond)
 
-	start := time.Now()
+	resetAt := notifyUserInputAt(s)
+
 	ok := <-done
-	elapsed := time.Since(start)
+	elapsed := time.Since(resetAt)
 
 	if !ok {
 		t.Fatal("expected idle=true")
 	}
-	// Should have waited ~200ms after the second keystroke (minus the ~100ms
-	// we already waited before reading from done).
-	if elapsed < 100*time.Millisecond {
+
+	if elapsed < idleTimeout {
 		t.Fatalf("returned too quickly after reset (%v)", elapsed)
 	}
+}
+
+func notifyUserInputAt(s *Session) time.Time {
+	at := time.Now()
+
+	s.NotifyUserInput()
+
+	return at
 }
 
 func TestWaitForUserIdle_MaxWaitExpires(t *testing.T) {

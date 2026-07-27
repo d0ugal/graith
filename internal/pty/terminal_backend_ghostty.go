@@ -27,11 +27,15 @@ func ProbeTerminalAdoption() (maxSessions int, available bool) {
 	if err != nil {
 		return 0, false
 	}
+
 	if err := terminal.Close(); err != nil {
 		return 0, false
 	}
+
 	helpers, _ := FreezeTerminalHelpers(context.Background())
+
 	ThawTerminalHelpers()
+
 	if len(helpers) != 0 {
 		return 0, false
 	}

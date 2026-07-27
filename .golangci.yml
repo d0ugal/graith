@@ -5,7 +5,9 @@ run:
   go: "1.26.4"
   # Compile and lint build-tagged files too (e.g. the //go:build integration
   # test suite). Without this, golangci-lint skips them entirely and lint drift
-  # in the integration tests goes unnoticed in CI.
+  # in the integration tests goes unnoticed in CI. The libghostty tag is covered
+  # by Makefile's focused lint-libghostty target so the default !libghostty
+  # fail-closed files keep their normal lint coverage.
   build-tags:
     - integration
 
