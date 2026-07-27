@@ -24,6 +24,13 @@ on:
 permissions:
   contents: read
 
+# Pull-request runs are expensive and become obsolete on the next push to the
+# same PR. Non-PR events use a unique group so main, release-please, and manual
+# diagnostics never cancel or serialize each other through this PR policy.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Decide whether the macOS legs need to run. These jobs run
   # `go test -race ./...` and integration compile checks on darwin, so they

@@ -55,6 +55,13 @@ on:
 permissions:
   contents: read
 
+# Pull-request runs are expensive and become obsolete on the next push to the
+# same PR. Manual diagnostics use a unique group so they are never cancelled by
+# PR activity or serialized behind a PR run.
+concurrency:
+  group: sandbox-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ---------------------------------------------------------------------------
   # Decide whether the macOS/safehouse enforcement job needs to run. It tests
