@@ -9,6 +9,7 @@ on:
       - 'internal/**/*.go'
       - 'go.mod'
       - 'go.sum'
+      - '.github/ci-tool-versions.env'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -33,9 +34,14 @@ jobs:
       contents: read
       pages: read
     env:
-      HUGO_VERSION: 0.154.5
       HUGO_ENVIRONMENT: production
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Load CI tool versions
+        run: grep -E '^(HUGO_VERSION|K6_IMAGE|GOVULNCHECK_VERSION)=' .github/ci-tool-versions.env >> "$GITHUB_ENV"
       - name: Install Hugo CLI (extended)
         run: |
           wget -O "${{ runner.temp }}/hugo.deb" \
@@ -43,10 +49,6 @@ jobs:
           sudo dpkg -i "${{ runner.temp }}/hugo.deb"
       - name: Install Dart Sass
         run: sudo snap install dart-sass
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Use the repository toolchain for the website's nested Go module.

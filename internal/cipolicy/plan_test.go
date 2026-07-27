@@ -311,6 +311,10 @@ func TestDetectCapabilitiesClassifiesWebsiteHugoBuildInputs(t *testing.T) {
 			path:             "website/tests/package-graph.test.mjs",
 			wantCapabilities: []string{"docs-preview", "docs-publication"},
 		},
+		"ci tool version pins": {
+			path:             ".github/ci-tool-versions.env",
+			wantCapabilities: []string{"docs-preview", "docs-publication", "go-core", "workflow-policy"},
+		},
 		"unknown website path fails closed": {
 			path:         "website/bothy/blether.txt",
 			wantSuperset: true,
@@ -626,7 +630,7 @@ func TestBuildPlanRejectsRequiredModeOutsideUniversalFloor(t *testing.T) {
 }
 
 func TestDetectorDigestPinned(t *testing.T) {
-	const want = "39a87be564ef9e9f17cd7c17984a8ae37cc47cd609ed4b14c04368f918b75e9a"
+	const want = "91cf691cd8164dbf164c1f65e90ac3e66dd96ea1f663a74e4038187088f5f114"
 
 	if got := DetectorDigest(); got != want {
 		t.Fatalf("DetectorDigest() = %s, want %s", got, want)

@@ -128,6 +128,12 @@ var (
 		},
 		{
 			Paths: []string{
+				".github/ci-tool-versions.env",
+			},
+			Capabilities: []string{"docs-preview", "docs-publication", "go-core", "workflow-policy"},
+		},
+		{
+			Paths: []string{
 				"go.mod",
 				"Makefile",
 			},

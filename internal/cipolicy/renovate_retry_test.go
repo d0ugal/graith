@@ -68,6 +68,16 @@ func TestRenovateRetryPolicy(t *testing.T) {
 				stderr: "requested URL returned error: 403",
 			},
 		},
+		"k6 update missing replacement metadata": {
+			responses: []renovateFakeResponse{
+				{log: renovateSuccessLogWithoutK6ReplacementMetadata(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "CI tool managers did not retain expected datasource or integrity metadata",
+			},
+		},
 		"deterministic second attempt": {
 			responses: []renovateFakeResponse{
 				{log: renovateTransientLog, status: 1},
@@ -236,6 +246,37 @@ exit "$(cat "$FAKE_RENOVATE_RESPONSES/$count.status")"
 func renovateSuccessLog(t *testing.T) string {
 	t.Helper()
 
+	ciToolDeps := []any{
+		map[string]any{
+			"depName":      "gohugoio/hugo",
+			"datasource":   "github-releases",
+			"currentValue": "0.154.5",
+			"updates":      []any{},
+		},
+		map[string]any{
+			"depName":       "grafana/k6",
+			"datasource":    "docker",
+			"currentValue":  "1.8.0-with-browser",
+			"currentDigest": "sha256:" + strings.Repeat("a", 64),
+			"updates": []any{
+				map[string]any{
+					"branchName": "renovate/grafana-k6-2.x",
+					"newValue":   "2.1.0-with-browser",
+					"newDigest":  "sha256:" + strings.Repeat("b", 64),
+				},
+			},
+		},
+		map[string]any{
+			"depName":      "golang.org/x/vuln/cmd/govulncheck",
+			"packageName":  "golang.org/x/vuln",
+			"datasource":   "go",
+			"currentValue": "v1.3.0",
+			"updates": []any{
+				map[string]any{"branchName": "renovate/golang.org-x-vuln-cmd-govulncheck-1.x"},
+			},
+		},
+	}
+
 	nativeDeps := []any{
 		map[string]any{
 			"depName":       "Ghostty",
@@ -265,7 +306,10 @@ func renovateSuccessLog(t *testing.T) string {
 			"level": 20,
 			"msg":   "packageFiles with updates",
 			"config": map[string]any{
-				"regex": []any{map[string]any{"deps": nativeDeps}},
+				"regex": []any{
+					map[string]any{"packageFile": ".github/ci-tool-versions.env", "deps": ciToolDeps},
+					map[string]any{"deps": nativeDeps},
+				},
 			},
 		}),
 		renovateJSONLine(t, map[string]any{
@@ -303,6 +347,16 @@ func renovateSuccessLog(t *testing.T) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func renovateSuccessLogWithoutK6ReplacementMetadata(t *testing.T) string {
+	t.Helper()
+
+	log := renovateSuccessLog(t)
+	log = strings.ReplaceAll(log, `,"newValue":"2.1.0-with-browser"`, "")
+	log = strings.ReplaceAll(log, `,"newDigest":"sha256:`+strings.Repeat("b", 64)+`"`, "")
+
+	return log
 }
 
 func renovateJSONLine(t *testing.T, value any) string {

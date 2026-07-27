@@ -57,6 +57,7 @@ func TestWorkflowLintTriggerPathsIncludeLintConfig(t *testing.T) {
 		".github/workflows/**",
 		".github/actionlint.yaml",
 		".github/zizmor.yml",
+		".github/ci-tool-versions.env",
 		"internal/libghosttydeps/testdata/renovate/**",
 		"libghostty-native.lock.json",
 		"renovate.json5",
@@ -451,6 +452,87 @@ func TestGolangciLintDockerImageIsDigestPinned(t *testing.T) {
 	assertContains(t, renovate, "GOLANGCI_LINT_VERSION := (?<currentValue>v[\\\\d\\\\.]+)\\\\s+GOLANGCI_LINT_DIGEST := (?<currentDigest>sha256:[a-f0-9]{64})")
 	assertContains(t, renovate, "autoReplaceStringTemplate: 'GOLANGCI_LINT_VERSION := {{{newValue}}}\\nGOLANGCI_LINT_DIGEST := {{{newDigest}}}',")
 	assertNotContains(t, renovate, "pinDigests: false")
+}
+
+func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	pins := readPolicyFile(t, filepath.Join(repoRoot, ".github/ci-tool-versions.env"))
+	renovate := readPolicyFile(t, filepath.Join(repoRoot, "renovate.json5"))
+
+	assertRegexp(t, pins, `(?m)^HUGO_VERSION=\d+\.\d+\.\d+$`)
+	assertRegexp(t, pins, `(?m)^K6_IMAGE=grafana/k6:\d+\.\d+\.\d+-with-browser@sha256:[a-f0-9]{64}$`)
+	assertRegexp(t, pins, `(?m)^GOVULNCHECK_VERSION=v\d+\.\d+\.\d+$`)
+
+	for _, workflowPath := range []string{
+		".github/workflows/ci.yml",
+		".github/workflows/docs.yml",
+		".github/workflows/docs-preview.yml",
+	} {
+		path := filepath.Join(repoRoot, workflowPath)
+		workflow := readPolicyFile(t, path)
+		assertContains(t, workflow, ".github/ci-tool-versions.env")
+		assertCIToolVersionsLoadOrder(t, path)
+	}
+
+	assertContains(t, renovate, "HUGO_VERSION=(?<currentValue>[\\\\d.]+)")
+	assertContains(t, renovate, "K6_IMAGE=(?<packageName>grafana/k6):(?<currentValue>[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
+	assertContains(t, renovate, "autoReplaceStringTemplate: 'K6_IMAGE=grafana/k6:{{{newValue}}}@{{{newDigest}}}',")
+	assertContains(t, renovate, "GOVULNCHECK_VERSION=(?<currentValue>v[\\\\d.]+)")
+	assertContains(t, renovate, "depNameTemplate: 'golang.org/x/vuln/cmd/govulncheck'")
+	assertContains(t, renovate, "packageNameTemplate: 'golang.org/x/vuln'")
+}
+
+func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
+	t.Helper()
+
+	workflow, err := ReadP11WorkflowSummary(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for jobID, job := range workflow.Jobs {
+		checkoutIndex := -1
+		loadIndex := -1
+		firstConsumerIndex := -1
+
+		for index, step := range job.Steps {
+			if checkoutIndex == -1 && strings.HasPrefix(step.Uses, "actions/checkout@") {
+				checkoutIndex = index
+			}
+
+			if step.Name == "Load CI tool versions" {
+				loadIndex = index
+			}
+
+			if firstConsumerIndex == -1 &&
+				step.Name != "Load CI tool versions" &&
+				(strings.Contains(step.Run, "HUGO_VERSION") ||
+					strings.Contains(step.Run, "K6_IMAGE") ||
+					strings.Contains(step.Run, "GOVULNCHECK_VERSION")) {
+				firstConsumerIndex = index
+			}
+		}
+
+		if loadIndex == -1 && firstConsumerIndex == -1 {
+			continue
+		}
+
+		if loadIndex == -1 {
+			t.Fatalf("%s job %s consumes CI tool versions without a Load CI tool versions step", workflowPath, jobID)
+		}
+
+		if checkoutIndex == -1 {
+			t.Fatalf("%s job %s loads CI tool versions without actions/checkout", workflowPath, jobID)
+		}
+
+		if loadIndex <= checkoutIndex {
+			t.Fatalf("%s job %s loads CI tool versions before checkout", workflowPath, jobID)
+		}
+
+		if firstConsumerIndex != -1 && loadIndex >= firstConsumerIndex {
+			t.Fatalf("%s job %s loads CI tool versions after first consumer", workflowPath, jobID)
+		}
+	}
 }
 
 func validateAttestationVerifyCommand(code, stepName, repository, signerWorkflow string) error {

@@ -87,6 +87,34 @@
   ],
   customManagers: [
     {
+      // CI workflows consume these pins from one checked-in env file. Keep
+      // version-only tools here so workflow-local env blocks do not drift.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['HUGO_VERSION=(?<currentValue>[\\d.]+)'],
+      depNameTemplate: 'gohugoio/hugo',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['K6_IMAGE=(?<packageName>grafana/k6):(?<currentValue>[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})'],
+      autoReplaceStringTemplate: 'K6_IMAGE=grafana/k6:{{{newValue}}}@{{{newDigest}}}',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['GOVULNCHECK_VERSION=(?<currentValue>v[\\d.]+)'],
+      depNameTemplate: 'golang.org/x/vuln/cmd/govulncheck',
+      packageNameTemplate: 'golang.org/x/vuln',
+      datasourceTemplate: 'go',
+      versioningTemplate: 'semver',
+    },
+    {
       // Commit-only repositories follow the selected branch digest. The update
       // command resolves go-libghostty's digest to its Go pseudo-version.
       customType: 'regex',

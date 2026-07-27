@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Validate Renovate and prove every native pin is upgraded into the explicit,
-# non-automerge libghostty dependency unit using deliberately stale fixtures.
+# Validate Renovate and prove custom managers extract the expected dependency
+# surfaces. Native pins use deliberately stale fixtures to exercise grouping.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,10 +29,12 @@ trap cleanup EXIT
 cp "$REPO_DIR/renovate.json5" "$fixture/renovate.json5"
 cp "$REPO_DIR/internal/libghosttydeps/testdata/renovate/libghostty-native.lock.json" \
     "$fixture/libghostty-native.lock.json"
+mkdir -p "$fixture/.github"
+cp "$REPO_DIR/.github/ci-tool-versions.env" "$fixture/.github/ci-tool-versions.env"
 git -C "$fixture" init -q
 git -C "$fixture" config user.name "Renovate fixture"
 git -C "$fixture" config user.email "renovate-fixture@example.invalid"
-git -C "$fixture" add renovate.json5 libghostty-native.lock.json
+git -C "$fixture" add renovate.json5 libghostty-native.lock.json .github/ci-tool-versions.env
 git -C "$fixture" commit -qm "test: add dreich dependency fixture"
 
 is_transient_tangled_tls_failure() {
@@ -76,6 +78,50 @@ run_renovate_lookup() {
 if ! run_renovate_lookup; then
     echo "error: Renovate lookup dry run failed" >&2
     jq -r 'select(.level >= 40) | [.msg, (.err.message // .err // "")] | @tsv' "$log" >&2 || true
+    exit 1
+fi
+
+ci_expected='["gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","grafana/k6"]'
+ci_actual="$(jq -sc '
+    [
+        .[] |
+        select(.msg == "packageFiles with updates") |
+        .config.regex[]? |
+        select(.packageFile == ".github/ci-tool-versions.env") |
+        .deps[]? |
+        .depName
+    ] | unique | sort
+    ' "$log")"
+if [[ "$ci_actual" != "$ci_expected" ]]; then
+    echo "error: Renovate CI tool dependencies = $ci_actual; want $ci_expected" >&2
+    exit 1
+fi
+
+if ! jq -se '
+    [
+        .[] |
+        select(.msg == "packageFiles with updates") |
+        .config.regex[]? |
+        select(.packageFile == ".github/ci-tool-versions.env") |
+        .deps[]?
+    ] as $deps |
+    any($deps[];
+        .depName == "grafana/k6" and
+        .datasource == "docker" and
+        (.currentDigest | test("^sha256:[a-f0-9]{64}$")) and
+        all(.updates[]?;
+            .branchName != "renovate/pin-dependencies" and
+            (.newValue | test("^[0-9]+[.][0-9]+[.][0-9]+-with-browser$")) and
+            (.newDigest | test("^sha256:[a-f0-9]{64}$")))) and
+    any($deps[];
+        .depName == "golang.org/x/vuln/cmd/govulncheck" and
+        .packageName == "golang.org/x/vuln" and
+        .datasource == "go") and
+    any($deps[];
+        .depName == "gohugoio/hugo" and
+        .datasource == "github-releases")
+    ' "$log" >/dev/null; then
+    echo "error: CI tool managers did not retain expected datasource or integrity metadata" >&2
     exit 1
 fi
 
@@ -157,4 +203,4 @@ if jq -se '
     exit 1
 fi
 
-echo "Renovate suppressed the unsupported Ghostty/Highway proposal and retained unrelated native dependency updates."
+echo "Renovate recognized CI tool pins, suppressed the unsupported Ghostty/Highway proposal, and retained unrelated native dependency updates."

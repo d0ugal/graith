@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, closed]
     paths:
       - 'website/**'
+      - '.github/ci-tool-versions.env'
       - '.github/workflows/docs.yml'
       - '.github/workflows/docs-preview.yml'
   # Safety-net prune of stale screenshot dirs (in case an on-close cleanup
@@ -37,8 +38,6 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      HUGO_VERSION: 0.154.5
-      K6_IMAGE: grafana/k6:1.8.0-with-browser
       BASE_URL: http://localhost:8080
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -47,6 +46,9 @@ jobs:
           # Screenshots are pushed via the Go helper's GITHUB_TOKEN, not the
           # checkout's persisted credentials.
           persist-credentials: false
+
+      - name: Load CI tool versions
+        run: grep -E '^(HUGO_VERSION|K6_IMAGE|GOVULNCHECK_VERSION)=' .github/ci-tool-versions.env >> "$GITHUB_ENV"
 
       - name: Install Hugo (extended) + Dart Sass
         run: |
@@ -72,7 +74,7 @@ jobs:
         run: |
           BASE="$BASE_SHA"
           HEAD="$HEAD_SHA"
-          if changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ .github/workflows/docs.yml .github/workflows/docs-preview.yml)"; then
+          if changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ .github/ci-tool-versions.env .github/workflows/docs.yml .github/workflows/docs-preview.yml)"; then
             detector_failed=0
           else
             detector_failed=1
@@ -88,10 +90,14 @@ jobs:
           if [ "$detector_failed" = 1 ] || grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"; then
             global=1
           fi
+          ci_tool_versions_changed=0
+          if grep -qx '.github/ci-tool-versions.env' <<<"$changed"; then
+            ci_tool_versions_changed=1
+          fi
 
           # Website tooling and workflow changes still need the production Hugo
           # validation path, even when they do not map to a specific screenshot.
-          if [ "$global" = 1 ] || grep -qE '^website/|^\.github/workflows/(docs|docs-preview)\.yml$' <<<"$changed"; then
+          if [ "$global" = 1 ] || grep -qE '^website/|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$' <<<"$changed"; then
             build=1
           fi
 
@@ -141,6 +147,12 @@ jobs:
               # Include it when regeneration is the only website change.
               if grep -qx 'website/data/package_dependencies.json' <<<"$changed"; then
                 emit "website/content/docs/contributing/package-dependencies.md" false
+              fi
+              # CI tool changes can affect screenshot tooling without touching a
+              # specific docs page. Exercise one stable page so k6 image updates
+              # are pulled and run before Renovate can merge them.
+              if [ "$ci_tool_versions_changed" = 1 ]; then
+                emit "website/content/docs/_index.md" false
               fi
             fi
           } | jq -s '
