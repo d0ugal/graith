@@ -17,7 +17,7 @@ import (
 const (
 	PlanSchemaVersion        = 1
 	DetectorVersion          = "cipolicy-detector-v1"
-	detectorAlgorithmVersion = "path-rules-v2"
+	detectorAlgorithmVersion = "path-rules-v3"
 )
 
 const (
@@ -108,6 +108,24 @@ var (
 	}
 
 	capabilityPathRules = []detectorPathRule{
+		{
+			Paths: []string{
+				".github/workflows/dev-release.yml",
+				".goreleaser-dev.yaml",
+				"THIRD_PARTY_NOTICES.libghostty.md",
+				"libghostty-native.lock.json",
+				"libghostty-native.spdx.json",
+				"scripts/dev-release-base-tag.sh",
+				"scripts/dev-release-version.sh",
+				"scripts/libghostty-native.sh",
+			},
+			Prefixes: []string{
+				"internal/daemonservice/",
+				"macos/notifier/",
+				"macos/service/",
+			},
+			Capabilities: []string{"dev-release"},
+		},
 		{
 			Paths: []string{
 				"go.mod",
@@ -638,36 +656,53 @@ func DetectCapabilities(changedFiles []string, exactFileList bool, detectorError
 			continue
 		}
 
-		switch {
-		case invalidChangedPath(path):
+		if invalidChangedPath(path) {
 			detection.Superset = true
 			reasons["detector-error"] = true
 
 			detection.Errors = append(detection.Errors, "invalid changed path "+path)
+
+			continue
+		}
+
+		pathCapabilities := capabilitiesForPath(path)
+
+		switch {
 		case isCIPolicyPath(path):
 			detection.Superset = true
 			reasons["ci-policy-change"] = true
+
+			for _, capability := range pathCapabilities {
+				capabilities[capability] = true
+			}
+
+			continue
 		case isGeneratedInputPath(path):
 			detection.Superset = true
 			reasons["generated-input"] = true
+
+			continue
 		case isLockfilePath(path):
 			detection.Superset = true
 			reasons["lockfile"] = true
+
+			continue
 		case isReleaseMetadataPath(path):
 			detection.Superset = true
 			reasons["release-metadata"] = true
+
+			continue
 		default:
-			pathCapabilities := capabilitiesForPath(path)
 			if len(pathCapabilities) == 0 {
 				detection.Superset = true
 				reasons["unknown-path"] = true
 
 				continue
 			}
+		}
 
-			for _, capability := range pathCapabilities {
-				capabilities[capability] = true
-			}
+		for _, capability := range pathCapabilities {
+			capabilities[capability] = true
 		}
 	}
 

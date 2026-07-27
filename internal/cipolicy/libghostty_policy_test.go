@@ -107,18 +107,29 @@ func TestLibghosttyReleaseRoutingAndUpgradeFixture(t *testing.T) {
 	assertContains(t, goreleaser, `test ! -e "dist/graith-historical-pre-removal"`)
 	assertNotRegexp(t, goreleaser, `TestLibghosttyCharmToNativeUpgrade|gr-charm`)
 
-	devMatcher := releasePathMatcher(t, devRelease)
 	stableMatcher := releasePathMatcher(t, goreleaser)
 
 	for _, path := range []string{"internal/pty/terminal_backend_ghostty.go", "go.mod", "website/content/docs/installation.md"} {
-		if devMatcher.MatchString(path) || stableMatcher.MatchString(path) {
+		if sharedClassifierSelectsDevRelease(path) || stableMatcher.MatchString(path) {
 			t.Fatalf("release matcher unexpectedly selected non-release path %s", path)
 		}
 	}
 
-	for _, path := range []string{"scripts/dev-release-version.sh", "macos/notifier/build.sh"} {
-		if !devMatcher.MatchString(path) {
-			t.Fatalf("dev release matcher did not select %s", path)
+	for _, path := range []string{
+		".github/workflows/dev-release.yml",
+		".goreleaser-dev.yaml",
+		"THIRD_PARTY_NOTICES.libghostty.md",
+		"libghostty-native.lock.json",
+		"libghostty-native.spdx.json",
+		"scripts/dev-release-base-tag.sh",
+		"scripts/dev-release-version.sh",
+		"scripts/libghostty-native.sh",
+		"macos/notifier/build.sh",
+		"macos/service/release-signing-mode.sh",
+		"internal/daemonservice/service_manifest.json",
+	} {
+		if !sharedClassifierSelectsDevRelease(path) {
+			t.Fatalf("shared classifier did not select dev release for %s", path)
 		}
 	}
 
@@ -128,18 +139,29 @@ func TestLibghosttyReleaseRoutingAndUpgradeFixture(t *testing.T) {
 		}
 	}
 
-	for name, workflow := range map[string]string{"dev-release": devRelease, "goreleaser": goreleaser} {
-		assertRegexp(t, workflow, `(?ms)if \[ "\$EVENT" != "pull_request" \]; then.*?echo "release=true"`)
-		assertRegexp(t, workflow, `(?ms)if ! files="\$\(gh api "repos/\$REPO/pulls/\$PR/files".*?echo "release=true"`)
-		assertRegexp(t, workflow, `(?ms)release-context:.*?needs: changes`)
-		assertRegexp(t, workflow, `(?ms)release-context:.*?needs\.changes\.outputs\.release == 'true'`)
+	assertRegexp(t, devRelease, `(?ms)if \[ "\$EVENT" != "pull_request" \]; then.*?echo "release=true"`)
+	assertContains(t, devRelease, "go run ./cmd/cipolicy")
+	assertContains(t, devRelease, `ref: ${{ github.event.pull_request.base.sha }}`)
+	assertContains(t, devRelease, `persist-credentials: false`)
+	assertContains(t, devRelease, `detector_args+=("-detector-error" "could not list PR files")`)
+	assertContains(t, devRelease, `pulls/$PR/files?per_page=100`)
+	assertContains(t, devRelease, `PR file list is incomplete; running dev release to be safe.`)
+	assertContains(t, devRelease, `detector_args+=("-detector-error" "could not resolve PR head tree")`)
+	assertContains(t, devRelease, `repos/$REPO/git/commits/$HEAD_SHA`)
+	assertRegexp(t, devRelease, `(?ms)if ! go run \./cmd/cipolicy.*?echo "release=true" >> "\$GITHUB_OUTPUT"`)
+	assertContains(t, devRelease, `jq -er '`)
+	assertContains(t, devRelease, `detected_capabilities | index("dev-release")`)
+	assertContains(t, devRelease, `error("plan is missing detected_capabilities array")`)
+	assertContains(t, devRelease, `error("plan is missing superset_reasons array")`)
+	assertRegexp(t, devRelease, `(?ms)release-context:.*?needs: changes`)
+	assertRegexp(t, devRelease, `(?ms)release-context:.*?needs\.changes\.outputs\.release == 'true'`)
+	assertRegexp(t, devRelease, `branches:\n      - main`)
 
-		if name == "dev-release" {
-			assertRegexp(t, workflow, `branches:\n      - main`)
-		} else {
-			assertRegexp(t, workflow, `tags:\n      - "v\*"`)
-		}
-	}
+	assertRegexp(t, goreleaser, `(?ms)if \[ "\$EVENT" != "pull_request" \]; then.*?echo "release=true"`)
+	assertRegexp(t, goreleaser, `(?ms)if ! files="\$\(gh api "repos/\$REPO/pulls/\$PR/files".*?echo "release=true"`)
+	assertRegexp(t, goreleaser, `(?ms)release-context:.*?needs: changes`)
+	assertRegexp(t, goreleaser, `(?ms)release-context:.*?needs\.changes\.outputs\.release == 'true'`)
+	assertRegexp(t, goreleaser, `tags:\n      - "v\*"`)
 }
 
 func TestLibghosttyLocalNativeBuildIsolation(t *testing.T) {
@@ -355,6 +377,12 @@ func releasePathMatcher(t *testing.T, workflow string) *regexp.Regexp {
 	}
 
 	return matcher
+}
+
+func sharedClassifierSelectsDevRelease(path string) bool {
+	detection := DetectCapabilities([]string{path}, true, nil)
+
+	return containsString(detection.Capabilities, "dev-release")
 }
 
 func mustMatchString(t *testing.T, value, pattern string) string {

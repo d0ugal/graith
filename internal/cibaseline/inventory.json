@@ -1056,7 +1056,7 @@
       "path": ".github/workflows/dev-release.yml",
       "name": "Dev Release",
       "owner": "release-owners",
-      "file_sha256": "7e2454d633ca93444e541a64b46622f2edf90579685a3edcaa07691ade8958aa",
+      "file_sha256": "154bc82f791649523a4f50fc38f61eedcfbbf9ffc0f9e055140bf2bf60238b2d",
       "events": {
         "pull_request": null,
         "push": {
@@ -1316,6 +1316,28 @@
           ],
           "github_names": [
             "Detect dev-release-relevant changes"
+          ],
+          "action_pins": [
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+          ],
+          "toolchains": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
+          ],
+          "cache_actions": [
+            {
+              "action": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+              "name": null,
+              "with": {
+                "go-version-file": "go.mod"
+              }
+            }
           ]
         },
         {
@@ -2782,7 +2804,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "8c4124d52b42441d114ecdd92ec51ee037804385045b248d72cf894c465e2e5c",
+      "sha256": "1537bf870add4121a072e90d8027f4d4f46f1c025d5be30c6b5adb43b354cfc2",
       "executable_contract": "preserve native/release/coverage routing and libghostty artifact trust assertions formerly held by libghostty-policy.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent native policy coverage and zero unexplained replay disagreement"
@@ -3503,5 +3525,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "753fcd277e4f35a66e7c2bcf1b83ab950ba42ccc4f05ef678a4f29c3c2623d2d"
+  "digest": "2fdd1b392194dc97a0572955a53d942fcaaf5e3185fc0ec1a72f2676a1ba5604"
 }
