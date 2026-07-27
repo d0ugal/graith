@@ -60,6 +60,46 @@ policy edits, generated input drift, lockfiles, release metadata, and detector
 errors expand to the safe dev-release superset instead of narrowing silently.
 Manifest generation and validation remain package owned.
 
+## Classify workflow paths
+
+`cmd/ciclassify` is the shared changed-path classifier for job-level workflow
+gates. It reads newline-delimited repository paths, rejects blank, absolute,
+traversal, or whitespace-padded rows, and emits the exact GitHub output names
+expected by each workflow mode:
+
+```bash
+git diff --name-only origin/main...HEAD |
+  go run ./cmd/ciclassify -mode libghostty
+```
+
+Use `-json` for local diagnostics, or `-github-output "$GITHUB_OUTPUT"` when a
+workflow wants the command to append outputs directly. Pull-request workflows
+that use the classifier check out the PR base SHA before running it; PR-modified
+policy code is treated as input to validate, not authority for narrowing CI.
+
+Current classifier consumers and rollback boundaries:
+
+| Workflow | Consumer | Outputs | Status | Fail-safe behavior |
+|----------|----------|---------|--------|--------------------|
+| `ci.yml` | macOS test and integration jobs | `macos` | migrated | file-list or classifier failure runs macOS jobs |
+| `coverage.yml` | Swift coverage job and coverage comment | `gui` | migrated | file-list or classifier failure runs Swift coverage |
+| `sandbox.yml` | macOS safehouse job | `macos` | migrated | file-list or classifier failure runs the macOS enforcement job |
+| `libghostty-native.yml` | native runtime matrix and dependency-unit race/fuzz gates | `native`, `dependency-unit` | migrated | file-list, classifier, or detector job failure requires native and dependency-unit validation |
+| `docs-preview.yml` | workflow trigger and Hugo build/page selection | `trigger`, `global`, `build` in fixtures | not migrated | existing workflow path filter and detector failure still run the Hugo build |
+| `dev-release.yml` | dev release-shaped package validation | `release` | migrated through `cmd/cipolicy plan` | file-list, head-tree, or classifier failure runs dev release |
+| `goreleaser.yml` | stable release-shaped package validation | `release` | parity only | existing inline classifier remains; file-list failure runs stable release |
+
+Stable release must not be migrated until the parity fixtures in
+`internal/cipolicy/testdata/workflow_classifiers.json` prove the shared rules
+match the current inline stable-release classifier for representative release
+paths. Keep that migration in a separate rollback boundary from non-release
+gates.
+
+CI policy source changes conservatively select every migrated non-release gate.
+The release-shaped `cmd/ciclassify` modes remain diagnostic parity checks for
+the current dev and stable release classifiers until any stable-release workflow
+migration is reviewed separately.
+
 ## Downstream use
 
 `mode.trust_tiers` is an aggregate across the mode's `source_events`. A policy

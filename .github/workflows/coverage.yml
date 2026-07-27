@@ -32,7 +32,7 @@ jobs:
   # pull_request merge ref can be built against an older base than
   # `base.sha`, so diffing the two surfaces the base branch's own gui/ commits
   # and spuriously flips gui=true. The API returns exactly the PR's changed
-  # files, immune to that drift — and needs no checkout.
+  # files; the job checks out base.sha before running trusted Go classifier code.
   changes:
     name: Detect gui changes
     runs-on: ubuntu-latest
@@ -43,6 +43,13 @@ jobs:
     outputs:
       gui: ${{ steps.filter.outputs.gui }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
       - id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,13 +64,12 @@ jobs:
             echo "Could not list PR files; running Swift coverage to be safe."
             exit 0
           fi
-          # here-string (not a pipe) so grep matching early can't SIGPIPE-fail
-          # an upstream command under pipefail.
-          if grep -q '^gui/' <<<"$files"; then
+          if ! classification="$(go run ./cmd/ciclassify -mode coverage <<<"$files")"; then
             echo "gui=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "gui=false" >> "$GITHUB_OUTPUT"
+            echo "Shared classifier failed; running Swift coverage to be safe."
+            exit 0
           fi
+          echo "$classification" >> "$GITHUB_OUTPUT"
 
   go-coverage:
     name: Go coverage

@@ -14,7 +14,8 @@ func TestCoverageGUIDetectorFailsSafe(t *testing.T) {
 	script := coverageGUIDetectorScript(t)
 	tests := map[string]struct {
 		files  string
-		fail   bool
+		ghFail bool
+		goFail bool
 		want   string
 		output string
 	}{
@@ -28,8 +29,14 @@ func TestCoverageGUIDetectorFailsSafe(t *testing.T) {
 			want:   "false",
 			output: "gui=false",
 		},
-		"detector failure runs swift coverage": {
-			fail:   true,
+		"file list failure runs swift coverage": {
+			ghFail: true,
+			want:   "true",
+			output: "gui=true",
+		},
+		"classifier failure runs swift coverage": {
+			files:  "internal/client/passthrough.go",
+			goFail: true,
 			want:   "true",
 			output: "gui=true",
 		},
@@ -39,7 +46,7 @@ func TestCoverageGUIDetectorFailsSafe(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, combined := runCoverageGUIDetector(t, script, test.files, test.fail)
+			got, combined := runCoverageGUIDetector(t, script, test.files, test.ghFail, test.goFail)
 
 			if got != test.want {
 				t.Fatalf("gui output = %q, want %q; command output:\n%s", got, test.want, combined)
@@ -108,24 +115,35 @@ func coverageGUIDetectorScript(t *testing.T) string {
 	t.Helper()
 
 	changes := p11WorkflowJob(t, coverageWorkflow(t), "changes")
-	if len(changes.Steps) != 1 {
-		t.Fatalf("coverage changes step count = %d, want 1", len(changes.Steps))
+
+	var script string
+
+	for _, step := range changes.Steps {
+		if strings.Contains(step.Run, "go run ./cmd/ciclassify -mode coverage") {
+			script = step.Run
+			break
+		}
 	}
 
-	script := changes.Steps[0].Run
+	if script == "" {
+		t.Fatalf("coverage changes job does not call ciclassify: %#v", changes.Steps)
+	}
+
 	assertContains(t, script, `echo "gui=true" >> "$GITHUB_OUTPUT"`)
 	assertContains(t, script, "Could not list PR files; running Swift coverage to be safe.")
+	assertContains(t, script, "Shared classifier failed; running Swift coverage to be safe.")
 
 	return script
 }
 
-func runCoverageGUIDetector(t *testing.T, script, files string, fail bool) (string, string) {
+func runCoverageGUIDetector(t *testing.T, script, files string, ghFail, goFail bool) (string, string) {
 	t.Helper()
 
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "github-output")
 	scriptPath := filepath.Join(dir, "detector.sh")
 	ghPath := filepath.Join(dir, "gh")
+	goPath := filepath.Join(dir, "go")
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
@@ -145,6 +163,24 @@ printf '%s\n' "$GRAITH_FAKE_GH_FILES"
 		t.Fatal(err)
 	}
 
+	goScript := `#!/bin/sh
+if [ "${GRAITH_FAKE_GO_FAIL:-}" = "1" ]; then
+  exit 24
+fi
+files="$(cat)"
+case "$files" in
+  *gui/*) echo "gui=true" ;;
+  *) echo "gui=false" ;;
+esac
+`
+	if err := os.WriteFile(goPath, []byte(goScript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(goPath, 0o700); err != nil { //nolint:gosec // Fake go command must be executable for workflow policy coverage.
+		t.Fatal(err)
+	}
+
 	cmd := exec.Command("bash", scriptPath)
 
 	cmd.Env = append(os.Environ(),
@@ -155,8 +191,12 @@ printf '%s\n' "$GRAITH_FAKE_GH_FILES"
 		"GRAITH_FAKE_GH_FILES="+files,
 		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
-	if fail {
+	if ghFail {
 		cmd.Env = append(cmd.Env, "GRAITH_FAKE_GH_FAIL=1")
+	}
+
+	if goFail {
+		cmd.Env = append(cmd.Env, "GRAITH_FAKE_GO_FAIL=1")
 	}
 
 	combinedBytes, err := cmd.CombinedOutput()
