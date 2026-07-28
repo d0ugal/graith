@@ -110,9 +110,10 @@ non-optional runtime apply failure return an error and leave the previous config
 generation in place. Remote transport replacement closes the old listener first
 and stays closed if the replacement fails; the command still succeeds after the
 config generation is applied and reports remote access as degraded and closed.
-Fix the setting or dependency, then reload again through the local socket. In
-`remote.mode = "interface"`, this includes starting `tailscaled` and rerunning
-`gr daemon reload`. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
+Fix the setting or dependency, then reload again through the local socket; the
+command prints this retry guidance whenever it reports remote access as
+degraded. In `remote.mode = "interface"`, this includes starting `tailscaled`
+and rerunning `gr daemon reload`. See [remote hot reload]({{< relref "/docs/configuration/access.md#hot-reload-and-revocation" >}}).
 
 ## macOS user service
 

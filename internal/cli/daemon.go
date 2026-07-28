@@ -421,6 +421,8 @@ func printDaemonReloadResult(resp protocol.Envelope) error {
 		} else {
 			out.Printf("%s: %s\n", prefix, result.RemoteDegradedReason)
 		}
+
+		out.Printf("Fix any remote setting or dependency problem, then run `gr daemon reload` on the daemon host to retry remote access.\n")
 	}
 
 	return nil

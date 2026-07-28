@@ -22,6 +22,25 @@ import (
 
 func allowDaemonLifecycleMutation(string) error { return nil }
 
+func TestPrintDaemonReloadResultReportsCleanReloadWithoutRemoteHint(t *testing.T) {
+	var rendered bytes.Buffer
+
+	previousOut := out
+	out = output.NewWithWriter(false, &rendered)
+
+	t.Cleanup(func() { out = previousOut })
+
+	resp := payloadEnv("reloaded", protocol.ReloadedMsg{Applied: true})
+
+	if err := printDaemonReloadResult(resp); err != nil {
+		t.Fatalf("printDaemonReloadResult() error = %v", err)
+	}
+
+	if got := rendered.String(); got != "Config reloaded\n" {
+		t.Fatalf("clean reload output = %q, want only the reload line", got)
+	}
+}
+
 func TestPrintDaemonReloadResultReportsRemoteDegradationWithoutError(t *testing.T) {
 	var rendered bytes.Buffer
 
@@ -45,6 +64,7 @@ func TestPrintDaemonReloadResultReportsRemoteDegradationWithoutError(t *testing.
 	for _, want := range []string{
 		"Config reloaded\n",
 		"Remote access degraded and closed: listener setup: tailscale status",
+		"Fix any remote setting or dependency problem, then run `gr daemon reload` on the daemon host to retry remote access.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("reload output = %q, want %q", got, want)
