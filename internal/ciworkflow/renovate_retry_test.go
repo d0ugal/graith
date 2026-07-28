@@ -78,6 +78,16 @@ func TestRenovateRetryPolicy(t *testing.T) {
 				stderr: "CI tool managers did not retain expected datasource or integrity metadata",
 			},
 		},
+		"zig update missing": {
+			responses: []renovateFakeResponse{
+				{log: renovateSuccessLogWithoutZigUpdate(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "Zig stopped resolving updates",
+			},
+		},
 		"deterministic second attempt": {
 			responses: []renovateFakeResponse{
 				{log: renovateTransientLog, status: 1},
@@ -291,7 +301,7 @@ func renovateSuccessLog(t *testing.T) string {
 			"updates":      []any{},
 		},
 	}
-	for _, name := range []string{"SPDX tools-java", "Zig", "go-libghostty", "simdutf", "uucode"} {
+	for _, name := range []string{"SPDX tools-java", "go-libghostty", "simdutf", "uucode"} {
 		nativeDeps = append(nativeDeps, map[string]any{
 			"depName": name,
 			"depType": "libghostty-native",
@@ -300,6 +310,17 @@ func renovateSuccessLog(t *testing.T) string {
 			},
 		})
 	}
+
+	nativeDeps = append(nativeDeps, map[string]any{
+		"depName":      "Zig",
+		"depType":      "libghostty-native",
+		"datasource":   "forgejo-tags",
+		"packageName":  "ziglang/zig",
+		"registryUrls": []string{"https://codeberg.org/"},
+		"updates": []any{
+			map[string]any{"branchName": "renovate/libghostty-native"},
+		},
+	})
 
 	lines := []string{
 		renovateJSONLine(t, map[string]any{
@@ -325,7 +346,7 @@ func renovateSuccessLog(t *testing.T) string {
 					},
 					map[string]any{
 						"matchDepTypes":               []string{"libghostty-native"},
-						"matchDepNames":               []string{"Ghostty", "Zig", "uucode", "Highway", "simdutf"},
+						"matchDepNames":               []string{"go-libghostty", "Ghostty", "Zig", "uucode", "Highway", "simdutf"},
 						"dependencyDashboardApproval": true,
 					},
 					map[string]any{
@@ -357,6 +378,68 @@ func renovateSuccessLogWithoutK6ReplacementMetadata(t *testing.T) string {
 	log = strings.ReplaceAll(log, `,"newDigest":"sha256:`+strings.Repeat("b", 64)+`"`, "")
 
 	return log
+}
+
+func renovateSuccessLogWithoutZigUpdate(t *testing.T) string {
+	t.Helper()
+
+	var lines []string
+
+	for _, line := range strings.Split(renovateSuccessLog(t), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+
+		if record["msg"] == "packageFiles with updates" {
+			clearZigUpdate(t, record)
+			line = renovateJSONLine(t, record)
+		}
+
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func clearZigUpdate(t *testing.T, record map[string]any) {
+	t.Helper()
+
+	config, ok := record["config"].(map[string]any)
+	if !ok {
+		t.Fatal("Renovate log missing config object")
+	}
+
+	regexManagers, ok := config["regex"].([]any)
+	if !ok {
+		t.Fatal("Renovate log missing regex managers")
+	}
+
+	for _, managerAny := range regexManagers {
+		manager, ok := managerAny.(map[string]any)
+		if !ok {
+			t.Fatal("Renovate regex manager was not an object")
+		}
+
+		deps, ok := manager["deps"].([]any)
+		if !ok {
+			continue
+		}
+
+		for _, depAny := range deps {
+			dep, ok := depAny.(map[string]any)
+			if !ok {
+				t.Fatal("Renovate dependency was not an object")
+			}
+
+			if dep["depName"] == "Zig" {
+				dep["updates"] = []any{}
+				return
+			}
+		}
+	}
+
+	t.Fatal("Renovate log missing Zig dependency")
 }
 
 func renovateJSONLine(t *testing.T, value any) string {

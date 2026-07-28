@@ -148,10 +148,17 @@ if ! jq -se '
         select(.depType == "libghostty-native")
     ] as $deps |
     ($deps | length) == 7 and
+    any($deps[];
+        .depName == "Zig" and
+        .datasource == "forgejo-tags" and
+        .packageName == "ziglang/zig" and
+        (.updates | length) > 0 and
+        (((.registryUrls // []) | index("https://codeberg.org/") != null) or
+         .registryUrl == "https://codeberg.org")) and
     all($deps[];
         all(.updates[]; .branchName | test("^renovate/(major-)?libghostty-native$")))
     ' "$log" >/dev/null; then
-    echo "error: one or more native fixture updates escaped the libghostty group" >&2
+    echo "error: one or more native fixture updates escaped the libghostty group, Zig left Codeberg, or Zig stopped resolving updates" >&2
     exit 1
 fi
 
@@ -175,7 +182,7 @@ if ! jq -se '
         .postUpgradeTasks == null) and
     any($config.packageRules[];
         .matchDepTypes == ["libghostty-native"] and
-        .matchDepNames == ["Ghostty", "Zig", "uucode", "Highway", "simdutf"] and
+        .matchDepNames == ["go-libghostty", "Ghostty", "Zig", "uucode", "Highway", "simdutf"] and
         .dependencyDashboardApproval == true) and
     any($config.packageRules[];
         .matchDepTypes == ["libghostty-native"] and

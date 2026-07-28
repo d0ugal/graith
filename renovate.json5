@@ -32,22 +32,21 @@
     },
     {
       // The wrapper's CMakeLists.txt is the compatibility authority for the
-      // normal unit update. Newer Ghostty/transitive releases stay visible on
-      // the dependency dashboard, but require explicit approval before they
-      // can propose a graph that differs from the wrapper-tested closure.
+      // normal unit update, and wrapper moves can select a new Ghostty commit
+      // that first needs a reviewed Apple artifact. Keep every native graph
+      // proposal visible on the dependency dashboard, but require explicit
+      // approval before Renovate opens the dependency-unit PR.
       matchDepTypes: ['libghostty-native'],
-      matchDepNames: ['Ghostty', 'Zig', 'uucode', 'Highway', 'simdutf'],
+      matchDepNames: ['go-libghostty', 'Ghostty', 'Zig', 'uucode', 'Highway', 'simdutf'],
       dependencyDashboardApproval: true,
     },
     {
-      // Defer the exact proposal currently represented by Renovate PR #1619:
-      // Ghostty d4ac93a -> 15484b6 and its Highway 1.2.0 -> 1.4.0 closure.
-      // The selected Zig license source returns 404 and the matching
-      // libghostty-vt-15484b6 Apple artifact is not published, so generation
-      // cannot produce a reviewable dependency unit. Remove this rule only
-      // after generate-dependency-unit succeeds against the same Ghostty
-      // commit, with a valid Zig license source and a published Apple release
-      // whose notes and GitHub asset digest bind that full commit.
+      // Defer the unsupported Ghostty d4ac93a -> 15484b6 and Highway
+      // 1.2.0 -> 1.4.0 proposal. The matching libghostty-vt-15484b6 Apple
+      // artifact is not published, so generation cannot produce a reviewable
+      // dependency unit. Remove this rule only after generate-dependency-unit
+      // succeeds against the same Ghostty commit, with a published Apple
+      // release whose notes and GitHub asset digest bind that full commit.
       matchDepTypes: ['libghostty-native'],
       matchJsonata: [
         "(depName = 'Ghostty' and currentDigest = 'd4ac93a0395d321b043ee0116dc8a1a384f0fb83') or (depName = 'Highway' and currentValue = '1.2.0')",
@@ -140,11 +139,12 @@
       customType: 'regex',
       managerFilePatterns: ['/^libghostty-native\\.lock\\.json$/'],
       matchStrings: [
-        '"zig":\\s*\\{\\s*"repository":\\s*"(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
+        '"zig":\\s*\\{\\s*"repository":\\s*"https://codeberg\\.org/(?<packageName>[^"]+)",\\s*"version":\\s*"(?<currentValue>[^"]+)"',
       ],
-      datasourceTemplate: 'github-tags',
+      datasourceTemplate: 'forgejo-tags',
       depNameTemplate: 'Zig',
       depTypeTemplate: 'libghostty-native',
+      registryUrlTemplate: 'https://codeberg.org',
       versioningTemplate: 'semver',
     },
     {

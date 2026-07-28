@@ -1,6 +1,7 @@
 package libghosttydeps
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -167,6 +168,79 @@ func TestReconcileVersion(t *testing.T) {
 
 	if selected != "2.0.0" {
 		t.Fatalf("derived version = %s, want 2.0.0", selected)
+	}
+}
+
+func TestCodebergRawTagURL(t *testing.T) {
+	got, err := codebergRawTagURL("https://codeberg.org/ziglang/zig", "0.16.0", "LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "https://codeberg.org/ziglang/zig/raw/tag/0.16.0/LICENSE"
+	if got != want {
+		t.Fatalf("Zig license URL = %s, want %s", got, want)
+	}
+
+	for name, test := range map[string]struct {
+		repository string
+		tag        string
+		file       string
+	}{
+		"github":      {repository: "https://github.com/ziglang/zig", tag: "0.16.0", file: "LICENSE"},
+		"branch_path": {repository: "https://codeberg.org/ziglang/zig", tag: "master/path", file: "LICENSE"},
+		"parent_file": {repository: "https://codeberg.org/ziglang/zig", tag: "0.16.0", file: "../LICENSE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := codebergRawTagURL(test.repository, test.tag, test.file); err == nil {
+				t.Fatal("invalid Zig raw URL input was accepted")
+			}
+		})
+	}
+}
+
+func TestGoModuleDownloadRetriesTransientChecksumFailure(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+
+	runner := func(context.Context, string, string, ...string) ([]byte, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, errors.New("run go mod download: reading https://sum.golang.org/lookup/go.mitchellh.com/libghostty@v0.0.0-bairn: 500 Internal Server Error")
+		}
+
+		return []byte(`{"Version":"v0.0.0-bairn"}`), nil
+	}
+
+	output, err := runWithRetry(ctx, "", retryPolicy{attempts: 4}, isTransientGoModuleDownloadError, runner, "go", "mod", "download")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if attempts != 3 {
+		t.Fatalf("go mod download attempts = %d, want 3", attempts)
+	}
+
+	if string(output) != `{"Version":"v0.0.0-bairn"}` {
+		t.Fatalf("go mod download output = %s", output)
+	}
+}
+
+func TestGoModuleDownloadDoesNotRetryPermanentFailure(t *testing.T) {
+	ctx := context.Background()
+	attempts := 0
+
+	runner := func(context.Context, string, string, ...string) ([]byte, error) {
+		attempts++
+		return nil, errors.New("run go mod download: unknown revision dreich")
+	}
+
+	if _, err := runWithRetry(ctx, "", retryPolicy{attempts: 4}, isTransientGoModuleDownloadError, runner, "go", "mod", "download"); err == nil {
+		t.Fatal("permanent go mod download failure was accepted")
+	}
+
+	if attempts != 1 {
+		t.Fatalf("go mod download attempts = %d, want 1", attempts)
 	}
 }
 
