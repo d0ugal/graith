@@ -128,6 +128,13 @@ func TestValidateTriggers_Valid(t *testing.T) {
 			}, ActionConfig{Type: ActionMessage, Body: "{gcx_event_id}", Deliver: DeliverConfig{Topic: "blether"}}),
 		},
 		{
+			name: "gcx wildcard on-call gate",
+			trig: gcxTrigger("canny-wildcard", GCXConfig{
+				Context: "croft", OnCallUserID: GCXOnCallAnyUser, ScheduleIDs: []string{"S-BRAW"},
+				TeamIDs: []string{"T-BRAW"}, States: []string{"firing"},
+			}, ActionConfig{Type: ActionMessage, Body: "{gcx_event_id}", Deliver: DeliverConfig{Topic: "blether"}}),
+		},
+		{
 			name: "schedule tracker full knobs",
 			trig: schedTrigger("canny-tracker", ScheduleConfig{Cron: "@hourly"}, ActionConfig{Type: ActionTracker, Prompt: "{issue_title}", Tracker: &TrackerConfig{
 				Provider: "github", Repo: "/tmp/croft", ActiveState: "open", ActiveLabels: []string{"thrawn"},
@@ -185,6 +192,8 @@ func TestValidateTriggers_Invalid(t *testing.T) {
 		{"gcx missing context", gcxTrigger("haar", GCXConfig{}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "context is required"},
 		{"gcx bad event", gcxTrigger("haar", GCXConfig{Context: "croft", Event: "incident"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "v1 supports"},
 		{"gcx user without schedules", gcxTrigger("haar", GCXConfig{Context: "croft", OnCallUserID: "U-BRAW"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must be set together"},
+		{"gcx wildcard without schedules", gcxTrigger("haar", GCXConfig{Context: "croft", OnCallUserID: GCXOnCallAnyUser}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must be set together"},
+		{"gcx user with padding", gcxTrigger("haar", GCXConfig{Context: "croft", OnCallUserID: " U-BRAW ", ScheduleIDs: []string{"S-BRAW"}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must not have leading or trailing whitespace"},
 		{"gcx schedules without user", gcxTrigger("haar", GCXConfig{Context: "croft", ScheduleIDs: []string{"S-BRAW"}}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "must be set together"},
 		{"gcx zero cadence", gcxTrigger("haar", GCXConfig{Context: "croft", Every: "0s"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "every must be > 0"},
 		{"gcx max age below cadence", gcxTrigger("haar", GCXConfig{Context: "croft", Every: "5m", MaxAge: "1m"}, ActionConfig{Type: ActionMessage, Body: "x", Deliver: DeliverConfig{Topic: "t"}}), false, "max_age must be greater than or equal to every"},

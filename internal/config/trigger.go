@@ -43,14 +43,15 @@ type WatchConfig struct {
 }
 
 // GCXConfig is the Grafana Cloud event source. V1 polls OnCall alert groups
-// through an existing gcx context and can gate delivery on a pinned human being
-// currently present in one of the selected OnCall schedules.
+// through an existing gcx context and can gate delivery on either a pinned human
+// being or, when OnCallUserID is GCXOnCallAnyUser, any current user in one of
+// the selected OnCall schedules.
 type GCXConfig struct {
 	Event          string   `toml:"event"`           // oncall_alert_group (v1; default)
 	Context        string   `toml:"context"`         // gcx context (required; credentials remain owned by gcx)
 	Every          string   `toml:"every"`           // poll cadence; default 1m
 	Timeout        string   `toml:"timeout"`         // timeout for each gcx invocation; default 30s
-	OnCallUserID   string   `toml:"oncall_user_id"`  // stable human user PK; paired with ScheduleIDs
+	OnCallUserID   string   `toml:"oncall_user_id"`  // stable human user PK or GCXOnCallAnyUser; paired with ScheduleIDs
 	ScheduleIDs    []string `toml:"schedule_ids"`    // schedules used for the current-on-call gate
 	TeamIDs        []string `toml:"team_ids"`        // optional alert-group team filters
 	IntegrationIDs []string `toml:"integration_ids"` // optional alert-group integration filters
@@ -61,6 +62,7 @@ type GCXConfig struct {
 
 const (
 	GCXEventOnCallAlertGroup = "oncall_alert_group"
+	GCXOnCallAnyUser         = "*"
 	defaultGCXEvery          = time.Minute
 	defaultGCXTimeout        = 30 * time.Second
 	defaultGCXMaxAge         = 24 * time.Hour
@@ -843,9 +845,16 @@ func validateGCX(where string, g *GCXConfig) []error {
 		errs = append(errs, fmt.Errorf("%s: [gcx] max_age must be greater than or equal to every (otherwise active events can re-fire after cursor pruning)", where))
 	}
 
-	userSet := strings.TrimSpace(g.OnCallUserID) != ""
-	if g.OnCallUserID != "" && !userSet {
-		errs = append(errs, fmt.Errorf("%s: [gcx] oncall_user_id must not be whitespace", where))
+	trimmedUserID := strings.TrimSpace(g.OnCallUserID)
+	userSet := trimmedUserID != ""
+
+	if g.OnCallUserID != "" {
+		switch {
+		case !userSet:
+			errs = append(errs, fmt.Errorf("%s: [gcx] oncall_user_id must not be whitespace", where))
+		case g.OnCallUserID != trimmedUserID:
+			errs = append(errs, fmt.Errorf("%s: [gcx] oncall_user_id must not have leading or trailing whitespace", where))
+		}
 	}
 
 	if userSet != (len(g.ScheduleIDs) > 0) {

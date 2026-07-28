@@ -94,15 +94,31 @@ func gcxTestTrigger(gate bool) config.TriggerConfig {
 func gcxSchedulesJSON(t *testing.T, scheduleID string, users ...string) []byte {
 	t.Helper()
 
-	onCall := make([]map[string]string, 0, len(users))
-	for _, user := range users {
-		onCall = append(onCall, map[string]string{"pk": user})
+	return gcxSchedulesListJSON(t, gcxScheduleFixture{id: scheduleID, users: users})
+}
+
+type gcxScheduleFixture struct {
+	id    string
+	users []string
+}
+
+func gcxSchedulesListJSON(t *testing.T, schedules ...gcxScheduleFixture) []byte {
+	t.Helper()
+
+	items := make([]map[string]any, 0, len(schedules))
+	for _, schedule := range schedules {
+		onCall := make([]map[string]string, 0, len(schedule.users))
+		for _, user := range schedule.users {
+			onCall = append(onCall, map[string]string{"pk": user})
+		}
+
+		items = append(items, map[string]any{
+			"metadata.name":    schedule.id,
+			"spec.on_call_now": onCall,
+		})
 	}
 
-	out, err := json.Marshal([]map[string]any{{
-		"metadata.name":    scheduleID,
-		"spec.on_call_now": onCall,
-	}})
+	out, err := json.Marshal(items)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +167,75 @@ func TestPollGCXOnCall(t *testing.T) {
 		onCall, err := pollGCXOnCall(t.Context(), cfg, fake.run)
 		if err != nil || onCall {
 			t.Fatalf("onCall=%v err=%v", onCall, err)
+		}
+	})
+
+	t.Run("wildcard matches any current user on selected schedules", func(t *testing.T) {
+		fake := &fakeGCX{schedules: [][]byte{gcxSchedulesListJSON(t,
+			gcxScheduleFixture{id: "S-BRAW"},
+			gcxScheduleFixture{id: "S-CANNY", users: []string{"U-THRAWN"}},
+		)}}
+		wildcard := &config.GCXConfig{Context: "croft", OnCallUserID: config.GCXOnCallAnyUser, ScheduleIDs: []string{"S-BRAW", "S-CANNY"}}
+
+		onCall, err := pollGCXOnCall(t.Context(), wildcard, fake.run)
+		if err != nil || !onCall {
+			t.Fatalf("onCall=%v err=%v", onCall, err)
+		}
+	})
+
+	t.Run("wildcard requires a current user", func(t *testing.T) {
+		fake := &fakeGCX{schedules: [][]byte{gcxSchedulesJSON(t, "S-BRAW")}}
+		wildcard := &config.GCXConfig{Context: "croft", OnCallUserID: config.GCXOnCallAnyUser, ScheduleIDs: []string{"S-BRAW"}}
+
+		onCall, err := pollGCXOnCall(t.Context(), wildcard, fake.run)
+		if err != nil || onCall {
+			t.Fatalf("onCall=%v err=%v", onCall, err)
+		}
+	})
+
+	for name, userID := range map[string]string{"blank": "", "whitespace": " "} {
+		t.Run("wildcard ignores "+name+" on-call user IDs", func(t *testing.T) {
+			fake := &fakeGCX{schedules: [][]byte{gcxSchedulesJSON(t, "S-BRAW", userID)}}
+			wildcard := &config.GCXConfig{Context: "croft", OnCallUserID: config.GCXOnCallAnyUser, ScheduleIDs: []string{"S-BRAW"}}
+
+			onCall, err := pollGCXOnCall(t.Context(), wildcard, fake.run)
+			if err != nil || onCall {
+				t.Fatalf("onCall=%v err=%v", onCall, err)
+			}
+		})
+	}
+
+	t.Run("wildcard still fails closed on missing schedule", func(t *testing.T) {
+		fake := &fakeGCX{schedules: [][]byte{gcxSchedulesListJSON(t,
+			gcxScheduleFixture{id: "S-BRAW", users: []string{"U-BRAW"}},
+			gcxScheduleFixture{id: "S-OTHER", users: []string{"U-THRAWN"}},
+		)}}
+		wildcard := &config.GCXConfig{Context: "croft", OnCallUserID: config.GCXOnCallAnyUser, ScheduleIDs: []string{"S-BRAW", "S-CANNY"}}
+
+		if _, err := pollGCXOnCall(t.Context(), wildcard, fake.run); err == nil || !strings.Contains(err.Error(), "S-CANNY") {
+			t.Fatalf("expected missing-schedule error, got %v", err)
+		}
+	})
+
+	t.Run("user without schedules fails closed", func(t *testing.T) {
+		fake := &fakeGCX{}
+		if _, err := pollGCXOnCall(t.Context(), &config.GCXConfig{Context: "croft", OnCallUserID: config.GCXOnCallAnyUser}, fake.run); err == nil || !strings.Contains(err.Error(), "must be set together") {
+			t.Fatalf("expected pairing error, got %v", err)
+		}
+
+		if len(fake.calls) != 0 {
+			t.Fatalf("calls=%v, want none", fake.calls)
+		}
+	})
+
+	t.Run("schedules without user fails closed", func(t *testing.T) {
+		fake := &fakeGCX{}
+		if _, err := pollGCXOnCall(t.Context(), &config.GCXConfig{Context: "croft", ScheduleIDs: []string{"S-BRAW"}}, fake.run); err == nil || !strings.Contains(err.Error(), "must be set together") {
+			t.Fatalf("expected pairing error, got %v", err)
+		}
+
+		if len(fake.calls) != 0 {
+			t.Fatalf("calls=%v, want none", fake.calls)
 		}
 	})
 

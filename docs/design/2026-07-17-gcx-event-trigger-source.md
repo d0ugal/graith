@@ -157,10 +157,12 @@ rate_limit = "5/30m"
 ```
 
 `oncall_user_id` and `schedule_ids` must be set together; omitting both disables
-the on-call gate. The human ID is deliberately explicit and stable. The gcx
-context may authenticate as a service account. Team and integration filters are
-optional but strongly recommended because they make schedule membership a
-closer approximation of the actual escalation route.
+the on-call gate. A literal human ID is deliberately explicit and stable. For
+trigger testing, the exact `*` wildcard passes the gate when any user is
+currently on any selected schedule, but selected schedules are still required and
+validated. The gcx context may authenticate as a service account. Team and
+integration filters are optional but strongly recommended because they make
+schedule membership a closer approximation of the actual escalation route.
 
 V1 template variables are `{gcx_event_id}`, `{gcx_event_kind}`,
 `{gcx_event_state}`, `{gcx_event_url}`, `{gcx_team_id}`,

@@ -851,6 +851,8 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 #
 # GCX → session: investigate newly observed OnCall alert groups, but only while
 # the configured human is currently present in one of the selected schedules.
+# For trigger testing, oncall_user_id = "*" passes when any user is currently on
+# any selected schedule; schedule_ids are still required and validated.
 # Authentication stays in the named gcx context; do not put tokens here.
 # [[trigger]]
 # name = "my-oncall-alerts"
@@ -859,7 +861,7 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 # context          = "oncall-automation"
 # every            = "1m"
 # timeout          = "30s"
-# oncall_user_id   = "U..."
+# oncall_user_id   = "U..." # or "*" for trigger testing
 # schedule_ids     = ["S..."]
 # team_ids         = ["T..."]
 # integration_ids  = ["I..."]
