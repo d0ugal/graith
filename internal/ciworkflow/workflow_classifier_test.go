@@ -61,17 +61,28 @@ func TestWorkflowClassifierParityFixtures(t *testing.T) {
 func TestWorkflowClassifierTreatsPolicyChangesAsMigratedGatingConsumers(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]string{
-		"ci policy workflow":      ".github/workflows/coverage.yml",
-		"shared classifier":       "cmd/ciclassify/main.go",
-		"shared workflow package": "internal/ciworkflow/workflow_classifier.go",
+	tests := map[string]struct {
+		path        string
+		docsPreview bool
+	}{
+		"ci policy workflow": {
+			path: ".github/workflows/coverage.yml",
+		},
+		"shared classifier": {
+			path:        "cmd/ciclassify/main.go",
+			docsPreview: true,
+		},
+		"shared workflow package": {
+			path:        "internal/ciworkflow/workflow_classifier.go",
+			docsPreview: true,
+		},
 	}
 
-	for name, path := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := ClassifyWorkflowPaths([]string{path})
+			got, err := ClassifyWorkflowPaths([]string{test.path})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,8 +95,8 @@ func TestWorkflowClassifierTreatsPolicyChangesAsMigratedGatingConsumers(t *testi
 				t.Fatalf("policy classifier change = %#v, want every migrated gating output true", got)
 			}
 
-			if got.DocsPreviewTrigger || got.DocsPreviewBuild || got.DocsPreviewGlobal {
-				t.Fatalf("policy classifier change = %#v, want docs-preview outputs false", got)
+			if got.DocsPreviewTrigger != test.docsPreview || got.DocsPreviewBuild != test.docsPreview || got.DocsPreviewGlobal {
+				t.Fatalf("policy classifier change = %#v, want docs-preview trigger/build %t and global false", got, test.docsPreview)
 			}
 		})
 	}
@@ -130,19 +141,25 @@ func TestMigratedDetectorScriptsFailSafe(t *testing.T) {
 		workflow string
 		jobID    string
 		mode     string
-		output   string
+		outputs  []string
 	}{
 		"ci macos detector": {
 			workflow: ".github/workflows/ci.yml",
 			jobID:    "changes",
 			mode:     "ci",
-			output:   "macos",
+			outputs:  []string{"macos"},
+		},
+		"docs-preview detector": {
+			workflow: ".github/workflows/docs-preview.yml",
+			jobID:    "changes",
+			mode:     "docs-preview",
+			outputs:  []string{"build", "trigger"},
 		},
 		"sandbox macos detector": {
 			workflow: ".github/workflows/sandbox.yml",
 			jobID:    "changes",
 			mode:     "sandbox",
-			output:   "macos",
+			outputs:  []string{"macos"},
 		},
 	}
 
@@ -151,12 +168,24 @@ func TestMigratedDetectorScriptsFailSafe(t *testing.T) {
 			t.Parallel()
 
 			script := workflowDetectorScript(t, test.workflow, test.jobID, test.mode)
-			failSafeOutput := `echo "` + test.output + `=true" >> "$GITHUB_OUTPUT"`
+			fileListFailure := workflowDetectorFailureBlock(t, script, `if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then`)
+			classifierFailure := workflowDetectorFailureBlock(t, script, `if ! classification="$(go run ./cmd/ciclassify -mode `+test.mode+` <<<"$files")"; then`)
 
-			assertContains(t, script, `if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
-  `+failSafeOutput)
-			assertContains(t, script, `if ! classification="$(go run ./cmd/ciclassify -mode `+test.mode+` <<<"$files")"; then
-  `+failSafeOutput)
+			for _, output := range test.outputs {
+				failSafeOutput := workflowDetectorFailSafeOutput(test.mode, output)
+
+				for _, block := range []string{fileListFailure, classifierFailure} {
+					assertContains(t, block, failSafeOutput)
+				}
+			}
+
+			if test.mode == "docs-preview" {
+				for _, block := range []string{fileListFailure, classifierFailure} {
+					assertContains(t, block, `echo "global=false"`)
+					assertContains(t, block, `} >> "$GITHUB_OUTPUT"`)
+					assertNotContains(t, block, `echo "global=true"`)
+				}
+			}
 		})
 	}
 }
@@ -275,6 +304,20 @@ func workflowDetectorScript(t *testing.T, workflowPath, jobID, mode string) stri
 	return ""
 }
 
+func workflowDetectorFailureBlock(t *testing.T, script, start string) string {
+	t.Helper()
+
+	return mustMatchString(t, script, `(?ms)`+regexp.QuoteMeta(start)+`.*?\n\s*fi`)
+}
+
+func workflowDetectorFailSafeOutput(mode, output string) string {
+	if mode == "docs-preview" {
+		return `echo "` + output + `=true"`
+	}
+
+	return `echo "` + output + `=true" >> "$GITHUB_OUTPUT"`
+}
+
 type workflowLegacyMatchers struct {
 	devRelease    *regexp.Regexp
 	stableRelease *regexp.Regexp
@@ -352,7 +395,7 @@ var (
 
 	legacyCIWorkflowMatcher = regexp.MustCompile(`^\.github/(actions|workflows)/|^cmd/ciclassify/|^internal/ciworkflow/`)
 
-	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$`)
+	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$`)
 
 	legacyDocsPreviewGlobalMatcher = regexp.MustCompile(`^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)`)
 )

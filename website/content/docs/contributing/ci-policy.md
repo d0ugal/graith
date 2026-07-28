@@ -49,7 +49,7 @@ Current classifier consumers and rollback boundaries:
 | `sandbox.yml` | macOS safehouse job | `macos` | migrated | file-list or classifier failure runs the macOS enforcement job |
 | `libghostty-native.yml` | native runtime matrix and dependency-unit race/fuzz gates | `native`, `dependency-unit` | migrated | file-list, classifier, or detector job failure requires native and dependency-unit validation |
 | `dev-release.yml` | dev release-shaped package validation | `release` | migrated | file-list or classifier failure runs dev release |
-| `docs-preview.yml` | workflow trigger and Hugo build/page selection | `trigger`, `global`, `build` in fixtures | not migrated | existing workflow path filter and detector failure still run the Hugo build |
+| `docs-preview.yml` | workflow trigger and Hugo build gate; page selection stays local to the workflow | `trigger`, `global`, `build` | migrated | file-list or classifier failure runs the Hugo build; local detector failure expands page selection globally |
 | `goreleaser.yml` | stable release-shaped package validation | `release` | parity only | existing inline classifier remains; file-list failure runs stable release |
 
 Stable release must not be migrated until the parity fixtures in
@@ -60,7 +60,8 @@ gates.
 
 CI workflow source changes conservatively select every migrated non-release
 gate. Changes to `cmd/ciclassify` or `internal/ciworkflow` also select the
-dev-release gate, because dev-release now relies on the shared classifier.
+dev-release and docs-preview gates, because both workflows now rely on the
+shared classifier.
 
 ## Retained Workflow Tests
 
