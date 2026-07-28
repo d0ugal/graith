@@ -15,11 +15,11 @@ the previous P0-P11 rollout: no external gate, no new identity, no settings
 change, no merge queue, no live fixture repository, and no required-check
 cutover.
 
-The near-term objective is faster, more reliable CI with fewer duplicated
-policy surfaces. The first implementation signal is a non-required shadow
-summary inside existing GitHub Actions. Current checks remain authoritative
-until a later in-repository change has direct evidence and a reversible reason
-to simplify them.
+The near-term objective is the simplest and fastest CI setup we can get while
+preserving the best practical coverage. The first implementation signal is a
+non-required shadow summary inside existing GitHub Actions. Current checks
+remain authoritative until a later in-repository change has direct evidence and
+a reversible reason to simplify them.
 
 ## Background
 
@@ -233,8 +233,8 @@ Expected files:
 
 - update one existing workflow, preferably `.github/workflows/ci.yml`, to add a
   non-required `CI shadow summary` job;
-- reuse existing static inventory code from `internal/cibaseline` or
-  `internal/cipolicy` only where it is simpler than shell/YAML;
+- reuse `cmd/ciclassify` or small `internal/ciworkflow` helpers only where they
+  are simpler than shell/YAML;
 - add a small helper command only if the summary would otherwise duplicate
   parsing logic;
 - add focused tests for any helper behavior used by the summary;
@@ -272,7 +272,7 @@ remain non-required.
 Acceptance commands:
 
 ```bash
-go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy
+go test ./internal/ciworkflow ./cmd/ciclassify
 git diff --check
 ```
 
@@ -292,27 +292,26 @@ Parallelism: C2 can run while C1 is in review if it does not touch `cigate`.
 
 #### Work Package C3: Prune Baseline and Policy Helpers to Actual Callers
 
-Purpose: keep useful static inventory and validation revealed by C2, while
-deleting retained live evidence, historical-window acceptance, and gate-oriented
-policy shape that has no concrete caller.
+Purpose: delete generated baseline, generated policy manifest, and run-plan
+machinery that has no concrete workflow caller, while keeping the direct
+classifier and focused workflow checks that make current CI faster or better
+covered.
 
 Expected files:
 
-- keep or simplify `internal/cibaseline/inventory.go`,
-  `internal/cibaseline/inventory_test.go`, and `internal/cibaseline/inventory.json`
-  only as needed by C2/C4;
-- simplify or delete `cmd/cibaseline/**` based on the C2 caller shape;
-- delete `internal/cibaseline/github.go`,
-  `internal/cibaseline/evidence.go`, `internal/cibaseline/acceptance.go`, and
-  retained evidence fixtures;
-- simplify or delete `internal/cipolicy/manifest.go`, `build.go`,
-  `validate.go`, `io.go`, and `manifest.json` based on the C2/C4 caller shape;
-- keep `cmd/cipolicy/**` while `dev-release.yml` still invokes its plan command
-  from the trusted base checkout;
-- delete `internal/cipolicy/plan.go`, `result.go`, and `fixture.go` unless C2
-  or C4 already imports them directly;
-- treat `internal/cipolicy/cache.go` as already deleted by #1737;
-- delete `internal/cipolicy/artifact.go` unless current native/release
+- delete `cmd/cibaseline/**`;
+- delete `internal/cibaseline/inventory.go`, `inventory_test.go`, and
+  `inventory.json`;
+- delete `cmd/cipolicy/**`;
+- update `dev-release.yml` to call `cmd/ciclassify -mode dev-release`
+  directly from the trusted base checkout;
+- delete former `internal/cipolicy/manifest.go`, `build.go`, `validate.go`, `io.go`,
+  and `manifest.json`;
+- delete former `internal/cipolicy/plan.go`, `result.go`, and obsolete plan fixtures;
+- keep `cmd/ciclassify/**` and the small `internal/ciworkflow` classifier helpers
+  used by current workflows;
+- treat former `internal/cipolicy/cache.go` as already deleted by #1737;
+- delete former `internal/cipolicy/artifact.go` unless current native/release
   validation has a direct caller.
 
 Dependencies: C0 and C2. Coordinate with C1 to avoid conflicts in architecture
@@ -321,25 +320,27 @@ or docs.
 Acceptance commands:
 
 ```bash
-go test ./internal/cibaseline ./cmd/cibaseline ./internal/cipolicy
+go test ./internal/ciworkflow ./cmd/ciclassify
 go test ./...
 git diff --check
 ```
 
 Acceptance evidence:
 
-- Every remaining command or package has a concrete C2/C4/native/release caller.
+- Every remaining CI helper command or package has a concrete current workflow
+  or test caller.
 - No retained-evidence acceptance depends on fixed dates, mature run windows,
   or GitHub history collection.
-- No speculative plan/result/fixture/cache code remains without an accepted
-  caller.
-- Static inventory drift tests still catch workflow/job rename mistakes when
-  the summary relies on them.
+- No generated baseline, generated policy manifest, speculative
+  plan/result/fixture/cache code remains without an accepted caller.
+- Workflow/job rename mistakes remain covered by focused workflow policy tests
+  and the workflows themselves.
 
-Rollback: revert C3 or restore the deleted helper package in one PR.
+Rollback: restore the deleted helper packages only with their workflow caller.
+Otherwise revert the focused classifier or workflow changes.
 
-Parallelism: C3 can be split into `cibaseline` and `cipolicy` pruning PRs after
-C2 identifies the real imports.
+Parallelism: C3 can be split into baseline deletion, policy-plan deletion, and
+workflow migration PRs if review pressure requires it.
 
 #### Work Package C4: Deterministic Change-Class Fixtures
 
@@ -365,7 +366,7 @@ Required sample classes:
 | GUI-only | Existing macOS/GUI routing and required-check satisfaction semantics remain visible. |
 | Sandbox | Sandbox fail-safe escalation remains visible. |
 | Libghostty runtime | Native source-build, artifact, manifest, archive, and consumer checks are treated as core runtime coverage. |
-| Generated metadata | Existing drift tests remain visible. |
+| Generated metadata | Existing protocol/capability drift tests remain visible. |
 | Release path | Release-shaped PR builds run without publication credentials. |
 | Workflow/script | Workflow-lint and helper tests cover policy changes. |
 | Fork PR | Publication credentials, docs-preview writes, and regen mutation remain unavailable. |
@@ -374,7 +375,7 @@ Required sample classes:
 Acceptance commands:
 
 ```bash
-go test ./internal/cibaseline ./internal/cipolicy
+go test ./internal/ciworkflow ./cmd/ciclassify
 git diff --check
 ```
 
@@ -401,7 +402,7 @@ Expected files may include:
 - `.github/workflows/libghostty-native.yml`;
 - `.github/workflows/dev-release.yml`;
 - `.github/workflows/goreleaser.yml`;
-- `internal/cipolicy/libghostty_policy_test.go`;
+- `internal/ciworkflow/libghostty_policy_test.go`;
 - `cmd/libghosttyarchive/**`;
 - `internal/libghosttyarchive/**`;
 - `scripts/libghostty-native.sh`;
@@ -556,9 +557,9 @@ settings change. No package depends on a fixed elapsed time window.
 
 | Old phase | New package |
 | --- | --- |
-| P0 baseline evidence | C2 local inventory signal first; C3 deletes retained live evidence. |
-| P1 policy manifest | C2 uses only the static inventory/manifest it needs; C3 prunes the rest. |
-| P2 plan/result policy | C3 deletes unless C2/C4 already proved a direct local caller. |
+| P0 baseline evidence | C3 deletes generated baseline inventory and keeps current workflows plus focused workflow checks as the authority. |
+| P1 policy manifest | C3 deletes generated policy manifest and keeps only direct classifiers with current workflow callers. |
+| P2 plan/result policy | C3 deletes run-plan machinery unless a future reviewed workflow caller proves it is needed. |
 | P3 hermetic policy fixture | C4 deterministic sample classes. |
 | P4 trusted CI gate App | C1 delete/reject. |
 | P5 artifact/cache contracts | #1758 removes the artifact contract after finding no direct native/release caller; #1737 already deleted cache authority. Active native/release artifact validation stays in workflow/script tests. |

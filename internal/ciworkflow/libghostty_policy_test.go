@@ -1,4 +1,4 @@
-package cipolicy
+package ciworkflow
 
 import (
 	"encoding/json"
@@ -144,6 +144,8 @@ func TestLibghosttyReleaseRoutingAndUpgradeFixture(t *testing.T) {
 		"scripts/dev-release-base-tag.sh",
 		"scripts/dev-release-version.sh",
 		"scripts/libghostty-native.sh",
+		"cmd/ciclassify/main.go",
+		"internal/ciworkflow/workflow_classifier.go",
 		"macos/notifier/build.sh",
 		"macos/service/release-signing-mode.sh",
 		"internal/daemonservice/service_manifest.json",
@@ -159,20 +161,21 @@ func TestLibghosttyReleaseRoutingAndUpgradeFixture(t *testing.T) {
 		}
 	}
 
+	devReleaseFilter := mustMatchString(t, devRelease, `(?ms)- id: filter\n.*?(?:\n\n  release-context:)`)
+
 	assertRegexp(t, devRelease, `(?ms)if \[ "\$EVENT" != "pull_request" \]; then.*?echo "release=true"`)
-	assertContains(t, devRelease, "go run ./cmd/cipolicy")
+	assertContains(t, devRelease, "go run ./cmd/ciclassify")
+	assertContains(t, devRelease, "-mode dev-release")
+	assertContains(t, devRelease, `-github-output "$GITHUB_OUTPUT"`)
 	assertContains(t, devRelease, `ref: ${{ github.event.pull_request.base.sha }}`)
 	assertContains(t, devRelease, `persist-credentials: false`)
-	assertContains(t, devRelease, `detector_args+=("-detector-error" "could not list PR files")`)
 	assertContains(t, devRelease, `pulls/$PR/files?per_page=100`)
+	assertContains(t, devRelease, `Could not list PR files; running dev release to be safe.`)
 	assertContains(t, devRelease, `PR file list is incomplete; running dev release to be safe.`)
-	assertContains(t, devRelease, `detector_args+=("-detector-error" "could not resolve PR head tree")`)
-	assertContains(t, devRelease, `repos/$REPO/git/commits/$HEAD_SHA`)
-	assertRegexp(t, devRelease, `(?ms)if ! go run \./cmd/cipolicy.*?echo "release=true" >> "\$GITHUB_OUTPUT"`)
-	assertContains(t, devRelease, `jq -er '`)
-	assertContains(t, devRelease, `detected_capabilities | index("dev-release")`)
-	assertContains(t, devRelease, `error("plan is missing detected_capabilities array")`)
-	assertContains(t, devRelease, `error("plan is missing superset_reasons array")`)
+	assertRegexp(t, devRelease, `(?ms)if ! go run \./cmd/ciclassify.*?echo "release=true" >> "\$GITHUB_OUTPUT"`)
+	assertNotContains(t, devRelease, `go run ./cmd/cipolicy`)
+	assertNotContains(t, devReleaseFilter, `jq -er '`)
+	assertNotContains(t, devReleaseFilter, `dev-release-plan.json`)
 	assertRegexp(t, devRelease, `(?ms)release-context:.*?needs: changes`)
 	assertRegexp(t, devRelease, `(?ms)release-context:.*?needs\.changes\.outputs\.release == 'true'`)
 	assertRegexp(t, devRelease, `branches:\n      - main`)
@@ -387,9 +390,12 @@ func releasePathMatcher(t *testing.T, workflow string) *regexp.Regexp {
 }
 
 func sharedClassifierSelectsDevRelease(path string) bool {
-	detection := DetectCapabilities([]string{path}, true, nil)
+	classification, err := ClassifyWorkflowPaths([]string{path})
+	if err != nil {
+		return false
+	}
 
-	return containsString(detection.Capabilities, "dev-release")
+	return classification.DevRelease
 }
 
 func mustMatchString(t *testing.T, value, pattern string) string {

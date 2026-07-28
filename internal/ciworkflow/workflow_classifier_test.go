@@ -1,4 +1,4 @@
-package cipolicy
+package ciworkflow
 
 import (
 	"bytes"
@@ -62,10 +62,9 @@ func TestWorkflowClassifierTreatsPolicyChangesAsMigratedGatingConsumers(t *testi
 	t.Parallel()
 
 	tests := map[string]string{
-		"ci policy command":     "cmd/cipolicy/main.go",
-		"ci policy workflow":    ".github/workflows/coverage.yml",
-		"shared classifier":     "cmd/ciclassify/main.go",
-		"shared policy package": "internal/cipolicy/plan.go",
+		"ci policy workflow":      ".github/workflows/coverage.yml",
+		"shared classifier":       "cmd/ciclassify/main.go",
+		"shared workflow package": "internal/ciworkflow/workflow_classifier.go",
 	}
 
 	for name, path := range tests {
@@ -95,14 +94,13 @@ func TestWorkflowClassifierTreatsPolicyChangesAsMigratedGatingConsumers(t *testi
 func TestWorkflowClassifierReleaseModesMatchCurrentClassifiersForPolicyPaths(t *testing.T) {
 	t.Parallel()
 
-	stableMatcher := currentWorkflowLegacyMatchers(t).stableRelease
+	legacyMatchers := currentWorkflowLegacyMatchers(t)
 	tests := map[string]string{
-		"ci policy command":         "cmd/cipolicy/main.go",
 		"ci policy workflow":        ".github/workflows/coverage.yml",
 		"dev release workflow":      ".github/workflows/dev-release.yml",
 		"stable release workflow":   ".github/workflows/goreleaser.yml",
 		"shared classifier command": "cmd/ciclassify/main.go",
-		"shared policy package":     "internal/cipolicy/plan.go",
+		"shared workflow package":   "internal/ciworkflow/workflow_classifier.go",
 	}
 
 	for name, path := range tests {
@@ -114,11 +112,11 @@ func TestWorkflowClassifierReleaseModesMatchCurrentClassifiersForPolicyPaths(t *
 				t.Fatal(err)
 			}
 
-			if want := sharedClassifierSelectsDevRelease(path); got.DevRelease != want {
+			if want := legacyMatchers.devRelease.MatchString(path); got.DevRelease != want {
 				t.Fatalf("DevRelease for %s = %t, want current dev-release classifier %t", path, got.DevRelease, want)
 			}
 
-			if want := stableMatcher.MatchString(path); got.StableRelease != want {
+			if want := legacyMatchers.stableRelease.MatchString(path); got.StableRelease != want {
 				t.Fatalf("StableRelease for %s = %t, want current stable-release classifier %t", path, got.StableRelease, want)
 			}
 		})
@@ -171,6 +169,7 @@ func TestWorkflowClassifierRejectsUnsafeChangedFileLists(t *testing.T) {
 		"empty":              {},
 		"leading whitespace": {" internal/pty/session.go"},
 		"traversal":          {"internal/../go.mod"},
+		"trailing traversal": {"internal/.."},
 		"absolute":           {"/go.mod"},
 	}
 
@@ -277,6 +276,7 @@ func workflowDetectorScript(t *testing.T, workflowPath, jobID, mode string) stri
 }
 
 type workflowLegacyMatchers struct {
+	devRelease    *regexp.Regexp
 	stableRelease *regexp.Regexp
 }
 
@@ -286,6 +286,7 @@ func currentWorkflowLegacyMatchers(t *testing.T) workflowLegacyMatchers {
 	repoRoot := p11RepoRoot()
 
 	return workflowLegacyMatchers{
+		devRelease:    legacyDevReleaseMatcher,
 		stableRelease: releasePathMatcher(t, readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/goreleaser.yml"))),
 	}
 }
@@ -294,27 +295,29 @@ func legacyWorkflowClassification(files []string, matchers workflowLegacyMatcher
 	var result WorkflowClassifications
 
 	for _, path := range files {
-		if legacyCIMacOSMatcher.MatchString(path) {
+		sharedWorkflow := legacyCIWorkflowMatcher.MatchString(path)
+
+		if sharedWorkflow || legacyCIMacOSMatcher.MatchString(path) {
 			result.CIMacOS = true
 		}
 
-		if legacyCoverageGUIMatcher.MatchString(path) {
+		if sharedWorkflow || legacyCoverageGUIMatcher.MatchString(path) {
 			result.CoverageGUI = true
 		}
 
-		if legacySandboxMacOSMatcher.MatchString(path) {
+		if sharedWorkflow || legacySandboxMacOSMatcher.MatchString(path) {
 			result.SandboxMacOS = true
 		}
 
-		if path == "libghostty-native.lock.json" {
+		if sharedWorkflow || path == "libghostty-native.lock.json" {
 			result.LibghosttyDependencyUnit = true
 		}
 
-		if legacyLibghosttyNativeMatcher.MatchString(path) {
+		if sharedWorkflow || legacyLibghosttyNativeMatcher.MatchString(path) {
 			result.LibghosttyNative = true
 		}
 
-		if sharedClassifierSelectsDevRelease(path) {
+		if matchers.devRelease.MatchString(path) {
 			result.DevRelease = true
 		}
 
@@ -344,6 +347,10 @@ var (
 	legacySandboxMacOSMatcher = regexp.MustCompile(`^internal/sandbox/|^go\.mod$|^go\.sum$|^\.github/workflows/sandbox\.yml$`)
 
 	legacyLibghosttyNativeMatcher = regexp.MustCompile(`^\.goreleaser-dev\.yaml$|^\.github/workflows/(dev-release|libghostty-native)\.yml$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty|release)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-version|libghostty-native)\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$`)
+
+	legacyDevReleaseMatcher = regexp.MustCompile(`^\.github/workflows/dev-release\.yml$|^\.goreleaser-dev\.yaml$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-base-tag|dev-release-version|libghostty-native)\.sh$|^cmd/ciclassify/|^internal/(ciworkflow|daemonservice)/|^macos/(notifier|service)/`)
+
+	legacyCIWorkflowMatcher = regexp.MustCompile(`^\.github/(actions|workflows)/|^cmd/ciclassify/|^internal/ciworkflow/`)
 
 	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$`)
 

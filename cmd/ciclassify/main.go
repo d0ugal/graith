@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/d0ugal/graith/internal/cipolicy"
+	"github.com/d0ugal/graith/internal/ciworkflow"
 )
 
 func main() {
@@ -45,14 +45,14 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 
-	result, err := cipolicy.ClassifyWorkflowPaths(files)
+	result, err := ciworkflow.ClassifyWorkflowPaths(files)
 	if err != nil {
 		return err
 	}
 
 	var outputs map[string]bool
 	if *mode != "" {
-		outputs, err = cipolicy.WorkflowModeOutputs(cipolicy.WorkflowClassifierMode(*mode), result)
+		outputs, err = ciworkflow.WorkflowModeOutputs(ciworkflow.WorkflowClassifierMode(*mode), result)
 		if err != nil {
 			return err
 		}

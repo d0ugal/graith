@@ -1,8 +1,9 @@
-package cipolicy
+package ciworkflow
 
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const WorkflowClassifierVersion = "ci-path-classifier-v1"
@@ -74,6 +75,35 @@ var (
 
 	libghosttyDependencyUnitRules = workflowPathRule{
 		Paths: []string{"libghostty-native.lock.json"},
+	}
+
+	ciWorkflowRules = workflowPathRule{
+		Prefixes: []string{
+			".github/actions/",
+			".github/workflows/",
+			"cmd/ciclassify/",
+			"internal/ciworkflow/",
+		},
+	}
+
+	devReleaseRules = workflowPathRule{
+		Paths: []string{
+			".github/workflows/dev-release.yml",
+			".goreleaser-dev.yaml",
+			"THIRD_PARTY_NOTICES.libghostty.md",
+			"libghostty-native.lock.json",
+			"libghostty-native.spdx.json",
+			"scripts/dev-release-base-tag.sh",
+			"scripts/dev-release-version.sh",
+			"scripts/libghostty-native.sh",
+		},
+		Prefixes: []string{
+			"cmd/ciclassify/",
+			"internal/ciworkflow/",
+			"internal/daemonservice/",
+			"macos/notifier/",
+			"macos/service/",
+		},
 	}
 
 	libghosttyNativeRules = workflowPathRule{
@@ -168,30 +198,29 @@ func ClassifyWorkflowPaths(changedFiles []string) (WorkflowClassifications, erro
 	var result WorkflowClassifications
 
 	for _, path := range files {
-		sharedPolicy := isCIPolicyPath(path)
-		pathCapabilities := capabilitiesForPath(path)
+		sharedWorkflow := isCIWorkflowPath(path)
 
-		if sharedPolicy || workflowRuleMatches(ciMacOSRules, path) {
+		if sharedWorkflow || workflowRuleMatches(ciMacOSRules, path) {
 			result.CIMacOS = true
 		}
 
-		if sharedPolicy || workflowRuleMatches(coverageGUIRules, path) {
+		if sharedWorkflow || workflowRuleMatches(coverageGUIRules, path) {
 			result.CoverageGUI = true
 		}
 
-		if sharedPolicy || workflowRuleMatches(sandboxMacOSRules, path) {
+		if sharedWorkflow || workflowRuleMatches(sandboxMacOSRules, path) {
 			result.SandboxMacOS = true
 		}
 
-		if sharedPolicy || workflowRuleMatches(libghosttyNativeRules, path) {
+		if sharedWorkflow || workflowRuleMatches(libghosttyNativeRules, path) {
 			result.LibghosttyNative = true
 		}
 
-		if sharedPolicy || workflowRuleMatches(libghosttyDependencyUnitRules, path) {
+		if sharedWorkflow || workflowRuleMatches(libghosttyDependencyUnitRules, path) {
 			result.LibghosttyDependencyUnit = true
 		}
 
-		if containsString(pathCapabilities, "dev-release") {
+		if workflowRuleMatches(devReleaseRules, path) {
 			result.DevRelease = true
 		}
 
@@ -273,9 +302,23 @@ func validatedWorkflowChangedFiles(changedFiles []string) ([]string, error) {
 }
 
 func workflowRuleMatches(rule workflowPathRule, path string) bool {
-	return detectorRuleMatches(detectorPathRule{
-		Paths:    rule.Paths,
-		Prefixes: rule.Prefixes,
-		Suffixes: rule.Suffixes,
-	}, path)
+	for _, exact := range rule.Paths {
+		if path == exact {
+			return true
+		}
+	}
+
+	for _, prefix := range rule.Prefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+
+	for _, suffix := range rule.Suffixes {
+		if strings.HasSuffix(path, suffix) {
+			return true
+		}
+	}
+
+	return false
 }

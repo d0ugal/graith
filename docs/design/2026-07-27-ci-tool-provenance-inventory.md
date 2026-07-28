@@ -19,16 +19,17 @@ reversible.
 
 ## Background
 
-The current CI baseline inventory in `internal/cibaseline/inventory.json`
-records 18 workflow files, their jobs, action pins, artifact actions, cache
-actions, permissions, and required contexts. It proves that normal action
-references are commit-pinned, but it does not classify every executable
-downloaded from `run:` blocks or every tool fetched by a pinned action.
+The workflow files under `.github/workflows/` are the current source of truth
+for CI jobs, action pins, artifact actions, cache actions, permissions, and
+required contexts. They show that normal action references are commit-pinned,
+but they do not classify every executable downloaded from `run:` blocks or
+every tool fetched by a pinned action.
 
 Existing workflow hardening already covers several high-risk cases:
 
 - workflow action references are full-commit SHA pins in the checked-in
-  baseline, with action-internal tool fetches classified separately below;
+  workflow files, with action-internal tool fetches classified separately
+  below;
 - `golangci-lint` and Renovate run from digest-pinned containers;
 - `nono`, `actionlint`, and `zizmor` release tarballs are verified with GitHub
   artifact attestations bound to their signer workflows before execution;
@@ -114,15 +115,15 @@ still be mutable if its `action.yml`, Dockerfile, or bundled JavaScript fetches
 unverified binaries or tag-only containers at run time.
 
 Exact versions and digests below are a 2026-07-27 evidence snapshot. The
-workflow files, lock files, Renovate managers, and CI baseline remain
-authoritative for current values; this document is authoritative for the
-classification and disposition of each tool family.
+workflow files, lock files, and Renovate managers remain authoritative for
+current values; this document is authoritative for the classification and
+disposition of each tool family.
 
 #### Inventory
 
 | Item | Workflows / jobs | Classification | Evidence | Disposition |
 |------|------------------|----------------|----------|-------------|
-| GitHub action references | All workflows with `uses:` | Immutable/provenance-verified | `internal/cibaseline/inventory.json` records full action SHAs; workflow scan found no tag-only `uses:` references. | No change. Keep static baseline drift checks; action-internal tools are separate inventory rows. |
+| GitHub action references | All workflows with `uses:` | Immutable/provenance-verified | Workflow scan found no tag-only `uses:` references; normal action refs are full action SHAs in `.github/workflows/`. | No change. Keep action refs commit-pinned; action-internal tools are separate inventory rows. |
 | Go toolchain from `actions/setup-go` | Go, docs, native, sandbox, release, and workflow-lint jobs | Platform-managed | Pinned `actions/setup-go` action reads `go-version-file: go.mod`; `go.mod` pins Go `1.26.5`. | No replacement without a demonstrated platform reliability issue. |
 | GitHub Pages actions | `docs.yml` build/deploy | Platform-managed | `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages` are GitHub-owned and SHA-pinned. | No change; platform-managed. |
 | GitHub artifact actions | Native, regen, release, scorecard workflows | Platform-managed | `actions/upload-artifact` and `actions/download-artifact` are SHA-pinned; artifact consumers reverify expected names, manifests, and checksums where artifacts become release inputs. | No change; keep consumer checks. |
@@ -196,7 +197,6 @@ security or reliability benefit.
 - Existing Safehouse follow-up: #1763.
 - Existing Hugo/k6/govulncheck follow-up: #1764.
 - Existing release-integrity follow-up: #706.
-- Current static baseline: `internal/cibaseline/inventory.json`.
 - Current workflows: `.github/workflows/`.
 - Native dependency lock: `libghostty-native.lock.json`.
 - Native helper: `scripts/libghostty-native.sh`.

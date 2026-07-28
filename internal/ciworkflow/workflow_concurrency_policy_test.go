@@ -1,4 +1,4 @@
-package cipolicy
+package ciworkflow
 
 import (
 	"path/filepath"

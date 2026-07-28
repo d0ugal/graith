@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/d0ugal/graith/internal/cipolicy"
+	"github.com/d0ugal/graith/internal/ciworkflow"
 )
 
 func TestRunWritesGitHubOutputs(t *testing.T) {
@@ -74,7 +74,7 @@ func TestRunWritesJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var got cipolicy.WorkflowClassifications
+	var got ciworkflow.WorkflowClassifications
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
