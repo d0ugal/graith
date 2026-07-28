@@ -244,6 +244,23 @@ func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
 			t.Errorf("codex OptionArgs = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("info commands expose default provider probes", func(t *testing.T) {
+		want := map[string]map[string][]string{
+			"claude": {"version": {"--version"}},
+			"codex":  {"version": {"--version"}},
+			"cursor": {
+				"model":   {"--list-models"},
+				"version": {"-v"},
+			},
+		}
+
+		for agentName, wantInfo := range want {
+			if got := d.Agents[agentName].Info; !reflect.DeepEqual(got, wantInfo) {
+				t.Errorf("agent %q: Info = %v, want %v", agentName, got, wantInfo)
+			}
+		}
+	})
 }
 
 // TestConfigReloadDebounceDuration exercises the accessor's empty/invalid/valid

@@ -289,6 +289,14 @@
       "notes": "Sandbox explain/watch output is diagnostic and streaming, making the terminal its natural interface."
     },
     {
+      "id": "agent.introspect",
+      "category": "Diagnostics",
+      "name": "List configured agents and provider info",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-28-agent-introspection.md#platform-support",
+      "notes": "Provider info probes execute configured agent CLIs in the daemon/provider environment for agent and scripting workflows; native apps use catalog data for session creation instead."
+    },
+    {
       "id": "config.view",
       "category": "Diagnostics",
       "name": "View effective config + diff-vs-defaults",

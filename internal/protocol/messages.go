@@ -735,6 +735,9 @@ type AgentCatalogEntry struct {
 	// Command is the launch command configured for the agent (informational; the
 	// GUI may show it as a subtitle). Empty when unset.
 	Command string `json:"command,omitempty"`
+	// InfoKeys lists configured provider info commands, such as "model" or
+	// "version", sorted for stable display.
+	InfoKeys []string `json:"info_keys,omitempty"`
 }
 
 // AgentCatalogResponseMsg carries the daemon's effective agent catalog and the
@@ -744,6 +747,36 @@ type AgentCatalogEntry struct {
 type AgentCatalogResponseMsg struct {
 	Agents       []AgentCatalogEntry `json:"agents"`
 	DefaultAgent string              `json:"default_agent"`
+}
+
+// AgentInfoMsg requests provider-specific information for a configured agent.
+// When Key is empty, the daemon runs every configured info command for Agent.
+// When Key is set, only that provider-neutral key is run.
+type AgentInfoMsg struct {
+	Agent string `json:"agent"`
+	Key   string `json:"key,omitempty"`
+}
+
+// AgentInfoResult is the captured output of one configured provider info
+// command. Command and Args report the configured agent command and selected
+// info argv, not the sandbox wrapper used internally.
+type AgentInfoResult struct {
+	Key             string   `json:"key"`
+	Command         string   `json:"command"`
+	Args            []string `json:"args,omitempty"`
+	Stdout          string   `json:"stdout,omitempty"`
+	Stderr          string   `json:"stderr,omitempty"`
+	StdoutTruncated bool     `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool     `json:"stderr_truncated,omitempty"`
+	ExitCode        int      `json:"exit_code"`
+	Error           string   `json:"error,omitempty"`
+}
+
+// AgentInfoResponseMsg carries all requested info command results for an agent.
+// Results are sorted by Key when multiple keys are requested.
+type AgentInfoResponseMsg struct {
+	Agent   string            `json:"agent"`
+	Results []AgentInfoResult `json:"results"`
 }
 
 // Diagnostics types (daemon -> client, in response to "diagnostics" message)

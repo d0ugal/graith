@@ -55,7 +55,7 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 	case "handshake", "auth_proof", "repo_list", "store_list", "store_get", "list",
 		"logs", "wait", "msg_topics", "msg_conversation", "msg_jail_list",
 		"msg_jail_show", "screen_preview", "screen_snapshot", "status",
-		"diagnostics", "config", "agent_catalog", "scenario_status", "trigger_list",
+		"diagnostics", "config", "agent_catalog", "agent_info", "scenario_status", "trigger_list",
 		"trigger_status", "todo_list", "scenario_list", "upgrade_preflight", "upgrade":
 		return false
 	default:
@@ -404,6 +404,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "repo_list":
 				handleRepoList(sm, sendControl)
+
+			case "agent_info":
+				handleAgentInfo(ctx, sm, sendControl, msg)
 
 			case "store_list":
 				handleStoreList(sm, auth, sendControl, msg)

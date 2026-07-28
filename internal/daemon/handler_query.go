@@ -99,9 +99,17 @@ func handleAgentCatalog(sm *SessionManager, send func(string, any)) {
 
 	entries := make([]protocol.AgentCatalogEntry, 0, len(names))
 	for _, name := range names {
+		infoKeys := make([]string, 0, len(cfg.Agents[name].Info))
+		for key := range cfg.Agents[name].Info {
+			infoKeys = append(infoKeys, key)
+		}
+
+		sort.Strings(infoKeys)
+
 		entries = append(entries, protocol.AgentCatalogEntry{
-			Name:    name,
-			Command: cfg.Agents[name].Command,
+			Name:     name,
+			Command:  cfg.Agents[name].Command,
+			InfoKeys: infoKeys,
 		})
 	}
 

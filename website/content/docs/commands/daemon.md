@@ -189,6 +189,74 @@ See [`[daemon_service]`]({{< relref "/docs/configuration/_index.md#macos-daemon-
 before upgrading if agents depend on `SSH_AUTH_SOCK`, cloud credentials, or API
 keys inherited from your terminal.
 
+## Agent introspection
+
+### `gr agent list` (alias: `gr agent ls`)
+
+List the agents configured in the daemon's effective configuration. The table
+shows the agent name, whether it is the configured default, the launch command,
+and any configured provider info keys.
+
+Use `--json` for the raw catalog:
+
+```json
+{
+  "agents": [
+    {
+      "name": "cursor",
+      "command": "agent",
+      "info_keys": ["model", "version"]
+    }
+  ],
+  "default_agent": "claude"
+}
+```
+
+### `gr agent info <agent> [key]`
+
+Run configured provider info commands for an agent. Without `[key]`, graith
+runs every key under `[agents.<agent>.info]` in sorted order. With `[key]`, it
+runs only that key, for example:
+
+```bash
+gr agent info cursor model
+gr agent info cursor --json
+```
+
+The daemon runs the configured agent `command` with the selected `info` argv in
+a daemon-owned provider context with the agent's optional Graith sandbox. It
+does not require the calling shell to have the provider CLI available. Normal
+session launch args, prompt injection, hooks, and included-repo flags are not
+applied.
+
+The human-readable single-key form prints the provider stdout directly. With
+`--json`, stdout, stderr, exit code, truncation flags, and per-result errors are
+separate fields:
+
+```json
+{
+  "agent": "cursor",
+  "results": [
+    {
+      "key": "model",
+      "command": "agent",
+      "args": ["--list-models"],
+      "stdout": "auto - Auto\n",
+      "exit_code": 0
+    }
+  ]
+}
+```
+
+Unknown agents, unknown info keys, and agents without `info` configuration fail
+the request. Provider command failures and timeouts are returned on the specific
+result, then the CLI exits non-zero after printing the human or JSON output.
+
+Configuration and lookup errors are returned before running probes. Each info
+command has a 30 second daemon timeout. Captured stdout and stderr are capped at
+1 MiB each; JSON results set `stdout_truncated` or `stderr_truncated` when a
+stream exceeds that cap, and human output prints a truncation marker.
+
 ## Other commands
 
 ### `gr config show`

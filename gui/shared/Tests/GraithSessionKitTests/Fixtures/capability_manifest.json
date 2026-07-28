@@ -221,6 +221,12 @@
       "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support"
     },
     {
+      "id": "agent.introspect",
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-28-agent-introspection.md#platform-support"
+    },
+    {
       "id": "config.view",
       "ios": "supported",
       "macos": "supported"

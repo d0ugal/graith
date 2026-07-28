@@ -178,6 +178,9 @@ var registeredTypes = []any{
 	AgentCatalogMsg{},
 	AgentCatalogEntry{},
 	AgentCatalogResponseMsg{},
+	AgentInfoMsg{},
+	AgentInfoResult{},
+	AgentInfoResponseMsg{},
 	DiagnosticsMsg{},
 	SessionDiagnostic{},
 	TriggerDiagnostic{},
@@ -404,6 +407,9 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ConfigResponseMsg":       {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
 	"AgentCatalogEntry":       {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
 	"AgentCatalogResponseMsg": {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)
+	"AgentInfoMsg":            {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoResult":         {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoResponseMsg":    {SwiftNA, ""},                              // CLI provider introspection
 	"StatusResponseMsg":       {SwiftPlanned, ""},
 	// Read-only task-list types remain planned for the GUIs. Mutation types are
 	// intentionally not applicable to the native apps.

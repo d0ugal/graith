@@ -3177,6 +3177,11 @@ type Agent struct {
 	// / search flags) into config so custom agents can define their own
 	// conditional flags (issue #1236).
 	OptionArgs []AgentOptionArg `json:"option_args,omitempty" toml:"option_args"`
+	// Info maps provider-neutral info keys to agent-native argv fragments. Graith
+	// runs these as `<command> <info[key]...>` in a daemon-owned provider context
+	// with the agent's sandbox settings, so callers do not need the provider CLI on
+	// their own PATH.
+	Info map[string][]string `json:"info,omitempty" toml:"info"`
 }
 
 // AgentOptionArg is one conditional argv group for an agent (see Agent.OptionArgs).
@@ -3840,6 +3845,20 @@ func (c *Config) Validate() error {
 
 			if opt.When != "" && !IsTemplateVar(opt.When) {
 				errs = append(errs, fmt.Errorf("agents.%s.option_args[%d].when %q: not a known template variable", agentName, i, opt.When))
+			}
+		}
+
+		for key, args := range agent.Info {
+			if strings.TrimSpace(key) == "" {
+				errs = append(errs, fmt.Errorf("agents.%s.info: key must not be empty", agentName))
+			}
+
+			if key != strings.TrimSpace(key) {
+				errs = append(errs, fmt.Errorf("agents.%s.info[%q]: key must not have leading or trailing whitespace", agentName, key))
+			}
+
+			if len(args) == 0 {
+				errs = append(errs, fmt.Errorf("agents.%s.info[%q]: args must not be empty", agentName, key))
 			}
 		}
 	}
@@ -4830,6 +4849,10 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.OptionArgs != nil {
 		def.OptionArgs = usr.OptionArgs
+	}
+
+	if usr.Info != nil {
+		def.Info = usr.Info
 	}
 
 	return def

@@ -214,6 +214,40 @@ func TestValidateOptionArgsEmptyWhenAllowed(t *testing.T) {
 	}
 }
 
+func TestValidateAgentInfoCommands(t *testing.T) {
+	tests := map[string]struct {
+		info      map[string][]string
+		wantSubst string
+	}{
+		"empty key rejected": {
+			info:      map[string][]string{"": {"--version"}},
+			wantSubst: "key must not be empty",
+		},
+		"whitespace key rejected": {
+			info:      map[string][]string{" model ": {"--list-models"}},
+			wantSubst: "key must not have leading or trailing whitespace",
+		},
+		"empty args rejected": {
+			info:      map[string][]string{"version": {}},
+			wantSubst: "args must not be empty",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			braw := cfg.Agents["codex"]
+			braw.Info = test.info
+			cfg.Agents["codex"] = braw
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), test.wantSubst) {
+				t.Fatalf("Validate() = %v, want error containing %q", err, test.wantSubst)
+			}
+		})
+	}
+}
+
 // TestDefaultAgentArgsRoundTrip proves the new adapter fields survive a
 // marshal→unmarshal cycle — the path `gr config show`/`diff` take — so the
 // codex option_args array-of-tables and the add_dir_args/headless_args slices
@@ -243,8 +277,54 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 		t.Errorf("codex option_args did not round-trip: %v", got.Agents["codex"].OptionArgs)
 	}
 
+	for _, agentName := range []string{"claude", "codex", "cursor"} {
+		if !reflect.DeepEqual(got.Agents[agentName].Info, orig.Agents[agentName].Info) {
+			t.Errorf("%s info commands did not round-trip: %v", agentName, got.Agents[agentName].Info)
+		}
+	}
+
 	if len(orig.Agents["codex"].OptionArgs) == 0 {
 		t.Fatal("expected the embedded codex agent to define option_args")
+	}
+
+	if got := orig.Agents["cursor"].Info["model"]; !reflect.DeepEqual(got, []string{"--list-models"}) {
+		t.Fatalf("cursor model info command = %v, want [--list-models]", got)
+	}
+
+	for _, agentName := range []string{"claude", "codex"} {
+		if got := orig.Agents[agentName].Info["version"]; !reflect.DeepEqual(got, []string{"--version"}) {
+			t.Fatalf("%s version info command = %v, want [--version]", agentName, got)
+		}
+	}
+}
+
+func TestAgentInfoConfigParsingAndMerge(t *testing.T) {
+	var cfg Config
+	if err := toml.Unmarshal([]byte(`
+[agents.cursor]
+command = "agent"
+
+[agents.cursor.info]
+model = ["--list-models"]
+version = ["-v"]
+`), &cfg); err != nil {
+		t.Fatalf("unmarshal agent info config: %v", err)
+	}
+
+	if got := cfg.Agents["cursor"].Info["version"]; !reflect.DeepEqual(got, []string{"-v"}) {
+		t.Fatalf("parsed cursor version info = %v, want [-v]", got)
+	}
+
+	merged := mergeAgent(Agent{Info: map[string][]string{"model": {"--old"}}}, Agent{
+		Info: map[string][]string{"version": {"-v"}},
+	})
+
+	if _, ok := merged.Info["model"]; ok {
+		t.Fatalf("user info map should replace default info map, got %v", merged.Info)
+	}
+
+	if got := merged.Info["version"]; !reflect.DeepEqual(got, []string{"-v"}) {
+		t.Fatalf("merged version info = %v, want [-v]", got)
 	}
 }
 

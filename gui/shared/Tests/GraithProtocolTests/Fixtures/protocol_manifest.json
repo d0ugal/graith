@@ -169,6 +169,16 @@
             "kind": "string"
           },
           "optional": true
+        },
+        {
+          "name": "info_keys",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
         }
       ]
     },
@@ -200,6 +210,122 @@
             "kind": "string"
           },
           "optional": false
+        }
+      ]
+    },
+    {
+      "name": "AgentInfoMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "agent",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AgentInfoResponseMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "agent",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "results",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "AgentInfoResult"
+            }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "AgentInfoResult",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "key",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "command",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "args",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "stdout",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "stderr",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "stdout_truncated",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "stderr_truncated",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "exit_code",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "error",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         }
       ]
     },

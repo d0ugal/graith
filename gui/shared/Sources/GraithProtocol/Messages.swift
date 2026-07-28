@@ -810,17 +810,20 @@ public struct ConfigResponseMsg: Codable, Sendable {
 public struct AgentCatalogEntry: Codable, Sendable, Identifiable, Hashable {
     public var name: String
     public var command: String?
+    public var infoKeys: [String]?
 
     public var id: String { name }
 
-    public init(name: String, command: String? = nil) {
+    public init(name: String, command: String? = nil, infoKeys: [String]? = nil) {
         self.name = name
         self.command = command
+        self.infoKeys = infoKeys
     }
 
     enum CodingKeys: String, CodingKey {
         case name
         case command
+        case infoKeys = "info_keys"
     }
 }
 

@@ -26,6 +26,11 @@ validate_model = ""             # command to validate --model values
 headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
 add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory (see Includes)
 headless_args  = []             # argv prefix prepended in headless mode (see below)
+
+[agents.claude.info]
+# Optional provider info commands, run as: <command> <args...>
+# model = ["--list-models"]
+# version = ["--version"]
 ```
 
 `headless_capable` marks whether an agent supports [headless mode]({{< relref "sessions.md#headless-sessions" >}}). Only Claude supports it in v1; you can't ask a session to go headless on an agent that isn't capable.
@@ -36,6 +41,7 @@ Every agent-specific flag graith appends is defined here — a custom agent can 
 - **`non_interactive_args`** — optional argv prepended on every create, resume, and fork. It is **empty by default** for every bundled agent, so each keeps its own approval TUI (and, for Codex, its own sandbox) out of the box; Graith treats time spent in that TUI as ordinary running state and never answers on your behalf. Set it to the agent's unattended flag(s) — e.g. `["--dangerously-skip-permissions"]` for Claude, `["--ask-for-approval", "never", "--sandbox", "danger-full-access"]` for Codex, `["--force"]` for Cursor, `["--auto"]` for OpenCode — to run without those prompts. Doing so disables the agent's native safeguards, so only enable it behind a boundary you control (Graith's `[sandbox]`, an external sandbox, or a VM). Graith does not provide a semantic shell-command policy; configure an agent-native hook or external policy tool directly if needed.
 - **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
+- **`info`** — provider-neutral info keys mapped to agent-native argv fragments (see [Provider info commands](#provider-info-commands)).
 
 `inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping, or — most usefully — to give a [custom agent](#custom-agents) a mechanism it wouldn't otherwise get. The values are:
 
@@ -66,6 +72,11 @@ Only `{username}` is available in `branch_prefix`.
 
 Two more variables are scoped to specific fields. `{dir}` is available only in `add_dir_args`, bound to each granted directory in turn. The Codex option values — `{profile}`, `{reasoning_effort}`, `{service_tier}`, and `{web_search}` (a boolean rendering as `true`/empty) — are available in `option_args`, alongside `{model}`.
 
+Info commands use the daemon-created probe identity only: `{agent_session_id}`,
+`{session_id}`, `{session_name}`, and `{worktree_path}`. They do not receive
+the session-launch-only variables such as `{model}`, `{username}`, or
+`{fork_source_agent_session_id}`.
+
 ### Conditional option flags
 
 `option_args` moves per-session choices (Codex's `--model`, `--profile`, reasoning-effort, service-tier, and `--search`) into config, so a custom agent can define its own. Each group lists the argv to append and a `when` template variable that gates it — the group is emitted only when that variable resolves to a non-empty value (`true` for a boolean such as `web_search`). An empty `when` emits the group unconditionally. Non-interactive launch flags belong in `non_interactive_args`, not here.
@@ -85,6 +96,53 @@ args = ["--search"]
 ```
 
 This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` naming an unknown template variable, or a group with no `args`, is rejected at config load.
+
+### Provider info commands
+
+`[agents.<name>.info]` maps stable info keys to the agent-native arguments that
+query them. `gr agent info <name>` runs all configured keys; `gr agent info
+<name> <key>` runs one key. The daemon combines the agent's configured
+`command` with the selected info argv and runs it in a daemon-owned provider
+context with the agent's optional Graith sandbox. It does not use the caller's
+shell PATH and does not return the configured environment in the response.
+The probe environment starts from a small daemon-side allowlist (`PATH`, `HOME`,
+`SHELL`, `TERM`, locale variables, temp-directory variables, and XDG config,
+data, and cache paths), then applies the agent's explicit `env` map and
+Graith's own `GRAITH_*` probe markers. Auth/socket variables such as
+`GRAITH_TOKEN`, `SSH_AUTH_SOCK`, and `XDG_RUNTIME_DIR` are not inherited from
+the caller environment.
+
+```toml
+[agents.cursor]
+command = "agent"
+args = ["--yolo", "--model", "{model}"]
+resume_args = ["--resume", "{agent_session_id}", "--yolo"]
+
+[agents.cursor.info]
+model = ["--list-models"]
+version = ["-v"]
+```
+
+Claude and Codex ship with a `version` probe by default:
+
+```toml
+[agents.claude.info]
+version = ["--version"]
+
+[agents.codex.info]
+version = ["--version"]
+```
+
+Info commands are for provider catalog and version probes, not session launch.
+They use only the selected `info` argv, not the normal `args`,
+`resume_args`, `option_args`, prompt injection, hooks, or included-repo flags.
+Each command is bounded by a 30 second daemon timeout. Unknown agents, unknown
+keys, and agents without `info` configuration fail the request. Timeouts and
+provider command failures are returned on their specific result with non-zero
+exit status and an `error` field; the CLI still exits non-zero after rendering
+those results. Captured stdout and stderr are capped at 1 MiB each; with
+`--json`, stdout, stderr, `stdout_truncated`, `stderr_truncated`, exit code, and
+per-result errors are returned as separate fields.
 
 ### Per-agent sandbox
 
@@ -110,6 +168,9 @@ resume_args = ["--resume", "{agent_session_id}"]
 env         = { MY_CONFIG = "production" }
 idle_timeout = "2h"
 prompt_injection = "append_system_prompt"  # how to inject agent_prompt (else the prompt is skipped)
+
+[agents.my-agent.info]
+version = ["--version"]
 
 [agents.my-agent.sandbox]
 read_dirs  = ["~/.my-agent"]
@@ -191,6 +252,9 @@ resume_args  = ["--resume", "{agent_session_id}"]
 fork_args    = ["--resume", "{fork_source_agent_session_id}", "--fork-session", "--session-id", "{agent_session_id}"]
 add_dir_args = ["--add-dir", "{dir}"]
 headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
+
+[agents.claude.info]
+version = ["--version"]
 ```
 
 ### Codex
@@ -213,6 +277,9 @@ add_dir_args = ["--add-dir", "{dir}"]
 when = "model"
 args = ["--model", "{model}"]
 # … profile, reasoning_effort, service_tier, web_search …
+
+[agents.codex.info]
+version = ["--version"]
 ```
 
 ### OpenCode
@@ -239,6 +306,10 @@ args           = []
 resume_args    = ["resume"]
 validate_model = "agent --list-models"
 add_dir_args   = ["--add-dir", "{dir}"]
+
+[agents.cursor.info]
+model = ["--list-models"]
+version = ["-v"]
 ```
 
 When lifecycle hooks are enabled, graith publishes `.cursor/hooks.json` in the
