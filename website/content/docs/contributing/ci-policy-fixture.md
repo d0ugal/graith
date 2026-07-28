@@ -1,80 +1,47 @@
 ---
 weight: 37
-title: CI policy replacement tests
-description: Run the retained Go replacements for retired workflow-script policy tests
+title: CI workflow replacement tests
+description: Run the retained Go replacements for retired workflow-script checks
 icon: shield-alert
 toc: true
 ---
 
-# CI policy replacement tests
+# CI workflow replacement tests
 
-The CI policy replacement tests are the retained Go coverage for retired
-workflow-script policy tests. They run inside `internal/cipolicy` with no
-repository secrets and do not perform external network access. The tests bind
-the same checked-in [CI policy manifest]({{< relref "/docs/contributing/ci-policy.md" >}})
-to repository workflow files, deterministic change classes, credential
-boundaries, and local plan construction.
+The CI workflow replacement tests are the retained Go coverage for retired
+workflow-script checks. They run inside `internal/ciworkflow` with no
+repository secrets and do not perform external network access.
 
-Run it with the normal package tests:
+Run them with the normal package tests:
 
 ```bash
-go test ./internal/cipolicy
+go test ./internal/ciworkflow
 ```
 
-To replay only the deterministic change-class fixtures, run:
+To replay only the shared classifier parity fixtures, run:
 
 ```bash
-go test ./internal/cipolicy -run TestDeterministicChangeClassFixtures
+go test ./internal/ciworkflow -run TestWorkflowClassifierParityFixtures
 ```
 
-Policy changes already touch `internal/cipolicy`, so this coverage runs in the
-existing Go test gate whenever the evaluator, manifest contracts, or
-replacement-test bindings change.
-
-## Deterministic Change Classes
-
-`TestDeterministicChangeClassFixtures` builds local plans from checked-in path
-sets and checks the committed baseline inventory for the authoritative required
-contexts and macOS fail-safe job conditions. It covers these sample classes
-without elapsed-time gates, live GitHub history, or a second repository:
-
-| Class | Local evidence |
-| --- | --- |
-| Go-only | Go core paths select exactly the pull-request capability floor, keep the seven authoritative required modes, and do not select release or publication capabilities. |
-| Docs-only | Docs-preview and docs-publication classes are detected, same-repository screenshot writes stay explicitly scoped, and the plan does not escalate beyond the required pull-request floor. |
-| GUI-only | GUI/iOS routing is detected and GUI policy modes stay applicable for the plan tier. |
-| Sandbox | Sandbox paths retain the nono and safehouse modes, while detector failures remain explicit and select the full fail-safe capability set. |
-| Libghostty runtime | Native runtime paths detect Go and native capabilities and keep the native source-build, adapter, and gate modes tied to detected runtime evidence. |
-| Generated metadata | Generated inputs escalate to the safe superset and keep regen prepare, mutation, and validation modes tied to the generated-input reason. |
-| Release path | Release metadata escalates to release-shaped validation while pull-request plans still cannot bind publication credentials. |
-| Workflow/script | Workflow-policy helper changes select the full safe superset and keep workflow-lint modes tied to detected policy-helper evidence. |
-| Fork PR | Publication credentials, docs-preview writes, and regeneration mutation are denied under fork trust. |
-| Same-repository mutation | Same-repository docs-preview writes are scoped, while regeneration still cannot borrow maintainer credentials from repository location. |
-
-Shared assertions also check that the committed inventory still lists the seven
-authoritative required contexts and that `ci/test-macos` and
-`ci/integration-macos` retain their fail-safe detector conditions. The class
-rows above describe fixture-specific detection, routing, escalation, required
-mode, and credential evidence.
+Workflow-check changes already touch `internal/ciworkflow`, so this coverage
+runs in the existing Go test gate whenever the classifier or workflow
+assertions change.
 
 ## What It Proves
 
-The replacement tests fail closed when a deterministic fault tries to make the
-policy look narrower or more trusted than the checked-in manifest allows:
+The replacement tests fail closed when local workflow behavior drifts away from
+the retained checks:
 
-- missing files, unknown paths, or unknown changed-file lists;
-- manifest workflow traces that drift away from checked-in workflow content;
-- changed-file samples that are not known to the local detector;
-- manifest-level unsupported platform decisions that silently pass; and
-- tracked helpers under the retired `.github/workflows/scripts/` surface, via
-  the P0 inventory generator and `internal/cibaseline` tests.
-
-The same-repository agent branch tier is treated as untrusted for credentials.
-Synthetic tokens and filesystem roots prove that docs-preview writes,
-regeneration pushes, and coverage/comment publication do not gain maintainer
-credentials merely because the branch lives in `d0ugal/graith`. Credential
-operations must also name a capability that is both allowed for that operation
-and present in the evaluated plan.
+- migrated workflow gates keep their expected changed-path outputs;
+- detector scripts run the expensive jobs when file listing or classification
+  fails;
+- workflow triggers, concurrency groups, timeouts, and pinned tool installs keep
+  the expected boundaries;
+- docs-preview, renovate retry, libghostty native, dev-release, and stable
+  release workflows keep their local invariants; and
+- synthetic credential operations cannot gain broader token classes, scopes, or
+  filesystem roots than their operation allows.
 
 ## Local Scope
 
@@ -83,5 +50,4 @@ check-creator source restriction, fork token behavior, merge queue or
 `merge_group` triggering, check freshness, live artifact provenance, live cache
 provenance, or repository ruleset binding. Current CI evidence comes from
 repository-owned workflows plus the retained
-[CI baseline]({{< relref "/docs/contributing/ci-baseline.md" >}}) and
-[CI policy]({{< relref "/docs/contributing/ci-policy.md" >}}) checks.
+[CI workflow checks]({{< relref "/docs/contributing/ci-policy.md" >}}).

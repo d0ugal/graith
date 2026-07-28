@@ -91,6 +91,32 @@
       }
     },
     {
+      "name": "shared classifier command",
+      "event": "pull_request",
+      "files": ["cmd/ciclassify/main.go"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "sandbox_macos": true,
+        "libghostty_native": true,
+        "libghostty_dependency_unit": true,
+        "dev_release": true
+      }
+    },
+    {
+      "name": "shared workflow package",
+      "event": "pull_request",
+      "files": ["internal/ciworkflow/workflow_classifier.go"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "sandbox_macos": true,
+        "libghostty_native": true,
+        "libghostty_dependency_unit": true,
+        "dev_release": true
+      }
+    },
+    {
       "name": "shared macos packaging",
       "event": "pull_request",
       "files": ["macos/service/release-signing-mode.sh"],

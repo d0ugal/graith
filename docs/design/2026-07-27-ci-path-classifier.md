@@ -24,7 +24,7 @@ The path rules have drifted. Release classifiers already differ from nearby nati
 
 ## Goals
 
-- Keep one authoritative path classifier in Go, matching the repository's current CI policy helper direction.
+- Keep one authoritative path classifier in Go, matching the repository's current workflow-check helper direction.
 - Preserve job-level skip behavior for required contexts.
 - Run pull-request classification from trusted base code rather than trusting PR-modified classifier code.
 - Prove parity with representative path fixtures before migrating each consumer.
@@ -32,7 +32,7 @@ The path rules have drifted. Release classifiers already differ from nearby nati
 
 ### Non-Goals
 
-- Replace the CI policy manifest or run-plan evaluator.
+- Replace the removed CI policy manifest or run-plan evaluator.
 - Move stable-release publication decisions into the shared classifier in v1.
 - Replace docs-preview page selection, which also depends on base/head file existence.
 - Add iOS or macOS app UI surface.
@@ -53,9 +53,9 @@ Leaving the shell regexes in place keeps the workflows cheap and familiar, but e
 
 ### Proposal 1: Shared Go classifier with staged workflow migration (Recommended)
 
-Add `internal/cipolicy` classifier rules plus a small `cmd/ciclassify` CLI. The CLI reads newline-delimited changed paths and emits either GitHub output key/value pairs or JSON diagnostics. Workflows still fetch the PR file list with `gh api`, but migrated PR detectors check out the base SHA, set up Go, and run the base classifier. If listing, checkout, setup, or classification fails, the workflow runs the gated validation rather than skipping it.
+Add `internal/ciworkflow` classifier rules plus a small `cmd/ciclassify` CLI. The CLI reads newline-delimited changed paths and emits either GitHub output key/value pairs or JSON diagnostics. Workflows still fetch the PR file list with `gh api`, but migrated PR detectors check out the base SHA, set up Go, and run the base classifier. If listing, checkout, setup, or classification fails, the workflow runs the gated validation rather than skipping it.
 
-The first migration covers CI macOS, coverage GUI, sandbox macOS, and libghostty native/dependency-unit outputs. Dev-release path decisions already use `cmd/cipolicy plan` on the base branch, so `cmd/ciclassify` derives its dev-release diagnostic output from the same capability rules instead of introducing another release rule list. Stable-release remains inline; its current rules are captured by parity fixtures so a later PR can migrate it with a small rollback boundary: revert only the stable-release workflow call-site change if release parity or event trust does not hold.
+The first migration covers CI macOS, coverage GUI, sandbox macOS, libghostty native/dependency-unit outputs, and dev-release path decisions. Stable-release remains inline; its current rules are captured by parity fixtures so a later PR can migrate it with a small rollback boundary: revert only the stable-release workflow call-site change if release parity or event trust does not hold.
 
 Trade-offs: the cheap detector jobs now need a base checkout and Go setup on pull requests. That is slower than `grep`, but far cheaper than accidental macOS or release drift, and failures are conservative.
 
@@ -68,19 +68,19 @@ This would keep detector jobs lighter, but it preserves shell as the runtime con
 ### References
 
 - Issue: https://github.com/d0ugal/graith/issues/1761
-- CI policy docs: `website/content/docs/contributing/ci-policy.md`
+- CI workflow checks docs: `website/content/docs/contributing/ci-policy.md`
 - Classifier command: `cmd/ciclassify`
-- Rules and parity fixtures: `internal/cipolicy/workflow_classifier.go`, `internal/cipolicy/testdata/workflow_classifiers.json`
+- Rules and parity fixtures: `internal/ciworkflow/workflow_classifier.go`, `internal/ciworkflow/testdata/workflow_classifiers.json`
 
 ### Implementation Notes
 
 The migrated workflows use the PR files API as before. They do not classify with PR-head code. The checkout step uses `github.event.pull_request.base.sha`, which keeps policy changes in the PR as inputs to be validated rather than authority for narrowing the run.
 
-CI policy source changes select every migrated non-release gate. Release classifier outputs remain exact diagnostics for the current dev-release and stable-release classifiers until a later release migration proves and adopts the broader behavior deliberately.
+CI workflow source changes select every migrated non-release gate. Changes to `cmd/ciclassify` or `internal/ciworkflow` also select dev-release because that workflow now relies on the shared classifier. Stable-release classifier output remains a parity diagnostic until a later release migration proves and adopts the broader behavior deliberately.
 
 ### Alternatives considered
 
-Embedding all workflow gate outputs in the existing `cmd/cipolicy plan` command was rejected because run-plan replay and workflow job gating have different contracts. The plan evaluator expands capabilities and required modes; the workflow classifier emits the exact legacy output names expected by existing jobs. Dev release is the exception already present on the base branch, and the workflow classifier treats that capability as authoritative for diagnostics and parity.
+Embedding workflow gate outputs in the removed `cmd/cipolicy plan` command was rejected because run-plan replay and workflow job gating have different contracts. The run-plan layer also depended on a generated manifest that current CI does not need. The workflow classifier emits the exact output names expected by existing jobs without preserving that extra policy source.
 
 ### Testing
 

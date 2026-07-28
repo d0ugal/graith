@@ -45,11 +45,6 @@ jobs:
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
-          REF: ${{ github.ref }}
-          BASE_REF: refs/heads/${{ github.event.pull_request.base.ref }}
-          HEAD_REF: refs/heads/${{ github.event.pull_request.head.ref }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           if [ "$EVENT" != "pull_request" ]; then
@@ -58,77 +53,34 @@ jobs:
           fi
 
           changed_files="$RUNNER_TEMP/dev-release-changed-files.txt"
-          plan="$RUNNER_TEMP/dev-release-plan.json"
-          detector_args=()
 
           if ! gh api "repos/$REPO/pulls/$PR/files?per_page=100" --paginate --jq '.[].filename' > "$changed_files"; then
-            : > "$changed_files"
-            detector_args+=("-detector-error" "could not list PR files")
+            echo "release=true" >> "$GITHUB_OUTPUT"
             echo "Could not list PR files; running dev release to be safe."
-          else
-            if ! expected_files="$(gh api "repos/$REPO/pulls/$PR" --jq '.changed_files')" || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
-              echo "release=true" >> "$GITHUB_OUTPUT"
-              echo "Could not verify PR file count; running dev release to be safe."
-              exit 0
-            fi
-
-            listed_files="$(wc -l < "$changed_files" | tr -d '[:space:]')"
-            if [ "$listed_files" -ne "$expected_files" ]; then
-              echo "release=true" >> "$GITHUB_OUTPUT"
-              echo "PR file list is incomplete; running dev release to be safe."
-              exit 0
-            fi
+            exit 0
           fi
 
-          tree_sha="0000000000000000000000000000000000000000"
-          if resolved_tree="$(gh api "repos/$REPO/git/commits/$HEAD_SHA" --jq '.tree.sha' 2>/dev/null)" && \
-             [[ "$resolved_tree" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
-            tree_sha="$resolved_tree"
-          else
-            detector_args+=("-detector-error" "could not resolve PR head tree")
+          if ! expected_files="$(gh api "repos/$REPO/pulls/$PR" --jq '.changed_files')" || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Could not verify PR file count; running dev release to be safe."
+            exit 0
           fi
 
-          trust_args=("-same-repository-agent")
-          if [ "$HEAD_REPOSITORY" != "$REPO" ]; then
-            trust_args=("-fork")
+          listed_files="$(wc -l < "$changed_files" | tr -d '[:space:]')"
+          if [ "$listed_files" -ne "$expected_files" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "PR file list is incomplete; running dev release to be safe."
+            exit 0
           fi
 
-          if ! go run ./cmd/cipolicy \
+          if ! go run ./cmd/ciclassify \
+            -mode dev-release \
             -changed-files "$changed_files" \
-            -event "$EVENT" \
-            -ref "$REF" \
-            -base-ref "$BASE_REF" \
-            -head-ref "$HEAD_REF" \
-            -head-repository "$HEAD_REPOSITORY" \
-            "${trust_args[@]}" \
-            -commit "$HEAD_SHA" \
-            -tree "$tree_sha" \
-            -output "$plan" \
-            "${detector_args[@]}" \
-            plan; then
+            -github-output "$GITHUB_OUTPUT"; then
             echo "release=true" >> "$GITHUB_OUTPUT"
             echo "Could not classify PR files; running dev release to be safe."
             exit 0
           fi
-
-          if ! release="$(jq -er '
-            if (.detected_capabilities | type) != "array" then
-              error("plan is missing detected_capabilities array")
-            elif (.superset_reasons | type) != "array" then
-              error("plan is missing superset_reasons array")
-            elif ((.detected_capabilities | index("dev-release")) != null) then
-              "true"
-            elif (.superset_reasons | any(. == "detector-error" or . == "empty-file-list" or . == "file-list-unknown")) then
-              "true"
-            else
-              "false"
-            end
-          ' "$plan")"; then
-            release=true
-            echo "Could not read plan release decision; running dev release to be safe."
-          fi
-
-          echo "release=$release" >> "$GITHUB_OUTPUT"
 
   release-context:
     name: Select dev release context

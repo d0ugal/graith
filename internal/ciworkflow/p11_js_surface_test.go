@@ -1,4 +1,4 @@
-package cipolicy
+package ciworkflow
 
 import (
 	"os"
@@ -218,15 +218,6 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 		`git checkout --detach "$GENERATED_SHA"`,
 		`git push origin "HEAD:$HEAD_REF"`,
 	})
-
-	manifest, err := ReadManifest(filepath.Join(repoRoot, DefaultManifestPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	p11AssertTrustTier(t, manifest, p11SameRepoEvent(), "same-repository-agent")
-	p11AssertTrustTier(t, manifest, p11ForkEvent(), "fork-untrusted")
-	p11AssertTrustTier(t, manifest, p11TrustedBaseEvent(), "trusted-base")
 
 	err = ValidateCredentialOperation(regenerationPushOperation("same-repository-agent"))
 	if err == nil || !strings.Contains(err.Error(), "same-repository agent branches cannot obtain maintainer credentials") {
@@ -454,79 +445,6 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing
 	}
 }
 
-func TestCredentialTrustAllowlistMatchesCredentialOperations(t *testing.T) {
-	validPlanTiers := map[string]bool{
-		"same-repository-agent": true,
-		"trusted-base":          true,
-	}
-
-	for operation, policy := range credentialOperationPolicies {
-		allowances, ok := credentialTrustAllowlist[operation]
-		if !ok {
-			t.Fatalf("credential operation %s is missing from plan-to-credential trust allowlist", operation)
-		}
-
-		if len(allowances) == 0 {
-			t.Fatalf("credential operation %s has no plan-to-credential trust allowances", operation)
-		}
-
-		seen := map[credentialTrustAllowance]bool{}
-
-		for _, allowance := range allowances {
-			if allowance.PlanTrustTier == "" || allowance.CredentialTrustTier == "" {
-				t.Fatalf("credential operation %s has incomplete allowance %#v", operation, allowance)
-			}
-
-			if !validPlanTiers[allowance.PlanTrustTier] {
-				t.Fatalf("credential operation %s allows invalid plan trust tier %s", operation, allowance.PlanTrustTier)
-			}
-
-			if !containsString(policy.TrustTiers, allowance.CredentialTrustTier) {
-				t.Fatalf("credential operation %s allows credential trust tier %s outside policy trust tiers %#v", operation, allowance.CredentialTrustTier, policy.TrustTiers)
-			}
-
-			if seen[allowance] {
-				t.Fatalf("credential operation %s has duplicate trust allowance %#v", operation, allowance)
-			}
-
-			seen[allowance] = true
-		}
-	}
-
-	for operation := range credentialTrustAllowlist {
-		if _, ok := credentialOperationPolicies[operation]; !ok {
-			t.Fatalf("plan-to-credential trust allowlist references unknown credential operation %s", operation)
-		}
-	}
-}
-
-func TestCredentialTrustAllowlistRejectsCredentialTrustNotAllowedForPlan(t *testing.T) {
-	manifest := loadManifest(t)
-	plan := buildTestPlan(
-		t,
-		manifest,
-		p11TrustedBaseEvent(),
-		[]string{"docs/design/2026-07-24-ci-north-star.md"},
-		nil,
-		true,
-	)
-
-	operation := docsPreviewWriteOperation("same-repository-agent", syntheticRepositoryWriteToken)
-	if err := ValidateCredentialOperation(operation); err != nil {
-		t.Fatalf("ValidateCredentialOperation() error = %v", err)
-	}
-
-	policy := credentialOperationPolicies[operation.Operation]
-	if err := validateCredentialOperationPlanBinding(operation, policy, plan); err != nil {
-		t.Fatalf("validateCredentialOperationPlanBinding() error = %v", err)
-	}
-
-	err := validateCredentialTrustAllowance(operation, plan)
-	if err == nil || !strings.Contains(err.Error(), "credential trust tier same-repository-agent is not allowed for plan trust tier trusted-base") {
-		t.Fatalf("validateCredentialTrustAllowance() error = %v, want explicit plan-to-credential trust allowlist rejection", err)
-	}
-}
-
 func p11ReadMutatedRegenWorkflow(t *testing.T, needle, replacement string) P11WorkflowSummary {
 	t.Helper()
 
@@ -561,50 +479,6 @@ func p11ReadMutatedRegenWorkflow(t *testing.T, needle, replacement string) P11Wo
 
 func p11RepoRoot() string {
 	return filepath.Join("..", "..")
-}
-
-func p11SameRepoEvent() EventInput {
-	return EventInput{
-		GitHubEvent:         "pull_request",
-		Ref:                 "refs/pull/17/merge",
-		BaseRef:             "main",
-		HeadRef:             "braw-regen",
-		BaseRepository:      DefaultRepository,
-		HeadRepository:      DefaultRepository,
-		Commit:              "1111111111111111111111111111111111111111",
-		Tree:                "2222222222222222222222222222222222222222",
-		SameRepositoryAgent: true,
-	}
-}
-
-func p11ForkEvent() EventInput {
-	event := p11SameRepoEvent()
-	event.HeadRepository = "croft/graith"
-	event.SameRepositoryAgent = false
-	event.PullRequestFork = true
-
-	return event
-}
-
-func p11TrustedBaseEvent() EventInput {
-	event := p11SameRepoEvent()
-	event.SameRepositoryAgent = false
-	event.TrustedBase = true
-
-	return event
-}
-
-func p11AssertTrustTier(t *testing.T, manifest Manifest, event EventInput, want string) {
-	t.Helper()
-
-	_, got, err := SelectEvent(manifest, event)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != want {
-		t.Fatalf("trust tier = %s, want %s", got, want)
-	}
 }
 
 func p11WorkflowJobIDs(workflow P11WorkflowSummary) []string {

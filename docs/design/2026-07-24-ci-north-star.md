@@ -10,8 +10,10 @@ informed: maintainers, release owners, GUI owners, security owners
 # CI North Star
 
 This design resets the CI north star around the infrastructure graith already
-has. The goal is faster, more reliable feedback with fewer brittle helper
-surfaces, not a new CI control plane.
+has. The goal is the simplest and fastest CI setup we can get while preserving
+the best practical coverage for the codebase, not a new CI control plane.
+Helper code must earn its place by making CI faster, clearer, or better
+covered; otherwise the simpler answer is to delete it.
 
 The current GitHub Actions checks remain the authority. The first new signal is
 a visible, non-required shadow summary inside the existing Actions setup. It
@@ -259,7 +261,7 @@ creating churn:
 
 | Language surface | Corrected policy |
 | --- | --- |
-| Go | Prefer for reusable CI contracts, static workflow inventory, deterministic fixtures, and checks that benefit from typed tests. |
+| Go | Prefer for small reusable classifiers, deterministic fixtures, and checks that benefit from typed tests. Avoid generated policy inventories unless a current workflow consumes them directly. |
 | Shell | Keep for thin runner glue, platform setup, release scripts, and native build orchestration where it already maps directly to command-line tools. |
 | JavaScript | Keep platform-required JavaScript such as website browser tooling. Repository-owned CI policy helpers under `.github/workflows/scripts/` are retired when an owner-approved Go migration preserves the policy boundary and materially reduces duplicated helper surface. |
 | Python | Do not add repository-owned Python CI policy or archive-helper surfaces; C6 migrates the libghostty archive helper to Go and deletes the Python script. |
@@ -287,15 +289,15 @@ before more code is added.
 | `cmd/libghosttyarchive/**`, `internal/libghosttyarchive/**` | Migrated by C6 | Deterministic archive shape verification remains useful and tested, but repository-owned archive tooling moves from Python to Go and deletes `scripts/libghostty-linux-archive.py`. | Native/release artifact paths. | Revert the Go helper, restore the Python script, and restore its callers together. |
 | Release rendering and publish scripts | Keep | Current trusted publication workflows depend on them; no new publication boundary is introduced. | Existing release workflows and secrets. | Script-specific revert. |
 | macOS release helpers | Keep | Existing optional signing/notarization and archive checks stay as current release logic. | Current release workflows. | Helper-specific revert. |
-| `cmd/cibaseline/**` | Simplify | A local inventory command is useful; GitHub-history collection and retained proof are no longer part of acceptance. | Corrected static inventory package. | Remove command or revert to previous local-only behavior. |
-| `internal/cibaseline/inventory.go`, `inventory_test.go`, `inventory.json` | Keep | Static workflow inventory feeds drift tests and keeps required contexts explicit. | Current workflow files. | Regenerate or delete with the inventory PR. |
-| `internal/cibaseline/github.go`, `evidence.go`, `acceptance.go`, retained evidence fixtures | Revert/delete | Historical windows, retained live evidence, and mature-run acceptance are outside the corrected evidence model. | None after the design reset. | Delete in one PR; rollback restores files only. |
-| `cmd/cipolicy/**` | Keep | `dev-release.yml` still invokes `go run ./cmd/cipolicy` from the trusted base checkout for pull-request routing; CI-FU-03 confirmed it is active behavior, not migration scaffolding. | Dev-release workflow classifier and local command tests. | Restore command, tests, architecture row, inventory surfaces, and `ciPolicyPrefixes` together if accidentally removed. |
-| `internal/cipolicy/manifest.go`, `build.go`, `validate.go`, `io.go`, `manifest.json` | Simplify | Keep only the parts needed for current workflow inventory and local validation. | Current workflows. | Regenerate or delete with static inventory PR. |
-| `internal/cipolicy/plan.go`, `result.go`, `fixture.go` | Revert/delete unless a concrete C2/C4 caller lands first | Full plan/result fan-in was designed for the external gate. Do not preserve it as speculative infrastructure. | A direct summary or fixture caller, otherwise none. | Delete in the helper-pruning PR; rollback restores files only. |
-| `internal/cipolicy/artifact.go` and tests | Retired by #1758 | Follow-up caller inventory found no workflow, script, command, or local consumer for the artifact manifest/producer-result library. Native/release artifact protections remain in the current workflow, shell, and libghostty policy tests. | None. | Revert the focused deletion if a concrete caller is restored. |
-| `internal/cipolicy/cache.go` and tests | Retired by #1737 | The helper-pruning PR removed cross-run cache authority after no current native/release caller was retained. | None. | Revert that focused deletion if a concrete caller is restored. |
-| `internal/cipolicy/p11_js_surface.go` and tests | Simplify | Retain workflow parsing, regen trust-boundary assertions, and repository-controlled command detection; drop empty retained-JS inventory contracts and compatibility sample scaffolding. | Workflow policy tests. | Revert individual helper-retirement PR. |
+| `cmd/cibaseline/**` | Retired | The generated baseline command adds regeneration and drift-maintenance work without making current CI faster or better covered. | None after the simplification PR. | Restore the command and inventory package together only if a current workflow needs them. |
+| `internal/cibaseline/inventory.go`, `inventory_test.go`, `inventory.json` | Retired | Static workflow inventory became another source of truth and broke routine dependency automation. Current workflows and focused workflow checks are the authority. | None after the simplification PR. | Restore the package and command together only with a concrete caller. |
+| `cmd/ciclassify/**` | Keep | This is the direct changed-path classifier used by migrated workflow gates. It is small, tested, and avoids the generated manifest/run-plan layer. | Migrated workflow call sites. | Revert the specific workflow migration or classifier change. |
+| `cmd/cipolicy/**` | Retired | The command wrapped a generated manifest and run-plan model that current CI does not need. Dev-release now calls `cmd/ciclassify -mode dev-release` directly. | None after dev-release migration. | Restore only with the manifest/plan model and a concrete workflow caller. |
+| Former `internal/cipolicy/manifest.go`, `build.go`, `validate.go`, `io.go`, `manifest.json` | Retired | Generated CI policy manifests created a second policy source without improving speed or coverage. | None after the simplification PR. | Restore only with a concrete consumer. |
+| Former `internal/cipolicy/plan.go`, `result.go`, `fixture.go` | Retired | Full run-plan fan-in was designed for an external gate and is too much machinery for current workflow routing. | None after dev-release migration. | Restore only with an accepted in-repository caller. |
+| Former `internal/cipolicy/artifact.go` and tests | Retired by #1758 | Follow-up caller inventory found no workflow, script, command, or local consumer for the artifact manifest/producer-result library. Native/release artifact protections remain in the current workflow, shell, and libghostty policy tests. | None. | Revert the focused deletion if a concrete caller is restored. |
+| Former `internal/cipolicy/cache.go` and tests | Retired by #1737 | The helper-pruning PR removed cross-run cache authority after no current native/release caller was retained. | None. | Revert that focused deletion if a concrete caller is restored. |
+| `internal/ciworkflow/p11_js_surface.go` and tests | Simplify | Retain workflow parsing, regen trust-boundary assertions, and repository-controlled command detection; drop empty retained-JS inventory contracts and compatibility sample scaffolding. | Workflow policy tests. | Revert individual helper-retirement PR. |
 | `cmd/cigate/**` | Revert/delete | The command exists for an external evaluator and live proof path that is prohibited. | None in current workflows. | Delete command and architecture metadata in one PR. |
 | `internal/cigate/**` | Revert/delete | It requires App contracts, webhook signatures, replay storage, live proof bundles, deployment digests, and `merge_group`. | None in current workflows. | Delete package and tests in one PR. |
 | `website/content/docs/contributing/ci-gate.md` | Revert/delete | User documentation should not describe an external gate outside the corrected rollout. | `cmd/cigate` removal. | Revert docs deletion if the command is restored later. |
@@ -333,9 +335,9 @@ sequence:
 
 | Old phase | Corrected mapping |
 | --- | --- |
-| P0 baseline evidence | Keep static inventory value; drop retained live evidence windows. |
-| P1 policy manifest | Reduce to local inventory/summary contracts. |
-| P2 plan/result policy | Delete unless the minimal summary or deterministic fixtures already prove a direct local caller. |
+| P0 baseline evidence | Delete generated baseline inventory; keep current workflows and focused workflow checks as the authority. |
+| P1 policy manifest | Delete generated policy manifest; retain only direct classifiers with current workflow callers. |
+| P2 plan/result policy | Delete run-plan machinery unless a future reviewed workflow caller proves it is needed. |
 | P3 hermetic fixture | Keep deterministic fixture idea, not external acceptance. |
 | P4 trusted App | Rejected and scheduled for deletion. |
 | P5 artifact/cache contracts | #1758 found no direct artifact-contract caller and #1737 already deleted cache authority; native/release artifact validation stays in the active workflow/script tests. |
@@ -368,7 +370,8 @@ change.
 
 ### Open questions
 
-No external-infrastructure decisions are open for this rollout. The main open
-implementation choice is how much of the existing `cibaseline` and `cipolicy`
-code is simpler to reduce versus delete after the minimal shadow-summary PR
-shows its actual caller shape.
+No external-infrastructure decisions are open for this rollout. The helper
+surface direction is also settled: delete generated baseline, generated policy
+manifest, and run-plan machinery unless a current workflow has a direct,
+reviewed caller. Retain only the small classifiers and workflow policy tests
+that make CI faster, simpler, or better covered.
