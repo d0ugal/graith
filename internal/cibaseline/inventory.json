@@ -851,7 +851,7 @@
       "path": ".github/workflows/regen.yml",
       "name": "Regenerate",
       "owner": "graith-maintainers",
-      "file_sha256": "1708f2afab27aa9dc83c09893015cdd7c5e417d7b954c49d80854531ac07ce68",
+      "file_sha256": "e30872c812245ed91e0ea26dc676c23e6a84753e83f4c7f066fe85dcf15149bc",
       "events": {
         "pull_request": null
       },
@@ -2962,7 +2962,7 @@
       "owner": "graith-maintainers",
       "kind": "go-policy-contract-test",
       "git_mode": "100644",
-      "sha256": "6b3857314d5138a4871b293ffab6dd94db645b03c5f0fd1bebd3085586b2e6b1",
+      "sha256": "60ebcc29553b8a0fe9719528732c0a2691c761a7909783c302e49654e653dfd6",
       "executable_contract": "preserve regen credential, trust, scalar sweep, and repository-command detection assertions formerly held by regen-auth.test.js",
       "disposition": "grandfathered",
       "retirement_criterion": "owned replacement has equivalent regen-auth coverage and zero unexplained replay disagreement"
@@ -3693,5 +3693,5 @@
   ],
   "required_contexts_source": "reviewed GitHub branch protection API snapshot for refs/heads/main",
   "required_contexts_observed_at": "2026-07-25T16:54:00Z",
-  "digest": "11c394b1744b81076874c039e29058a1b8fab474aaddf8459cc628f1e99090df"
+  "digest": "ebf1835e244fbc8b5a86667b63f05ace223c250e4802e3764a9eb29e4aba5a41"
 }

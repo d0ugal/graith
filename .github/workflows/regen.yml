@@ -1,10 +1,12 @@
 # Auto-regenerate committed generated artifacts on a PR.
 #
-# Three files in this repo are mechanical generated outputs:
+# Several files in this repo are mechanical generated outputs:
 #   - gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json
 #     (from internal/protocol/messages.go)
 #   - website/content/docs/capabilities.md                   (from capabilities.json)
 #   - website/data/package_dependencies.json                 (from Go package imports)
+#   - internal/cibaseline/inventory.json                     (from CI workflow/policy surfaces)
+#   - internal/cipolicy/manifest.json                        (from the CI baseline inventory)
 # Native dependency PRs additionally project `libghostty-native.lock.json` into
 # the Go module, headers, Apple artifact pin, SPDX inventory, and notices.
 #
@@ -122,6 +124,14 @@ jobs:
           GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: scripts/libghostty-native.sh generate-dependency-unit
 
+      - name: Regenerate CI policy baseline
+        # Renovate only touches mechanical dependency pins. Human-authored CI
+        # policy changes must carry an explicit reviewed baseline update.
+        if: github.event.pull_request.user.login == 'renovate[bot]'
+        run: |
+          go run ./cmd/cibaseline -output internal/cibaseline/inventory.json generate
+          go test ./internal/cipolicy -run TestCommittedManifestMatchesInventory -update
+
       - name: Verify regenerated content
         # Prove mechanical projections are consistent before commit. License
         # review bindings deliberately stay pending when evidence changed; the
@@ -130,6 +140,8 @@ jobs:
         run: |
           go test ./internal/protocol -run TestManifestUpToDate
           go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
+          go test ./internal/cibaseline -run TestCommittedInventoryMatchesRepository
+          go test ./internal/cipolicy -run TestCommittedManifestMatchesInventory
           make package-graph-check
           if [ "${{ steps.native-lock.outputs.changed }}" = "true" ]; then
             scripts/libghostty-native.sh verify-generated-dependency-unit
@@ -150,6 +162,8 @@ jobs:
             gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json \
             website/content/docs/capabilities.md \
             website/data/package_dependencies.json \
+            internal/cibaseline/inventory.json \
+            internal/cipolicy/manifest.json \
             go.mod go.sum gui/shared/Package.swift \
             gui/shared/Sources/CGhosttyVT/include \
             libghostty-native.lock.json libghostty-native.spdx.json \
@@ -254,6 +268,8 @@ jobs:
               gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json|\
               website/content/docs/capabilities.md|\
               website/data/package_dependencies.json|\
+              internal/cibaseline/inventory.json|\
+              internal/cipolicy/manifest.json|\
               go.mod|go.sum|gui/shared/Package.swift|\
               gui/shared/Sources/CGhosttyVT/include/*|\
               libghostty-native.lock.json|libghostty-native.spdx.json|\

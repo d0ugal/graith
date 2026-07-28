@@ -65,6 +65,7 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 		"Regenerate generated files",
 		"Detect a native dependency lock update",
 		"Rotate the complete native dependency unit",
+		"Regenerate CI policy baseline",
 		"Verify regenerated content",
 		"Commit generated files if changed",
 		"Upload generated commit",
