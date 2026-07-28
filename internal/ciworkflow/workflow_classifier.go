@@ -165,8 +165,18 @@ var (
 			".github/ci-tool-versions.env",
 			".github/workflows/docs-preview.yml",
 			".github/workflows/docs.yml",
+			"go.mod",
+			"go.sum",
+			"Makefile",
 		},
-		Prefixes: []string{"website/"},
+		Prefixes: []string{
+			"cmd/ciclassify/",
+			"cmd/docsdiff/",
+			"cmd/docspreview/",
+			"internal/ciworkflow/",
+			"internal/docspreview/",
+			"website/",
+		},
 	}
 
 	docsPreviewGlobalRules = workflowPathRule{

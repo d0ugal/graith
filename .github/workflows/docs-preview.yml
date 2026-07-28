@@ -5,6 +5,14 @@ on:
     types: [opened, synchronize, reopened, closed]
     paths:
       - 'website/**'
+      - 'cmd/ciclassify/**'
+      - 'cmd/docsdiff/**'
+      - 'cmd/docspreview/**'
+      - 'internal/ciworkflow/**'
+      - 'internal/docspreview/**'
+      - 'Makefile'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/ci-tool-versions.env'
       - '.github/workflows/docs.yml'
       - '.github/workflows/docs-preview.yml'
@@ -28,9 +36,66 @@ defaults:
     shell: bash
 
 jobs:
+  changes:
+    name: Detect docs-preview-relevant changes
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+      global: ${{ steps.filter.outputs.global }}
+      trigger: ${{ steps.filter.outputs.trigger }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            {
+              echo "build=true"
+              echo "global=false"
+              echo "trigger=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running the Hugo build to be safe."
+            exit 0
+          fi
+          if ! classification="$(go run ./cmd/ciclassify -mode docs-preview <<<"$files")"; then
+            {
+              echo "build=true"
+              echo "global=false"
+              echo "trigger=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "Shared classifier failed; running the Hugo build to be safe."
+            exit 0
+          fi
+          echo "$classification" >> "$GITHUB_OUTPUT"
+          if grep -qx 'build=true' <<<"$classification"; then
+            echo "Docs-preview-relevant files changed: running the Hugo build."
+          else
+            echo "No docs-preview-relevant files changed: skipping docs preview."
+          fi
+
   preview:
     name: Screenshot changed pages
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    needs: changes
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      (needs.changes.result != 'success' || needs.changes.outputs.trigger != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Pushes screenshots to the orphan branch and upserts the sticky PR comment.
@@ -71,10 +136,24 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
+          CLASSIFIER_BUILD: ${{ needs.changes.outputs.build }}
+          CLASSIFIER_GLOBAL: ${{ needs.changes.outputs.global }}
         run: |
           BASE="$BASE_SHA"
           HEAD="$HEAD_SHA"
-          if changed="$(git diff --name-only "$BASE" "$HEAD" -- website/ .github/ci-tool-versions.env .github/workflows/docs.yml .github/workflows/docs-preview.yml)"; then
+          if changed="$(git diff --name-only "$BASE" "$HEAD" -- \
+            website/ \
+            cmd/ciclassify/ \
+            cmd/docsdiff/ \
+            cmd/docspreview/ \
+            internal/ciworkflow/ \
+            internal/docspreview/ \
+            Makefile \
+            go.mod \
+            go.sum \
+            .github/ci-tool-versions.env \
+            .github/workflows/docs.yml \
+            .github/workflows/docs-preview.yml)"; then
             detector_failed=0
           else
             detector_failed=1
@@ -84,10 +163,12 @@ jobs:
           echo "Docs-preview relevant changes:"; echo "$changed"
 
           build=0
+          classifier_build="${CLASSIFIER_BUILD:-true}"
+          classifier_global="${CLASSIFIER_GLOBAL:-false}"
 
           # A change to theme/config/layout/assets/data affects every page.
           global=0
-          if [ "$detector_failed" = 1 ] || grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"; then
+          if [ "$classifier_global" = "true" ] || [ "$detector_failed" = 1 ] || grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"; then
             global=1
           fi
           ci_tool_versions_changed=0
@@ -97,7 +178,7 @@ jobs:
 
           # Website tooling and workflow changes still need the production Hugo
           # validation path, even when they do not map to a specific screenshot.
-          if [ "$global" = 1 ] || grep -qE '^website/|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$' <<<"$changed"; then
+          if [ "$classifier_build" != "false" ] || [ "$global" = 1 ] || grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$' <<<"$changed"; then
             build=1
           fi
 

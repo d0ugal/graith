@@ -60,7 +60,9 @@
       "want": {
         "ci_macos": true,
         "sandbox_macos": true,
-        "libghostty_native": true
+        "libghostty_native": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
       }
     },
     {
@@ -100,7 +102,9 @@
         "sandbox_macos": true,
         "libghostty_native": true,
         "libghostty_dependency_unit": true,
-        "dev_release": true
+        "dev_release": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
       }
     },
     {
@@ -113,7 +117,9 @@
         "sandbox_macos": true,
         "libghostty_native": true,
         "libghostty_dependency_unit": true,
-        "dev_release": true
+        "dev_release": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
       }
     },
     {
@@ -144,9 +150,123 @@
       }
     },
     {
+      "name": "docs layout template",
+      "event": "pull_request",
+      "files": ["website/layouts/partials/docs/sidebar.html"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs asset",
+      "event": "pull_request",
+      "files": ["website/assets/images/logo.png"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs hugo configuration",
+      "event": "pull_request",
+      "files": ["website/hugo.toml"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs hugo module",
+      "event": "pull_request",
+      "files": ["website/go.mod"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs website go helper",
+      "event": "pull_request",
+      "files": ["website/cmd/packagegraph/main.go"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs preview go helper",
+      "event": "pull_request",
+      "files": ["cmd/docsdiff/main.go"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs preview command helper",
+      "event": "pull_request",
+      "files": ["cmd/docspreview/main.go"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs preview package helper",
+      "event": "pull_request",
+      "files": ["internal/docspreview/docspreview.go"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs preview workflow",
+      "event": "pull_request",
+      "files": [".github/workflows/docs-preview.yml"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "sandbox_macos": true,
+        "libghostty_native": true,
+        "libghostty_dependency_unit": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs build workflow",
+      "event": "pull_request",
+      "files": [".github/workflows/docs.yml"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "sandbox_macos": true,
+        "libghostty_native": true,
+        "libghostty_dependency_unit": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
       "name": "docs global input",
       "event": "pull_request",
       "files": ["website/data/package_dependencies.json"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs static asset",
+      "event": "pull_request",
+      "files": ["website/static/favicon.svg"],
       "want": {
         "docs_preview_trigger": true,
         "docs_preview_global": true,
@@ -158,6 +278,16 @@
       "event": "pull_request",
       "files": [".github/ci-tool-versions.env"],
       "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs build make target",
+      "event": "pull_request",
+      "files": ["Makefile"],
+      "want": {
+        "ci_macos": true,
         "docs_preview_trigger": true,
         "docs_preview_build": true
       }
