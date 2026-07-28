@@ -827,9 +827,7 @@ jobs:
             "repos/$GITHUB_REPOSITORY/git/ref/tags/dev" --jq '.object.sha')"
           test "$published_tag_sha" = "$RELEASE_REVISION"
 
-      - name: Update Homebrew tap
-        env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      - name: Render Homebrew tap formula
         run: |
           set -euo pipefail
           VERSION="$GRAITH_DEV_VERSION"
@@ -842,7 +840,7 @@ jobs:
           TAG="dev"
           REPO="d0ugal/graith"
 
-          cat > /tmp/graith-dev.rb << FORMULA
+          cat > "$RUNNER_TEMP/graith-dev.rb" << FORMULA
           # typed: false
           # frozen_string_literal: true
 
@@ -898,10 +896,19 @@ jobs:
           end
           FORMULA
 
+      - name: Update Homebrew tap
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="$GRAITH_DEV_VERSION"
+          tap_token="${RELEASE_TOKEN:?}"
+          unset RELEASE_TOKEN
+
           tap_dir="$(mktemp -d)"
-          askpass="$(mktemp)"
+          askpass="$(mktemp "$RUNNER_TEMP/graith-git-askpass.XXXXXX")"
           cleanup_tap_credentials() {
-            unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN
+            unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN tap_token
             rm -f "$askpass"
             rm -rf "$tap_dir"
           }
@@ -916,18 +923,22 @@ jobs:
             *) exit 1 ;;
           esac
           ASKPASS
-          chmod 700 "$askpass"
-          export GIT_ASKPASS="$askpass"
-          export GIT_TERMINAL_PROMPT=0
+          chmod 500 "$askpass"
+
+          git_with_tap_credentials() {
+            RELEASE_TOKEN="$tap_token" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"
+          }
 
           cd "$tap_dir"
-          git clone "https://github.com/d0ugal/homebrew-tap.git" .
-          cp /tmp/graith-dev.rb graith-dev.rb
+          git_with_tap_credentials clone "https://github.com/d0ugal/homebrew-tap.git" .
+          remote_url="$(git remote get-url origin)"
+          test "$remote_url" = "https://github.com/d0ugal/homebrew-tap.git"
+          cp "$RUNNER_TEMP/graith-dev.rb" graith-dev.rb
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add graith-dev.rb
           git diff --cached --quiet || git commit -m "chore: update graith-dev to ${VERSION}"
-          git push
+          git_with_tap_credentials push
 
       - name: Prune legacy unversioned dev assets
         env:
