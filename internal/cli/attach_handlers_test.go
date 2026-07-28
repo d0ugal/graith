@@ -84,6 +84,40 @@ func TestAdoptCurrent(t *testing.T) {
 	}
 }
 
+func TestAdoptCurrentKeepsExperimentalRequestOnSeedlessAttach(t *testing.T) {
+	restored := withLoopSeams(t, nil)
+
+	l := newLoop("braw", "")
+	l.experimentalAttach = true
+
+	nc := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", Name: "bonnie", ExperimentalAttach: true})),
+	}}
+
+	l.adoptCurrent(nc)
+
+	if !l.experimentalAttach {
+		t.Fatal("adoptCurrent cleared the experimental attach opt-in after seedless attach")
+	}
+
+	if l.opts.ExperimentalSeed != nil {
+		t.Fatal("seedless attach unexpectedly installed an experimental seed")
+	}
+
+	if len(*restored) != 0 {
+		t.Errorf("adoptCurrent must not restore the screen, got %v", *restored)
+	}
+
+	if len(nc.sends) != 1 {
+		t.Fatalf("sent %d controls, want one attach", len(nc.sends))
+	}
+
+	msg, ok := nc.sends[0].Payload.(protocol.AttachMsg)
+	if !ok || !msg.ExperimentalAttach {
+		t.Fatalf("attach payload = %#v, want experimental attach request", nc.sends[0].Payload)
+	}
+}
+
 func TestRestoreAndAdopt(t *testing.T) {
 	restored := withLoopSeams(t, nil)
 
@@ -107,7 +141,7 @@ func TestSwitchTo(t *testing.T) {
 	l := newLoop("auld", "older")
 	nc := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "new", Name: "bonnie"}))}}
 
-	l.switchTo(nc, "new")
+	l.switchTo(nc, "new", false)
 
 	if l.sessionID != "new" {
 		t.Errorf("sessionID = %q, want new", l.sessionID)
@@ -125,6 +159,34 @@ func TestSwitchTo(t *testing.T) {
 
 	if len(*restored) != 1 || (*restored)[0] != "new" {
 		t.Errorf("restoreScreen calls = %v, want [new] (repaint the target)", *restored)
+	}
+}
+
+func TestSwitchToAttachErrorKeepsCurrentSession(t *testing.T) {
+	restored := withLoopSeams(t, nil)
+
+	l := newLoop("auld", "")
+	nc := &scriptedConn{responses: []scriptedResp{
+		okResp(errEnv("nae such session")),
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "auld", Name: "still-here"})),
+	}}
+
+	l.switchTo(nc, "new", true)
+
+	if l.sessionID != "auld" {
+		t.Errorf("sessionID = %q, want unchanged auld", l.sessionID)
+	}
+
+	if l.opts.SessionID != "auld" || l.info.Name != "still-here" {
+		t.Errorf("opts.SessionID=%q info.Name=%q, want auld/still-here", l.opts.SessionID, l.info.Name)
+	}
+
+	if len(*restored) != 1 || (*restored)[0] != "auld" {
+		t.Errorf("restoreScreen calls = %v, want [auld]", *restored)
+	}
+
+	if got := nc.sentTypes(); !reflect.DeepEqual(got, []string{"attach", "attach"}) {
+		t.Errorf("sent = %v, want target attach then current attach", got)
 	}
 }
 
@@ -465,9 +527,13 @@ func TestReattachAfterOverlayFailure(t *testing.T) {
 
 	l := newLoop("braw", "")
 
-	got, err := reattachAfterOverlayFailure(failed, "braw", "Create", errEnv("name taken"), &l.opts, &l.info)
+	got, seed, err := reattachAfterOverlayFailure(failed, "braw", false, "Create", errEnv("name taken"), &l.opts, &l.info)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if seed != nil {
+		t.Fatalf("seed = %+v, want nil for raw reattach", seed)
 	}
 
 	if got != nc2 {

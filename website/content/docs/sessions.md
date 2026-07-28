@@ -93,6 +93,21 @@ Attaching connects your terminal's stdin/stdout to the session's PTY through the
 
 The attach loop transitions between passthrough mode (raw terminal I/O) and the overlay (session picker), cycling without dropping the daemon connection: detach with `ctrl+b d`, switch sessions with `ctrl+b n/p/l`.
 
+Sessions created with `gr new --experimental-attach` use the experimental
+terminal-owned attach client on future attaches. The daemon sends a coherent
+current-screen seed before live output resumes, and the client owns the outer
+alternate screen for that attach. Sessions created without the flag keep the
+default raw passthrough behavior.
+
+While experimental, this mode repaints daemon snapshots instead of forwarding
+all child terminal control traffic directly to your emulator. Expect incomplete
+support for child-driven mouse/focus/bracketed-paste modes, OSC features such as
+clipboard/window-title/hyperlinks, and terminal query responses. Host-terminal
+scrollback is not the history surface in this mode, and heavy output may repaint
+in full-screen bursts until dirty-row rendering lands. The Graith status bar is
+composed inside the owned frame, with read-only attach still replacing it with
+the persistent read-only indicator.
+
 ## Detachment
 
 Press `ctrl+b d` to detach. The agent keeps running; the daemon maintains the PTY and buffers output to a scrollback file.

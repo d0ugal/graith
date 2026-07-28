@@ -76,7 +76,9 @@ var restartCmd = &cobra.Command{
 			return nil
 		}
 
-		return runAttachByID(c, info.ID, nil)
+		return runAttachByIDWithOptions(c, info.ID, nil, attachRunOptions{
+			ExperimentalAttach: info.ExperimentalAttach,
+		})
 	},
 }
 

@@ -35,6 +35,51 @@ func TestAttachWithConvertPlainAttach(t *testing.T) {
 	}
 }
 
+func TestAttachWithConvertExperimentalAttach(t *testing.T) {
+	withDiscardOutput(t)
+
+	seed := protocol.ExperimentalAttachSeedMsg{
+		Session: protocol.SessionInfo{
+			ID:                 "braw",
+			Name:               "bonnie",
+			ExperimentalAttach: true,
+		},
+		Snapshot: protocol.ScreenSnapshotResponseMsg{
+			SessionID: "braw",
+			Frame:     "braw frame",
+		},
+	}
+	c := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("experimental_attached", seed)),
+	}}
+
+	info, gotSeed, attached, err := attachWithConvertOptions(c, "braw", attachRequestOptions{ExperimentalAttach: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !attached {
+		t.Fatal("expected attached=true")
+	}
+
+	if info.ID != "braw" || info.Name != "bonnie" || !info.ExperimentalAttach {
+		t.Errorf("info = %+v, want experimental braw/bonnie", info)
+	}
+
+	if gotSeed == nil || gotSeed.Snapshot.Frame != "braw frame" {
+		t.Fatalf("seed = %+v, want braw frame", gotSeed)
+	}
+
+	if len(c.sends) != 1 {
+		t.Fatalf("sent = %+v, want one attach", c.sends)
+	}
+
+	msg, ok := c.sends[0].Payload.(protocol.AttachMsg)
+	if !ok || !msg.ExperimentalAttach {
+		t.Fatalf("attach payload = %#v, want ExperimentalAttach=true", c.sends[0].Payload)
+	}
+}
+
 // TestAttachWithConvertReadError: a transport failure on the first read is
 // returned verbatim.
 func TestAttachWithConvertReadError(t *testing.T) {

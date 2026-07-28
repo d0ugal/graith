@@ -226,10 +226,14 @@ type PassthroughKeys struct {
 }
 
 type PassthroughOpts struct {
-	Keys      PassthroughKeys
-	SessionID string
-	Info      *protocol.SessionInfo
-	StatusBar *StatusBarCfg
+	Keys               PassthroughKeys
+	SessionID          string
+	Info               *protocol.SessionInfo
+	StatusBar          *StatusBarCfg
+	ExperimentalSeed   *protocol.ExperimentalAttachSeedMsg
+	TerminalOwned      bool
+	experimentalChrome *experimentalAttachChrome
+	terminalRefresh    chan struct{}
 	// DragArrowKeys enables the touch/hold-and-drag gesture that translates
 	// left-button mouse drags into arrow-key presses. Off by default.
 	DragArrowKeys bool
@@ -247,7 +251,75 @@ type StatusBarCfg struct {
 	Position string
 }
 
+const experimentalSnapshotMinInterval = 33 * time.Millisecond
+
+type experimentalSnapshotRequester struct {
+	requestCh chan struct{}
+	done      chan struct{}
+}
+
+func startExperimentalSnapshotRequester(ctx context.Context, c *Client, sessionID string) *experimentalSnapshotRequester {
+	r := &experimentalSnapshotRequester{
+		requestCh: make(chan struct{}, 1),
+		done:      make(chan struct{}),
+	}
+
+	go func() {
+		defer close(r.done)
+
+		var lastSent time.Time
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-r.requestCh:
+				wait := time.Until(lastSent.Add(experimentalSnapshotMinInterval))
+				if !waitExperimentalSnapshotInterval(ctx, wait) {
+					return
+				}
+
+				_ = c.SendControl("screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: sessionID})
+				lastSent = time.Now()
+			}
+		}
+	}()
+
+	return r
+}
+
+func (r *experimentalSnapshotRequester) request() {
+	select {
+	case r.requestCh <- struct{}{}:
+	default:
+	}
+}
+
+func (r *experimentalSnapshotRequester) wait() {
+	<-r.done
+}
+
+func waitExperimentalSnapshotInterval(ctx context.Context, wait time.Duration) bool {
+	if wait <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) PassthroughResult {
+	if opts.ExperimentalSeed != nil {
+		return c.runExperimentalPassthrough(ctx, opts)
+	}
+
 	fd := int(os.Stdin.Fd())
 
 	oldState, err := term.MakeRaw(fd)
@@ -418,11 +490,40 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 	demux := c.startDemux(innerCtx)
 
+	var snapshotRequester *experimentalSnapshotRequester
+	if opts.TerminalOwned && opts.SessionID != "" {
+		snapshotRequester = startExperimentalSnapshotRequester(innerCtx, c, opts.SessionID)
+	}
+
+	snapshotPending := false
+	snapshotDirty := false
+	requestSnapshot := func() {
+		if snapshotRequester == nil {
+			return
+		}
+
+		if snapshotPending {
+			snapshotDirty = true
+
+			return
+		}
+
+		snapshotPending = true
+
+		snapshotRequester.request()
+	}
+
 	var (
-		tickerCh <-chan time.Time
-		ticker   *time.Ticker
+		tickerCh        <-chan time.Time
+		ticker          *time.Ticker
+		statusSessionID string
 	)
 	if sb != nil {
+		statusSessionID = sb.sessionID
+		ticker = time.NewTicker(refreshInterval)
+		tickerCh = ticker.C
+	} else if opts.experimentalChrome != nil && opts.SessionID != "" {
+		statusSessionID = opts.SessionID
 		ticker = time.NewTicker(refreshInterval)
 		tickerCh = ticker.C
 	}
@@ -439,26 +540,69 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			case <-innerCtx.Done():
 				return
 			case data := <-demux.dataCh:
-				_, _ = stdout.Write(data)
+				if opts.TerminalOwned {
+					requestSnapshot()
+				} else {
+					_, _ = stdout.Write(data)
+				}
 			case msg := <-demux.controlCh:
 				switch msg.Type {
 				case "detached":
 					setResult(ResultDetached)
 					return
+				case "screen_snapshot_response":
+					if opts.TerminalOwned {
+						var snap protocol.ScreenSnapshotResponseMsg
+						if protocol.DecodePayload(msg, &snap) == nil && snap.SessionID == opts.SessionID {
+							writeExperimentalScreenSnapshotWithChrome(stdout, &snap, opts.experimentalChrome)
+						}
+
+						snapshotPending = false
+
+						if snapshotDirty {
+							snapshotDirty = false
+
+							requestSnapshot()
+						}
+					}
+				case "error":
+					if opts.TerminalOwned && snapshotPending {
+						snapshotPending = false
+						snapshotDirty = false
+					}
 				case "status_response":
-					if sb != nil {
+					if sb != nil || opts.experimentalChrome != nil {
 						var resp protocol.StatusResponseMsg
 						if protocol.DecodePayload(msg, &resp) == nil {
-							sb.updateInfo(newStatusBarInfo(resp.Session, resp.UnreadCount, resp.Fleet))
-							sb.render(stdout)
+							info := newStatusBarInfo(resp.Session, resp.UnreadCount, resp.Fleet)
+							if sb != nil {
+								sb.updateInfo(info)
+								sb.render(stdout)
+							}
+
+							if opts.experimentalChrome != nil {
+								opts.experimentalChrome.updateInfo(info)
+								opts.experimentalChrome.renderTo(stdout)
+							}
 						}
 					}
 				}
 			case <-tickerCh:
-				sb.render(stdout)
-				_ = c.SendControl("status", protocol.StatusRequestMsg{
-					SessionID: sb.sessionID,
-				})
+				if sb != nil {
+					sb.render(stdout)
+				}
+
+				if opts.experimentalChrome != nil {
+					opts.experimentalChrome.renderTo(stdout)
+				}
+
+				if statusSessionID != "" {
+					_ = c.SendControl("status", protocol.StatusRequestMsg{
+						SessionID: statusSessionID,
+					})
+				}
+			case <-opts.terminalRefresh:
+				requestSnapshot()
 			case <-demux.errCh:
 				setResult(ResultDisconnected)
 				return
@@ -525,6 +669,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					prefixSeen = false
 
 					clearHelpBar(stdout)
+
+					if opts.TerminalOwned {
+						signalExperimentalRefresh(opts.terminalRefresh)
+					}
 
 					switch key {
 					case prefixByte:
@@ -601,6 +749,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 	<-innerCtx.Done()
 	c.stopDemux(demux)
+
+	if snapshotRequester != nil {
+		snapshotRequester.wait()
+	}
 
 	return result
 }

@@ -32,6 +32,7 @@ func TestCreateOptsFromMsgMapsEveryField(t *testing.T) {
 		AllowConcurrent:     true,
 		SkipModelValidation: true,
 		Headless:            true,
+		ExperimentalAttach:  true,
 		NoFetch:             true,
 		Codex:               &protocol.CodexOptions{Profile: "canny"},
 	}
@@ -57,6 +58,7 @@ func TestCreateOptsFromMsgMapsEveryField(t *testing.T) {
 		{"AllowConcurrent", got.AllowConcurrent},
 		{"SkipModelValidation", got.SkipModelValidation},
 		{"Headless", got.Headless},
+		{"ExperimentalAttach", got.ExperimentalAttach},
 		{"NoFetch", got.NoFetch},
 		{"Codex", got.Codex.Profile == "canny"},
 		{"Rows", got.Rows == 40},

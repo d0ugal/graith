@@ -53,6 +53,10 @@ type sessionOutput interface {
 	LastOutputAt() time.Time
 }
 
+type atomicAttachOutput interface {
+	AttachWithScreenSnapshot(w io.Writer) grpty.ScreenCapture
+}
+
 // sessionDriver is the minimal contract needed by the daemon's common
 // lifecycle, input, and output consumers.
 type sessionDriver interface {

@@ -55,15 +55,21 @@ func controlOp(c controlConn, msgType string, payload any) error {
 }
 
 // attachDecode sends an attach request for sessionID and decodes the daemon's
-// reply into info. Read and decode errors are intentionally swallowed to match
-// the attach loop's best-effort reattach behaviour: a failed reattach leaves
-// info unchanged and the loop reports the trouble on its next passthrough.
+// reply into info. Errors are intentionally swallowed by this compatibility
+// wrapper to match the attach loop's historical best-effort reattach behaviour.
 func attachDecode(c controlConn, sessionID string, info *protocol.SessionInfo) {
-	_ = c.SendControl("attach", attachMsg(sessionID))
+	_, _ = attachDecodeWithOptions(c, sessionID, attachRequestOptions{}, info)
+}
 
-	resp, _ := c.ReadControlResponse()
+func attachDecodeWithOptions(c controlConn, sessionID string, opts attachRequestOptions, info *protocol.SessionInfo) (*protocol.ExperimentalAttachSeedMsg, error) {
+	_ = c.SendControl("attach", attachMsgWithOptions(sessionID, opts))
 
-	_ = protocol.DecodePayload(resp, info)
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeAttachResponse(resp, info)
 }
 
 // fetchSessionList requests the session list (msg selects live vs deleted) and

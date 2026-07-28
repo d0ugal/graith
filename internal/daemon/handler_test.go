@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -201,6 +202,81 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 	}
 	h.sm.sessions[id] = sess
 	h.sm.mu.Unlock()
+}
+
+type emptySnapshotAttachDriver struct {
+	done       chan struct{}
+	scrollback *grpty.Scrollback
+	createdAt  time.Time
+	writers    []io.Writer
+}
+
+func (d *emptySnapshotAttachDriver) ProcessPID() int { return 0 }
+func (d *emptySnapshotAttachDriver) Pgid() int       { return 0 }
+func (d *emptySnapshotAttachDriver) Done() <-chan struct{} {
+	if d.done == nil {
+		d.done = make(chan struct{})
+	}
+
+	return d.done
+}
+func (d *emptySnapshotAttachDriver) Exited() bool               { return false }
+func (d *emptySnapshotAttachDriver) ExitCode() int              { return 0 }
+func (d *emptySnapshotAttachDriver) ExitSignal() syscall.Signal { return 0 }
+func (d *emptySnapshotAttachDriver) PeakRSSBytes() int64        { return 0 }
+func (d *emptySnapshotAttachDriver) RecentlyAdopted(time.Duration) bool {
+	return false
+}
+func (d *emptySnapshotAttachDriver) BytesRead() int64 { return 0 }
+func (d *emptySnapshotAttachDriver) WasAdopted() bool { return false }
+func (d *emptySnapshotAttachDriver) CreatedAt() time.Time {
+	if d.createdAt.IsZero() {
+		return time.Now()
+	}
+
+	return d.createdAt
+}
+func (d *emptySnapshotAttachDriver) Kill() error      { return nil }
+func (d *emptySnapshotAttachDriver) ForceKill() error { return nil }
+func (d *emptySnapshotAttachDriver) Close()           {}
+func (d *emptySnapshotAttachDriver) WriteInput([]byte) error {
+	return nil
+}
+func (d *emptySnapshotAttachDriver) WriteInputAndSubmit([]byte) error {
+	return nil
+}
+func (d *emptySnapshotAttachDriver) Interrupt(int, time.Duration) error {
+	return nil
+}
+func (d *emptySnapshotAttachDriver) Attach(w io.Writer) {
+	d.writers = append(d.writers, w)
+}
+func (d *emptySnapshotAttachDriver) Detach() {
+	d.writers = nil
+}
+func (d *emptySnapshotAttachDriver) DetachWriter(w io.Writer) {
+	for i, candidate := range d.writers {
+		if candidate == w {
+			d.writers = append(d.writers[:i], d.writers[i+1:]...)
+
+			return
+		}
+	}
+}
+func (d *emptySnapshotAttachDriver) ScreenPreview() string { return "" }
+func (d *emptySnapshotAttachDriver) ScreenSnapshot() grpty.ScreenCapture {
+	return grpty.ScreenCapture{}
+}
+func (d *emptySnapshotAttachDriver) ScrollbackFile() *grpty.Scrollback {
+	return d.scrollback
+}
+func (d *emptySnapshotAttachDriver) LastOutputAt() time.Time {
+	return time.Time{}
+}
+func (d *emptySnapshotAttachDriver) AttachWithScreenSnapshot(w io.Writer) grpty.ScreenCapture {
+	d.Attach(w)
+
+	return grpty.ScreenCapture{}
 }
 
 func TestHandshake(t *testing.T) {
@@ -610,6 +686,108 @@ func TestAttachAndDetach(t *testing.T) {
 
 	if detached.Reason != "user" {
 		t.Errorf("reason = %q, want %q", detached.Reason, "user")
+	}
+}
+
+func TestExperimentalAttachSendsSeed(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSession(t, "braw-exp", "bonnie-exp")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["braw-exp"].ExperimentalAttach = true
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-exp", ExperimentalAttach: true})
+
+	frame, err := h.reader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl {
+		t.Fatalf("first frame channel = %d, want control seed", frame.Channel)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env.Type != "experimental_attached" {
+		t.Fatalf("response type = %q, want experimental_attached", env.Type)
+	}
+
+	var seed protocol.ExperimentalAttachSeedMsg
+	if err := protocol.DecodePayload(env, &seed); err != nil {
+		t.Fatal(err)
+	}
+
+	if seed.Session.ID != "braw-exp" || !seed.Session.ExperimentalAttach {
+		t.Fatalf("seed session = %+v, want experimental braw-exp", seed.Session)
+	}
+
+	if seed.Snapshot.SessionID != "braw-exp" || seed.Snapshot.Cols != 80 || seed.Snapshot.Rows != 24 {
+		t.Fatalf("seed snapshot = %+v, want braw-exp 80x24", seed.Snapshot)
+	}
+}
+
+func TestExperimentalAttachFallsBackWhenSnapshotEmpty(t *testing.T) {
+	h := newTestHarness(t)
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-exp.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sb.Write([]byte("tail-braw\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	driver := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: sb,
+		createdAt:  time.Now().UTC(),
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["empty-exp"] = &SessionState{
+		ID:                 "empty-exp",
+		Name:               "empty-exp",
+		Agent:              "claude",
+		Status:             StatusRunning,
+		ExperimentalAttach: true,
+		CreatedAt:          time.Now().UTC(),
+	}
+	h.sm.sessions["empty-exp"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-exp", ExperimentalAttach: true})
+
+	frame, err := h.reader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl {
+		t.Fatalf("first frame channel = %d, want control fallback", frame.Channel)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env.Type != "attached" {
+		t.Fatalf("response type = %q, want attached fallback", env.Type)
+	}
+
+	frame, err = h.reader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "tail-braw\n" {
+		t.Fatalf("fallback data frame = (%d, %q), want tail data", frame.Channel, string(frame.Payload))
 	}
 }
 
@@ -2448,6 +2626,36 @@ func TestFrameDataWriter(t *testing.T) {
 
 	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "test data" {
 		t.Errorf("got channel=%d payload=%q", frame.Channel, frame.Payload)
+	}
+}
+
+func TestGatedDataWriterReleasePreservesOrder(t *testing.T) {
+	var buf bytes.Buffer
+
+	gate := newGatedDataWriter(&buf)
+
+	if _, err := gate.Write([]byte("braw")); err != nil {
+		t.Fatal(err)
+	}
+
+	if buf.Len() != 0 {
+		t.Fatalf("buffer wrote before release: %q", buf.String())
+	}
+
+	if _, err := gate.Write([]byte("-canny")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := gate.Release(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gate.Write([]byte("-dreich")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := buf.String(), "braw-canny-dreich"; got != want {
+		t.Fatalf("buffer = %q, want %q", got, want)
 	}
 }
 

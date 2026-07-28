@@ -31,11 +31,26 @@ Create a new agent session.
 | `--codex-service-tier <tier>` | Codex only: service tier — `auto`, `default`, `flex`, `priority` |
 | `--codex-web-search` | Codex only: enable live web search (`codex --search`) |
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
+| `--experimental-attach` | Persist opt-in use of the experimental terminal-owned attach client for this session |
 | `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
 
 `--no-fetch` overrides `fetch_on_create` for that session. Use it when SSH auth
 is unavailable (e.g. a biometric agent that can't sign non-interactively) or when
 you're offline.
+
+`--experimental-attach` makes future attaches to that session request the
+terminal-owned attach handshake. The daemon seeds the client with a coherent
+current-screen snapshot before live output resumes, and the client owns the outer
+alternate screen instead of injecting chrome into the child PTY stream. This is
+experimental and intentionally opt-in per session.
+
+Current limitations: child terminal mode changes are interpreted by Graith's
+daemon-side terminal model instead of being forwarded directly to the host
+emulator, so child-driven mouse/focus/bracketed-paste modes, OSC clipboard/title
+and hyperlink features, and terminal query responses are incomplete. The Graith
+status bar is composed inside the owned frame, host scrollback is not the
+primary history surface, and high-volume output repaints from full snapshots
+until the renderer grows dirty-row updates.
 
 When an existing session creates a child session, omitted labels inherit from
 the parent by default. Supplying `--label` sets the child's complete label set

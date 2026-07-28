@@ -463,6 +463,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		AgentSessionID:       agentSessionID,
 		Model:                model,
 		Codex:                codexStatePtr(codexOpts),
+		ExperimentalAttach:   opts.ExperimentalAttach,
 		Mirror:               isMirror,
 		MirrorSourceID:       mirrorSourceID,
 		ReadOnlyBranch:       readOnlyBranch,

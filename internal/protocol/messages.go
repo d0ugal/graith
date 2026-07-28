@@ -106,6 +106,7 @@ type CreateMsg struct {
 	AllowConcurrent     bool      `json:"allow_concurrent,omitempty"`
 	SkipModelValidation bool      `json:"skip_model_validation,omitempty"`
 	Headless            bool      `json:"headless,omitempty"`
+	ExperimentalAttach  bool      `json:"experimental_attach,omitempty"`
 	// NoFetch skips the `git fetch origin` that normally runs before the
 	// worktree is created (issue #1012). Lets sessions be created from local
 	// repo state when SSH auth is unavailable (Secretive/biometric, offline).
@@ -142,6 +143,16 @@ type AttachMsg struct {
 	// watch a session without risk of injecting keystrokes (issue #31). The
 	// client also gates input locally; this is the server-side backstop.
 	ReadOnly bool `json:"read_only,omitempty"`
+	// ExperimentalAttach requests the terminal-owned attach handshake for
+	// sessions created with the matching experimental flag. The daemon replies
+	// with "experimental_attached" when it can seed the client with an atomic
+	// current-screen snapshot before live data frames resume.
+	ExperimentalAttach bool `json:"experimental_attach,omitempty"`
+}
+
+type ExperimentalAttachSeedMsg struct {
+	Session  SessionInfo               `json:"session"`
+	Snapshot ScreenSnapshotResponseMsg `json:"snapshot"`
 }
 
 // AttachConvertMsg requests converting a headless (one-shot stream-json) session
@@ -541,46 +552,47 @@ type SessionListMsg struct {
 }
 
 type SessionInfo struct {
-	ID               string             `json:"id"`
-	ParentID         string             `json:"parent_id,omitempty"`
-	Name             string             `json:"name"`
-	Labels           []string           `json:"labels"`
-	RepoPath         string             `json:"repo_path"`
-	RepoName         string             `json:"repo_name"`
-	WorktreePath     string             `json:"worktree_path"`
-	CWD              string             `json:"cwd"`
-	Branch           string             `json:"branch"`
-	BaseBranch       string             `json:"base_branch"`
-	Agent            string             `json:"agent"`
-	AgentSessionID   string             `json:"agent_session_id,omitempty"`
-	Status           string             `json:"status"`
-	AgentStatus      string             `json:"agent_status,omitempty"`
-	ExitCode         *int               `json:"exit_code,omitempty"`
-	ExitSignal       string             `json:"exit_signal,omitempty"`
-	CreatedAt        string             `json:"created_at"`
-	LastAttachedAt   string             `json:"last_attached_at,omitempty"`
-	StatusChangedAt  string             `json:"status_changed_at,omitempty"`
-	Dirty            bool               `json:"dirty,omitempty"`
-	UnpushedCount    int                `json:"unpushed_count,omitempty"`
-	Sandboxed        bool               `json:"sandboxed,omitempty"`
-	Mirror           bool               `json:"mirror,omitempty"`
-	ReadOnlyBranch   bool               `json:"read_only_branch,omitempty"`
-	ReadOnlyRevision string             `json:"read_only_revision,omitempty"`
-	InPlace          bool               `json:"in_place,omitempty"`
-	Model            string             `json:"model,omitempty"`
-	ToolName         string             `json:"tool_name,omitempty"`
-	Includes         []IncludedRepoInfo `json:"includes,omitempty"`
-	ConfigStale      bool               `json:"config_stale,omitempty"`
-	Starred          bool               `json:"starred,omitempty"`
-	SystemKind       string             `json:"system_kind,omitempty"`
-	ScenarioID       string             `json:"scenario_id,omitempty"`
-	ScenarioName     string             `json:"scenario_name,omitempty"`
-	SummaryText      string             `json:"summary_text,omitempty"`
-	SummaryFaded     bool               `json:"summary_faded,omitempty"`
-	LastOutputAt     string             `json:"last_output_at,omitempty"`
-	MigratedFrom     string             `json:"migrated_from,omitempty"`
-	PullRequest      *PRInfo            `json:"pull_request,omitempty"`
-	CI               *CIInfo            `json:"ci,omitempty"`
+	ID                 string             `json:"id"`
+	ParentID           string             `json:"parent_id,omitempty"`
+	Name               string             `json:"name"`
+	Labels             []string           `json:"labels"`
+	RepoPath           string             `json:"repo_path"`
+	RepoName           string             `json:"repo_name"`
+	WorktreePath       string             `json:"worktree_path"`
+	CWD                string             `json:"cwd"`
+	Branch             string             `json:"branch"`
+	BaseBranch         string             `json:"base_branch"`
+	Agent              string             `json:"agent"`
+	AgentSessionID     string             `json:"agent_session_id,omitempty"`
+	Status             string             `json:"status"`
+	AgentStatus        string             `json:"agent_status,omitempty"`
+	ExitCode           *int               `json:"exit_code,omitempty"`
+	ExitSignal         string             `json:"exit_signal,omitempty"`
+	CreatedAt          string             `json:"created_at"`
+	LastAttachedAt     string             `json:"last_attached_at,omitempty"`
+	StatusChangedAt    string             `json:"status_changed_at,omitempty"`
+	Dirty              bool               `json:"dirty,omitempty"`
+	UnpushedCount      int                `json:"unpushed_count,omitempty"`
+	Sandboxed          bool               `json:"sandboxed,omitempty"`
+	Mirror             bool               `json:"mirror,omitempty"`
+	ReadOnlyBranch     bool               `json:"read_only_branch,omitempty"`
+	ReadOnlyRevision   string             `json:"read_only_revision,omitempty"`
+	InPlace            bool               `json:"in_place,omitempty"`
+	ExperimentalAttach bool               `json:"experimental_attach,omitempty"`
+	Model              string             `json:"model,omitempty"`
+	ToolName           string             `json:"tool_name,omitempty"`
+	Includes           []IncludedRepoInfo `json:"includes,omitempty"`
+	ConfigStale        bool               `json:"config_stale,omitempty"`
+	Starred            bool               `json:"starred,omitempty"`
+	SystemKind         string             `json:"system_kind,omitempty"`
+	ScenarioID         string             `json:"scenario_id,omitempty"`
+	ScenarioName       string             `json:"scenario_name,omitempty"`
+	SummaryText        string             `json:"summary_text,omitempty"`
+	SummaryFaded       bool               `json:"summary_faded,omitempty"`
+	LastOutputAt       string             `json:"last_output_at,omitempty"`
+	MigratedFrom       string             `json:"migrated_from,omitempty"`
+	PullRequest        *PRInfo            `json:"pull_request,omitempty"`
+	CI                 *CIInfo            `json:"ci,omitempty"`
 	// Tokens is the aggregated token usage for the session's current agent, or
 	// nil when unknown (never parsed, unsupported agent, or unreadable). Absent
 	// via omitempty so older clients and pre-token daemons project nothing.

@@ -83,7 +83,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 	var (
 		attachedSessionID  string
-		attachedDataWriter *frameDataWriter
+		attachedDataWriter io.Writer
 		// attachedReadOnly drops this connection's input frames when the current
 		// attach was requested read-only (issue #31). Set on attach, cleared on
 		// detach; it is the server-side backstop to the client's input gate.
@@ -492,8 +492,32 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					}
 				}
 
+				output, ok := outputCapability(ptySess)
+				if !ok {
+					sendControl("error", protocol.ErrorMsg{Message: "session does not provide attach output"})
+					continue
+				}
+
+				var atomicOutput atomicAttachOutput
+				if a.ExperimentalAttach {
+					atomicOutput, ok = output.(atomicAttachOutput)
+					if !ok {
+						sendControl("error", protocol.ErrorMsg{Message: "session does not provide experimental attach output"})
+						continue
+					}
+				}
+
 				attachedSessionID = a.SessionID
-				attachedDataWriter = &frameDataWriter{writer: writer}
+
+				liveDataWriter := &frameDataWriter{writer: writer}
+				attachedDataWriter = liveDataWriter
+
+				var gatedWriter *gatedDataWriter
+				if a.ExperimentalAttach {
+					gatedWriter = newGatedDataWriter(liveDataWriter)
+					attachedDataWriter = gatedWriter
+				}
+
 				attachedReadOnly = a.ReadOnly
 
 				sm.KickAttachedClient(a.SessionID)
@@ -526,13 +550,48 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				}
 
 				sess, _ := sm.Get(a.SessionID)
-				sendControl("attached", toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID)))
+				info := toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID))
 
-				output, ok := outputCapability(ptySess)
-				if !ok {
-					sendControl("error", protocol.ErrorMsg{Message: "session does not provide attach output"})
+				if a.ExperimentalAttach {
+					snapshot := atomicOutput.AttachWithScreenSnapshot(attachedDataWriter)
+					seed := protocol.ExperimentalAttachSeedMsg{
+						Session:  info,
+						Snapshot: screenSnapshotResponse(a.SessionID, snapshot),
+					}
+
+					if seed.Snapshot.Frame == "" {
+						output.DetachWriter(attachedDataWriter)
+						gatedWriter.Discard()
+
+						attachedDataWriter = liveDataWriter
+
+						sendControl("attached", info)
+
+						if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
+							_ = writer.WriteFrame(protocol.ChannelData, tail)
+						}
+
+						output.Attach(attachedDataWriter)
+
+						continue
+					}
+
+					if err := sendControlResult("experimental_attached", seed); err != nil {
+						_ = gatedWriter.Release()
+
+						continue
+					}
+
+					if err := gatedWriter.Release(); err != nil {
+						log.Debug("experimental attach live-output release failed", "session", a.SessionID, "err", err)
+
+						_ = conn.Close()
+					}
+
 					continue
 				}
+
+				sendControl("attached", info)
 
 				if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
 					_ = writer.WriteFrame(protocol.ChannelData, tail)
@@ -1125,44 +1184,137 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+const gatedDataWriterBufferLimit = 1 << 20
+
+type gatedDataWriter struct {
+	mu            sync.Mutex
+	cond          *sync.Cond
+	target        io.Writer
+	released      bool
+	discarded     bool
+	buffered      [][]byte
+	bufferedBytes int
+}
+
+func newGatedDataWriter(target io.Writer) *gatedDataWriter {
+	w := &gatedDataWriter{target: target}
+	w.cond = sync.NewCond(&w.mu)
+
+	return w
+}
+
+func (w *gatedDataWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	for !w.released && w.bufferedBytes+len(p) > gatedDataWriterBufferLimit {
+		w.cond.Wait()
+	}
+
+	if w.released {
+		if w.discarded {
+			w.mu.Unlock()
+
+			return len(p), nil
+		}
+
+		w.mu.Unlock()
+
+		return w.target.Write(p)
+	}
+
+	w.buffered = append(w.buffered, append([]byte(nil), p...))
+	w.bufferedBytes += len(p)
+	w.mu.Unlock()
+
+	return len(p), nil
+}
+
+func (w *gatedDataWriter) Release() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.released {
+		return nil
+	}
+
+	for _, p := range w.buffered {
+		if _, err := w.target.Write(p); err != nil {
+			w.released = true
+			w.cond.Broadcast()
+
+			return err
+		}
+	}
+
+	w.released = true
+	w.buffered = nil
+	w.bufferedBytes = 0
+	w.cond.Broadcast()
+
+	return nil
+}
+
+func (w *gatedDataWriter) Discard() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.released = true
+	w.discarded = true
+	w.buffered = nil
+	w.bufferedBytes = 0
+	w.cond.Broadcast()
+}
+
+func screenSnapshotResponse(sessionID string, snap grpty.ScreenCapture) protocol.ScreenSnapshotResponseMsg {
+	return protocol.ScreenSnapshotResponseMsg{
+		SessionID:     sessionID,
+		Frame:         snap.Frame,
+		CursorX:       snap.CursorX,
+		CursorY:       snap.CursorY,
+		CursorVisible: snap.CursorVisible,
+		Cols:          snap.Cols,
+		Rows:          snap.Rows,
+	}
+}
+
 func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.SessionInfo {
 	info := protocol.SessionInfo{
-		ID:               s.ID,
-		ParentID:         s.ParentID,
-		Name:             s.Name,
-		Labels:           append([]string{}, s.Labels...),
-		RepoPath:         s.RepoPath,
-		RepoName:         s.RepoName,
-		WorktreePath:     s.WorktreePath,
-		CWD:              s.CWD,
-		Branch:           s.Branch,
-		BaseBranch:       s.BaseBranch,
-		Agent:            s.Agent,
-		AgentSessionID:   s.AgentSessionID,
-		Status:           string(s.Status),
-		AgentStatus:      s.AgentStatus,
-		ExitCode:         s.ExitCode,
-		ExitSignal:       s.ExitSignal,
-		CreatedAt:        s.CreatedAt.Format(time.RFC3339),
-		Dirty:            s.GitDirty,
-		UnpushedCount:    s.GitUnpushed,
-		PullRequest:      prInfo(s.PullRequest),
-		CI:               ciInfo(s.CI),
-		Tokens:           tokenInfo(s.Tokens),
-		Sandboxed:        s.Sandboxed,
-		Mirror:           s.Mirror,
-		ReadOnlyBranch:   s.ReadOnlyBranch,
-		ReadOnlyRevision: s.ReadOnlyRevision,
-		InPlace:          s.InPlace,
-		Model:            s.Model,
-		ToolName:         s.HookToolName,
-		ConfigStale:      isConfigStale(s, cfg),
-		Starred:          s.Starred,
-		SystemKind:       s.SystemKind,
-		ScenarioID:       s.ScenarioID,
-		ScenarioName:     s.ScenarioName,
-		ContextPressure:  s.ContextPressure,
-		SubAgentCount:    len(s.SubAgents),
+		ID:                 s.ID,
+		ParentID:           s.ParentID,
+		Name:               s.Name,
+		Labels:             append([]string{}, s.Labels...),
+		RepoPath:           s.RepoPath,
+		RepoName:           s.RepoName,
+		WorktreePath:       s.WorktreePath,
+		CWD:                s.CWD,
+		Branch:             s.Branch,
+		BaseBranch:         s.BaseBranch,
+		Agent:              s.Agent,
+		AgentSessionID:     s.AgentSessionID,
+		Status:             string(s.Status),
+		AgentStatus:        s.AgentStatus,
+		ExitCode:           s.ExitCode,
+		ExitSignal:         s.ExitSignal,
+		CreatedAt:          s.CreatedAt.Format(time.RFC3339),
+		Dirty:              s.GitDirty,
+		UnpushedCount:      s.GitUnpushed,
+		PullRequest:        prInfo(s.PullRequest),
+		CI:                 ciInfo(s.CI),
+		Tokens:             tokenInfo(s.Tokens),
+		Sandboxed:          s.Sandboxed,
+		Mirror:             s.Mirror,
+		ReadOnlyBranch:     s.ReadOnlyBranch,
+		ReadOnlyRevision:   s.ReadOnlyRevision,
+		InPlace:            s.InPlace,
+		ExperimentalAttach: s.ExperimentalAttach,
+		Model:              s.Model,
+		ToolName:           s.HookToolName,
+		ConfigStale:        isConfigStale(s, cfg),
+		Starred:            s.Starred,
+		SystemKind:         s.SystemKind,
+		ScenarioID:         s.ScenarioID,
+		ScenarioName:       s.ScenarioName,
+		ContextPressure:    s.ContextPressure,
+		SubAgentCount:      len(s.SubAgents),
 	}
 	if s.MigratedFrom != nil {
 		info.MigratedFrom = s.MigratedFrom.Agent

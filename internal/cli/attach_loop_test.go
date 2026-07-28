@@ -59,6 +59,27 @@ func TestDispatchTerminalExit(t *testing.T) {
 	}
 }
 
+func TestDispatchTerminalOwnedExitDoesNotClearRestoredScreen(t *testing.T) {
+	for _, result := range []client.PassthroughResult{client.ResultDetached, client.ResultQuit} {
+		l := &attachLoop{terminalOwnedPass: true}
+
+		var (
+			done bool
+			err  error
+		)
+
+		out := captureStdout(t, func() { done, err = l.dispatch(result) })
+
+		if !done || err != nil {
+			t.Errorf("dispatch(%v) = (%v, %v), want (true, nil)", result, done, err)
+		}
+
+		if out != "" {
+			t.Errorf("terminal-owned dispatch(%v) wrote %q, want no reset", result, out)
+		}
+	}
+}
+
 // TestDispatchUnknownResultContinues: an unrecognised result loops again
 // (done=false) with no side effects, mirroring the original switch fall-through.
 func TestDispatchUnknownResultContinues(t *testing.T) {

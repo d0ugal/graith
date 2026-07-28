@@ -129,8 +129,9 @@ type SessionState struct {
 	// DriverKind is the session's transport: DriverPTY (interactive PTY) or
 	// DriverHeadless (headless stream-json, issue #1075). Resolved once at
 	// creation and never re-derived from config. Empty is treated as DriverPTY.
-	DriverKind string `json:"driver_kind,omitempty"`
-	Model      string `json:"model,omitempty"`
+	DriverKind         string `json:"driver_kind,omitempty"`
+	ExperimentalAttach bool   `json:"experimental_attach,omitempty"`
+	Model              string `json:"model,omitempty"`
 	// Codex holds typed per-session Codex CLI options (issue #1186), persisted so
 	// a resume/fork replays the same flags. Nil for non-codex sessions or when no
 	// option was set. No migration needed: an older state simply has nil here.

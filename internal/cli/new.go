@@ -29,6 +29,7 @@ var (
 	newAllowConcurrent     bool
 	newSkipModelValidation bool
 	newHeadless            bool
+	newExperimentalAttach  bool
 	newNoFetch             bool
 	newLabels              []string
 
@@ -141,6 +142,7 @@ var newCmd = &cobra.Command{
 			AllowConcurrent:     newAllowConcurrent,
 			SkipModelValidation: newSkipModelValidation,
 			Headless:            newHeadless,
+			ExperimentalAttach:  newExperimentalAttach,
 			NoFetch:             newNoFetch,
 			Codex:               codexOptionsToProtocol(codexOpts),
 		})
@@ -184,7 +186,9 @@ var newCmd = &cobra.Command{
 			return nil
 		}
 
-		return runAttachByID(c, info.ID, nil)
+		return runAttachByIDWithOptions(c, info.ID, nil, attachRunOptions{
+			ExperimentalAttach: info.ExperimentalAttach,
+		})
 	},
 }
 
@@ -238,6 +242,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newAllowConcurrent, "allow-concurrent", false, "allow multiple in-place sessions on the same repo")
 	newCmd.Flags().BoolVar(&newSkipModelValidation, "skip-model-validation", false, "skip validate_model check (use models not in the validation list)")
 	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
+	newCmd.Flags().BoolVar(&newExperimentalAttach, "experimental-attach", false, "use the experimental terminal-owned attach client for this session")
 	newCmd.Flags().BoolVar(&newNoFetch, "no-fetch", false, "skip git fetch origin and create the worktree from local repo state (use when SSH auth is unavailable or offline)")
 	newCmd.Flags().StringArrayVar(&newLabels, "label", nil, "session label (repeatable)")
 	newCmd.Flags().StringVar(&newCodexProfile, "codex-profile", "", "Codex config profile to layer on top (codex --profile)")
