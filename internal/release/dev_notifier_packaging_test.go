@@ -1483,13 +1483,17 @@ func TestDevHomebrewTapCredentialsAreScopedToGitPrompts(t *testing.T) {
 	}
 
 	for _, required := range []string{
+		`tap_token="${RELEASE_TOKEN:?}"`,
+		`unset RELEASE_TOKEN`,
 		`cat > "$askpass"`,
-		`export GIT_ASKPASS="$askpass"`,
-		`export GIT_TERMINAL_PROMPT=0`,
-		`unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN`,
+		`RELEASE_TOKEN="$tap_token" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"`,
+		`unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN tap_token`,
 		`rm -f "$askpass"`,
 		`rm -rf "$tap_dir"`,
-		`git clone "https://github.com/d0ugal/homebrew-tap.git" .`,
+		`git_with_tap_credentials clone "https://github.com/d0ugal/homebrew-tap.git" .`,
+		`remote_url="$(git remote get-url origin)"`,
+		`test "$remote_url" = "https://github.com/d0ugal/homebrew-tap.git"`,
+		`git_with_tap_credentials push`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("Homebrew tap update missing credential-scope guard %q", required)
@@ -1521,6 +1525,12 @@ func TestDevHomebrewTapCredentialsAreScopedToGitPrompts(t *testing.T) {
 	const fakeGit = `#!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == -c && "${2:-}" == credential.helper= ]]; then
+  shift 2
+else
+  echo "git did not disable credential helpers" >&2
+  exit 60
+fi
 if [[ "${1:-}" != clone ]]; then
   echo "unexpected git invocation: $*" >&2
   exit 61
@@ -1566,6 +1576,7 @@ printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  %s\n' 
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"GRAITH_DEV_VERSION=0.0.0-dev+canny",
 		"RELEASE_TOKEN="+secret,
+		"RUNNER_TEMP="+work,
 	)
 
 	output, err := command.CombinedOutput()
@@ -1598,7 +1609,7 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 	var script string
 
 	for _, step := range job.Steps {
-		if step.Name == "Update Homebrew tap" {
+		if step.Name == "Render Homebrew tap formula" {
 			script = step.Run
 			break
 		}
@@ -1626,7 +1637,7 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 		t.Error("macOS dev-release workflow still uses non-portable in-place sed")
 	}
 
-	const formulaStart = "cat > /tmp/graith-dev.rb << FORMULA\n"
+	const formulaStart = "cat > \"$RUNNER_TEMP/graith-dev.rb\" << FORMULA\n"
 
 	_, formulaAndRest, ok := strings.Cut(script, formulaStart)
 	if !ok {

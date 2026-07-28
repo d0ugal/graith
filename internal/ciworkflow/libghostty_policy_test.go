@@ -187,6 +187,52 @@ func TestLibghosttyReleaseRoutingAndUpgradeFixture(t *testing.T) {
 	assertRegexp(t, goreleaser, `tags:\n      - "v\*"`)
 }
 
+func TestDevReleaseHomebrewTapCredentialsStayOutOfGitURLs(t *testing.T) {
+	repoRoot := p11RepoRoot()
+
+	workflow, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/dev-release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	publish := p11WorkflowJob(t, workflow, "publish-dev")
+	renderFormula := p11WorkflowStep(t, publish, "Render Homebrew tap formula")
+	updateTap := p11WorkflowStep(t, publish, "Update Homebrew tap")
+
+	if p11MapHasReleaseTokenExpression(renderFormula.Env) || strings.Contains(renderFormula.Run, "RELEASE_TOKEN") {
+		t.Fatal("Homebrew formula rendering must not receive the tap publication token")
+	}
+
+	if got := p11WorkflowReleaseTokenExpressionCount(workflow); got != 1 {
+		t.Fatalf("dev-release RELEASE_TOKEN structural references = %d, want update tap env only", got)
+	}
+
+	if updateTap.Env["RELEASE_TOKEN"] != "${{ secrets.RELEASE_TOKEN }}" || len(updateTap.Env) != 1 {
+		t.Fatalf("update tap env = %#v, want only RELEASE_TOKEN", updateTap.Env)
+	}
+
+	for _, scalar := range workflow.Scalars {
+		assertNotRegexp(t, scalar, `https://[^[:space:]'"]*@github\.com`)
+	}
+
+	if p11WorkflowRunLineContainsAll(workflow, "git clone", "RELEASE_TOKEN") ||
+		p11WorkflowRunLineContainsReleaseTokenExpression(workflow, "git clone") {
+		t.Fatal("dev-release must not put RELEASE_TOKEN in a git clone command line")
+	}
+
+	assertContains(t, updateTap.Run, `tap_token="${RELEASE_TOKEN:?}"`)
+	assertContains(t, updateTap.Run, `unset RELEASE_TOKEN`)
+	assertContains(t, updateTap.Run, `RELEASE_TOKEN="$tap_token" GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"`)
+	assertContains(t, updateTap.Run, `git_with_tap_credentials clone "https://github.com/d0ugal/homebrew-tap.git" .`)
+	assertContains(t, updateTap.Run, `remote_url="$(git remote get-url origin)"`)
+	assertContains(t, updateTap.Run, `test "$remote_url" = "https://github.com/d0ugal/homebrew-tap.git"`)
+	assertContains(t, updateTap.Run, `git_with_tap_credentials push`)
+	assertContains(t, updateTap.Run, `unset GIT_ASKPASS GIT_TERMINAL_PROMPT RELEASE_TOKEN tap_token`)
+	assertNotContains(t, updateTap.Run, `git remote set-url`)
+	assertNotContains(t, updateTap.Run, `export GIT_ASKPASS`)
+	assertNotContains(t, updateTap.Run, `credential.helper store`)
+}
+
 func TestLibghosttyLocalNativeBuildIsolation(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	nativeScript := readPolicyFile(t, filepath.Join(repoRoot, "scripts/libghostty-native.sh"))
