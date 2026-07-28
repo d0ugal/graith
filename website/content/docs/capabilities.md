@@ -160,7 +160,10 @@ as live state.
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
+| List configured agents and provider info <sup>1</sup> | ✅ | — | — |
 | View effective config + diff-vs-defaults | ✅ | ✅ | ✅ |
 | Health check / doctor diagnostics (orphan GC stays CLI-only) | ✅ | ✅ | ✅ |
+
+<sup>1</sup> List configured agents and provider info: Provider info probes execute configured agent CLIs in the daemon/provider environment for agent and scripting workflows; native apps use catalog data for session creation instead. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-28-agent-introspection.md#platform-support)
 
 <!-- END GENERATED CAPABILITY MATRIX -->

@@ -89,6 +89,7 @@ func TestRemoteAllowed(t *testing.T) {
 		{"guest cannot read DMs", roleRemoteGuest, "msg_conversation", false},
 		{"guest cannot scenario_status", roleRemoteGuest, "scenario_status", false},
 		{"guest cannot wait", roleRemoteGuest, "wait", false},
+		{"guest cannot agent_info", roleRemoteGuest, "agent_info", false},
 
 		// roleRemoteHuman: everything except local-only.
 		{"human can list", roleRemoteHuman, "list", true},
@@ -103,6 +104,7 @@ func TestRemoteAllowed(t *testing.T) {
 		// #904: the GUI config viewer + diagnostics panel — paired human only.
 		{"human can diagnostics", roleRemoteHuman, "diagnostics", true},
 		{"human can config", roleRemoteHuman, "config", true},
+		{"human can agent_info", roleRemoteHuman, "agent_info", true},
 		{"guest cannot diagnostics", roleRemoteGuest, "diagnostics", false},
 		{"guest cannot config", roleRemoteGuest, "config", false},
 		// Session-originated: a human must NOT be able to impersonate a session.
@@ -113,6 +115,7 @@ func TestRemoteAllowed(t *testing.T) {
 
 		// Remote sessions: everything except local-only (self/descendant applied later).
 		{"session can attach", roleSession, "attach", true},
+		{"session can agent_info", roleSession, "agent_info", true},
 		{"session can status_report", roleSession, "status_report", true},
 		{"session can publish own scenario result", roleSession, "scenario_result_publish", true},
 		{"session cannot upgrade", roleSession, "upgrade", false},

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -66,7 +67,14 @@ func TestAgentCatalogHandlerIncludesCustomAgentAndDefault(t *testing.T) {
 		h.sm.cfg.Agents = map[string]config.Agent{}
 	}
 
-	h.sm.cfg.Agents["thrawn"] = config.Agent{NonInteractiveArgs: []string{}, Command: "thrawn-cli"}
+	h.sm.cfg.Agents["thrawn"] = config.Agent{
+		NonInteractiveArgs: []string{},
+		Command:            "thrawn-cli",
+		Info: map[string][]string{
+			"version": {"--version"},
+			"model":   {"--models"},
+		},
+	}
 	h.sm.cfg.DefaultAgent = "thrawn"
 	h.sm.mu.Unlock()
 
@@ -99,6 +107,14 @@ func TestAgentCatalogHandlerIncludesCustomAgentAndDefault(t *testing.T) {
 
 	if found.Command != "thrawn-cli" {
 		t.Errorf("custom agent command = %q, want thrawn-cli", found.Command)
+	}
+
+	if !sort.StringsAreSorted(found.InfoKeys) {
+		t.Errorf("custom agent info keys not sorted: %v", found.InfoKeys)
+	}
+
+	if !reflect.DeepEqual(found.InfoKeys, []string{"model", "version"}) {
+		t.Errorf("custom agent info keys = %v, want [model version]", found.InfoKeys)
 	}
 }
 
