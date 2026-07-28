@@ -28,6 +28,15 @@ const dependencyBaseRefEnv = "GRAITH_LIBGHOSTTY_BASE_REF"
 
 var httpClient = &http.Client{Timeout: 2 * time.Minute}
 
+type commandRunner func(context.Context, string, string, ...string) ([]byte, error)
+
+type retryPolicy struct {
+	attempts int
+	delay    time.Duration
+}
+
+var goModuleDownloadRetry = retryPolicy{attempts: 4, delay: 2 * time.Second}
+
 type moduleDownload struct {
 	Version string `json:"Version"`
 	Dir     string `json:"Dir"`
@@ -156,7 +165,7 @@ func validateRepositories(lock Lock) error {
 	want := map[string][2]string{
 		"go-libghostty": {lock.GoLibghostty.Repository, "https://tangled.org/mitchellh.com/go-libghostty"},
 		"Ghostty":       {lock.Ghostty.Repository, "https://github.com/ghostty-org/ghostty.git"},
-		"Zig":           {lock.Zig.Repository, "ziglang/zig"},
+		"Zig":           {lock.Zig.Repository, "https://codeberg.org/ziglang/zig"},
 		"uucode":        {lock.Uucode.Repository, "jacobsandlund/uucode"},
 		"Highway":       {lock.Highway.Repository, "google/highway"},
 		"simdutf":       {lock.Simdutf.Repository, "simdutf/simdutf"},
@@ -351,7 +360,7 @@ func refreshGhosttyClosure(ctx context.Context, source string, lock *Lock, deriv
 }
 
 func refreshGoLibghostty(ctx context.Context, root string, lock *Lock) (bool, error) {
-	output, err := run(ctx, root, "go", "mod", "download", "-json", "go.mitchellh.com/libghostty@"+lock.GoLibghostty.Commit)
+	output, err := runGoModuleDownload(ctx, root, "go.mitchellh.com/libghostty@"+lock.GoLibghostty.Commit)
 	if err != nil {
 		return false, err
 	}
@@ -412,6 +421,83 @@ func updateGoModule(ctx context.Context, root, version string) error {
 	}
 
 	return nil
+}
+
+func runGoModuleDownload(ctx context.Context, root, module string) ([]byte, error) {
+	return runWithRetry(ctx, root, goModuleDownloadRetry, isTransientGoModuleDownloadError, run, "go", "mod", "download", "-json", module)
+}
+
+func runWithRetry(
+	ctx context.Context,
+	directory string,
+	policy retryPolicy,
+	retryable func(error) bool,
+	runner commandRunner,
+	name string,
+	args ...string,
+) ([]byte, error) {
+	if policy.attempts < 1 {
+		policy.attempts = 1
+	}
+
+	var lastErr error
+
+	for attempt := 1; attempt <= policy.attempts; attempt++ {
+		output, err := runner(ctx, directory, name, args...)
+		if err == nil {
+			return output, nil
+		}
+
+		lastErr = err
+		if attempt == policy.attempts || !retryable(err) {
+			return nil, err
+		}
+
+		if policy.delay <= 0 {
+			continue
+		}
+
+		timer := time.NewTimer(policy.delay * time.Duration(attempt))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return nil, lastErr
+}
+
+func isTransientGoModuleDownloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "sum.golang.org") &&
+		!strings.Contains(message, "proxy.golang.org") {
+		return false
+	}
+
+	for _, fragment := range []string{
+		"500 internal server error",
+		"502 bad gateway",
+		"503 service unavailable",
+		"504 gateway timeout",
+		"connection reset",
+		"connection refused",
+		"i/o timeout",
+		"temporary failure",
+		"tls handshake timeout",
+		"unexpected eof",
+	} {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func primaryDependencyChanged(ctx context.Context, root string, current Lock) (bool, error) {
@@ -529,7 +615,12 @@ func refreshZig(ctx context.Context, lock *Lock) error {
 	lock.Zig.LinuxX8664URL = linux.Tarball
 	lock.Zig.LinuxX8664SHA256 = linux.Shasum
 
-	license, err := download(ctx, "https://raw.githubusercontent.com/ziglang/zig/"+lock.Zig.Version+"/LICENSE")
+	licenseURL, err := codebergRawTagURL(lock.Zig.Repository, lock.Zig.Version, "LICENSE")
+	if err != nil {
+		return err
+	}
+
+	license, err := download(ctx, licenseURL)
 	if err != nil {
 		return fmt.Errorf("download Zig license: %w", err)
 	}
@@ -537,6 +628,29 @@ func refreshZig(ctx context.Context, lock *Lock) error {
 	lock.Zig.LicenseSHA256 = bytesSHA256(license)
 
 	return nil
+}
+
+func codebergRawTagURL(repository, tag, file string) (string, error) {
+	parsed, err := url.Parse(repository)
+	if err != nil {
+		return "", err
+	}
+
+	repositoryPath := strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
+	if parsed.Scheme != "https" || parsed.Host != "codeberg.org" || repositoryPath != "ziglang/zig" {
+		return "", fmt.Errorf("unsupported Zig repository %q", repository)
+	}
+
+	if tag == "" || strings.ContainsAny(tag, "/?#") {
+		return "", fmt.Errorf("unsupported Zig tag %q", tag)
+	}
+
+	cleanFile := path.Clean(file)
+	if cleanFile == "." || cleanFile != file || path.IsAbs(cleanFile) || strings.HasPrefix(cleanFile, "../") {
+		return "", fmt.Errorf("unsupported Zig raw file %q", file)
+	}
+
+	return fmt.Sprintf("https://codeberg.org/%s/raw/tag/%s/%s", repositoryPath, url.PathEscape(tag), cleanFile), nil
 }
 
 func refreshSPDXTools(ctx context.Context, lock *Lock) error {

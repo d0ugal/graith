@@ -10,7 +10,7 @@
     "commit": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83"
   },
   "zig": {
-    "repository": "ziglang/zig",
+    "repository": "https://codeberg.org/ziglang/zig",
     "version": "0.14.1"
   },
   "uucode": {

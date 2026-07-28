@@ -160,13 +160,14 @@ hashes. Do not run the acceptance command as a mechanical update step.
 
 Renovate detects go-libghostty, Ghostty, Zig, uucode, Highway, simdutf, and the
 SPDX Java validator from exact fields in the lock. It groups them as
-`libghostty-native`, disables automerge, and disables the ordinary Go manager
-for go-libghostty so a wrapper-only module PR cannot merge. The hosted Renovate
+`libghostty-native`, disables automerge, requires dependency-dashboard approval
+for native graph proposals, and disables the ordinary Go manager for
+go-libghostty so a wrapper-only module PR cannot merge. The hosted Renovate
 service cannot run repository-defined post-upgrade commands, so the repository's
-regeneration workflow projects every proposed lock update. A generated commit explicitly dispatches all
-required workflows at its new branch SHA because a normal `GITHUB_TOKEN` push
-does not create a second pull-request run. Validate the config and its
-deliberately stale update fixture locally with:
+regeneration workflow projects every approved lock update. A generated commit
+explicitly dispatches all required workflows at its new branch SHA because a
+normal `GITHUB_TOKEN` push does not create a second pull-request run. Validate
+the config and its deliberately stale update fixture locally with:
 
 ```bash
 scripts/verify-renovate-libghostty.sh
@@ -180,9 +181,9 @@ reference as a single integrity unit.
 
 The configuration temporarily suppresses only the unsupported Ghostty
 `d4ac93a` -> `15484b6` and Highway `1.2.0` -> `1.4.0` proposal. Remove that
-rule after `generate-dependency-unit` succeeds for the full Ghostty commit,
-the Zig license URL is valid, and the matching `libghostty-vt-15484b6` Apple
-release is published with notes and an asset digest binding that commit.
+rule after `generate-dependency-unit` succeeds for the full Ghostty commit and
+the matching `libghostty-vt-15484b6` Apple release is published with notes and
+an asset digest binding that commit.
 
 go-libghostty is commit-pinned from its canonical Tangled repository. Its
 `CMakeLists.txt` exact `GIT_TAG` is the default tested Ghostty revision. Ghostty
@@ -190,14 +191,15 @@ is also commit-pinned because its C API is not released independently. A newer
 Ghostty commit can be proposed through Renovate's dependency dashboard, but it
 needs explicit approval and the complete native compatibility suite.
 
-Zig, uucode, Highway, and simdutf are discovered from their upstream release
-feeds, but compatibility comes from the selected Ghostty source tree. The
-generator reads Ghostty's root and package `build.zig.zon` declarations and the
-vendored simdutf header, then derives the exact compiled versions, commits, Zig
-content hashes, source archives, and license hashes. A transitive-only “latest”
-proposal fails until a selected Ghostty commit actually consumes it; reviewers
-use those dashboard entries to discover upstream changes rather than overriding
-Ghostty's tested graph.
+Zig is discovered from its Codeberg Forgejo tag feed, while uucode, Highway,
+and simdutf are discovered from their upstream release feeds. Compatibility
+comes from the selected Ghostty source tree. The generator reads Ghostty's root
+and package `build.zig.zon` declarations and the vendored simdutf header, then
+derives the exact compiled versions, commits, Zig content hashes, source
+archives, and license hashes. A transitive-only “latest” proposal fails until a
+selected Ghostty commit actually consumes it; reviewers use those dashboard
+entries to discover upstream changes rather than overriding Ghostty's tested
+graph.
 
 The SPDX validator is update tooling rather than compiled native content, so it
 may open automatically in the same non-automerge group. It remains
