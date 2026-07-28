@@ -5813,7 +5813,7 @@
           "type": {
             "kind": "int"
           },
-          "optional": true
+          "optional": false
         },
         {
           "name": "bindings",

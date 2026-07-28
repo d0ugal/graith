@@ -1357,7 +1357,7 @@ type TriggerRecord struct {
 	LastRun    string `json:"last_run,omitempty"`    // RFC3339 or ""
 	LastResult string `json:"last_result,omitempty"` // most recent run result
 	LastError  string `json:"last_error,omitempty"`
-	RunCount   int    `json:"run_count,omitempty"`
+	RunCount   int    `json:"run_count"`
 	Bindings   int    `json:"bindings,omitempty"` // watch: live bound sessions
 	Degraded   string `json:"degraded,omitempty"` // watch: degraded binding reason
 	// DegradedRetryCount/DegradedRetryAt describe the automatic recovery of the
