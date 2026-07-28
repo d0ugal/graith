@@ -492,7 +492,15 @@ func gcxReactorSuffix(eventID string) string {
 
 func pollGCXOnCall(ctx context.Context, cfg *config.GCXConfig, runner gcxRunner) (bool, error) {
 	if cfg.OnCallUserID == "" {
+		if len(cfg.ScheduleIDs) > 0 {
+			return false, errors.New("oncall_user_id and schedule_ids must be set together")
+		}
+
 		return true, nil
+	}
+
+	if len(cfg.ScheduleIDs) == 0 {
+		return false, errors.New("oncall_user_id and schedule_ids must be set together")
 	}
 
 	out, err := runGCXWithTimeout(ctx, cfg, runner,
@@ -515,6 +523,7 @@ func pollGCXOnCall(ctx context.Context, cfg *config.GCXConfig, runner gcxRunner)
 
 	found := make(map[string]bool, len(wanted))
 	onCall := false
+	matchAnyUser := cfg.OnCallUserID == config.GCXOnCallAnyUser
 
 	for _, schedule := range schedules {
 		if !wanted[schedule.ID] {
@@ -523,6 +532,12 @@ func pollGCXOnCall(ctx context.Context, cfg *config.GCXConfig, runner gcxRunner)
 
 		found[schedule.ID] = true
 		for _, user := range schedule.OnCallNow {
+			if matchAnyUser && strings.TrimSpace(user.PK) != "" {
+				onCall = true
+
+				break
+			}
+
 			if user.PK == cfg.OnCallUserID {
 				onCall = true
 			}

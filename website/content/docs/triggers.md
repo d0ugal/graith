@@ -171,7 +171,7 @@ event            = "oncall_alert_group" # v1 value; also the default
 context          = "oncall-automation"  # required gcx context name
 every            = "1m"                 # default 1m
 timeout          = "30s"                # per gcx call; default 30s
-oncall_user_id   = "U..."               # stable human OnCall user ID
+oncall_user_id   = "U..."               # stable human OnCall user ID, or "*" for testing
 schedule_ids     = ["S..."]             # schedules that gate this trigger
 team_ids         = ["T..."]             # optional alert filters
 integration_ids  = ["I..."]             # optional alert filters
@@ -202,10 +202,13 @@ gcx irm oncall schedules list \
 ```
 
 `oncall_user_id` and `schedule_ids` must be configured together; omitting both
-disables the on-call gate. The source checks whether that user is in
-`spec.on_call_now` for **any** selected schedule. If the schedule read fails or a
-configured schedule is absent, it fails closed: no action fires and `gr trigger
-status` records the error.
+disables the on-call gate. With a literal user ID, the source checks whether
+that user is in `spec.on_call_now` for **any** selected schedule. For trigger
+testing, set `oncall_user_id = "*"` to pass the gate when any user is currently
+on any selected schedule. The wildcard still requires `schedule_ids`, and if the
+schedule read fails or a configured schedule is absent, it fails closed: no
+action fires and `gr trigger status` records the error. `oncall_user_id` cannot
+include leading or trailing whitespace.
 
 The gate answers "is this user on call when the poll runs?", not "when the alert
 began?" — an off-call → on-call transition primes without firing (see below), so
