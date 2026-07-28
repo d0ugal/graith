@@ -3,7 +3,10 @@ package ciworkflow
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -309,6 +312,229 @@ func TestLibghosttyLinuxArtifactsRemainTrustedAndLockComplete(t *testing.T) {
 	assertNotContains(t, contractStep, "if: needs.changes.outputs.dependency-unit")
 	assertRegexp(t, nativePublish, `(?ms)gh release create.*?gh release view`)
 	assertRegexp(t, nativePublish, `actions/checkout@[0-9a-f]{40}`)
+}
+
+func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	workflowPath := filepath.Join(repoRoot, ".github/workflows/libghostty-native-artifacts.yml")
+	nativeArtifacts := readPolicyFile(t, workflowPath)
+
+	workflow, err := ReadP11WorkflowSummary(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := p11WorkflowJobIDs(workflow); strings.Join(got, ",") != "apple-build,apple-publish,authorize,generate,linux-build,linux-publish,push,validate" {
+		t.Fatalf("artifact workflow jobs = %#v", got)
+	}
+
+	assertContains(t, nativeArtifacts, "pull_request_target")
+	assertContains(t, nativeArtifacts, "zizmor: ignore[dangerous-triggers]")
+	assertContains(t, nativeArtifacts, "RELEASE_TOKEN is isolated in a no-code push job")
+	assertContains(t, nativeArtifacts, "native-artifact-approved")
+	assertContains(t, nativeArtifacts, "libghostty-native.lock.json")
+	assertContains(t, nativeArtifacts, "same-repository PR branches")
+	assertContains(t, nativeArtifacts, "reviewing this exact native dependency head SHA")
+	assertContains(t, nativeArtifacts, "lock-only dependency PRs")
+	assertContains(t, nativeArtifacts, "prepare-artifact-lock")
+	assertContains(t, nativeArtifacts, "generate-artifact-inputs")
+	assertContains(t, nativeArtifacts, "generate-dependency-unit")
+	assertContains(t, nativeArtifacts, "libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag")
+	assertContains(t, nativeArtifacts, "libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux")
+
+	if !reflect.DeepEqual(workflow.Events, []string{"pull_request_target"}) {
+		t.Fatalf("artifact workflow events = %#v, want pull_request_target", workflow.Events)
+	}
+
+	if !reflect.DeepEqual(workflow.Permissions, map[string]string{"contents": "read", "pull-requests": "read"}) {
+		t.Fatalf("artifact workflow permissions = %#v", workflow.Permissions)
+	}
+
+	authorize := p11WorkflowJob(t, workflow, "authorize")
+	validate := p11WorkflowJob(t, workflow, "validate")
+	appleBuildJob := p11WorkflowJob(t, workflow, "apple-build")
+	applePublishJob := p11WorkflowJob(t, workflow, "apple-publish")
+	linuxBuildJob := p11WorkflowJob(t, workflow, "linux-build")
+	linuxPublishJob := p11WorkflowJob(t, workflow, "linux-publish")
+	generate := p11WorkflowJob(t, workflow, "generate")
+	push := p11WorkflowJob(t, workflow, "push")
+
+	if p11JobUsesAction(authorize, "actions/checkout") || p11JobRunsRepositoryControlledCode(authorize) {
+		t.Fatal("artifact authorization job must not check out or run repository-controlled code")
+	}
+
+	authorizeStep := p11WorkflowStep(t, authorize, "Require same-repository lock-only approved PR")
+	assertContains(t, authorizeStep.Run, `[ "$EVENT_ACTION" != "labeled" ] || [ "$EVENT_LABEL" != "$APPROVAL_LABEL" ]`)
+	assertContains(t, authorizeStep.Run, `repos/$REPOSITORY/compare/$BASE_SHA...$HEAD_SHA`)
+	assertNotContains(t, authorizeStep.Run, `pulls/$PR_NUMBER/files`)
+
+	if p11JobUsesAction(validate, "actions/checkout") || p11JobRunsRepositoryControlledCode(validate) {
+		t.Fatal("artifact credential validation job must not check out or run repository-controlled code")
+	}
+
+	if p11JobUsesAction(applePublishJob, "actions/checkout") ||
+		p11JobUsesAction(linuxPublishJob, "actions/checkout") ||
+		p11JobRunsRepositoryControlledCode(applePublishJob) ||
+		p11JobRunsRepositoryControlledCode(linuxPublishJob) {
+		t.Fatal("artifact publisher jobs must not check out or run repository-controlled code")
+	}
+
+	if p11JobRunsRepositoryControlledCode(push) {
+		t.Fatal("artifact push job must not run repository-controlled code")
+	}
+
+	if got := p11WorkflowReleaseTokenExpressionCount(workflow); got != 2 {
+		t.Fatalf("artifact workflow RELEASE_TOKEN structural references = %d, want validation env and push checkout only", got)
+	}
+
+	for id, job := range map[string]P11WorkflowJob{
+		"apple-build":   appleBuildJob,
+		"apple-publish": applePublishJob,
+		"linux-build":   linuxBuildJob,
+		"linux-publish": linuxPublishJob,
+		"generate":      generate,
+	} {
+		if p11JobHasReleaseTokenExpression(job) {
+			t.Fatalf("%s job must not receive RELEASE_TOKEN", id)
+		}
+
+		if p11JobCheckoutPersistsCredentials(job) {
+			t.Fatalf("%s job must not persist checkout credentials", id)
+		}
+	}
+
+	for id, job := range map[string]P11WorkflowJob{
+		"apple-build": appleBuildJob,
+		"linux-build": linuxBuildJob,
+	} {
+		if job.Permissions["contents"] != "read" || job.Permissions["pull-requests"] != "read" {
+			t.Fatalf("%s permissions = %#v, want read-only build permissions", id, job.Permissions)
+		}
+	}
+
+	for id, job := range map[string]P11WorkflowJob{
+		"apple-publish": applePublishJob,
+		"linux-publish": linuxPublishJob,
+	} {
+		if job.Permissions["contents"] != "write" || job.Permissions["pull-requests"] != "read" {
+			t.Fatalf("%s permissions = %#v, want release write plus PR read", id, job.Permissions)
+		}
+	}
+
+	for id, job := range map[string]P11WorkflowJob{
+		"apple-build": appleBuildJob,
+		"linux-build": linuxBuildJob,
+		"generate":    generate,
+	} {
+		checkout := p11WorkflowStep(t, job, "Check out trusted base")
+		if checkout.With["ref"] != "${{ github.event.pull_request.base.sha }}" ||
+			checkout.With["persist-credentials"] != "false" {
+			t.Fatalf("%s trusted checkout = %#v", id, checkout.With)
+		}
+
+		overlay := p11WorkflowStep(t, job, "Overlay reviewed PR lock")
+		assertContains(t, overlay.Run, "application/vnd.github.raw")
+		assertContains(t, overlay.Run, "contents/libghostty-native.lock.json?ref=$SOURCE_SHA")
+	}
+
+	appleCache := p11WorkflowStep(t, appleBuildJob, "Check for existing Apple artifact")
+	assertContains(t, appleCache.Run, "verified immutable Apple artifact already published")
+	assertContains(t, appleCache.Run, "go-libghostty commit: $go_libghostty_commit")
+	assertContains(t, appleCache.Run, "Zig version: $zig_version")
+
+	appleBuild := p11WorkflowStep(t, appleBuildJob, "Build Apple artifact")
+	if _, ok := appleBuild.Env["GH_TOKEN"]; ok {
+		t.Fatal("Apple build step must not receive GH_TOKEN")
+	}
+
+	assertContains(t, appleBuild.Run, "swift package compute-checksum")
+	assertContains(t, p11WorkflowStep(t, appleBuildJob, "Upload built Apple artifact").Uses, "actions/upload-artifact")
+
+	applePublish := p11WorkflowStep(t, applePublishJob, "Publish Apple artifact")
+	assertContains(t, applePublish.Run, "gh release upload")
+	assertContains(t, applePublish.Run, "Published Apple artifact digest")
+	assertContains(t, p11WorkflowStep(t, applePublishJob, "Download built Apple artifact").Uses, "actions/download-artifact")
+
+	linuxBuild := p11WorkflowStep(t, linuxBuildJob, "Build and pack Linux artifact")
+	assertContains(t, linuxBuild.Env["GRAITH_LIBGHOSTTY_ARTIFACT_INPUTS"], "1")
+	assertContains(t, linuxBuild.Run, `"$RUNNER_TEMP/libghosttyarchive" pack`)
+	assertContains(t, p11WorkflowStep(t, linuxBuildJob, "Check for existing Linux artifact").Run, "verified immutable Linux artifact already published")
+	assertContains(t, p11WorkflowStep(t, linuxBuildJob, "Upload built Linux artifact").Uses, "actions/upload-artifact")
+	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Download built Linux artifact").Uses, "actions/download-artifact")
+	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset").Run, "gh release upload")
+	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset").Run, "Published Linux artifact digest")
+
+	commit := p11WorkflowStep(t, generate, "Commit generated native files if changed")
+	assertContains(t, commit.Run, `git commit-tree "$tree_sha" -p "$SOURCE_SHA"`)
+	assertContains(t, commit.Run, `git checkout --detach "$generated_sha"`)
+	assertContains(t, commit.Run, `git bundle create "$RUNNER_TEMP/generated-native.bundle" HEAD "^$SOURCE_SHA"`)
+	assertContains(t, commit.Run, "Generated native commit contains a non-allowlisted path.")
+
+	pushCheckout := p11WorkflowStep(t, push, "Check out source head with workflow-triggering credentials")
+	if pushCheckout.With["token"] != "${{ secrets.RELEASE_TOKEN }}" ||
+		pushCheckout.With["persist-credentials"] != "true" {
+		t.Fatalf("artifact push checkout = %#v", pushCheckout.With)
+	}
+
+	pushStep := p11WorkflowStep(t, push, "Push generated native commit")
+	assertContains(t, pushStep.Run, `git ls-remote origin "refs/heads/$HEAD_REF"`)
+	assertContains(t, pushStep.Run, `git diff --no-renames --name-only -z "$SOURCE_SHA" "$GENERATED_SHA"`)
+	assertContains(t, pushStep.Run, `git push origin "HEAD:$HEAD_REF"`)
+	assertNotContains(t, pushStep.Run, "--force")
+	assertNotContains(t, pushStep.Run, "${{ github.head_ref }}")
+}
+
+func TestLibghosttyNativeGeneratedCommitBundleRoundTrips(t *testing.T) {
+	work := t.TempDir()
+	run := func(args ...string) string {
+		t.Helper()
+
+		command := exec.Command(args[0], args[1:]...)
+		command.Dir = work
+
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, output)
+		}
+
+		return strings.TrimSpace(string(output))
+	}
+
+	run("git", "init", "-q", "-b", "main")
+	run("git", "config", "user.name", "Braw Bot")
+	run("git", "config", "user.email", "braw@example.invalid")
+
+	if err := os.WriteFile(filepath.Join(work, "lock"), []byte("canny\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run("git", "add", "lock")
+	run("git", "commit", "-qm", "base")
+
+	if err := os.WriteFile(filepath.Join(work, "lock"), []byte("dreich\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run("git", "commit", "-qam", "source")
+	sourceSHA := run("git", "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(work, "generated"), []byte("blether\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run("git", "add", "generated")
+	treeSHA := run("git", "write-tree")
+	generatedSHA := run("git", "commit-tree", treeSHA, "-p", sourceSHA, "-m", "generated")
+	run("git", "checkout", "--detach", generatedSHA)
+
+	bundlePath := filepath.Join(work, "generated.bundle")
+	run("git", "bundle", "create", bundlePath, "HEAD", "^"+sourceSHA)
+	run("git", "checkout", "-q", sourceSHA)
+	run("git", "fetch", bundlePath, "HEAD")
+
+	if got := run("git", "rev-parse", "FETCH_HEAD"); got != generatedSHA {
+		t.Fatalf("FETCH_HEAD = %s, want generated commit %s", got, generatedSHA)
+	}
 }
 
 func TestLibghosttyLinuxArtifactPolicyRequiresArchiveHelperChecks(t *testing.T) {

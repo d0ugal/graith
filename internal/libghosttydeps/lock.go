@@ -177,7 +177,11 @@ func decodeLock(data []byte, requireProjectionConsistency bool) (Lock, error) {
 }
 
 func WriteLock(path string, lock Lock) error {
-	if err := lock.Validate(); err != nil {
+	return writeLock(path, lock, true)
+}
+
+func writeLock(path string, lock Lock, requireProjectionConsistency bool) error {
+	if err := lock.validate(requireProjectionConsistency); err != nil {
 		return err
 	}
 
@@ -247,6 +251,9 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 	if requireProjectionConsistency {
 		check(sha256Pattern.MatchString(lock.Ghostty.LinuxArtifacts.AMD64.SHA256), "invalid Linux amd64 artifact SHA-256")
 		check(sha256Pattern.MatchString(lock.Ghostty.LinuxArtifacts.ARM64.SHA256), "invalid Linux arm64 artifact SHA-256")
+		check(!isRepeatedCharacterSHA256(lock.Ghostty.AppleArtifact.SHA256), "Apple artifact SHA-256 is a placeholder")
+		check(!isRepeatedCharacterSHA256(lock.Ghostty.LinuxArtifacts.AMD64.SHA256), "Linux amd64 artifact SHA-256 is a placeholder")
+		check(!isRepeatedCharacterSHA256(lock.Ghostty.LinuxArtifacts.ARM64.SHA256), "Linux arm64 artifact SHA-256 is a placeholder")
 	}
 
 	for name, value := range map[string]string{
@@ -273,6 +280,10 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 	if requireProjectionConsistency && len(lock.Ghostty.Commit) >= 7 {
 		check(strings.Contains(lock.Ghostty.AppleArtifact.URL, lock.Ghostty.Commit[:7]),
 			"Apple artifact URL does not contain the Ghostty short commit")
+		check(strings.Contains(lock.Ghostty.LinuxArtifacts.AMD64.URL, lock.Ghostty.Commit[:7]),
+			"Linux amd64 artifact URL does not contain the Ghostty short commit")
+		check(strings.Contains(lock.Ghostty.LinuxArtifacts.ARM64.URL, lock.Ghostty.Commit[:7]),
+			"Linux arm64 artifact URL does not contain the Ghostty short commit")
 	}
 
 	if requireProjectionConsistency {
@@ -281,6 +292,20 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 	}
 
 	return errors.Join(problems...)
+}
+
+func isRepeatedCharacterSHA256(value string) bool {
+	if !sha256Pattern.MatchString(value) {
+		return false
+	}
+
+	for index := 1; index < len(value); index++ {
+		if value[index] != value[0] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // AcceptLicenseReviews binds the current license conclusions to the exact

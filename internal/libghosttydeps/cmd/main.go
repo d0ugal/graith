@@ -29,8 +29,14 @@ func main() {
 		err = libghosttydeps.Verify(absolute)
 	case "verify-generated":
 		err = libghosttydeps.VerifyGenerated(absolute)
+	case "verify-artifact-inputs":
+		err = libghosttydeps.VerifyArtifactInputs(absolute)
 	case "generate":
 		err = libghosttydeps.Generate(context.Background(), absolute)
+	case "generate-artifact-inputs":
+		err = libghosttydeps.GenerateArtifactInputs(context.Background(), absolute)
+	case "prepare-artifact-lock":
+		err = libghosttydeps.PrepareArtifactLock(context.Background(), absolute)
 	case "accept-license-reviews":
 		err = acceptLicenseReviews(absolute)
 	default:
@@ -43,7 +49,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: go run ./internal/libghosttydeps/cmd verify|verify-generated|generate|accept-license-reviews [repository-root]")
+	fmt.Fprintln(os.Stderr, "usage: go run ./internal/libghosttydeps/cmd verify|verify-generated|verify-artifact-inputs|generate|generate-artifact-inputs|prepare-artifact-lock|accept-license-reviews [repository-root]")
 	os.Exit(2)
 }
 

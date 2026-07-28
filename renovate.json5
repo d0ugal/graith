@@ -26,7 +26,7 @@
       commitMessageTopic: 'native libghostty dependency unit',
       prBodyNotes: [
         'This group is an exact native dependency unit and must never be automerged.',
-        'The generation task rotates go.mod/go.sum, Ghostty and wrapper revisions, the Apple artifact, Zig/transitive source and license hashes, committed headers, SPDX, and notices. A red generation check means the selected releases are not present in the selected Ghostty commit or the reviewed Apple artifact has not been published yet.',
+        'For same-repository lock-only PRs, a maintainer should review the proposal, including go-libghostty\'s tested Ghostty pin, and apply native-artifact-approved. The trusted artifact workflow consumes that exact label event, builds/publishes Apple and Linux assets keyed by the Ghostty, go-libghostty, and Zig inputs, then pushes the generated go.mod/go.sum, Ghostty and wrapper revisions, Zig/transitive source and license hashes, committed headers, SPDX, and notices back to this branch. Reapply the label after a rebase or synchronize event.',
         'If license or embedded-notice hashes changed, inspect the exact evidence and run scripts/libghostty-native.sh accept-license-reviews before regenerating. Run every required libghostty native check before merge. See the contributing guide for commit-pinned and vendored discovery rules.',
       ],
     },
@@ -43,10 +43,10 @@
     {
       // Defer the unsupported Ghostty d4ac93a -> 15484b6 and Highway
       // 1.2.0 -> 1.4.0 proposal. The matching libghostty-vt-15484b6 Apple
-      // artifact is not published, so generation cannot produce a reviewable
-      // dependency unit. Remove this rule only after generate-dependency-unit
-      // succeeds against the same Ghostty commit, with a published Apple
-      // release whose notes and GitHub asset digest bind that full commit.
+      // artifact is not buildable through the reviewed artifact workflow, so
+      // generation cannot produce a reviewable dependency unit. Remove this
+      // rule only after the artifact workflow can publish Apple and Linux
+      // releases whose notes and GitHub asset digests bind that full commit.
       matchDepTypes: ['libghostty-native'],
       matchJsonata: [
         "(depName = 'Ghostty' and currentDigest = 'd4ac93a0395d321b043ee0116dc8a1a384f0fb83') or (depName = 'Highway' and currentValue = '1.2.0')",

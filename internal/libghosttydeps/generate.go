@@ -22,13 +22,23 @@ import (
 	"time"
 )
 
-const maxDependencyDownload = 256 << 20
+const (
+	maxDependencyDownload   = 256 << 20
+	dependencyBaseRefEnv    = "GRAITH_LIBGHOSTTY_BASE_REF"
+	graithReleaseRepository = "d0ugal/graith"
+	appleArtifactAssetName  = "libghostty-vt.xcframework.zip"
+)
 
-const dependencyBaseRefEnv = "GRAITH_LIBGHOSTTY_BASE_REF"
-
-var httpClient = &http.Client{Timeout: 2 * time.Minute}
+var (
+	httpClient            = &http.Client{Timeout: 2 * time.Minute}
+	pendingArtifactSHA256 = strings.Repeat("0", 64)
+)
 
 type commandRunner func(context.Context, string, string, ...string) ([]byte, error)
+
+type generateOptions struct {
+	allowPendingLinuxArtifacts bool
+}
 
 type retryPolicy struct {
 	attempts int
@@ -77,6 +87,19 @@ var generatedUnitFiles = []string{
 const generatedHeaders = "gui/shared/Sources/CGhosttyVT/include/ghostty"
 
 func Generate(ctx context.Context, root string) error {
+	return generate(ctx, root, generateOptions{})
+}
+
+// GenerateArtifactInputs rotates the native dependency projections for a
+// trusted artifact-builder workspace before the new Linux artifacts have been
+// published. The resulting lock is deliberately not strict-verifiable and must
+// not be committed; Generate performs the final strict rotation after the
+// release assets exist.
+func GenerateArtifactInputs(ctx context.Context, root string) error {
+	return generate(ctx, root, generateOptions{allowPendingLinuxArtifacts: true})
+}
+
+func generate(ctx context.Context, root string, options generateOptions) error {
 	lockPath := filepath.Join(root, LockFilename)
 
 	// Renovate changes canonical versions and commits before this command runs,
@@ -93,6 +116,11 @@ func Generate(ctx context.Context, root string) error {
 	}
 
 	primaryUpdate, err := primaryDependencyChanged(ctx, root, lock)
+	if err != nil {
+		return err
+	}
+
+	artifactUpdate, err := artifactDependencyChanged(ctx, root, lock)
 	if err != nil {
 		return err
 	}
@@ -128,8 +156,22 @@ func Generate(ctx context.Context, root string) error {
 		return err
 	}
 
-	if err := refreshAppleArtifact(ctx, &lock); err != nil {
-		return err
+	if artifactUpdate || wrapperMoved {
+		if options.allowPendingLinuxArtifacts {
+			if err := refreshAppleArtifact(ctx, &lock); err != nil {
+				return err
+			}
+
+			stageLinuxArtifactPlaceholders(&lock)
+		} else {
+			if err := refreshAppleArtifact(ctx, &lock); err != nil {
+				return err
+			}
+
+			if err := refreshLinuxArtifacts(ctx, &lock); err != nil {
+				return err
+			}
+		}
 	}
 
 	return withGeneratedUnitRollback(root, func() error {
@@ -141,7 +183,7 @@ func Generate(ctx context.Context, root string) error {
 			return err
 		}
 
-		if err := WriteLock(lockPath, lock); err != nil {
+		if err := writeLock(lockPath, lock, !options.allowPendingLinuxArtifacts); err != nil {
 			return err
 		}
 
@@ -153,12 +195,65 @@ func Generate(ctx context.Context, root string) error {
 			return err
 		}
 
-		if err := VerifyGenerated(root); err != nil {
+		if err := verify(root, false, !options.allowPendingLinuxArtifacts); err != nil {
 			return fmt.Errorf("verify generated native dependency unit: %w", err)
 		}
 
 		return nil
 	})
+}
+
+// PrepareArtifactLock resolves the final wrapper-selected Ghostty source pin
+// and Zig toolchain metadata without requiring the reviewed native release
+// artifacts to exist yet. Trusted artifact-publication workflows use this
+// materialized lock as build input, then run Generate after publishing the
+// immutable release assets.
+func PrepareArtifactLock(ctx context.Context, root string) error {
+	lockPath := filepath.Join(root, LockFilename)
+
+	lock, err := loadLockForGeneration(lockPath)
+	if err != nil {
+		return err
+	}
+
+	if err := validateRepositories(lock); err != nil {
+		return err
+	}
+
+	primaryUpdate, err := primaryDependencyChanged(ctx, root, lock)
+	if err != nil {
+		return err
+	}
+
+	work, err := os.MkdirTemp("", "graith-libghostty-artifacts-")
+	if err != nil {
+		return fmt.Errorf("create native artifact preparation directory: %w", err)
+	}
+	defer func() {
+		_ = os.RemoveAll(work)
+	}()
+
+	wrapperMoved, err := refreshGoLibghostty(ctx, root, &lock)
+	if err != nil {
+		return err
+	}
+
+	ghosttySource := filepath.Join(work, "ghostty")
+	if err := checkoutCommit(ctx, lock.Ghostty.Repository, lock.Ghostty.Commit, ghosttySource); err != nil {
+		return err
+	}
+
+	if err := refreshGhosttyClosure(ctx, ghosttySource, &lock, primaryUpdate || wrapperMoved); err != nil {
+		return err
+	}
+
+	if err := refreshZig(ctx, &lock); err != nil {
+		return err
+	}
+
+	stageNativeArtifactPlaceholders(&lock)
+
+	return writeLock(lockPath, lock, false)
 }
 
 func validateRepositories(lock Lock) error {
@@ -501,6 +596,24 @@ func isTransientGoModuleDownloadError(err error) bool {
 }
 
 func primaryDependencyChanged(ctx context.Context, root string, current Lock) (bool, error) {
+	previous, ok, err := dependencyBaseLock(ctx, root)
+	if err != nil || !ok {
+		return ok, err
+	}
+
+	return primaryDependencyDiffers(previous, current), nil
+}
+
+func artifactDependencyChanged(ctx context.Context, root string, current Lock) (bool, error) {
+	previous, ok, err := dependencyBaseLock(ctx, root)
+	if err != nil || !ok {
+		return ok, err
+	}
+
+	return artifactDependencyDiffers(previous, current), nil
+}
+
+func dependencyBaseLock(ctx context.Context, root string) (Lock, bool, error) {
 	ref := os.Getenv(dependencyBaseRefEnv)
 
 	required := ref != ""
@@ -510,17 +623,17 @@ func primaryDependencyChanged(ctx context.Context, root string, current Lock) (b
 
 	if required {
 		if _, err := run(ctx, root, "git", "rev-parse", "--verify", ref+"^{commit}"); err != nil {
-			return false, fmt.Errorf("resolve native dependency base %s: %w", ref, err)
+			return Lock{}, false, fmt.Errorf("resolve native dependency base %s: %w", ref, err)
 		}
 
 		mergeBase, err := run(ctx, root, "git", "merge-base", ref, "HEAD")
 		if err != nil {
-			return false, fmt.Errorf("find native dependency merge base for %s: %w", ref, err)
+			return Lock{}, false, fmt.Errorf("find native dependency merge base for %s: %w", ref, err)
 		}
 
 		ref = strings.TrimSpace(string(mergeBase))
 		if !fullSHAPattern.MatchString(ref) {
-			return false, fmt.Errorf("invalid native dependency merge base %q", ref)
+			return Lock{}, false, fmt.Errorf("invalid native dependency merge base %q", ref)
 		}
 	}
 
@@ -530,25 +643,30 @@ func primaryDependencyChanged(ctx context.Context, root string, current Lock) (b
 			// The base for the change that introduces the canonical lock has no
 			// file to compare. Treat bootstrap as a primary update so Ghostty's
 			// own declarations populate every transitive version.
-			return true, nil
+			return Lock{}, true, nil
 		}
 		// A newly introduced, uncommitted lock has no HEAD projection. This is
 		// only the bootstrap case; normal Renovate and regeneration runs always
 		// have either HEAD or an explicit base revision available.
-		return false, nil
+		return Lock{}, false, nil
 	}
 
 	previous, err := decodeLock(output, false)
 	if err != nil {
-		return false, fmt.Errorf("decode native dependency base %s: %w", ref, err)
+		return Lock{}, false, fmt.Errorf("decode native dependency base %s: %w", ref, err)
 	}
 
-	return primaryDependencyDiffers(previous, current), nil
+	return previous, true, nil
 }
 
 func primaryDependencyDiffers(previous, current Lock) bool {
 	return previous.GoLibghostty.Commit != current.GoLibghostty.Commit ||
 		previous.Ghostty.Commit != current.Ghostty.Commit
+}
+
+func artifactDependencyDiffers(previous, current Lock) bool {
+	return primaryDependencyDiffers(previous, current) ||
+		previous.Zig.Version != current.Zig.Version
 }
 
 func reconcileVersion(component, compiled string, selected *string, derive bool) error {
@@ -669,22 +787,123 @@ func refreshSPDXTools(ctx context.Context, lock *Lock) error {
 }
 
 func refreshAppleArtifact(ctx context.Context, lock *Lock) error {
-	tag := "libghostty-vt-" + lock.Ghostty.Commit[:7]
+	tag := appleArtifactTag(*lock)
 
-	archive, assetURL, releaseBody, err := verifiedGitHubReleaseAsset(ctx, "d0ugal/graith", tag, "libghostty-vt.xcframework.zip")
+	archive, assetURL, releaseBody, err := verifiedGitHubReleaseAsset(ctx, graithReleaseRepository, tag, appleArtifactAssetName)
 	if err != nil {
 		return fmt.Errorf("download Apple artifact for Ghostty %s (publish the reviewed artifact before regenerating): %w", lock.Ghostty.Commit, err)
 	}
 
 	digest := bytesSHA256(archive)
-	if !strings.Contains(releaseBody, lock.Ghostty.Commit) || !strings.Contains(releaseBody, "SPM checksum: "+digest) {
-		return fmt.Errorf("apple artifact release %s is not bound to full Ghostty commit %s and checksum %s", tag, lock.Ghostty.Commit, digest)
+	if !strings.Contains(releaseBody, lock.Ghostty.Commit) ||
+		!strings.Contains(releaseBody, lock.GoLibghostty.Commit) ||
+		!strings.Contains(releaseBody, "Zig version: "+lock.Zig.Version) ||
+		!strings.Contains(releaseBody, "SPM checksum: "+digest) {
+		return fmt.Errorf("apple artifact release %s is not bound to full Ghostty commit %s, go-libghostty commit %s, Zig version %s, and checksum %s",
+			tag, lock.Ghostty.Commit, lock.GoLibghostty.Commit, lock.Zig.Version, digest)
 	}
 
 	lock.Ghostty.AppleArtifact.URL = assetURL
 	lock.Ghostty.AppleArtifact.SHA256 = digest
 
 	return nil
+}
+
+func refreshLinuxArtifacts(ctx context.Context, lock *Lock) error {
+	tag := linuxArtifactTag(*lock)
+	releaseBody := ""
+
+	for _, artifact := range []struct {
+		arch  string
+		field *LinuxArtifact
+	}{
+		{arch: "amd64", field: &lock.Ghostty.LinuxArtifacts.AMD64},
+		{arch: "arm64", field: &lock.Ghostty.LinuxArtifacts.ARM64},
+	} {
+		assetName := linuxArtifactAssetName(artifact.arch)
+
+		archive, assetURL, body, err := verifiedGitHubReleaseAsset(ctx, graithReleaseRepository, tag, assetName)
+		if err != nil {
+			return fmt.Errorf("download Linux %s artifact for Ghostty %s (publish the reviewed Linux artifacts before regenerating): %w", artifact.arch, lock.Ghostty.Commit, err)
+		}
+
+		if releaseBody == "" {
+			releaseBody = body
+		} else if body != releaseBody {
+			return fmt.Errorf("linux artifact release %s returned inconsistent release notes", tag)
+		}
+
+		artifact.field.URL = assetURL
+		artifact.field.SHA256 = bytesSHA256(archive)
+	}
+
+	if !strings.Contains(releaseBody, lock.Ghostty.Commit) ||
+		!strings.Contains(releaseBody, lock.GoLibghostty.Commit) ||
+		!strings.Contains(releaseBody, "Zig version: "+lock.Zig.Version) {
+		return fmt.Errorf("linux artifact release %s is not bound to full Ghostty commit %s, go-libghostty commit %s, and Zig version %s",
+			tag, lock.Ghostty.Commit, lock.GoLibghostty.Commit, lock.Zig.Version)
+	}
+
+	return nil
+}
+
+func stageNativeArtifactPlaceholders(lock *Lock) {
+	lock.Ghostty.AppleArtifact.URL = appleArtifactURL(*lock)
+	lock.Ghostty.AppleArtifact.SHA256 = pendingArtifactSHA256
+	stageLinuxArtifactPlaceholders(lock)
+}
+
+func stageLinuxArtifactPlaceholders(lock *Lock) {
+	lock.Ghostty.LinuxArtifacts.AMD64.URL = linuxArtifactURL(*lock, "amd64")
+	lock.Ghostty.LinuxArtifacts.AMD64.SHA256 = pendingArtifactSHA256
+	lock.Ghostty.LinuxArtifacts.ARM64.URL = linuxArtifactURL(*lock, "arm64")
+	lock.Ghostty.LinuxArtifacts.ARM64.SHA256 = pendingArtifactSHA256
+}
+
+func appleArtifactTag(lock Lock) string {
+	return nativeArtifactTagPrefix(lock)
+}
+
+func appleArtifactURL(lock Lock) string {
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s",
+		graithReleaseRepository, appleArtifactTag(lock), appleArtifactAssetName)
+}
+
+func linuxArtifactTag(lock Lock) string {
+	return nativeArtifactTagPrefix(lock) + "-linux"
+}
+
+func nativeArtifactTagPrefix(lock Lock) string {
+	return "libghostty-vt-" + lock.Ghostty.Commit[:7] +
+		"-go-" + lock.GoLibghostty.Commit[:7] +
+		"-zig-" + artifactTagPart(lock.Zig.Version)
+}
+
+func artifactTagPart(value string) string {
+	var builder strings.Builder
+
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('-')
+		}
+	}
+
+	return builder.String()
+}
+
+func linuxArtifactAssetName(arch string) string {
+	return "libghostty-vt-linux-" + arch + ".tar.gz"
+}
+
+func linuxArtifactURL(lock Lock, arch string) string {
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s",
+		graithReleaseRepository, linuxArtifactTag(lock), linuxArtifactAssetName(arch))
 }
 
 func synchronizeHeaders(source, root string, lock *Lock) error {
