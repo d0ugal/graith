@@ -134,6 +134,127 @@ func TestWorkflowClassifierReleaseModesMatchCurrentClassifiersForPolicyPaths(t *
 	}
 }
 
+func TestDevReleaseWorkflowRoutingPreservesEventSemantics(t *testing.T) {
+	t.Parallel()
+
+	workflowPath := filepath.Join(p11RepoRoot(), ".github/workflows/dev-release.yml")
+	workflow := devReleaseWorkflow(t)
+	workflowYAML := readWorkflowYAML(t, workflowPath)
+	push := p11MappingValue(p11MappingValue(workflowYAML, "on"), "push")
+
+	assertStringsEqual(t, "dev-release workflow events", workflow.Events, []string{"pull_request", "push"})
+	assertStringsEqual(t, "dev-release push branches", p11StringList(p11MappingValue(push, "branches")), []string{"main"})
+
+	if p11MappingValue(push, "tags") != nil {
+		t.Fatal("dev-release workflow must not run from push tags")
+	}
+
+	filter := workflowDetectorScript(t, ".github/workflows/dev-release.yml", "changes", "dev-release")
+	assertContains(t, filter, `if [ "$EVENT" != "pull_request" ]; then
+  echo "release=true" >> "$GITHUB_OUTPUT"`)
+	assertContains(t, filter, `-changed-files "$changed_files"`)
+	assertContains(t, filter, `-github-output "$GITHUB_OUTPUT"`)
+	assertNotContains(t, filter, "cmd/cipolicy")
+	assertNotContains(t, filter, "dev-release-plan.json")
+}
+
+func TestDevReleaseRoutingFailsSafeWhenDetectorDoesNotSucceed(t *testing.T) {
+	t.Parallel()
+
+	releaseContext := p11WorkflowJob(t, devReleaseWorkflow(t), "release-context")
+
+	p11AssertJobIf(t, "release-context", releaseContext, "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')")
+	assertContains(t, releaseContext.If, "needs.changes.result != 'success'")
+	assertStringsEqual(t, "release-context needs", releaseContext.Needs, []string{"changes"})
+
+	tests := map[string]struct {
+		changesResult string
+		releaseOutput string
+		cancelled     bool
+		want          bool
+	}{
+		"detector selected dev release":      {changesResult: "success", releaseOutput: "true", want: true},
+		"detector skipped dev release":       {changesResult: "success", releaseOutput: "false", want: false},
+		"detector failed after false output": {changesResult: "failure", releaseOutput: "false", want: true},
+		"detector timed out before output":   {changesResult: "timed_out", want: true},
+		"detector skipped before output":     {changesResult: "skipped", want: true},
+		"cancelled workflow":                 {changesResult: "success", releaseOutput: "true", cancelled: true, want: false},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := devReleaseContextSelected(t, releaseContext.If, test.changesResult, test.releaseOutput, test.cancelled)
+			if got != test.want {
+				t.Fatalf("devReleaseContextSelected(result=%q, release=%q, cancelled=%t) = %t, want %t",
+					test.changesResult, test.releaseOutput, test.cancelled, got, test.want)
+			}
+		})
+	}
+}
+
+func TestDevReleasePublicationCredentialsStayPushOnly(t *testing.T) {
+	t.Parallel()
+
+	workflow := devReleaseWorkflow(t)
+	buildDarwin := p11WorkflowJob(t, workflow, "build-darwin")
+	attestLinux := p11WorkflowJob(t, workflow, "attest-linux")
+	publishDev := p11WorkflowJob(t, workflow, "publish-dev")
+
+	p11AssertJobIf(t, "attest-linux", attestLinux, "github.event_name == 'push'")
+	p11AssertJobIf(t, "publish-dev", publishDev, "github.event_name == 'push'")
+	assertStringsEqual(t, "publish-dev needs", publishDev.Needs, []string{"release-context", "assemble-dev", "attest-linux"})
+
+	if publishDev.Permissions["contents"] != "write" || publishDev.Permissions["attestations"] != "read" || len(publishDev.Permissions) != 2 {
+		t.Fatalf("publish-dev permissions = %#v, want contents:write and attestations:read only", publishDev.Permissions)
+	}
+
+	signing := p11WorkflowStep(t, buildDarwin, "Configure optional macOS service signing")
+	unsigned := p11WorkflowStep(t, buildDarwin, "Configure unsigned pull-request packaging")
+
+	if signing.If != "github.event_name == 'push'" {
+		t.Fatalf("macOS signing step if = %q, want push-only", signing.If)
+	}
+
+	if unsigned.If != "github.event_name == 'pull_request'" {
+		t.Fatalf("unsigned pull-request packaging step if = %q, want pull_request-only", unsigned.If)
+	}
+
+	if err := ValidateCredentialOperation(devReleasePublishOperation("trusted-publication")); err != nil {
+		t.Fatalf("trusted dev-release publication credential rejected: %v", err)
+	}
+
+	tests := map[string]struct {
+		trustTier string
+		wantErr   string
+	}{
+		"fork pull request": {
+			trustTier: "fork-untrusted",
+			wantErr:   "fork pull requests may use only synthetic read tokens",
+		},
+		"same-repository pull request": {
+			trustTier: "same-repository-agent",
+			wantErr:   "same-repository agent branches cannot obtain maintainer credentials",
+		},
+		"trusted base without publish": {
+			trustTier: "trusted-base",
+			wantErr:   "dev-release-publish is not allowed for trust tier trusted-base",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateCredentialOperation(devReleasePublishOperation(test.trustTier))
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("dev-release publish credential error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestMigratedDetectorScriptsFailSafe(t *testing.T) {
 	t.Parallel()
 
@@ -265,6 +386,29 @@ func TestWorkflowModeOutputs(t *testing.T) {
 	}
 }
 
+func devReleaseWorkflow(t *testing.T) P11WorkflowSummary {
+	t.Helper()
+
+	workflow, err := ReadP11WorkflowSummary(filepath.Join(p11RepoRoot(), ".github/workflows/dev-release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return workflow
+}
+
+func devReleaseContextSelected(t *testing.T, condition, changesResult, releaseOutput string, cancelled bool) bool {
+	t.Helper()
+
+	switch p11NormalizeExpression(condition) {
+	case "!cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')":
+		return !cancelled && (changesResult != "success" || releaseOutput == "true")
+	default:
+		t.Fatalf("unsupported dev-release condition %q", condition)
+		return false
+	}
+}
+
 func loadWorkflowClassifierFixtures(t *testing.T) workflowClassifierFixtureFile {
 	t.Helper()
 
@@ -293,8 +437,11 @@ func workflowDetectorScript(t *testing.T, workflowPath, jobID, mode string) stri
 	}
 
 	job := p11WorkflowJob(t, workflow, jobID)
+
+	modePattern := regexp.MustCompile(`(?:^|[[:space:]])-mode[[:space:]]+` + regexp.QuoteMeta(mode) + `(?:[[:space:]]|$)`)
 	for _, step := range job.Steps {
-		if strings.Contains(step.Run, "go run ./cmd/ciclassify -mode "+mode) {
+		if strings.Contains(step.Run, "go run ./cmd/ciclassify") &&
+			modePattern.MatchString(step.Run) {
 			return step.Run
 		}
 	}

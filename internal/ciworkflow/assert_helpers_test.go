@@ -31,3 +31,19 @@ func regenerationPushOperation(trustTier string) CredentialOperation {
 		Target: "generated/braw.bundle",
 	}
 }
+
+func devReleasePublishOperation(trustTier string) CredentialOperation {
+	return CredentialOperation{
+		Operation:  "dev-release-publish",
+		TrustTier:  trustTier,
+		Capability: "dev-release",
+		Token: SyntheticToken{
+			Name:         "release",
+			TrustTier:    trustTier,
+			Class:        syntheticMaintainerToken,
+			Scopes:       []string{"contents:write"},
+			AllowedRoots: []string{"dist/dev-release"},
+		},
+		Target: "dist/dev-release/graith-dev.tar.gz",
+	}
+}

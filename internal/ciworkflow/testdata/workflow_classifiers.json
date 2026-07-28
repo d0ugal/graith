@@ -77,11 +77,90 @@
       }
     },
     {
+      "name": "dev release workflow",
+      "event": "pull_request",
+      "files": [".github/workflows/dev-release.yml"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "sandbox_macos": true,
+        "libghostty_native": true,
+        "libghostty_dependency_unit": true,
+        "dev_release": true
+      }
+    },
+    {
+      "name": "dev release goreleaser config",
+      "event": "pull_request",
+      "files": [".goreleaser-dev.yaml"],
+      "want": {
+        "libghostty_native": true,
+        "dev_release": true
+      }
+    },
+    {
       "name": "dev release base tag helper",
       "event": "pull_request",
       "files": ["scripts/dev-release-base-tag.sh"],
       "want": {
         "dev_release": true
+      }
+    },
+    {
+      "name": "dev release version helper",
+      "event": "pull_request",
+      "files": ["scripts/dev-release-version.sh"],
+      "want": {
+        "libghostty_native": true,
+        "dev_release": true
+      }
+    },
+    {
+      "name": "dev release native helper",
+      "event": "pull_request",
+      "files": ["scripts/libghostty-native.sh"],
+      "want": {
+        "libghostty_native": true,
+        "dev_release": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "dev release native spdx metadata",
+      "event": "pull_request",
+      "files": ["libghostty-native.spdx.json"],
+      "want": {
+        "libghostty_native": true,
+        "dev_release": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "dev release native notices",
+      "event": "pull_request",
+      "files": ["THIRD_PARTY_NOTICES.libghostty.md"],
+      "want": {
+        "libghostty_native": true,
+        "dev_release": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "dev release notifier packaging",
+      "event": "pull_request",
+      "files": ["macos/notifier/build.sh"],
+      "want": {
+        "dev_release": true,
+        "stable_release": true
+      }
+    },
+    {
+      "name": "dev release daemon service packaging",
+      "event": "pull_request",
+      "files": ["internal/daemonservice/service_manifest.json"],
+      "want": {
+        "dev_release": true,
+        "stable_release": true
       }
     },
     {
