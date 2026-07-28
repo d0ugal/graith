@@ -1,0 +1,754 @@
+name: Publish native libghostty dependency artifacts
+
+on:
+  # zizmor: ignore[dangerous-triggers] This privileged trigger is limited to same-repository
+  # lock-only PRs after maintainer labeling; artifact jobs run trusted base code
+  # with the PR lock as data, and RELEASE_TOKEN is isolated in a no-code push job.
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - libghostty-native.lock.json
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: libghostty-native-artifacts-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Authorize native artifact publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      should_publish: ${{ steps.classify.outputs.should_publish }}
+    steps:
+      - name: Require same-repository lock-only approved PR
+        id: classify
+        env:
+          APPROVAL_LABEL: native-artifact-approved
+          BASE_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          should_publish=false
+          trap 'echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"' EXIT
+
+          if [ "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]; then
+            echo "::notice::Native artifact publication is available only for same-repository PR branches."
+            exit 0
+          fi
+
+          if [ "$EVENT_ACTION" != "labeled" ] || [ "$EVENT_LABEL" != "$APPROVAL_LABEL" ]; then
+            echo "::notice::Apply $APPROVAL_LABEL after reviewing this exact native dependency head SHA to publish artifacts."
+            exit 0
+          fi
+
+          files="$RUNNER_TEMP/native-pr-files.txt"
+          gh api "repos/$REPOSITORY/compare/$BASE_SHA...$HEAD_SHA" \
+            --jq '.files[].filename' > "$files"
+          file_count="$(wc -l < "$files" | tr -d ' ')"
+          if [ "$file_count" != "1" ] ||
+            ! grep -Fxq "libghostty-native.lock.json" "$files"; then
+            echo "::notice::Native artifact publication only handles lock-only dependency PRs; split other changes before applying $APPROVAL_LABEL."
+            exit 0
+          fi
+
+          should_publish=true
+
+  validate:
+    name: Validate artifact publication credentials
+    needs: authorize
+    if: needs.authorize.outputs.should_publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require workflow-triggering token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::RELEASE_TOKEN is required to push generated native dependency commits."
+            exit 1
+          fi
+
+  apple-build:
+    name: Build Apple libghostty artifact
+    needs: authorize
+    if: needs.authorize.outputs.should_publish == 'true'
+    runs-on: macos-26
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Overlay reviewed PR lock
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > libghostty-native.lock.json
+
+      - name: Materialize artifact lock
+        env:
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: scripts/libghostty-native.sh prepare-artifact-lock
+
+      - name: Check for existing Apple artifact
+        id: apple-cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          asset="libghostty-vt.xcframework.zip"
+          ghostty_commit="$(jq -er '.ghostty.commit' libghostty-native.lock.json)"
+          go_libghostty_commit="$(jq -er '.goLibghostty.commit' libghostty-native.lock.json)"
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
+          tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag"
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          if [ -z "$remote_digest" ]; then
+            exit 0
+          fi
+          case "$remote_digest" in
+            sha256:*) remote_sha="${remote_digest#sha256:}" ;;
+            *)
+              echo "::error::Apple artifact $asset on $tag has unexpected digest $remote_digest."
+              exit 1
+              ;;
+          esac
+
+          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "SPM checksum: $remote_sha" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "SHA-256: $remote_sha" "$RUNNER_TEMP/existing-apple-notes.md"
+          echo "verified immutable Apple artifact already published"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install checksum-verified Zig for Apple build
+        if: steps.apple-cache.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          test "$(uname -s)-$(uname -m)" = Darwin-arm64
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            https://ziglang.org/download/index.json -o "$RUNNER_TEMP/zig-index.json"
+          zig_url="$(jq -er --arg version "$zig_version" '.[$version]["aarch64-macos"].tarball' "$RUNNER_TEMP/zig-index.json")"
+          zig_sha256="$(jq -er --arg version "$zig_version" '.[$version]["aarch64-macos"].shasum' "$RUNNER_TEMP/zig-index.json")"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$zig_url" -o "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$zig_sha256" "$RUNNER_TEMP/zig.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/zig/zig" version | grep -Fx "$zig_version"
+
+      - name: Build Apple artifact
+        if: steps.apple-cache.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          asset="libghostty-vt.xcframework.zip"
+          archive="$RUNNER_TEMP/$asset"
+          WORK="$RUNNER_TEMP/ghostty-apple" gui/shared/build-libghostty.sh
+          ditto -c -k --sequesterRsrc --keepParent \
+            gui/shared/Libraries/libghostty-vt.xcframework "$archive"
+          asset_sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          spm_checksum="$(swift package compute-checksum "$archive")"
+          test "$spm_checksum" = "$asset_sha"
+
+      - name: Upload built Apple artifact
+        if: steps.apple-cache.outputs.exists != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libghostty-native-apple-${{ github.run_id }}
+          path: ${{ runner.temp }}/libghostty-vt.xcframework.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  apple-publish:
+    name: Publish Apple libghostty artifact
+    needs: [authorize, apple-build]
+    if: needs.authorize.outputs.should_publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Check for existing Apple artifact
+        id: apple-cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          lock="$RUNNER_TEMP/libghostty-native.lock.json"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > "$lock"
+          asset="libghostty-vt.xcframework.zip"
+          ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
+          go_libghostty_commit="$(jq -er '.goLibghostty.commit' "$lock")"
+          zig_version="$(jq -er '.zig.version' "$lock")"
+          zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
+          tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag"
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          if [ -z "$remote_digest" ]; then
+            exit 0
+          fi
+          case "$remote_digest" in
+            sha256:*) remote_sha="${remote_digest#sha256:}" ;;
+            *)
+              echo "::error::Apple artifact $asset on $tag has unexpected digest $remote_digest."
+              exit 1
+              ;;
+          esac
+
+          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "SPM checksum: $remote_sha" "$RUNNER_TEMP/existing-apple-notes.md"
+          grep -Fqx "SHA-256: $remote_sha" "$RUNNER_TEMP/existing-apple-notes.md"
+          echo "verified immutable Apple artifact already published"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Download built Apple artifact
+        if: steps.apple-cache.outputs.exists != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: libghostty-native-apple-${{ github.run_id }}
+          path: ${{ runner.temp }}/apple
+
+      - name: Publish Apple artifact
+        if: steps.apple-cache.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          lock="$RUNNER_TEMP/libghostty-native.lock.json"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > "$lock"
+          asset="libghostty-vt.xcframework.zip"
+          archive="$RUNNER_TEMP/apple/$asset"
+          ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
+          go_libghostty_commit="$(jq -er '.goLibghostty.commit' "$lock")"
+          zig_version="$(jq -er '.zig.version' "$lock")"
+          zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
+          tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag"
+          asset_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          spm_checksum="$asset_sha"
+
+          notes="$RUNNER_TEMP/apple-release-notes.md"
+          cat > "$notes" <<EOF
+          Reviewed libghostty-vt Apple artifact.
+
+          Ghostty commit: $ghostty_commit
+          go-libghostty commit: $go_libghostty_commit
+          Zig version: $zig_version
+          SPM checksum: $spm_checksum
+          SHA-256: $asset_sha
+          Source pull request: #$PR_NUMBER
+          EOF
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes-file "$notes"
+          else
+            gh release create "$tag" --title "$tag" --notes-file "$notes"
+          fi
+
+          gh release upload "$tag" "$archive#$asset" --clobber=false
+          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          if [ "$remote_digest" != "sha256:$asset_sha" ]; then
+            echo "::error::Published Apple artifact digest $remote_digest does not match built SHA-256 $asset_sha."
+            exit 1
+          fi
+
+  linux-build:
+    name: Build Linux libghostty artifact (${{ matrix.goarch }})
+    needs: [authorize, apple-publish]
+    if: needs.authorize.outputs.should_publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            target: x86_64-linux-gnu
+          - goarch: arm64
+            target: aarch64-linux-gnu
+    steps:
+      - name: Check out trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Overlay reviewed PR lock
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > libghostty-native.lock.json
+
+      - name: Materialize artifact lock
+        env:
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: scripts/libghostty-native.sh prepare-artifact-lock
+
+      - name: Check for existing Linux artifact
+        id: linux-cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          asset="libghostty-vt-linux-$GOARCH.tar.gz"
+          ghostty_commit="$(jq -er '.ghostty.commit' libghostty-native.lock.json)"
+          go_libghostty_commit="$(jq -er '.goLibghostty.commit' libghostty-native.lock.json)"
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
+          tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux"
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          if [ -z "$remote_digest" ]; then
+            exit 0
+          fi
+          case "$remote_digest" in
+            sha256:*) ;;
+            *)
+              echo "::error::Linux artifact $asset on $tag has unexpected digest $remote_digest."
+              exit 1
+              ;;
+          esac
+
+          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-linux-notes.md"
+          grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
+          grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
+          grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-linux-notes.md"
+          echo "verified immutable Linux artifact already published: $asset"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install checksum-verified Zig from the artifact lock
+        if: steps.linux-cache.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          zig_version="$(jq -er '.zig.version' libghostty-native.lock.json)"
+          zig_url="$(jq -er '.zig.linuxX8664URL' libghostty-native.lock.json)"
+          zig_sha256="$(jq -er '.zig.linuxX8664SHA256' libghostty-native.lock.json)"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            "$zig_url" -o "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$zig_sha256" "$RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/zig"
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          test "$("$RUNNER_TEMP/zig/zig" version)" = "$zig_version"
+
+      - name: Generate artifact build inputs
+        if: steps.linux-cache.outputs.exists != 'true'
+        env:
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: scripts/libghostty-native.sh generate-artifact-inputs
+
+      - name: Build and pack Linux artifact
+        if: steps.linux-cache.outputs.exists != 'true'
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_ARTIFACT_INPUTS: "1"
+          GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-linux-${{ matrix.goarch }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
+          mkdir -p "$RUNNER_TEMP/bundle/pkgconfig" "$RUNNER_TEMP/bundle/include"
+          cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"
+          cp -R gui/shared/Sources/CGhosttyVT/include/. "$RUNNER_TEMP/bundle/include/"
+          sed -e "s#^Cflags:.*#Cflags: -I\${prefix}/include -DGHOSTTY_STATIC#" \
+            -e "s#^Libs:.*#Libs: -L\${prefix} -lghostty-vt#" \
+            "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" \
+            | sed "1i prefix=\${pcfiledir}/.." \
+            > "$RUNNER_TEMP/bundle/pkgconfig/libghostty-vt-static.pc"
+          test "$(PKG_CONFIG_PATH="$RUNNER_TEMP/bundle/pkgconfig" pkg-config --cflags libghostty-vt-static)" = \
+            "-I$RUNNER_TEMP/bundle/pkgconfig/../include -DGHOSTTY_STATIC"
+          test "$(PKG_CONFIG_PATH="$RUNNER_TEMP/bundle/pkgconfig" pkg-config --libs libghostty-vt-static)" = \
+            "-L$RUNNER_TEMP/bundle/pkgconfig/.. -lghostty-vt"
+          cp libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md "$RUNNER_TEMP/bundle/"
+          jq -n --arg target "$TARGET" --arg arch "$GOARCH" --arg commit "$(jq -er '.ghostty.commit' libghostty-native.lock.json)" \
+            '{schemaVersion:1,target:$target,architecture:$arch,ghosttyCommit:$commit}' > "$RUNNER_TEMP/bundle/manifest.json"
+          env -u GOOS -u GOARCH go build -o "$RUNNER_TEMP/libghosttyarchive" ./cmd/libghosttyarchive
+          "$RUNNER_TEMP/libghosttyarchive" pack "$RUNNER_TEMP/bundle" \
+            "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
+          "$RUNNER_TEMP/libghosttyarchive" inspect \
+            "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
+          sha256sum "$RUNNER_TEMP/libghostty-vt-linux-$GOARCH.tar.gz"
+
+      - name: Upload built Linux artifact
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        if: steps.linux-cache.outputs.exists != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libghostty-native-linux-${{ matrix.goarch }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/libghostty-vt-linux-${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  linux-publish:
+    name: Publish Linux libghostty artifact (${{ matrix.goarch }})
+    needs: [authorize, linux-build]
+    if: needs.authorize.outputs.should_publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+          - goarch: arm64
+    steps:
+      - name: Check for existing Linux artifact
+        id: linux-cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOARCH: ${{ matrix.goarch }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          lock="$RUNNER_TEMP/libghostty-native.lock.json"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > "$lock"
+          asset="libghostty-vt-linux-$GOARCH.tar.gz"
+          ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
+          go_libghostty_commit="$(jq -er '.goLibghostty.commit' "$lock")"
+          zig_version="$(jq -er '.zig.version' "$lock")"
+          zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
+          tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux"
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          if [ -z "$remote_digest" ]; then
+            exit 0
+          fi
+          case "$remote_digest" in
+            sha256:*) ;;
+            *)
+              echo "::error::Linux artifact $asset on $tag has unexpected digest $remote_digest."
+              exit 1
+              ;;
+          esac
+
+          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-linux-notes.md"
+          grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
+          grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
+          grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-linux-notes.md"
+          echo "verified immutable Linux artifact already published: $asset"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Download built Linux artifact
+        if: steps.linux-cache.outputs.exists != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: libghostty-native-linux-${{ matrix.goarch }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/linux
+
+      - name: Publish only absent immutable Linux asset
+        if: steps.linux-cache.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOARCH: ${{ matrix.goarch }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          lock="$RUNNER_TEMP/libghostty-native.lock.json"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > "$lock"
+          asset="libghostty-vt-linux-$GOARCH.tar.gz"
+          archive="$RUNNER_TEMP/linux/$asset"
+          ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
+          go_libghostty_commit="$(jq -er '.goLibghostty.commit' "$lock")"
+          zig_version="$(jq -er '.zig.version' "$lock")"
+          zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
+          tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux"
+          asset_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          notes="$RUNNER_TEMP/linux-release-notes.md"
+          cat > "$notes" <<EOF
+          Reviewed libghostty-vt Linux artifacts.
+
+          Ghostty commit: $ghostty_commit
+          go-libghostty commit: $go_libghostty_commit
+          Zig version: $zig_version
+          Source pull request: #$PR_NUMBER
+          EOF
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes-file "$notes"
+          else
+            gh release create "$tag" --title "$tag" --notes-file "$notes" ||
+              gh release view "$tag" >/dev/null
+          fi
+
+          gh release upload "$tag" "$archive#$asset" --clobber=false
+          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          if [ "$remote_digest" != "sha256:$asset_sha" ]; then
+            echo "::error::Published Linux artifact digest $remote_digest does not match built SHA-256 $asset_sha."
+            exit 1
+          fi
+
+  generate:
+    name: Generate native dependency projections
+    needs: [authorize, validate, apple-publish, linux-publish]
+    if: needs.authorize.outputs.should_publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+    steps:
+      - name: Check out trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Overlay reviewed PR lock
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
+            > libghostty-native.lock.json
+
+      - name: Generate dependency unit from published artifacts
+        env:
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: scripts/libghostty-native.sh generate-dependency-unit
+
+      - name: Commit generated native files if changed
+        id: commit
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$SOURCE_SHA"
+          git add -A -- \
+            go.mod go.sum gui/shared/Package.swift \
+            gui/shared/Sources/CGhosttyVT/include \
+            libghostty-native.lock.json libghostty-native.spdx.json \
+            THIRD_PARTY_NOTICES.libghostty.md
+          if git diff --cached --quiet; then
+            echo "Native dependency generated files already up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tree_sha="$(git write-tree)"
+          generated_sha="$(GIT_AUTHOR_NAME="github-actions[bot]" \
+            GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com" \
+            GIT_COMMITTER_NAME="github-actions[bot]" \
+            GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com" \
+            git commit-tree "$tree_sha" -p "$SOURCE_SHA" \
+              -m "chore(generated): refresh generated dependency metadata")"
+          if [ "$(git show -s --format=%P "$generated_sha")" != "$SOURCE_SHA" ]; then
+            echo "::error::Generated commit does not directly descend from the event head."
+            exit 1
+          fi
+
+          changed=false
+          while IFS= read -r -d '' path; do
+            changed=true
+            case "$path" in
+              go.mod|go.sum|gui/shared/Package.swift|\
+              gui/shared/Sources/CGhosttyVT/include/*|\
+              libghostty-native.lock.json|libghostty-native.spdx.json|\
+              THIRD_PARTY_NOTICES.libghostty.md)
+                ;;
+              *)
+                echo "::error::Generated native commit contains a non-allowlisted path."
+                exit 1
+                ;;
+            esac
+          done < <(git diff --no-renames --name-only -z "$SOURCE_SHA" "$generated_sha")
+          if [ "$changed" != "true" ]; then
+            echo "::error::Generated native commit contains no changes."
+            exit 1
+          fi
+
+          git checkout --detach "$generated_sha"
+          git bundle create "$RUNNER_TEMP/generated-native.bundle" HEAD "^$SOURCE_SHA"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload generated native commit
+        if: steps.commit.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libghostty-native-generated-${{ github.run_id }}
+          path: ${{ runner.temp }}/generated-native.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  push:
+    name: Push generated native dependency commit
+    needs: [authorize, validate, generate]
+    if: always() && needs.authorize.outputs.should_publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Propagate generation failure
+        if: needs.validate.result != 'success' || needs.generate.result != 'success'
+        run: |
+          echo "::error::Native dependency artifact publication or generation did not complete successfully."
+          exit 1
+
+      - name: Report clean generated files
+        if: needs.generate.result == 'success' && needs.generate.outputs.changed != 'true'
+        run: echo "Native dependency generated files already up to date."
+
+      - name: Check out source head with workflow-triggering credentials
+        if: needs.generate.result == 'success' && needs.generate.outputs.changed == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: true
+
+      - name: Download generated native commit
+        if: needs.generate.result == 'success' && needs.generate.outputs.changed == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: libghostty-native-generated-${{ github.run_id }}
+          path: ${{ runner.temp }}/generated-native-output
+
+      - name: Push generated native commit
+        if: needs.generate.result == 'success' && needs.generate.outputs.changed == 'true'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | awk '{print $1}')"
+          if [ "$remote_sha" != "$SOURCE_SHA" ]; then
+            echo "::error::PR branch advanced before the generated native commit could be pushed."
+            exit 1
+          fi
+
+          git fetch "$RUNNER_TEMP/generated-native-output/generated-native.bundle" HEAD
+          GENERATED_SHA="$(git rev-parse FETCH_HEAD)"
+          if [ "$(git show -s --format=%P "$GENERATED_SHA")" != "$SOURCE_SHA" ]; then
+            echo "::error::Generated native commit has an unexpected parent."
+            exit 1
+          fi
+          if [ "$(git show -s --format=%an "$GENERATED_SHA")" != "github-actions[bot]" ] || \
+             [ "$(git show -s --format=%ae "$GENERATED_SHA")" != "41898282+github-actions[bot]@users.noreply.github.com" ] || \
+             [ "$(git show -s --format=%s "$GENERATED_SHA")" != "chore(generated): refresh generated dependency metadata" ]; then
+            echo "::error::Generated native commit identity or message is unexpected."
+            exit 1
+          fi
+
+          changed=false
+          while IFS= read -r -d '' path; do
+            changed=true
+            case "$path" in
+              go.mod|go.sum|gui/shared/Package.swift|\
+              gui/shared/Sources/CGhosttyVT/include/*|\
+              libghostty-native.lock.json|libghostty-native.spdx.json|\
+              THIRD_PARTY_NOTICES.libghostty.md)
+                ;;
+              *)
+                echo "::error::Generated native commit contains a non-allowlisted path."
+                exit 1
+                ;;
+            esac
+          done < <(git diff --no-renames --name-only -z "$SOURCE_SHA" "$GENERATED_SHA")
+          if [ "$changed" != "true" ]; then
+            echo "::error::Generated native commit contains no changes."
+            exit 1
+          fi
+
+          git checkout --detach "$GENERATED_SHA"
+          git push origin "HEAD:$HEAD_REF"

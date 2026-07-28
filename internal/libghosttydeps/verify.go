@@ -15,7 +15,7 @@ var (
 )
 
 func Verify(root string) error {
-	return verify(root, true)
+	return verify(root, true, true)
 }
 
 // VerifyGenerated checks every mechanical projection without accepting new
@@ -23,11 +23,18 @@ func Verify(root string) error {
 // deliberately red PR when a license or required notice changed; the normal
 // Verify path remains the merge gate and requires explicit review bindings.
 func VerifyGenerated(root string) error {
-	return verify(root, false)
+	return verify(root, false, true)
 }
 
-func verify(root string, requireLicenseReviews bool) error {
-	lock, err := LoadLock(filepath.Join(root, LockFilename))
+// VerifyArtifactInputs checks a trusted artifact-builder workspace after
+// GenerateArtifactInputs has written projections with pending Linux artifact
+// placeholders. It is not a merge gate for committed repository state.
+func VerifyArtifactInputs(root string) error {
+	return verify(root, false, false)
+}
+
+func verify(root string, requireLicenseReviews bool, requireProjectionConsistency bool) error {
+	lock, err := loadLock(filepath.Join(root, LockFilename), requireProjectionConsistency)
 	if err != nil {
 		return err
 	}

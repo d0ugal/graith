@@ -164,10 +164,31 @@ SPDX Java validator from exact fields in the lock. It groups them as
 for native graph proposals, and disables the ordinary Go manager for
 go-libghostty so a wrapper-only module PR cannot merge. The hosted Renovate
 service cannot run repository-defined post-upgrade commands, so the repository's
-regeneration workflow projects every approved lock update. A generated commit
-explicitly dispatches all required workflows at its new branch SHA because a
-normal `GITHUB_TOKEN` push does not create a second pull-request run. Validate
-the config and its deliberately stale update fixture locally with:
+trusted workflows project every approved lock update.
+
+For same-repository Renovate PRs that change only `libghostty-native.lock.json`,
+inspect the dependency proposal, including the go-libghostty commit and its
+tested Ghostty pin, then apply the `native-artifact-approved` label. The
+`Publish native libghostty dependency artifacts` workflow consumes that exact
+`labeled` event only: if the branch is rebased or synchronized again, remove and
+reapply the label after reviewing the new head. The workflow runs only
+base-branch code, overlays the PR lock as data, builds the reviewed Apple and
+Linux assets, publishes immutable releases, regenerates the mechanical
+projections, and pushes the generated commit back to the Renovate branch with
+the workflow-triggering `RELEASE_TOKEN`. The write-token publisher and push jobs
+do not check out the repository, do not run repository-controlled or
+Ghostty-controlled build code, and the push job accepts only an allowlisted
+generated commit whose parent is the labeled PR head. Forks, mixed-code PRs,
+missing tokens, and artifact build failures fail or skip with an actionable
+message instead of publishing bytes.
+
+New Apple artifacts use the tag
+`libghostty-vt-<short Ghostty commit>-go-<short go-libghostty commit>-zig-<Zig version>`;
+Linux artifacts append `-linux`. Release notes bind the full Ghostty commit,
+go-libghostty commit, Zig version, and Apple SwiftPM checksum. Existing assets
+are never overwritten, and generation checks GitHub's release-asset digests
+before writing the final lock. Validate the config and its deliberately stale
+update fixture locally with:
 
 ```bash
 scripts/verify-renovate-libghostty.sh
@@ -181,9 +202,9 @@ reference as a single integrity unit.
 
 The configuration temporarily suppresses only the unsupported Ghostty
 `d4ac93a` -> `15484b6` and Highway `1.2.0` -> `1.4.0` proposal. Remove that
-rule after `generate-dependency-unit` succeeds for the full Ghostty commit and
-the matching `libghostty-vt-15484b6` Apple release is published with notes and
-an asset digest binding that commit.
+rule after the artifact publication workflow can build the full Ghostty commit,
+publish the matching Apple and Linux releases, and regenerate the dependency
+unit from those reviewed assets.
 
 go-libghostty is commit-pinned from its canonical Tangled repository. Its
 `CMakeLists.txt` exact `GIT_TAG` is the default tested Ghostty revision. Ghostty

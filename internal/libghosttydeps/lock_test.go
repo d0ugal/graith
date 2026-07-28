@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +127,118 @@ func TestGenerationDecodeAllowsStaleDerivedURLs(t *testing.T) {
 	}
 }
 
+func TestStrictLockRejectsPendingArtifactPlaceholders(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := LoadLock(filepath.Join(root, LockFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stageNativeArtifactPlaceholders(&lock)
+
+	data, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := DecodeLock(data); err == nil ||
+		!strings.Contains(err.Error(), "Apple artifact SHA-256 is a placeholder") ||
+		!strings.Contains(err.Error(), "Linux amd64 artifact SHA-256 is a placeholder") ||
+		!strings.Contains(err.Error(), "Linux arm64 artifact SHA-256 is a placeholder") {
+		t.Fatalf("strict placeholder error = %v", err)
+	}
+
+	if _, err := decodeLock(data, false); err != nil {
+		t.Fatalf("artifact preparation decode rejected placeholders: %v", err)
+	}
+}
+
+func TestRefreshLinuxArtifactsConsumesCommitBoundReleaseAssets(t *testing.T) {
+	lock := artifactFixtureLock("2222222222222222222222222222222222222222")
+
+	amd64Archive := []byte("braw amd64 archive")
+	arm64Archive := []byte("braw arm64 archive")
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.String() {
+		case "https://api.github.com/repos/d0ugal/graith/releases/tags/" + linuxArtifactTag(lock):
+			body := fmt.Sprintf(`{
+					"body": "Reviewed artifacts\nGhostty commit: %s\ngo-libghostty commit: %s\nZig version: %s\n",
+					"assets": [
+						{"name":"libghostty-vt-linux-amd64.tar.gz","digest":"sha256:%s","browser_download_url":"%s"},
+						{"name":"libghostty-vt-linux-arm64.tar.gz","digest":"sha256:%s","browser_download_url":"%s"}
+						]
+					}`, lock.Ghostty.Commit, lock.GoLibghostty.Commit, lock.Zig.Version,
+				bytesSHA256(amd64Archive), linuxArtifactURL(lock, "amd64"),
+				bytesSHA256(arm64Archive), linuxArtifactURL(lock, "arm64"))
+
+			return response(http.StatusOK, body), nil
+		case linuxArtifactURL(lock, "amd64"):
+			return response(http.StatusOK, string(amd64Archive)), nil
+		case linuxArtifactURL(lock, "arm64"):
+			return response(http.StatusOK, string(arm64Archive)), nil
+		default:
+			return response(http.StatusNotFound, "dreich"), nil
+		}
+	})
+	withHTTPClient(t, &http.Client{Transport: transport})
+
+	if err := refreshLinuxArtifacts(context.Background(), &lock); err != nil {
+		t.Fatal(err)
+	}
+
+	if lock.Ghostty.LinuxArtifacts.AMD64.URL != linuxArtifactURL(lock, "amd64") ||
+		lock.Ghostty.LinuxArtifacts.AMD64.SHA256 != bytesSHA256(amd64Archive) {
+		t.Fatalf("amd64 artifact = %#v", lock.Ghostty.LinuxArtifacts.AMD64)
+	}
+
+	if lock.Ghostty.LinuxArtifacts.ARM64.URL != linuxArtifactURL(lock, "arm64") ||
+		lock.Ghostty.LinuxArtifacts.ARM64.SHA256 != bytesSHA256(arm64Archive) {
+		t.Fatalf("arm64 artifact = %#v", lock.Ghostty.LinuxArtifacts.ARM64)
+	}
+}
+
+func TestRefreshLinuxArtifactsFailsActionablyWhenReleaseIsMissing(t *testing.T) {
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(http.StatusNotFound, "missing"), nil
+	})
+	withHTTPClient(t, &http.Client{Transport: transport})
+
+	lock := artifactFixtureLock("3333333333333333333333333333333333333333")
+
+	err := refreshLinuxArtifacts(context.Background(), &lock)
+	if err == nil ||
+		!strings.Contains(err.Error(), "download Linux amd64 artifact") ||
+		!strings.Contains(err.Error(), "publish the reviewed Linux artifacts") ||
+		!strings.Contains(err.Error(), linuxArtifactTag(lock)) {
+		t.Fatalf("missing release error = %v", err)
+	}
+}
+
+func TestNativeArtifactTagsIncludeToolchainAndWrapperInputs(t *testing.T) {
+	lock := artifactFixtureLock("4444444444444444444444444444444444444444")
+
+	if got, want := appleArtifactTag(lock), "libghostty-vt-4444444-go-1111111-zig-0.15.2"; got != want {
+		t.Fatalf("Apple artifact tag = %s, want %s", got, want)
+	}
+
+	lock.Zig.Version = "0.16.0+dev/canny"
+	if got, want := linuxArtifactTag(lock), "libghostty-vt-4444444-go-1111111-zig-0.16.0-dev-canny-linux"; got != want {
+		t.Fatalf("Linux artifact tag = %s, want %s", got, want)
+	}
+}
+
+func artifactFixtureLock(ghosttyCommit string) Lock {
+	return Lock{
+		GoLibghostty: GoDependency{Commit: "1111111111111111111111111111111111111111"},
+		Ghostty:      Ghostty{Commit: ghosttyCommit},
+		Zig:          Zig{Version: "0.15.2"},
+	}
+}
+
 func TestFollowWrapperGhosttyPin(t *testing.T) {
 	const (
 		previous = "1111111111111111111111111111111111111111"
@@ -149,6 +264,32 @@ func TestFollowWrapperGhosttyPin(t *testing.T) {
 
 	if lock.Ghostty.Commit != updated || lock.GoLibghostty.TestedGhosttyCommit != updated {
 		t.Fatalf("wrapper pair = Ghostty %s, tested %s; want %s", lock.Ghostty.Commit, lock.GoLibghostty.TestedGhosttyCommit, updated)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func withHTTPClient(t *testing.T, client *http.Client) {
+	t.Helper()
+
+	previous := httpClient
+	httpClient = client
+
+	t.Cleanup(func() {
+		httpClient = previous
+	})
+}
+
+func response(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     make(http.Header),
 	}
 }
 
@@ -248,6 +389,7 @@ func TestPrimaryDependencyDiffers(t *testing.T) {
 	previous := Lock{
 		GoLibghostty: GoDependency{Commit: strings.Repeat("1", 40)},
 		Ghostty:      Ghostty{Commit: strings.Repeat("2", 40)},
+		Zig:          Zig{Version: "0.15.2"},
 	}
 	current := previous
 
@@ -259,6 +401,24 @@ func TestPrimaryDependencyDiffers(t *testing.T) {
 	current.Ghostty.Commit = strings.Repeat("3", 40)
 	if !primaryDependencyDiffers(previous, current) {
 		t.Fatal("Ghostty change was not reported as a primary update")
+	}
+}
+
+func TestArtifactDependencyDiffers(t *testing.T) {
+	previous := Lock{
+		GoLibghostty: GoDependency{Commit: strings.Repeat("1", 40)},
+		Ghostty:      Ghostty{Commit: strings.Repeat("2", 40)},
+		Zig:          Zig{Version: "0.15.2"},
+	}
+	current := previous
+
+	if artifactDependencyDiffers(previous, current) {
+		t.Fatal("unchanged artifact inputs reported an update")
+	}
+
+	current.Zig.Version = "0.16.0"
+	if !artifactDependencyDiffers(previous, current) {
+		t.Fatal("Zig change was not reported as an artifact update")
 	}
 }
 

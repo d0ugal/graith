@@ -28,8 +28,8 @@ REQUIRED_ZIG="$(jq -er '.zig.version' "$DEPENDENCY_LOCK")"
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUIREMENTS (see gui/NEEDS-MAC-VALIDATION.md for the environment gaps that
 # currently block this from completing in CI/headless):
-#   - Zig == $REQUIRED_ZIG  (NOT newer: Ghostty's build.zig at this SHA uses the
-#     0.15.x std.Io.Dir.readFileAlloc 3-arg signature and rejects >= 0.16).
+#   - Zig == $REQUIRED_ZIG. Ghostty's build.zig is version-sensitive, so newer
+#     or older Zig releases are not interchangeable with the reviewed pin.
 #   - FULL Xcode (not just Command Line Tools): `xcodebuild -create-xcframework`
 #     and the iOS/iOS-simulator SDKs are Xcode-only. `xcode-select -p` must point
 #     at Xcode.app.

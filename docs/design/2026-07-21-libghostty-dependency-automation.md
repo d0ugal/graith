@@ -49,7 +49,7 @@ place for a dependency bot to perform independent search-and-replace updates.
 
 ### Non-Goals
 
-- Publishing a new Apple xcframework from an unreviewed dependency proposal.
+- Publishing a new native artifact from an unreviewed dependency proposal.
 - Treating a transitive release as compatible before Ghostty consumes it.
 
 ## Platform support
@@ -86,14 +86,27 @@ Ghostty commit consumes them.
 
 The command resolves the wrapper commit to its Go pseudo-version and sum,
 checks out the selected Ghostty commit, hashes exact sources and licenses,
-synchronizes committed headers, refreshes the Apple artifact URL/checksum,
-updates `go.mod`/`go.sum`, and renders the SPDX and generated notice inventory.
-It fails if the exact Apple artifact has not yet been published. The release
-metadata must name the full Ghostty commit and checksum, and the bytes must match
-GitHub's release-asset digest. This is an explicit trust boundary: the update
-consumes a separately built and reviewed artifact and does not rebuild or
-publish it. Those failures are review signals, not a reason to weaken
-verification.
+synchronizes committed headers, refreshes the Apple and Linux artifact
+URLs/checksums, updates `go.mod`/`go.sum`, and renders the SPDX and generated
+notice inventory. It fails if the exact native artifacts have not yet been
+published. The release metadata must name the full Ghostty commit, the Apple
+metadata must include the SwiftPM checksum, and the bytes must match GitHub's
+release-asset digest. This is an explicit trust boundary: normal generation
+consumes separately built and reviewed artifacts and never accepts stale,
+placeholder, or locally guessed artifact checksums.
+
+Same-repository lock-only Renovate PRs use a trusted `pull_request_target`
+workflow to fill that publication step. A maintainer first reviews the native
+proposal, including go-libghostty's tested Ghostty pin, and applies
+`native-artifact-approved`. The workflow authorizes only that exact `labeled`
+event, runs only base-branch repository code, overlays the PR lock as data,
+builds the Apple and Linux artifacts in read-only jobs, publishes immutable
+releases from no-checkout/no-build write-token jobs keyed by the Ghostty,
+go-libghostty, and Zig inputs, runs strict generation against those releases,
+and passes only an allowlisted generated commit bundle to an isolated
+`RELEASE_TOKEN` push job. Forks, mixed-code PRs, stale approval labels, missing
+credentials, branch races, existing asset mismatches, and unbuildable selected
+pins fail or skip without exposing maintainer credentials to unreviewed code.
 
 License conclusions are never inferred from a version string. Each conclusion
 is bound to the exact license and embedded-notice hashes by a review fingerprint.
@@ -107,15 +120,15 @@ An offline verification mode compares all projections to the lock on every
 native-relevant PR. Generation rolls all managed files back after a late error,
 so it never leaves a partially rotated worktree. The existing native workflow
 remains the required gate for wrapper tests, compatibility, race/fuzz,
-packaging, SPDX, linkage, privacy, and supported platforms. When the fallback
-workflow creates a generated commit, it explicitly dispatches every protected
-workflow at that exact branch head rather than relying on statuses from the
-pre-generation SHA.
+packaging, SPDX, linkage, privacy, and supported platforms. Generated commits
+are pushed with the repository's workflow-triggering token from an isolated job,
+so the normal pull-request synchronize event reruns required checks at the
+generated branch head.
 
 The trade-off is that a Renovate proposal for a transitive release can remain
-red until a compatible Ghostty commit and reviewed Apple artifact exist. That
-is intentional: Renovate discovers candidates; it does not assert native ABI or
-license compatibility.
+red until a compatible Ghostty commit and reviewed native artifacts exist. That
+is intentional: Renovate discovers candidates; it does not assert native ABI,
+buildability, or license compatibility.
 
 ### Proposal 2: Let Renovate rewrite every occurrence
 

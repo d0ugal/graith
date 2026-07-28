@@ -204,7 +204,11 @@ verify_dependency_unit() {
         die "could not enter the repository for dependency verification"
         return 1
     fi
-    go run ./internal/libghosttydeps/cmd verify "$REPO_DIR"
+    if [[ "${GRAITH_LIBGHOSTTY_ARTIFACT_INPUTS:-0}" == "1" ]]; then
+        go run ./internal/libghosttydeps/cmd verify-artifact-inputs "$REPO_DIR"
+    else
+        go run ./internal/libghosttydeps/cmd verify "$REPO_DIR"
+    fi
 }
 
 verify_generated_dependency_unit() {
@@ -215,6 +219,16 @@ verify_generated_dependency_unit() {
 generate_dependency_unit() {
     cd "$REPO_DIR"
     go run ./internal/libghosttydeps/cmd generate "$REPO_DIR"
+}
+
+generate_artifact_inputs() {
+    cd "$REPO_DIR"
+    go run ./internal/libghosttydeps/cmd generate-artifact-inputs "$REPO_DIR"
+}
+
+prepare_artifact_lock() {
+    cd "$REPO_DIR"
+    go run ./internal/libghosttydeps/cmd prepare-artifact-lock "$REPO_DIR"
 }
 
 accept_license_reviews() {
@@ -3233,6 +3247,10 @@ build-local materializes and verifies the pinned Apple artifact before building.
 source-build checks out Ghostty $GHOSTTY_SHA and requires Zig $REQUIRED_ZIG.
 generate-dependency-unit rotates the complete lock, Go module, headers, SPDX,
 notice inventory, and Apple artifact metadata; verify-dependency-unit is offline.
+generate-artifact-inputs is for trusted artifact-builder workspaces only; it
+leaves pending Linux artifact placeholders and must not be committed.
+prepare-artifact-lock materializes the lock needed by trusted artifact
+publication before the new Apple and Linux release assets exist.
 accept-license-reviews explicitly binds reviewed conclusions to current license
 and embedded-notice hashes; run it only after inspecting the changed evidence.
 EOF
@@ -3288,6 +3306,12 @@ case "${1:-}" in
         ;;
     generate-dependency-unit)
         generate_dependency_unit
+        ;;
+    generate-artifact-inputs)
+        generate_artifact_inputs
+        ;;
+    prepare-artifact-lock)
+        prepare_artifact_lock
         ;;
     accept-license-reviews)
         accept_license_reviews
