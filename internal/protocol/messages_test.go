@@ -147,6 +147,48 @@ func TestTriggerBindingDetailWatcherUsageJSON(t *testing.T) {
 	}
 }
 
+func TestTriggerStatusResponseRunCountJSON(t *testing.T) {
+	tests := map[string]struct {
+		runCount int
+	}{
+		"zero run count is present":     {runCount: 0},
+		"non-zero run count is present": {runCount: 7},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := json.Marshal(TriggerStatusResponse{
+				Trigger: TriggerRecord{
+					Name: "braw", Source: "schedule", Action: "message",
+					Enabled: true, RunCount: test.runCount,
+				},
+			})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+
+			var got struct {
+				Trigger struct {
+					RunCount *int `json:"run_count"`
+				} `json:"trigger"`
+			}
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+
+			if got.Trigger.RunCount == nil {
+				t.Fatalf("TriggerStatusResponse JSON = %s, want run_count field", data)
+			}
+
+			if *got.Trigger.RunCount != test.runCount {
+				t.Fatalf("run_count = %d, want %d in %s", *got.Trigger.RunCount, test.runCount, data)
+			}
+		})
+	}
+}
+
 func TestCreateMsgReadOnlyRoundTrip(t *testing.T) {
 	want := CreateMsg{
 		Name: "reader", Agent: "codex", RepoPath: "/croft", Base: "main", ReadOnly: true,
