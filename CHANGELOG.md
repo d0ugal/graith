@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.70.5](https://github.com/d0ugal/graith/compare/v0.70.4...v0.70.5) (2026-07-28)
+
+
+### Features
+
+* add agent introspection commands ([93ef01b](https://github.com/d0ugal/graith/commit/93ef01b601ea26404821548a072d1861e367c442))
+* add branch-backed read-only sessions ([52f7ce6](https://github.com/d0ugal/graith/commit/52f7ce6f998734c123c9fdcc7b787d82394e3577))
+* attribute trigger watcher usage ([#1752](https://github.com/d0ugal/graith/issues/1752)) ([cb68089](https://github.com/d0ugal/graith/commit/cb68089de44f575b1550c5547cd0cb79850e07eb))
+* **ci:** add graith-ci-gate evaluator ([a3cf6a1](https://github.com/d0ugal/graith/commit/a3cf6a1819e2af56d994076da75bf8ca6d5de628))
+* **ci:** add shadow summary job ([#1730](https://github.com/d0ugal/graith/issues/1730)) ([7bb577a](https://github.com/d0ugal/graith/commit/7bb577aaf0346c6179eef5f5a1e0c0f7e2d8c243))
+* **ci:** harden P11 regen auth parity ([8ec559e](https://github.com/d0ugal/graith/commit/8ec559e25fe4a11cb09296849304a147b7081e20))
+* **ci:** port docs preview helper to go ([#1743](https://github.com/d0ugal/graith/issues/1743)) ([44d4a4a](https://github.com/d0ugal/graith/commit/44d4a4a9b4c8d4965da0792bb92688d6733a1ad3))
+* **ci:** port docs screenshot diff to go ([#1740](https://github.com/d0ugal/graith/issues/1740)) ([9379efb](https://github.com/d0ugal/graith/commit/9379efbe5c291b735087f88e02c6126d24c53c79))
+* port libghostty archive helper to go ([#1739](https://github.com/d0ugal/graith/issues/1739)) ([f855b75](https://github.com/d0ugal/graith/commit/f855b752e946f2b943477e6dbbf3a40a65d20472))
+* support wildcard GCX on-call gate ([1c81cb6](https://github.com/d0ugal/graith/commit/1c81cb68c1fb05b13c3ed9b4581b6a5a7afd615f))
+* use fsevents for macos file-watch triggers ([1dc0001](https://github.com/d0ugal/graith/commit/1dc0001c3f12e50d762e98fcc6b77180ff683a5b))
+
+
+### Bug Fixes
+
+* allow historical gitleaks false positive ([#1772](https://github.com/d0ugal/graith/issues/1772)) ([790d00a](https://github.com/d0ugal/graith/commit/790d00a55525244ed9a6953b23e31e98e2a0f4c0))
+* bound daemon server shutdown drain ([19d5ac8](https://github.com/d0ugal/graith/commit/19d5ac8320ab99327f5160813edd361cd48d6cf6))
+* capture daemon runtime stderr ([bac1331](https://github.com/d0ugal/graith/commit/bac1331647a494690b73dc973a97a75a89e19797))
+* **ci:** bind nono attestation to release workflow ([b18de0c](https://github.com/d0ugal/graith/commit/b18de0c4ef8cea8aa6914ba4bd685096c9e9d8f7))
+* **ci:** bound Linux workflow job timeouts ([#1773](https://github.com/d0ugal/graith/issues/1773)) ([cc7714f](https://github.com/d0ugal/graith/commit/cc7714ff4357b1bd59558413a6701e77203a20eb))
+* **ci:** cancel superseded expensive PR runs ([9624225](https://github.com/d0ugal/graith/commit/9624225c91fd6e02c8e8a486a14dd86c5dc73cd1))
+* **ci:** fail safe coverage change detection ([91902cf](https://github.com/d0ugal/graith/commit/91902cf346ca7ec6615714916af07ebb608d9721))
+* **ci:** lint actionlint config changes ([#1775](https://github.com/d0ugal/graith/issues/1775)) ([d8308ca](https://github.com/d0ugal/graith/commit/d8308cadba1b8418f7bae3f4cd8453a6eb929fec))
+* **ci:** pin golangci-lint docker digest ([#1756](https://github.com/d0ugal/graith/issues/1756)) ([2155e67](https://github.com/d0ugal/graith/commit/2155e67d844673ce026093ab8719891421adf311))
+* **ci:** prune obsolete policy scaffolding ([a6eb217](https://github.com/d0ugal/graith/commit/a6eb2176854345865aa09baedfce362497cd4d4b))
+* **ci:** prune retained baseline evidence ([#1736](https://github.com/d0ugal/graith/issues/1736)) ([931ad75](https://github.com/d0ugal/graith/commit/931ad7533c1970e158627728c9af31c1bc5eb6fa))
+* **ci:** publish dev release without delete gap ([7e24e6a](https://github.com/d0ugal/graith/commit/7e24e6a8c1e953fa3469b7a38f78d47d990c2ef6))
+* **ci:** remove dev-release PAT from clone URL ([8142b82](https://github.com/d0ugal/graith/commit/8142b82ac65b44b6112e75ec7aba753b08ca0d81))
+* **ci:** remove external gate evaluator ([#1729](https://github.com/d0ugal/graith/issues/1729)) ([ce8bee5](https://github.com/d0ugal/graith/commit/ce8bee52ccc5a4b194d7a6d0ce7afb08a7c9bc62))
+* **ci:** remove unsupported policy expiry ([bbfccd1](https://github.com/d0ugal/graith/commit/bbfccd1495264e99ec9bfb0f198d2f0e17df5586))
+* **ci:** run Hugo preview for website build inputs ([502ae82](https://github.com/d0ugal/graith/commit/502ae826dfbbceac307f9c553079874636c7646f))
+* clarify degraded remote reload recovery ([64d4ed8](https://github.com/d0ugal/graith/commit/64d4ed82d2e8fb19f59df2fd40075ba502e0b69c))
+* escalate forced daemon restarts ([dd6cd6e](https://github.com/d0ugal/graith/commit/dd6cd6e8b4a882ae276b96d01a2405571de5c5da))
+* highlight draft PRs in overlay ([d63251e](https://github.com/d0ugal/graith/commit/d63251e5e3fd73a338e078c8a4801e185a140199))
+* include zero trigger run count in JSON ([a998295](https://github.com/d0ugal/graith/commit/a99829591679b6d2f6ae6e282f4c4a79a87da2bd))
+* report degraded remote reloads as applied ([4ed4d1b](https://github.com/d0ugal/graith/commit/4ed4d1b2407678b276de73e0acc620804cc1283a))
+* space draft PR marker ([#1754](https://github.com/d0ugal/graith/issues/1754)) ([a3a29dd](https://github.com/d0ugal/graith/commit/a3a29dd778d62f948e96a094e379b59f63b732f7))
+* update github.com/tailscale/hujson digest to b80ff77 ([#1781](https://github.com/d0ugal/graith/issues/1781)) ([8b16c6a](https://github.com/d0ugal/graith/commit/8b16c6a27990ad31011feabf3bd279fbdbbffce0))
+* update golang.org/x/exp digest to b88d891 ([#1794](https://github.com/d0ugal/graith/issues/1794)) ([fa70359](https://github.com/d0ugal/graith/commit/fa70359444d446de658fc4f86f44129ece11a968))
+* update libghostty Zig source handling ([7b22207](https://github.com/d0ugal/graith/commit/7b22207695dd1fcd4cd74c4c90caf0136fc1c451))
+* update module go.yaml.in/yaml/v3 to v3.0.5 ([#1726](https://github.com/d0ugal/graith/issues/1726)) ([b27d56d](https://github.com/d0ugal/graith/commit/b27d56d80b673f93d1d6185b4ee728ac7f3a2284))
+
+
+### Documentation
+
+* **ci:** document helper language preferences ([#1732](https://github.com/d0ugal/graith/issues/1732)) ([c8b4057](https://github.com/d0ugal/graith/commit/c8b40579384fceeadca10ae2ee9b082a1405ce67))
+* **ci:** reset north-star around existing actions ([9ab1813](https://github.com/d0ugal/graith/commit/9ab1813442d048047f28a8bfc45d883aacb31f88))
+* inventory CI tool provenance gaps ([d156697](https://github.com/d0ugal/graith/commit/d156697fa046e304718c49effc4a585e608f02ef))
+
+
+### Code Refactoring
+
+* **ci:** prune unused cipolicy helpers ([#1737](https://github.com/d0ugal/graith/issues/1737)) ([c1e7054](https://github.com/d0ugal/graith/commit/c1e7054b30e0538bd6b28f453132ef3306d101ff))
+* **ci:** remove unused artifact policy machinery ([70f589f](https://github.com/d0ugal/graith/commit/70f589faaac0be9cd72023a4aaf863ba5b70301b))
+* **ci:** route dev release through shared classifier ([02dd8ce](https://github.com/d0ugal/graith/commit/02dd8ce7092a90260ae4f74fc1b3424ca38def7c))
+
+
+### Tests
+
+* **ci:** add deterministic change-class fixtures ([#1738](https://github.com/d0ugal/graith/issues/1738)) ([1a38eed](https://github.com/d0ugal/graith/commit/1a38eed0ffd2f70b772c5ce1493b0d788c8edf70))
+* wait for no-fetch cleanup ([fb7f2c0](https://github.com/d0ugal/graith/commit/fb7f2c049bb156c6c16fe6262469ea200b3ee803))
+
+
+### Continuous Integration
+
+* consolidate workflow path classifiers ([808d956](https://github.com/d0ugal/graith/commit/808d956b79e2bf42ef24d055ebc83c193af11b67))
+* lint supported build-tag surfaces ([7eee25f](https://github.com/d0ugal/graith/commit/7eee25fc1ed9196f5ffdc8c3b8f4638a03dd91ce))
+* manage CI tool pins with Renovate ([88c7cac](https://github.com/d0ugal/graith/commit/88c7cacf7a96182595467911409e6e7c7d0e2947))
+* remove generated policy layers ([f80a44e](https://github.com/d0ugal/graith/commit/f80a44eeed681292b2ec2224ffcb8a5947a9cb40))
+* route docs preview builds through classifier ([3195de8](https://github.com/d0ugal/graith/commit/3195de8755a41f9c2d603260a01a05ca951babff))
+* scope dev-release tap credentials ([d755642](https://github.com/d0ugal/graith/commit/d755642dd19cea3fc367190be8ce5ebe36f8dc82))
+
+
+### Dependencies
+
+* **ci:** label libghostty as core runtime ([#1741](https://github.com/d0ugal/graith/issues/1741)) ([723bd31](https://github.com/d0ugal/graith/commit/723bd31f80befe7aa2341858564f73c39ccc0be8))
+* **ci:** remove redundant macOS build job ([b5fec93](https://github.com/d0ugal/graith/commit/b5fec933cd2474fcea6b44ed61c32ffbd2d600de)), closes [#1742](https://github.com/d0ugal/graith/issues/1742)
+* **ci:** remove shadow summary job ([#1748](https://github.com/d0ugal/graith/issues/1748)) ([cf21940](https://github.com/d0ugal/graith/commit/cf21940e166cdcc577eae61cccfe7b4ccbdafe36))
+* **deps:** update dependency gohugoio/hugo to v0.164.0 ([#1801](https://github.com/d0ugal/graith/issues/1801)) ([b0d8c6a](https://github.com/d0ugal/graith/commit/b0d8c6a0bd2a9091a5c0539879c082abcba5a9b1))
+* **deps:** update grafana/k6 docker tag to v2 ([#1803](https://github.com/d0ugal/graith/issues/1803)) ([7a0ff66](https://github.com/d0ugal/graith/commit/7a0ff660d573f36aa9bd7980247208f985472ba7))
+* **deps:** update module golang.org/x/vuln/cmd/govulncheck to v1.6.0 ([#1802](https://github.com/d0ugal/graith/issues/1802)) ([dbae697](https://github.com/d0ugal/graith/commit/dbae697090c6a6bd89c38c1872fc9519f8557d08))
+* **deps:** update renovate/renovate docker tag to v43.284.0 ([#1774](https://github.com/d0ugal/graith/issues/1774)) ([834b668](https://github.com/d0ugal/graith/commit/834b6680b8d9b75bfb3441303b5a28c3bc9986ae))
+
 ## [0.70.4](https://github.com/d0ugal/graith/compare/v0.70.3...v0.70.4) (2026-07-26)
 
 
