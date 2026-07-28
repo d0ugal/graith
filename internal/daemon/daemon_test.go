@@ -3923,16 +3923,17 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
-		ID:             "src1",
-		Name:           "braw-source-session",
-		RepoPath:       repoDir,
-		RepoName:       "testrepo",
-		WorktreePath:   repoDir,
-		Branch:         "feat/my-feature",
-		BaseBranch:     "main",
-		Agent:          "sleeper",
-		AgentSessionID: "braw-agent-id",
-		Status:         StatusRunning,
+		ID:                 "src1",
+		Name:               "braw-source-session",
+		RepoPath:           repoDir,
+		RepoName:           "testrepo",
+		WorktreePath:       repoDir,
+		Branch:             "feat/my-feature",
+		BaseBranch:         "main",
+		Agent:              "sleeper",
+		AgentSessionID:     "braw-agent-id",
+		ExperimentalAttach: true,
+		Status:             StatusRunning,
 	}
 
 	forked, err := sm.Fork("braw-fork", "src1", 24, 80)
@@ -3963,6 +3964,10 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 
 	if forked.BaseBranch == "feat/my-feature" {
 		t.Error("Fork() incorrectly used source Branch as BaseBranch")
+	}
+
+	if !forked.ExperimentalAttach {
+		t.Error("Fork() did not inherit experimental attach opt-in")
 	}
 }
 
@@ -4295,7 +4300,9 @@ func newRecorderManager(t *testing.T, repoDir string, includes []string) (*Sessi
 	recordPath := filepath.Join(dir, "argv.txt")
 
 	// $0/$@ are exactly the flags graith appends after the "-c" script string.
-	script := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
+	// Write through a temp file so polling assertions never observe a truncated
+	// record while the resumed process is replacing the previous launch argv.
+	script := `tmp="$GRAITH_ARGS_RECORD.$$"; printf '%s\n' "$0" "$@" > "$tmp"; mv "$tmp" "$GRAITH_ARGS_RECORD"; exec cat`
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false
@@ -4510,7 +4517,9 @@ func newClaudeRecorderManager(t *testing.T, repoDir string) (*SessionManager, st
 	recordPath := filepath.Join(dir, "argv.txt")
 
 	// $0/$@ are exactly the flags graith appends after the "-c" script string.
-	script := `printf '%s\n' "$0" "$@" > "$GRAITH_ARGS_RECORD"; exec cat`
+	// Write through a temp file so polling assertions never observe a truncated
+	// record while a later launch is replacing the previous argv.
+	script := `tmp="$GRAITH_ARGS_RECORD.$$"; printf '%s\n' "$0" "$@" > "$tmp"; mv "$tmp" "$GRAITH_ARGS_RECORD"; exec cat`
 
 	cfg := config.Default()
 	cfg.FetchOnCreate = false

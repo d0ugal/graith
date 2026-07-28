@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -156,6 +157,29 @@ func TestScreenSnapshotUsesLock(t *testing.T) {
 	snap := s.ScreenSnapshot()
 	if snap.Cols != 80 || snap.Rows != 24 {
 		t.Errorf("Snapshot size = (%d, %d), want (80, 24)", snap.Cols, snap.Rows)
+	}
+}
+
+func TestAttachWithScreenSnapshotCapturesAndAttaches(t *testing.T) {
+	vt := newRenderTestTerm(t, 12, 3)
+	_, _ = vt.Write([]byte("braw"))
+
+	s := &Session{ID: "braw", screen: vt, done: make(chan struct{})}
+
+	var writer bytes.Buffer
+
+	snap := s.AttachWithScreenSnapshot(&writer)
+
+	if !strings.Contains(snap.Frame, "braw") {
+		t.Fatalf("snapshot frame = %q, want current screen text", snap.Frame)
+	}
+
+	s.mu.RLock()
+	writers := len(s.writers)
+	s.mu.RUnlock()
+
+	if writers != 1 {
+		t.Fatalf("writers = %d, want 1", writers)
 	}
 }
 

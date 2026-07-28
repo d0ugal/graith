@@ -216,6 +216,36 @@ func TestAttachDecode(t *testing.T) {
 		}
 	})
 
+	t.Run("decodes experimental seed", func(t *testing.T) {
+		info := protocol.SessionInfo{ID: "old"}
+		seed := protocol.ExperimentalAttachSeedMsg{
+			Session: protocol.SessionInfo{ID: "braw", Name: "bonnie", ExperimentalAttach: true},
+			Snapshot: protocol.ScreenSnapshotResponseMsg{
+				SessionID: "braw",
+				Frame:     "frame",
+			},
+		}
+		c := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("experimental_attached", seed))}}
+
+		gotSeed, err := attachDecodeWithOptions(c, "braw", attachRequestOptions{ExperimentalAttach: true}, &info)
+		if err != nil {
+			t.Fatalf("attachDecodeWithOptions() error = %v", err)
+		}
+
+		if info.ID != "braw" || info.Name != "bonnie" || !info.ExperimentalAttach {
+			t.Fatalf("info = %+v, want experimental braw/bonnie", info)
+		}
+
+		if gotSeed == nil || gotSeed.Snapshot.Frame != "frame" {
+			t.Fatalf("seed = %+v, want frame", gotSeed)
+		}
+
+		msg, ok := c.sends[0].Payload.(protocol.AttachMsg)
+		if !ok || !msg.ExperimentalAttach {
+			t.Fatalf("attach payload = %#v, want ExperimentalAttach=true", c.sends[0].Payload)
+		}
+	})
+
 	t.Run("read error leaves info unchanged", func(t *testing.T) {
 		info := protocol.SessionInfo{ID: "kept"}
 		c := &scriptedConn{responses: []scriptedResp{errResp(io.EOF)}}

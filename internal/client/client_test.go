@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -883,6 +884,137 @@ func TestWriteScreenRestore_HiddenCursorOmitsShowSequence(t *testing.T) {
 
 	if strings.Contains(out, "\x1b[?25h") {
 		t.Errorf("hidden cursor should not emit the show-cursor sequence, got %q", out)
+	}
+}
+
+func TestWriteExperimentalAttachSeed(t *testing.T) {
+	var buf bytes.Buffer
+
+	writeExperimentalAttachSeed(&buf, &protocol.ExperimentalAttachSeedMsg{
+		Snapshot: protocol.ScreenSnapshotResponseMsg{
+			Frame:         "hello bothy",
+			CursorX:       4,
+			CursorY:       2,
+			CursorVisible: true,
+		},
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[?2026h") || !strings.Contains(out, "\x1b[?2026l") {
+		t.Fatalf("experimental seed should wrap repaint in synchronized update, got %q", out)
+	}
+
+	if !strings.Contains(out, "hello bothy") {
+		t.Fatalf("experimental seed should contain the frame body, got %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[3;5H") {
+		t.Fatalf("experimental seed should place cursor at row 3 col 5, got %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[?25h") {
+		t.Fatalf("experimental seed should show a visible cursor, got %q", out)
+	}
+}
+
+func TestWriteExperimentalScreenSnapshotIgnoresEmptyFrame(t *testing.T) {
+	var buf bytes.Buffer
+
+	writeExperimentalScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "canny",
+		Frame:         "",
+		CursorVisible: true,
+	})
+
+	if got := buf.String(); got != "" {
+		t.Fatalf("empty experimental snapshot wrote %q, want no output", got)
+	}
+}
+
+func TestWriteExperimentalScreenSnapshotDrawsReadOnlyChrome(t *testing.T) {
+	var buf bytes.Buffer
+
+	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+		Name:  "canny-observer",
+		Agent: "codex",
+	}, true, "bottom", 24, 80)
+
+	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "canny",
+		Frame:         "hello bothy",
+		CursorVisible: true,
+		Cols:          80,
+		Rows:          23,
+	}, chrome)
+
+	out := buf.String()
+	if !strings.Contains(out, "hello bothy") {
+		t.Fatalf("experimental snapshot should contain frame body, got %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[24;1H") || !strings.Contains(out, "READ-ONLY") {
+		t.Fatalf("experimental read-only chrome missing from output %q", out)
+	}
+}
+
+func TestWriteExperimentalScreenSnapshotDrawsStatusChrome(t *testing.T) {
+	var buf bytes.Buffer
+
+	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+		Name:        "canny-status",
+		Agent:       "codex",
+		Status:      "running",
+		AgentStatus: "active",
+	}, false, "bottom", 24, 80)
+
+	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "canny",
+		Frame:         "hello bothy",
+		CursorVisible: true,
+		Cols:          80,
+		Rows:          23,
+	}, chrome)
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[24;1H") || !strings.Contains(out, "canny-status") {
+		t.Fatalf("experimental status chrome missing from output %q", out)
+	}
+
+	if strings.Contains(out, "READ-ONLY") {
+		t.Fatalf("normal experimental status chrome rendered read-only indicator: %q", out)
+	}
+}
+
+func TestWriteExperimentalScreenSnapshotShiftsFrameBelowTopChrome(t *testing.T) {
+	var buf bytes.Buffer
+
+	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+		Name:   "top-braw",
+		Agent:  "codex",
+		Status: "running",
+	}, false, "top", 24, 80)
+
+	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "canny",
+		Frame:         "hello bothy",
+		CursorX:       4,
+		CursorY:       2,
+		CursorVisible: true,
+		Cols:          80,
+		Rows:          23,
+	}, chrome)
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[1;1H") || !strings.Contains(out, "top-braw") {
+		t.Fatalf("top experimental status chrome missing from output %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[2;1Hhello bothy") {
+		t.Fatalf("child frame was not shifted below top chrome: %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[4;5H") {
+		t.Fatalf("cursor was not shifted below top chrome: %q", out)
 	}
 }
 

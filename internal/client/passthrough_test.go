@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -105,6 +106,307 @@ func TestPrefixKeyOverlay(t *testing.T) {
 
 	if result != ResultOverlay {
 		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+	}
+}
+
+func TestTerminalOwnedDataTriggersSnapshotRepaint(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+
+	stdout := &lockedWriter{}
+	opts := testOpts
+	opts.SessionID = "braw"
+	opts.TerminalOwned = true
+
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
+	}()
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	daemonWriter := protocol.NewFrameWriter(daemonConn)
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("raw-never")); err != nil {
+		t.Fatal(err)
+	}
+
+	frame, err := daemonReader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl {
+		t.Fatalf("client frame channel = %d, want control", frame.Channel)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env.Type != "screen_snapshot" {
+		t.Fatalf("client control = %q, want screen_snapshot", env.Type)
+	}
+
+	var req protocol.ScreenSnapshotMsg
+	if err := protocol.DecodePayload(env, &req); err != nil {
+		t.Fatal(err)
+	}
+
+	if req.SessionID != "braw" {
+		t.Fatalf("snapshot request session = %q, want braw", req.SessionID)
+	}
+
+	resp, err := protocol.EncodeControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "braw",
+		Frame:         "screen-braw",
+		CursorVisible: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, resp); err != nil {
+		t.Fatal(err)
+	}
+
+	detached, err := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, detached); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result != ResultDetached {
+			t.Fatalf("result = %d, want detached", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return")
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "screen-braw") {
+		t.Fatalf("stdout = %q, want rendered snapshot", got)
+	}
+
+	if strings.Contains(got, "raw-never") {
+		t.Fatalf("terminal-owned mode wrote raw data to stdout: %q", got)
+	}
+}
+
+func TestTerminalOwnedSnapshotRequestsCoalesceWhilePending(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+
+	opts := testOpts
+	opts.SessionID = "canny"
+	opts.TerminalOwned = true
+
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(context.Background(), opts, stdinR, io.Discard, nil)
+	}()
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	daemonWriter := protocol.NewFrameWriter(daemonConn)
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+
+	frame, err := daemonReader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl || env.Type != "screen_snapshot" {
+		t.Fatalf("first client frame = (%d, %q), want screen_snapshot control", frame.Channel, env.Type)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("second")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonConn.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = daemonReader.ReadFrame()
+	if err == nil {
+		t.Fatal("received a second snapshot request while the first was still pending")
+	}
+
+	var netErr net.Error
+
+	ok := errors.As(err, &netErr)
+	if !ok || !netErr.Timeout() {
+		t.Fatalf("second read error = %v, want timeout", err)
+	}
+
+	if err := daemonConn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := protocol.EncodeControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "canny",
+		Frame:         "screen-canny",
+		CursorVisible: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+
+	frame, err = daemonReader.ReadFrame()
+	if err != nil {
+		t.Fatalf("reading dirty follow-up snapshot request: %v", err)
+	}
+
+	env, err = protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl || env.Type != "screen_snapshot" {
+		t.Fatalf("follow-up client frame = (%d, %q), want screen_snapshot control", frame.Channel, env.Type)
+	}
+
+	if err := daemonConn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+
+	detached, err := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, detached); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result != ResultDetached {
+			t.Fatalf("result = %d, want detached", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return")
+	}
+}
+
+func TestTerminalOwnedStatusChromeRefreshes(t *testing.T) {
+	oldRefreshInterval := refreshInterval
+	refreshInterval = 200 * time.Millisecond
+
+	t.Cleanup(func() { refreshInterval = oldRefreshInterval })
+
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+
+	stdout := &lockedWriter{}
+	opts := testOpts
+	opts.SessionID = "canny"
+	opts.TerminalOwned = true
+	opts.experimentalChrome = newExperimentalAttachChrome(protocol.SessionInfo{
+		ID:     "canny",
+		Name:   "old-status",
+		Agent:  "codex",
+		Status: "running",
+	}, false, "bottom", 24, 80)
+
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
+	}()
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	daemonWriter := protocol.NewFrameWriter(daemonConn)
+
+	frame, err := daemonReader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl {
+		t.Fatalf("client frame channel = %d, want control", frame.Channel)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env.Type != "status" {
+		t.Fatalf("client control = %q, want status", env.Type)
+	}
+
+	resp, err := protocol.EncodeControl("status_response", protocol.StatusResponseMsg{
+		Session: protocol.SessionInfo{
+			ID:     "canny",
+			Name:   "fresh-status",
+			Agent:  "codex",
+			Status: "running",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, resp); err != nil {
+		t.Fatal(err)
+	}
+
+	detached, err := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, detached); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result != ResultDetached {
+			t.Fatalf("result = %d, want detached", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return")
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "fresh-status") {
+		t.Fatalf("stdout = %q, want refreshed experimental status", got)
 	}
 }
 

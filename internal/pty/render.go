@@ -2,6 +2,7 @@ package pty
 
 import (
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -22,6 +23,32 @@ func (s *Session) ScreenSnapshot() ScreenCapture {
 		return ScreenCapture{}
 	}
 
+	snap := s.screenSnapshotLocked()
+	s.mu.Unlock()
+
+	return snap
+}
+
+// AttachWithScreenSnapshot captures the current terminal screen and registers a
+// live-output writer under one mutex acquisition. It lets attach clients seed a
+// local view without losing bytes written concurrently with attach.
+func (s *Session) AttachWithScreenSnapshot(w io.Writer) ScreenCapture {
+	s.mu.Lock()
+	if s.closed || s.screenInitializing {
+		s.writers = append(s.writers, w)
+		s.mu.Unlock()
+
+		return ScreenCapture{}
+	}
+
+	snap := s.screenSnapshotLocked()
+	s.writers = append(s.writers, w)
+	s.mu.Unlock()
+
+	return snap
+}
+
+func (s *Session) screenSnapshotLocked() ScreenCapture {
 	snap, err := renderFrameErr(s.screen)
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
@@ -32,7 +59,6 @@ func (s *Session) ScreenSnapshot() ScreenCapture {
 			snap, _ = renderFrameErr(s.screen)
 		}
 	}
-	s.mu.Unlock()
 
 	return snap
 }

@@ -360,6 +360,13 @@
             "kind": "bool"
           },
           "optional": true
+        },
+        {
+          "name": "experimental_attach",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
         }
       ]
     },
@@ -756,6 +763,13 @@
           "optional": true
         },
         {
+          "name": "experimental_attach",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
           "name": "no_fetch",
           "type": {
             "kind": "bool"
@@ -1073,6 +1087,28 @@
           "name": "message",
           "type": {
             "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "ExperimentalAttachSeedMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "session",
+          "type": {
+            "kind": "object",
+            "ref": "SessionInfo"
+          },
+          "optional": false
+        },
+        {
+          "name": "snapshot",
+          "type": {
+            "kind": "object",
+            "ref": "ScreenSnapshotResponseMsg"
           },
           "optional": false
         }
@@ -4433,6 +4469,13 @@
         },
         {
           "name": "in_place",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "experimental_attach",
           "type": {
             "kind": "bool"
           },
