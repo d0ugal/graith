@@ -39,8 +39,12 @@ linters:
     - fatcontext  # context stored in a loop / struct
     - perfsprint  # prefer faster alternatives to fmt.Sprintf
     - spancheck  # OTel/opencensus spans must be ended
+    - gomodguard_v2  # direct go.mod dependency allow/block list checks
 
   disable:
+    # The pinned golangci-lint v2.12.x image exposes both gomodguard_v2 and the
+    # deprecated gomodguard alias under the fast set; keep only the v2 linter.
+    - gomodguard
     # Failing under the shared config on this repo; temporarily disabled so the
     # standardized config can land now. Each will be fixed and re-enabled in a
     # dedicated follow-up PR.

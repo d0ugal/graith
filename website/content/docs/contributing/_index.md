@@ -119,6 +119,9 @@ go vet ./...    # static analysis
 ```
 
 `.golangci.yml` controls the enforced linter set. CI fails on violations.
+Deprecated linter aliases are disabled when the pinned golangci-lint image
+also ships their replacements; for example, direct module dependency checks use
+`gomodguard_v2` instead of the deprecated `gomodguard` alias.
 
 ## Commit messages
 
