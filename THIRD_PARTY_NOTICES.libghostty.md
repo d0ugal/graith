@@ -14,12 +14,12 @@ dependency unit.
 
 | Component | Exact compiled pin | Distributed license conclusion |
 |-----------|--------------------|--------------------------------|
-| go-libghostty | `v0.0.0-20260710165742-102a50836ce6` / `102a50836ce678a876e5deb1288276eaad1e3bf7` | MIT |
-| Ghostty libghostty-vt | `1.3.2-dev` / `d4ac93a0395d321b043ee0116dc8a1a384f0fb83` | MIT |
-| uucode | `0.2.0`, Zig hash `uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9` | MIT AND Unicode-3.0 |
+| go-libghostty | `v0.0.0-20260727203050-ef0f8ce3daa7` / `ef0f8ce3daa7fff71dbd7ea550a1de81c194d3b8` | MIT |
+| Ghostty libghostty-vt | `1.3.2-dev` / `2dd79f3bc6af649e68422b08e21ad0300fd8b391` | MIT |
+| uucode | `0.2.0`, Zig hash `uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA` | MIT AND Unicode-3.0 |
 | Highway | `1.2.0`, upstream `66486a10623fa0d72fe91260f96c892e41aceb06`, Zig hash `N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE` | BSD-3-Clause, elected from Apache-2.0 OR BSD-3-Clause |
 | simdutf amalgamation | compiled version `9.0.0`, corresponding upstream `ca7acbcea967b5dcbab490066e99e3a6e6925539` | MIT AND BSD-3-Clause AND Apache-2.0 |
-| Zig bundled runtime | `0.15.2` compiler runtime and UBSan runtime | MIT AND (Apache-2.0 WITH LLVM-exception) |
+| Zig bundled runtime | `0.16.0` compiler runtime and UBSan runtime | MIT AND (Apache-2.0 WITH LLVM-exception) |
 
 Ghostty's `pkg/simdutf/build.zig.zon` still says `5.2.8`, but that metadata is
 stale: the exact vendored header identifies `9.0.0`. The source hashes below
@@ -31,27 +31,27 @@ build-only tool.
 The exact verified inputs are:
 
 - go-libghostty module sum
-  `h1:IChRpD6xn1EWuRNlSH3RitYjxQiWNg3CQSn2ygJ+y0w=`, wrapper-tested Ghostty commit
-  `d4ac93a0395d321b043ee0116dc8a1a384f0fb83`, and LICENSE SHA-256
+  `h1:FjTViNdmzrhZ0/cprJIf9OVLRFrv9mi3XgcyHv9/ZK0=`, wrapper-tested Ghostty commit
+  `2dd79f3bc6af649e68422b08e21ad0300fd8b391`, and LICENSE SHA-256
   `fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9`;
 - Ghostty LICENSE SHA-256
   `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1` and committed-header tree SHA-256
-  `b694feb2b7526875a356c4d6c7b5c07d09030d1cd4507f86a37b2d1d49c42fe7`;
+  `bf954e4d646f4e9e2ab23844b2b025085b1eeb9733a99d0e9fda288b75531df9`;
 - Linux source-build configuration `-Demit-lib-vt=true`,
   `-Demit-xcframework=false`, `-Doptimize=ReleaseFast`, and the
   target-specific `-Dtarget=x86_64-linux-gnu` or
   `-Dtarget=aarch64-linux-gnu`; no Apple archive is used for Linux;
 - Apple testing archive used by the macOS native candidate
-  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-d4ac93a/libghostty-vt.xcframework.zip`
+  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-2dd79f3-go-ef0f8ce-zig-0.16.0/libghostty-vt.xcframework.zip`
   SHA-256
-  `bb5a200f65cbb3d0f626d5c37a011940f9a730a7fd74730d25d176e71c7f5564`;
-- Zig source URL `https://ziglang.org/download/0.15.2/zig-0.15.2.tar.xz`,
+  `5e420e5245f4997e6812ee06966a594be3e3f335e9011dcf94e31ab102669f79`;
+- Zig source URL `https://ziglang.org/download/0.16.0/zig-0.16.0.tar.xz`,
   source SHA-256
-  `d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c`,
+  `43186959edc87d5c7a1be7b7d2a25efffd22ce5807c7af99067f86f99641bfdf`,
   and LICENSE SHA-256
   `5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177`;
-- uucode archive `https://deps.files.ghostty.org/uucode-0.2.0-ZZjBPqZVVABQepOqZHR7vV_NcaN-wats0IB6o-Exj6m9.tar.gz` SHA-256
-  `d0abee0f4f8bd6eae3c051777e16e7c42d8964aaaa015591c4e565703f465f95`,
+- uucode archive `https://deps.files.ghostty.org/uucode-2826a37a4562284fdacd8fa029d49509cc9bffcd.tar.gz` SHA-256
+  `7e76fc7fab1e7ac728c52b35bbb3e5b8c639841abfc7fe1a4bcb13050594bc9e`,
   LICENSE SHA-256
   `312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33`,
   Bjoern Hoehrmann notice SHA-256
