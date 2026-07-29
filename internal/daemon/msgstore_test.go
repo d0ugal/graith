@@ -206,6 +206,10 @@ func TestListStreams(t *testing.T) {
 		t.Errorf("braw-stream.Unread = %d, want 0", alpha.Unread)
 	}
 
+	if alpha.LatestPreview != "wee-neep2" {
+		t.Errorf("braw-stream.LatestPreview = %q, want wee-neep2", alpha.LatestPreview)
+	}
+
 	beta := byName["canny-stream"]
 	if beta.Total != 1 {
 		t.Errorf("canny-stream.Total = %d, want 1", beta.Total)
@@ -213,6 +217,10 @@ func TestListStreams(t *testing.T) {
 
 	if beta.Unread != 1 {
 		t.Errorf("canny-stream.Unread = %d, want 1", beta.Unread)
+	}
+
+	if beta.LatestPreview != "wee-neep3" {
+		t.Errorf("canny-stream.LatestPreview = %q, want wee-neep3", beta.LatestPreview)
 	}
 }
 

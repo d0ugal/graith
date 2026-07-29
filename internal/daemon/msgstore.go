@@ -34,10 +34,11 @@ type Message struct {
 }
 
 type StreamInfo struct {
-	Name     string `json:"name"`
-	Total    int64  `json:"total"`
-	Unread   int64  `json:"unread"`
-	LatestAt string `json:"latest_at,omitempty"`
+	Name          string `json:"name"`
+	Total         int64  `json:"total"`
+	Unread        int64  `json:"unread"`
+	LatestAt      string `json:"latest_at,omitempty"`
+	LatestPreview string `json:"latest_preview,omitempty"`
 }
 
 type MsgStore struct {
@@ -595,7 +596,14 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 				   ) OR m2.seq IN (SELECT seq FROM acked_messages WHERE subscriber = ? AND stream = m.stream))
 				), 0
 			) as unread,
-			MAX(m.created_at) as latest_at
+			MAX(m.created_at) as latest_at,
+			COALESCE((
+				SELECT SUBSTR(m_latest.body, 1, 240)
+				FROM messages m_latest
+				WHERE m_latest.stream = m.stream
+				ORDER BY m_latest.created_at DESC, m_latest.seq DESC
+				LIMIT 1
+			), '') as latest_preview
 		FROM messages m`
 	if !includeSystem {
 		q += ` WHERE m.stream NOT LIKE '_system.%'`
@@ -615,7 +623,7 @@ func (s *MsgStore) ListStreams(subscriber string, includeSystem bool) ([]StreamI
 
 	for rows.Next() {
 		var si StreamInfo
-		if err := rows.Scan(&si.Name, &si.Total, &si.Unread, &si.LatestAt); err != nil {
+		if err := rows.Scan(&si.Name, &si.Total, &si.Unread, &si.LatestAt, &si.LatestPreview); err != nil {
 			return nil, fmt.Errorf("scan stream info: %w", err)
 		}
 
