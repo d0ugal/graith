@@ -156,8 +156,12 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 	buf.WriteString("\x1b[H\x1b[2J")
 
 	cursorYOffset := 0
+
 	if chrome != nil {
+		chrome.updateChildCursor(snap)
+
 		cursorYOffset = chrome.childRowOffset()
+
 		if cursorYOffset > 0 {
 			fmt.Fprintf(&buf, "\x1b[%d;1H", cursorYOffset+1)
 		}
@@ -169,11 +173,7 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 		chrome.render(&buf)
 	}
 
-	fmt.Fprintf(&buf, "\x1b[%d;%dH", snap.CursorY+1+cursorYOffset, snap.CursorX+1)
-
-	if snap.CursorVisible {
-		buf.WriteString("\x1b[?25h")
-	}
+	writeExperimentalAttachCursorRestore(&buf, snap.CursorX, snap.CursorY, snap.CursorVisible, cursorYOffset)
 
 	buf.WriteString("\x1b[?2026l")
 
@@ -187,6 +187,14 @@ type experimentalAttachChrome struct {
 	rows     int
 	cols     int
 	position string
+	cursor   experimentalAttachCursor
+}
+
+type experimentalAttachCursor struct {
+	x       int
+	y       int
+	visible bool
+	known   bool
 }
 
 func newExperimentalAttachChrome(info protocol.SessionInfo, readOnly bool, position string, rows, cols int) *experimentalAttachChrome {
@@ -212,22 +220,29 @@ func (ch *experimentalAttachChrome) updateInfo(info statusBarInfo) {
 	ch.mu.Unlock()
 }
 
+func (ch *experimentalAttachChrome) updateChildCursor(snap *protocol.ScreenSnapshotResponseMsg) {
+	ch.mu.Lock()
+	ch.cursor = experimentalAttachCursor{
+		x:       snap.CursorX,
+		y:       snap.CursorY,
+		visible: snap.CursorVisible,
+		known:   true,
+	}
+	ch.mu.Unlock()
+}
+
 func (ch *experimentalAttachChrome) childRowOffset() int {
 	ch.mu.Lock()
 	position := ch.position
 	ch.mu.Unlock()
 
-	if position == "top" {
-		return 1
-	}
-
-	return 0
+	return experimentalAttachChildRowOffset(position)
 }
 
 func (ch *experimentalAttachChrome) renderTo(w io.Writer) {
 	var buf strings.Builder
 
-	ch.render(&buf)
+	ch.renderStatusRefresh(&buf)
 
 	_, _ = w.Write([]byte(buf.String()))
 }
@@ -241,6 +256,39 @@ func (ch *experimentalAttachChrome) render(buf *strings.Builder) {
 	position := ch.position
 	ch.mu.Unlock()
 
+	writeExperimentalAttachChromeLine(buf, readOnly, info, rows, cols, position)
+}
+
+func (ch *experimentalAttachChrome) renderStatusRefresh(buf *strings.Builder) {
+	ch.mu.Lock()
+	readOnly := ch.readOnly
+	info := ch.info
+	rows := ch.rows
+	cols := ch.cols
+	position := ch.position
+	cursor := ch.cursor
+	ch.mu.Unlock()
+
+	// Return before the sync/hide prologue so a degenerate size cannot leave the
+	// terminal inside an unclosed synchronized update.
+	if rows < 1 || cols < 1 {
+		return
+	}
+
+	if cursor.known {
+		buf.WriteString("\x1b[?2026h")
+		buf.WriteString("\x1b[?25l")
+	}
+
+	writeExperimentalAttachChromeLine(buf, readOnly, info, rows, cols, position)
+
+	if cursor.known {
+		writeExperimentalAttachCursorRestore(buf, cursor.x, cursor.y, cursor.visible, experimentalAttachChildRowOffset(position))
+		buf.WriteString("\x1b[?2026l")
+	}
+}
+
+func writeExperimentalAttachChromeLine(buf *strings.Builder, readOnly bool, info statusBarInfo, rows, cols int, position string) {
 	if rows < 1 || cols < 1 {
 		return
 	}
@@ -256,4 +304,20 @@ func (ch *experimentalAttachChrome) render(buf *strings.Builder) {
 	}
 
 	fmt.Fprintf(buf, "\x1b[%d;1H%s", row, line)
+}
+
+func experimentalAttachChildRowOffset(position string) int {
+	if position == "top" {
+		return 1
+	}
+
+	return 0
+}
+
+func writeExperimentalAttachCursorRestore(buf *strings.Builder, x, y int, visible bool, yOffset int) {
+	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1+yOffset, x+1)
+
+	if visible {
+		buf.WriteString("\x1b[?25h")
+	}
 }

@@ -1018,6 +1018,168 @@ func TestWriteExperimentalScreenSnapshotShiftsFrameBelowTopChrome(t *testing.T) 
 	}
 }
 
+func TestExperimentalStatusChromeRefreshRestoresChildCursor(t *testing.T) {
+	tests := map[string]struct {
+		position      string
+		readOnly      bool
+		cursorX       int
+		cursorY       int
+		cursorVisible bool
+		refreshName   string
+		wantStatusRow string
+		wantStatus    string
+		wantCursor    string
+		wantShow      bool
+	}{
+		"bottom status bar": {
+			position:      "bottom",
+			cursorX:       6,
+			cursorY:       4,
+			cursorVisible: true,
+			refreshName:   "braw-refresh",
+			wantStatusRow: "\x1b[24;1H",
+			wantStatus:    "braw-refresh",
+			wantCursor:    "\x1b[5;7H",
+			wantShow:      true,
+		},
+		"top status bar offsets child cursor": {
+			position:      "top",
+			cursorX:       4,
+			cursorY:       2,
+			cursorVisible: true,
+			refreshName:   "canny-refresh",
+			wantStatusRow: "\x1b[1;1H",
+			wantStatus:    "canny-refresh",
+			wantCursor:    "\x1b[4;5H",
+			wantShow:      true,
+		},
+		"read-only status bar": {
+			position:      "bottom",
+			readOnly:      true,
+			cursorX:       2,
+			cursorY:       1,
+			cursorVisible: true,
+			refreshName:   "dreich-observer",
+			wantStatusRow: "\x1b[24;1H",
+			wantStatus:    "READ-ONLY",
+			wantCursor:    "\x1b[2;3H",
+			wantShow:      true,
+		},
+		"hidden child cursor": {
+			position:      "bottom",
+			cursorX:       9,
+			cursorY:       7,
+			cursorVisible: false,
+			refreshName:   "thrawn-refresh",
+			wantStatusRow: "\x1b[24;1H",
+			wantStatus:    "thrawn-refresh",
+			wantCursor:    "\x1b[8;10H",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+				Name:   "dreich-seed",
+				Agent:  "codex",
+				Status: "running",
+			}, test.readOnly, test.position, 24, 80)
+
+			var seed bytes.Buffer
+			writeExperimentalScreenSnapshotWithChrome(&seed, &protocol.ScreenSnapshotResponseMsg{
+				SessionID:     "canny",
+				Frame:         "hello bothy",
+				CursorX:       test.cursorX,
+				CursorY:       test.cursorY,
+				CursorVisible: test.cursorVisible,
+				Cols:          80,
+				Rows:          23,
+			}, chrome)
+
+			chrome.updateInfo(newStatusBarInfo(protocol.SessionInfo{
+				Name:        test.refreshName,
+				Agent:       "codex",
+				Status:      "running",
+				AgentStatus: "active",
+			}, 0, protocol.FleetSummary{}))
+
+			var buf bytes.Buffer
+			chrome.renderTo(&buf)
+
+			out := buf.String()
+			if !strings.Contains(out, test.wantStatusRow) || !strings.Contains(out, test.wantStatus) {
+				t.Fatalf("status-only chrome refresh missing status row or text: %q", out)
+			}
+
+			statusAt := strings.LastIndex(out, test.wantStatusRow)
+			cursorAt := strings.LastIndex(out, test.wantCursor)
+
+			if cursorAt == -1 {
+				t.Fatalf("status-only chrome refresh did not restore child cursor %q in %q", test.wantCursor, out)
+			}
+
+			if cursorAt < statusAt {
+				t.Fatalf("status-only chrome refresh restored cursor before drawing chrome: %q", out)
+			}
+
+			if !strings.Contains(out[:statusAt], "\x1b[?25l") {
+				t.Fatalf("status-only chrome refresh did not hide the cursor before drawing chrome: %q", out)
+			}
+
+			syncStartAt := strings.LastIndex(out, "\x1b[?2026h")
+			syncEndAt := strings.LastIndex(out, "\x1b[?2026l")
+
+			if syncStartAt == -1 || syncEndAt == -1 {
+				t.Fatalf("status-only chrome refresh did not bracket chrome with synchronized update: %q", out)
+			}
+
+			if syncStartAt > statusAt || syncEndAt < cursorAt {
+				t.Fatalf("synchronized update did not enclose chrome redraw and cursor restore: %q", out)
+			}
+
+			if strings.Count(out, "\x1b[?2026h") != strings.Count(out, "\x1b[?2026l") {
+				t.Fatalf("status-only chrome refresh emitted unbalanced synchronized update markers: %q", out)
+			}
+
+			if test.wantShow && !strings.Contains(out[cursorAt:], "\x1b[?25h") {
+				t.Fatalf("visible child cursor was not shown after restore: %q", out)
+			}
+
+			if !test.wantShow && strings.Contains(out, "\x1b[?25h") {
+				t.Fatalf("hidden child cursor should remain hidden after status refresh: %q", out)
+			}
+		})
+	}
+}
+
+func TestExperimentalStatusChromeRefreshBeforeSnapshotDoesNotTouchCursor(t *testing.T) {
+	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+		Name:   "blether-refresh",
+		Agent:  "codex",
+		Status: "running",
+	}, false, "bottom", 24, 80)
+
+	var buf bytes.Buffer
+	chrome.renderTo(&buf)
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[24;1H") || !strings.Contains(out, "blether-refresh") {
+		t.Fatalf("pre-snapshot chrome refresh missing status row or text: %q", out)
+	}
+
+	if strings.Contains(out, "\x1b[?25l") || strings.Contains(out, "\x1b[?25h") {
+		t.Fatalf("pre-snapshot chrome refresh should not change cursor visibility: %q", out)
+	}
+
+	if strings.Contains(out, "\x1b[?2026h") || strings.Contains(out, "\x1b[?2026l") {
+		t.Fatalf("pre-snapshot chrome refresh should not emit synchronized update markers: %q", out)
+	}
+
+	if strings.Count(out, "H") > 1 {
+		t.Fatalf("pre-snapshot chrome refresh should only position the chrome row: %q", out)
+	}
+}
+
 // withStubDaemonStart makes the daemon unreachable: it points at a dead socket
 // and stubs the daemon-spawn to fail, so any Connect-based helper fails fast.
 func withStubDaemonStart(t *testing.T) (config.Paths, *config.Config) {
