@@ -12,8 +12,8 @@ import "time"
 // arithmetic, wrap widths, minimum name width, panel breakpoints) stay as
 // documented constants next to the render logic they must match.
 var (
-	// refreshInterval is the cadence at which the session picker, attached status
-	// bar, and in-picker message viewer re-poll the daemon
+	// refreshInterval is the cadence at which the Session Navigator, attached
+	// status bar, and message viewer re-poll the daemon
 	// for fresh session state (issue #1315).
 	refreshInterval = 2 * time.Second
 
@@ -23,7 +23,7 @@ var (
 	fallbackRows uint16 = 24
 
 	// summaryWidth caps the visible width of a `gr status` summary shown in the
-	// picker before it is truncated with an ellipsis. It also bounds the
+	// Navigator before it is truncated with an ellipsis. It also bounds the
 	// auto-sizing Summary column (see SessionColumns), so the two stay in step.
 	summaryWidth = maxSummaryWidth
 )

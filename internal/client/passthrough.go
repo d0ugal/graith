@@ -174,7 +174,7 @@ func keyLabel(b byte) string {
 // about a remapped key (issue #1233).
 func showHelpBar(w io.Writer, keys PassthroughKeys) {
 	help := fmt.Sprintf(
-		"\x1b[7m %s detach  %s sessions  %s messages  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  %s restart \x1b[0m",
+		"\x1b[7m %s detach  %s navigator  %s messages  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  %s restart \x1b[0m",
 		keyLabel(keys.Detach),
 		keyLabel(keys.SessionList),
 		keyLabel(keys.Messages),

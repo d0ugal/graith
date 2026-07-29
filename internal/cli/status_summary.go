@@ -20,7 +20,7 @@ var (
 var statusSummaryCmd = &cobra.Command{
 	Use:   "status [session] <message>",
 	Short: "Set a status summary for a session",
-	Long: `Set a short status summary displayed in the session picker overlay.
+	Long: `Set a short status summary displayed in the Session Navigator.
 
 When run inside a graith session, the session is auto-detected.
 When run outside, provide the session name or ID as the first argument.

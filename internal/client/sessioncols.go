@@ -12,20 +12,20 @@ import (
 )
 
 // SessionColumn is the single source of truth for one column shown in the
-// session picker (the TUI overlay) and/or the `gr ls` snapshot. A column is
+// Session Navigator (the TUI overlay) and/or the `gr ls` snapshot. A column is
 // defined exactly once here, so adding a new column makes
 // it appear in every enabled surface — flip ShowCLI/ShowTUI to control where it
 // shows up and the views stay in sync automatically.
 //
-// The list snapshot table and picker render differently: the list aligns
-// plain-text cells (optionally colourised) by visible width, while the picker
+// The list snapshot table and Navigator render differently: the list aligns
+// plain-text cells (optionally colourised) by visible width, while the Navigator
 // uses fixed-width cells with unicode glyphs and per-cell styling. So each
 // column carries a value formatter (and styling) for each kind of surface
 // rather than a single shared string.
 //
 // The NAME/Session column is deliberately NOT part of this registry: both
 // surfaces render it specially (star prefix and tree indentation in list,
-// collapse indicators and tree prefixes in the picker), so it is handled
+// collapse indicators and tree prefixes in the Navigator), so it is handled
 // inline by each renderer. This registry covers only the trailing columns.
 type SessionColumn struct {
 	// Key is a stable identifier used for TUI width lookups.
@@ -36,7 +36,7 @@ type SessionColumn struct {
 
 	// ShowCLI includes the column in `gr ls` snapshot mode.
 	ShowCLI bool
-	// ShowTUI includes the column in the TUI session picker.
+	// ShowTUI includes the column in the TUI Session Navigator.
 	ShowTUI bool
 	// Wide restricts a CLI column to `gr ls --wide`.
 	Wide bool
@@ -53,7 +53,7 @@ type SessionColumn struct {
 	// ansi.StringWidth so the colour escapes don't disturb column alignment.
 	CLIColor func(s protocol.SessionInfo) color.Color
 
-	// TUIValue returns the cell text for the TUI picker. It may include "—"
+	// TUIValue returns the cell text for the TUI Session Navigator. It may include "—"
 	// placeholders and unicode status glyphs.
 	TUIValue func(s protocol.SessionInfo) string
 	// TUIStyle returns the lipgloss style (foreground/bold) for the TUI cell.

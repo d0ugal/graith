@@ -44,7 +44,7 @@ TOTAL                     81,562  51,726  1,961,106  96,004   0      2,190,398  
 ```
 
 `gr dashboard` was removed with no forwarding alias — use `gr ls` for snapshots
-or the attached-session picker (`ctrl+b w`) for an interactive view.
+or the Session Navigator (`ctrl+b w`) for an interactive view.
 
 `--label` compares case-insensitively and composes with `--repo`, `--children`,
 `--starred`, and `--deleted`. Repeating it requires every requested label; it
@@ -201,7 +201,7 @@ daemon log and injects anyway. See
 
 ### `gr status [session] <message>`
 
-Set a status summary, shown in the session picker overlay and `gr list`. Run inside a graith session, it auto-detects the session.
+Set a status summary, shown in the Session Navigator and `gr list`. Run inside a graith session, it auto-detects the session.
 
 | Flag | Description |
 |------|-------------|

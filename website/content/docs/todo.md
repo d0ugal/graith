@@ -238,12 +238,12 @@ keep their existing environment and use the scenario name from the delivered
 manifest. A dependency-blocked seed becomes claimable only after its upstream
 items finish; members without a `task` get no seed.
 
-## In `gr list` and the overlay
+## In `gr list`
 
-A `done/total` column is available in both `gr list` and the overlay session
-picker, **opt-in and off by default**. It shows a session's own subtree count; a
-scenario-wide total shows only on the scenario's orchestrator, so fleet totals
-aren't inflated by echoing it onto every member.
+A `done/total` column is available in `gr list --wide`, **opt-in and off by
+default**. It shows a session's own subtree count; a scenario-wide total shows
+only on the scenario's orchestrator, so fleet totals aren't inflated by echoing
+it onto every member.
 
 ## Configuration
 

@@ -121,7 +121,7 @@ The client is stateless. Each command connects to the Unix socket, sends a hands
 For `attach`, the client loops between three modes, switching on prefix key commands and overlay actions:
 
 1. **Passthrough mode:** raw terminal I/O forwarded to/from the daemon
-2. **Overlay mode:** session picker TUI (Bubble Tea)
+2. **Overlay mode:** Session Navigator TUI (Bubble Tea)
 3. **Shell mode:** interactive shell in the worktree
 
 ### Passthrough

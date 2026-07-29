@@ -144,7 +144,7 @@ When a session is created:
 
 ## `gr attach [name-or-id]` (alias: `a`)
 
-Attach to a session. If no name is given, opens the session picker overlay.
+Attach to a session. If no name is given, opens the Session Navigator.
 
 For PTY sessions, the daemon-side terminal model owns terminal query replies.
 Attach output is filtered so the host terminal does not also answer child
@@ -167,9 +167,9 @@ output into repaint hints and refreshes from screen snapshots.
 
 `gr attach --read-only <name>` observes with a persistent `🔒 READ-ONLY`
 indicator. The prefix key (default `ctrl+b`) still works — detach, open the
-picker, switch sessions — only agent input is blocked. Input is gated in the
+Navigator, switch sessions — only agent input is blocked. Input is gated in the
 client and, as a backstop, the daemon. The mode covers the whole attach session,
-including picker-switched sessions.
+including sessions selected from the Navigator.
 
 A **headless** session has no PTY, so `gr attach` **converts it to interactive**:
 graith stops the headless process and relaunches via `claude --resume

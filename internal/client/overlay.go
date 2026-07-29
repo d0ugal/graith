@@ -45,7 +45,9 @@ const (
 
 var viewNames = []string{"All", "Repo", "Starred", "Labels", "Scenarios", "Deleted"}
 
-// PickerView identifies the session-picker view to restore within one attach
+const sessionNavigatorTitle = "Session Navigator"
+
+// PickerView identifies the Session Navigator view to restore within one attach
 // client. It is deliberately a client-local value; it is never persisted.
 type PickerView int
 
@@ -112,7 +114,7 @@ var (
 	colorYellow  = lipgloss.Color("#FFD75F")
 	colorPreview = lipgloss.Color("#555555")
 	colorPanel   = lipgloss.Color("#1a1a1a")
-	// colorSelectBg is the background of the highlighted row in the picker, so
+	// colorSelectBg is the background of the highlighted row in the Navigator, so
 	// the whole selected line stands out rather than just the "> " cursor. Dark
 	// and purple-tinted to echo the accent used for the selected name and the
 	// selected view label.
@@ -222,6 +224,14 @@ func pad(s string, width int) string {
 	}
 
 	return s
+}
+
+func fitStyledLine(s string, width int) string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return s
+	}
+
+	return ansi.Truncate(s, width, "…")
 }
 
 func displayBranch(branch, name string) string {
@@ -441,7 +451,7 @@ func displayLastOutput(s protocol.SessionInfo) string {
 	return ""
 }
 
-// maxSummaryWidth is the default cap on the picker's Summary cell, used when the
+// maxSummaryWidth is the default cap on the Navigator's Summary cell, used when the
 // [terminal] summary_width preference is unset. The live value is summaryWidth
 // (see presentation.go), which ConfigurePresentation may override from config.
 const maxSummaryWidth = 40
@@ -594,7 +604,7 @@ func computeColumnWidths(sessions []protocol.SessionInfo, _ string) columnWidths
 	}
 }
 
-// tuiColumns returns the registry columns shown in the TUI picker, in order.
+// tuiColumns returns the registry columns shown in the TUI Session Navigator, in order.
 func tuiColumns() []SessionColumn {
 	var cols []SessionColumn
 
@@ -605,6 +615,114 @@ func tuiColumns() []SessionColumn {
 	}
 
 	return cols
+}
+
+func sessionCountLabel(count int) string {
+	if count == 1 {
+		return "1 session"
+	}
+
+	return fmt.Sprintf("%d sessions", count)
+}
+
+func (m *overlayModel) panelWidth() int {
+	if m.width == 0 {
+		return m.contentWidth + 4
+	}
+
+	return min(m.contentWidth+4, m.width-4)
+}
+
+func (m *overlayModel) panelInnerWidth() int {
+	return max(1, m.panelWidth()-4)
+}
+
+func (m *overlayModel) resizeFilterInput() {
+	prefixWidth := lipgloss.Width(sessionNavigatorTitle + "  Filter: ")
+	promptWidth := lipgloss.Width(m.filterInput.Prompt)
+	cursorWidth := 1
+
+	m.filterInput.SetWidth(max(8, m.panelInnerWidth()-prefixWidth-promptWidth-cursorWidth))
+}
+
+func renderSessionNavigatorTitle(view viewMode, visibleSessions int, profile string, width int) string {
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+
+	activeViewStyle := titleStyle
+
+	activeViewName := "All"
+	if view >= 0 && int(view) < len(viewNames) {
+		activeViewName = viewNames[view]
+	}
+
+	var titleParts []string
+
+	for i, name := range viewNames {
+		if viewMode(i) == view {
+			titleParts = append(titleParts, activeViewStyle.Render(name))
+		} else {
+			titleParts = append(titleParts, dim.Render(name))
+		}
+	}
+
+	full := titleStyle.Render(sessionNavigatorTitle)
+	full += dim.Render("  " + sessionCountLabel(visibleSessions))
+
+	if profile != "" {
+		full += dim.Render(" [" + profile + "]")
+	}
+
+	full += dim.Render("  ◂ ") + strings.Join(titleParts, dim.Render(" │ ")) + dim.Render(" ▸")
+	if lipgloss.Width(full) <= width {
+		return full
+	}
+
+	compact := titleStyle.Render(sessionNavigatorTitle)
+	compact += dim.Render("  view: ") + activeViewStyle.Render(activeViewName)
+
+	count := dim.Render("  " + sessionCountLabel(visibleSessions))
+
+	if lipgloss.Width(compact+count) <= width {
+		compact += count
+	}
+
+	if profile != "" {
+		profileLabel := dim.Render(" [" + profile + "]")
+		if lipgloss.Width(compact+profileLabel) <= width {
+			compact += profileLabel
+		}
+	}
+
+	return fitStyledLine(compact, width)
+}
+
+func selectedSessionContext(item sessionItem, currentSessionID string) string {
+	s := item.info
+
+	var parts []string
+
+	if s.ID == currentSessionID {
+		parts = append(parts, "attached")
+	}
+
+	if item.labelGroup != "" {
+		parts = append(parts, "label: "+item.labelGroup)
+	}
+
+	if s.RepoName != "" && !item.showRepo && item.labelGroup == "" {
+		parts = append(parts, "repo: "+s.RepoName)
+	}
+
+	if s.SystemKind != "" {
+		parts = append(parts, "kind: "+s.SystemKind)
+	}
+
+	if status := displayStatus(s); status != "" {
+		parts = append(parts, "status: "+status)
+	}
+
+	return strings.Join(parts, "  ")
 }
 
 // compactDelegate renders each item on a single line with aligned columns.
@@ -703,7 +821,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	// Render each TUI column from the shared registry so the CLI table and the
-	// picker stay in sync. Every trailing column contributes "  <cell>".
+	// Navigator stay in sync. Every trailing column contributes "  <cell>".
 	var b strings.Builder
 
 	b.WriteString(selPrefix)
@@ -733,7 +851,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	_, _ = fmt.Fprint(w, line)
 }
 
-// highlightSelectedRow makes the picker's selected row stand out by giving the
+// highlightSelectedRow makes the Navigator's selected row stand out by giving the
 // whole line a subtle background (and keeping it bold), so the eye doesn't have
 // to trace the "> " cursor across a wide terminal to find the current row.
 //
@@ -883,7 +1001,7 @@ type overlayModel struct {
 	keySearch string
 }
 
-// OverlayKeys carries the configurable picker keybindings from [keybindings].
+// OverlayKeys carries the configurable Navigator keybindings from [keybindings].
 // Empty fields fall back to the built-in defaults (see newOverlayModel).
 type OverlayKeys struct {
 	DeleteSession string
@@ -912,19 +1030,18 @@ func (m *overlayModel) resizeList() {
 		return
 	}
 
-	reserve := 10
+	reserve := 12
 	if m.state == stateConfirmDelete || m.state == stateConfirmStop || m.state == stateConfirmRestart || m.state == stateRestartMenu || m.state == stateRestartingAll {
 		reserve = 14
 	}
-
-	panelWidth := min(m.contentWidth+4, m.width-4)
 
 	listHeight := min(len(m.list.Items())+4, m.height-reserve)
 	if listHeight < 4 {
 		listHeight = 4
 	}
 
-	m.list.SetSize(panelWidth-4, listHeight)
+	m.list.SetSize(m.panelInnerWidth(), listHeight)
+	m.resizeFilterInput()
 }
 
 // OverlayResult holds the outcome of the overlay interaction.
@@ -1489,7 +1606,7 @@ func descendantCount(sessions []protocol.SessionInfo, sessionID string) int {
 }
 
 // knownDescendantCount includes both live and soft-deleted sessions. Deleted
-// sessions are hidden from the normal picker views, but the daemon still keeps
+// sessions are hidden from the normal Navigator views, but the daemon still keeps
 // them in the ownership tree and requires a subtree delete for their parent.
 func (m *overlayModel) knownDescendantCount(sessionID string) int {
 	sessions := make([]protocol.SessionInfo, 0, len(m.allSessions)+len(m.deletedSessions))
@@ -1499,7 +1616,7 @@ func (m *overlayModel) knownDescendantCount(sessionID string) int {
 	return descendantCount(sessions, sessionID)
 }
 
-// refreshDeletedNow loads ownership nodes hidden from live picker views. Nil
+// refreshDeletedNow loads ownership nodes hidden from live Navigator views. Nil
 // remains the failure sentinel, so a transient error never erases the last
 // successful ownership snapshot.
 func (m *overlayModel) refreshDeletedNow() {
@@ -1639,7 +1756,7 @@ func (m *overlayModel) rebuildForView() {
 	m.cols.treeIndent = maxTreeIndentFromItems(items)
 
 	m.contentWidth = m.cols.totalWidth()
-	m.filterInput.SetWidth(m.contentWidth)
+	m.resizeFilterInput()
 	m.list.SetItems(items)
 	m.list.SetDelegate(compactDelegate{cols: m.cols, currentSessionID: m.currentSessionID, shortcutKeys: m.shortcutKeys})
 	m.list.Select(0)
@@ -2226,7 +2343,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, tea.Quit
 
-			// keyDelete/keyResume/keySearch are the configurable picker keys.
+			// keyDelete/keyResume/keySearch are the configurable Navigator keys.
 			// This is a first-match-wins switch, so a user who rebinds one onto
 			// an existing literal (e.g. search onto "q") gets whichever case
 			// appears first. Defaults (x/R//) don't collide with any literal.
@@ -2514,37 +2631,19 @@ func (m *overlayModel) View() tea.View {
 		return cm.View()
 	}
 
-	panelWidth := min(m.contentWidth+4, w-4)
+	panelWidth := m.panelWidth()
+	panelInnerWidth := m.panelInnerWidth()
 	dim := lipgloss.NewStyle().Foreground(colorDim)
 
 	var panelContent strings.Builder
 
 	if m.state == stateFilter {
-		panelContent.WriteString("Filter: ")
-		panelContent.WriteString(m.filterInput.View())
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+		line := titleStyle.Render(sessionNavigatorTitle) + dim.Render("  Filter: ") + m.filterInput.View()
+		panelContent.WriteString(fitStyledLine(line, panelInnerWidth))
 		panelContent.WriteString("\n")
 	} else {
-		dimArrow := lipgloss.NewStyle().Foreground(colorDim)
-		activeViewStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
-
-		var titleParts []string
-
-		for i, name := range viewNames {
-			if viewMode(i) == m.view {
-				titleParts = append(titleParts, activeViewStyle.Render(name))
-			} else {
-				titleParts = append(titleParts, dimArrow.Render(name))
-			}
-		}
-
-		title := dimArrow.Render("◂ ") + strings.Join(titleParts, dimArrow.Render(" │ ")) + dimArrow.Render(" ▸")
-
-		if m.profile != "" {
-			dimStyle := lipgloss.NewStyle().Foreground(colorDim)
-			title += " " + dimStyle.Render("["+m.profile+"]")
-		}
-
-		panelContent.WriteString(title)
+		panelContent.WriteString(renderSessionNavigatorTitle(m.view, len(m.visibleSessions()), m.profile, panelInnerWidth))
 		panelContent.WriteString("\n")
 	}
 
@@ -2603,6 +2702,15 @@ func (m *overlayModel) View() tea.View {
 
 		panelContent.WriteString("\n")
 
+		selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+
+		selectedLine := dim.Render("Selected: ") + selectedStyle.Render(item.displayName())
+		if context := selectedSessionContext(item, m.currentSessionID); context != "" {
+			selectedLine += dim.Render("  " + context)
+		}
+
+		panelContent.WriteString(fitStyledLine(selectedLine, panelInnerWidth))
+
 		var line1 []string
 
 		if !s.Mirror {
@@ -2627,6 +2735,7 @@ func (m *overlayModel) View() tea.View {
 		}
 
 		if len(line1) > 0 {
+			panelContent.WriteString("\n")
 			panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
 		}
 
@@ -2906,7 +3015,7 @@ func (m *overlayModel) View() tea.View {
 	return v
 }
 
-// RunOverlayOpts configures the session-picker overlay. It replaces the long
+// RunOverlayOpts configures the Session Navigator overlay. It replaces the long
 // positional parameter list of RunOverlay — several of its fields are
 // structurally identical callbacks (five `func(sessionID string) error`) that
 // were trivially transposable when passed positionally.
@@ -2952,7 +3061,7 @@ type RunOverlayOpts struct {
 	Keys OverlayKeys
 }
 
-// RunOverlay launches the bubbletea session picker.
+// RunOverlay launches the Bubble Tea Session Navigator.
 func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
 	m.refreshSessions = opts.RefreshSessions

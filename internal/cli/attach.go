@@ -86,7 +86,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 	return fmt.Errorf("session %q not found", name)
 }
 
-// runAttachFromOverlay opens the session picker with no session currently
+// runAttachFromOverlay opens the Session Navigator with no session currently
 // attached (the `gr attach` with no argument entry point), then attaches to the
 // picked or newly created session.
 func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) error {

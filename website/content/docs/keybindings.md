@@ -21,7 +21,7 @@ the matching `keybindings.*` field (defaults shown):
 
 | Key | Action | Config key |
 |-----|--------|-----------|
-| `w` | Open the session picker overlay | `session_list` |
+| `w` | Open the Session Navigator | `session_list` |
 | `d` | Detach (leave the agent running) | `detach` |
 | `s` | Open a shell in the session's worktree | `shell` |
 | `c` | Create a new session | `new_session` |
@@ -47,9 +47,10 @@ Press the prefix key twice (`ctrl+b ctrl+b`) to send a single `ctrl+b` to the ag
 
 graith also understands the Kitty keyboard protocol: extended terminals (e.g. Ghostty) send `ESC [ <codepoint> ; 5 u` for ctrl+key combinations, which graith normalizes to raw control bytes for prefix detection, stripping release events.
 
-## Session picker overlay
+## Session Navigator
 
-The overlay is a full-screen TUI showing all sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
+The Session Navigator is a full-screen TUI for browsing, managing, and attaching
+to sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
 
 ### Navigation
 
@@ -63,7 +64,7 @@ The overlay is a full-screen TUI showing all sessions. Open it with `ctrl+b w`, 
 | `l` / Right | Next view mode |
 | Tab | Jump to the next group in grouped views |
 | Enter | Attach to the highlighted session |
-| `q` / Esc | Close the overlay |
+| `q` / Esc | Close the Navigator |
 
 ### View modes
 
@@ -86,7 +87,8 @@ Cycle with `h`/`l` or arrows:
 | `x` | Delete session (prompts for confirmation with `y`); sessions with descendants offer to soft-delete the entire subtree |
 | `s` | Toggle starred state |
 | `r` | Restart session (prompts for confirmation) |
-| `R` | Restart all sessions in current view (prompts for confirmation) |
+| `R` | Open the restart menu for all, outdated, or stopped sessions in the current view |
+| `S` | Stop the highlighted session (prompts for confirmation) |
 | Space | Fold/unfold children of a parent session |
 | `C` | Fold/unfold all parent sessions |
 | `/` | Enter filter mode (type to search by name, repo, or label) |
@@ -98,18 +100,17 @@ the session still belongs to it. An empty Labels view says that there are no
 labelled sessions. Trees contain only sessions matched by the selected view and
 search: when a parent is absent, its visible child is shown as a root.
 
-Reopening the picker during the same attach session remembers the last view and
+Reopening the Navigator during the same attach session remembers the last view and
 selected session when they are still available. A new `gr attach` process starts
 in **All** as usual.
 
-The overlay has no stop, resume, rename, or label-edit action — use `gr stop`,
-`gr restart`, or `gr update` from the CLI.
+The Navigator has no rename or label-edit action — use `gr update` from the CLI.
 
-### Preview panel
+### Preview
 
-The right side of the overlay shows a live preview of the selected session's
-terminal screen. The daemon maintains the screen model, and clients request
-snapshots while the session produces output.
+The Navigator keeps a live preview of the selected session's terminal screen
+behind the management panel. The daemon maintains the screen model, and clients
+request snapshots while the session produces output.
 
 ### Session display
 
@@ -117,10 +118,12 @@ Each session row shows:
 
 | Column | Content |
 |--------|---------|
-| Name | Session name (with star indicator if starred) |
+| Name | Session name (with star/current indicators if starred or attached) |
 | Status | Running, stopped, errored, or agent status (`active`, `ready`, or `error`) |
 | Summary | Status text, tool name from hooks, or auto-derived activity |
 | Git | Branch name (or "(in-place)"), dirty indicator, unpushed commit count |
+| PR | Pull request number plus CI or merge-conflict state |
+| Review | Pull request review decision (`a`, `c`, or `r`) |
 | Output | Age of most recent output |
 
 ## Message viewer and scroll pager

@@ -40,7 +40,7 @@ Press `ctrl+b d` to detach. The agent keeps running. Reattach later:
 gr attach fix-auth-bug
 ```
 
-Or `gr attach` with no arguments opens the picker.
+Or `gr attach` with no arguments opens the Session Navigator.
 
 ## Multiple sessions
 
@@ -50,11 +50,11 @@ gr new add-tests --agent codex
 gr new explore-codebase --background    # don't attach yet
 ```
 
-Switch with `ctrl+b n` (next) / `ctrl+b p` (previous), or `ctrl+b w` for the picker overlay.
+Switch with `ctrl+b n` (next) / `ctrl+b p` (previous), or `ctrl+b w` for the Session Navigator.
 
-## Session picker
+## Session Navigator
 
-The picker shows all sessions as one parent/child tree by default. Repository
+The Session Navigator shows all sessions as one parent/child tree by default. Repository
 names stay visible on each row, including when a parent and child belong to
 different repositories:
 

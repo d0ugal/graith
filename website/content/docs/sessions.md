@@ -97,7 +97,7 @@ OSC/DCS/APC side-effect protocols before they reach the host terminal, so a
 detached session and an attached session expose the same child-facing terminal
 authority.
 
-The attach loop transitions between passthrough mode (raw terminal I/O) and the overlay (session picker), cycling without dropping the daemon connection: detach with `ctrl+b d`, switch sessions with `ctrl+b n/p/l`.
+The attach loop transitions between passthrough mode (raw terminal I/O) and the Session Navigator, cycling without dropping the daemon connection: detach with `ctrl+b d`, switch sessions with `ctrl+b n/p/l`.
 
 Live attach output is bounded per client so a slow terminal or remote link cannot
 stall the session's PTY drain. Raw attach and `gr logs -f` preserve byte order,
@@ -304,7 +304,7 @@ independent. Labels never grant access: creation and update use the same
 local-human, remote-human, session/descendant, and system-session boundaries as
 the rest of session metadata.
 
-The CLI picker has a **Labels** view, grouping matching sessions across repository
+The Session Navigator has a **Labels** view, grouping matching sessions across repository
 boundaries and displaying each match as `repo/session`. Each label group preserves
 parent/child relationships, including those crossing repositories. Search also
 matches label text; if filtering removes a parent, its matching child becomes a
@@ -328,14 +328,14 @@ Starred sessions:
 - Can't be deleted — set `--starred=false` first
 - Are skipped by batch `stop`/`delete` operations (e.g. `--stale`, `--stopped`)
 - Can still be stopped directly (`gr stop <session>`)
-- Appear in the Starred view in the session picker
+- Appear in the Starred view in the Session Navigator
 - Show a star indicator in the session list
 
 `--starred` combines with `--name` and `--parent`; the daemon validates and persists them as one update. Repeating the same true/false value is safe.
 
 ## Status summaries
 
-Agents or users can set a status summary shown in the session picker:
+Agents or users can set a status summary shown in the Session Navigator:
 
 ```bash
 gr status "Exploring code"
@@ -345,4 +345,4 @@ gr status --clear
 
 The status auto-expires when the agent produces output without updating it (default TTL: 5 minutes); while idle it fades but persists visually.
 
-With no explicit status, the picker auto-derives activity summaries from hook reports (e.g. "Using Bash", "Using Edit").
+With no explicit status, the Session Navigator auto-derives activity summaries from hook reports (e.g. "Using Bash", "Using Edit").

@@ -72,7 +72,7 @@ gr msg send --children "text"     # message all child sessions
 gr msg pub --topic <topic> "text" # broadcast to a topic
 gr msg inbox --all --ack              # read inbox messages
 gr store put --shared <key> <body> # persist documents (use --shared)
-gr status "message"               # set status visible in picker
+gr status "message"               # set status visible in the Session Navigator
 gr type <session> "text"          # type into another session
 ```
 
@@ -117,5 +117,5 @@ Orchestrator coordinates:
 ## Access
 
 - `ctrl+b o` switches to the orchestrator session from any attached session
-- The orchestrator appears in the session picker with a system kind indicator
+- The orchestrator appears in the Session Navigator with a system kind indicator
 - `gr list` shows it alongside regular sessions

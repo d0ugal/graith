@@ -17,7 +17,7 @@ gr new add-pagination --repo ~/Code/api --prompt "add cursor-based pagination to
 gr new fix-n-plus-one --repo ~/Code/api --prompt "find and fix N+1 queries in the user endpoints"
 ```
 
-Each agent gets its own worktree and branch -- no conflicts. Switch with `ctrl+b n/p` or the session picker (`ctrl+b w`).
+Each agent gets its own worktree and branch -- no conflicts. Switch with `ctrl+b n/p` or the Session Navigator (`ctrl+b w`).
 
 ## Explore-then-fork
 
@@ -329,4 +329,4 @@ gr status "Phase 3: running tests"
 gr status "Done - all tests passing"
 ```
 
-The orchestrator or user follows progress in the session picker (`ctrl+b w`), which shows all sessions' status summaries.
+The orchestrator or user follows progress in the Session Navigator (`ctrl+b w`), which shows all sessions' status summaries.

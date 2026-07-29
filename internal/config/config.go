@@ -1731,23 +1731,23 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 // TerminalConfig is the [terminal] block: user-tunable interactive-TUI
 // presentation preferences that were previously fixed literals in the client
 // (issue #1254) — how often interactive session views refresh, and how
-// wide a `gr status` summary may grow in the picker before truncation.
+// wide a `gr status` summary may grow in the Navigator before truncation.
 //
 // Session-lifecycle presentation (the fallback terminal geometry and the
 // per-session scrollback cap) is deliberately NOT here: it lives in the
 // [lifecycle] block (issue #1243, default_cols/default_rows/max_log_bytes),
-// which owns the daemon's PTY seed. Layout invariants (the picker's column
+// which owns the daemon's PTY seed. Layout invariants (the Navigator's column
 // arithmetic, wrap widths, the minimum name column, and the GUI's frame rate)
 // are also excluded — they must match render logic and stay as documented
 // constants. Every field is optional and falls back to its default constant.
 type TerminalConfig struct {
-	// RefreshInterval is the cadence at which the session picker, attached
+	// RefreshInterval is the cadence at which the Session Navigator, attached
 	// status bar, and message viewer re-poll the daemon for fresh session state.
 	// Empty, unparseable, or non-positive uses the default
 	// (TerminalRefreshIntervalDefault); a zero cadence would busy-loop.
 	RefreshInterval string `toml:"refresh_interval"`
 	// SummaryWidth is the maximum visible width (in cells) of a `gr status`
-	// summary shown against a session in the picker before it is truncated with
+	// summary shown against a session in the Navigator before it is truncated with
 	// an ellipsis. Values < 1 fall back to the default (TerminalSummaryWidth).
 	SummaryWidth int `toml:"summary_width"`
 }
@@ -1765,7 +1765,7 @@ func (t TerminalConfig) RefreshIntervalDuration() time.Duration {
 	return positiveDurationOrDefault(t.RefreshInterval, TerminalRefreshIntervalDefault)
 }
 
-// SummaryWidthValue returns the picker summary truncation width, or the default
+// SummaryWidthValue returns the Navigator summary truncation width, or the default
 // when the configured value is non-positive.
 func (t TerminalConfig) SummaryWidthValue() int {
 	if t.SummaryWidth < 1 {

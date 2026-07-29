@@ -34,7 +34,7 @@ The wire protocol uses 5-byte framed multiplexing: `[channel:1][length:4][payloa
 
 **Worktrees** give git-level isolation: a session's own branch lets agents work different tasks in one repo without conflicts.
 
-**The prefix key** (default `ctrl+b`) intercepts keystrokes while attached — press it, then a command key (`w` session picker, `d` detach).
+**The prefix key** (default `ctrl+b`) intercepts keystrokes while attached — press it, then a command key (`w` Session Navigator, `d` detach).
 
 **Messaging** is inter-agent pub/sub, SQLite-backed: publish to topics, send direct messages, subscribe to streams.
 

@@ -34,7 +34,7 @@ You are running inside a graith session — a terminal multiplexer for AI coding
 
 ## Status updates
 
-Run `gr status "message"` to set your status visible to the user and other agents in the session picker. Update at key milestones:
+Run `gr status "message"` to set your status visible to the user and other agents in the Session Navigator. Update at key milestones:
 
 ```
 gr status "Exploring code"
@@ -210,8 +210,8 @@ inbox_preview_bytes   = 1000     # unread-inbox preview injected into a session'
 # (column arithmetic, wrap widths, frame rates) are deliberately NOT configurable
 # — they must match render logic. Empty or non-positive values fall back below.
 [terminal]
-refresh_interval = "2s"   # how often the picker/status bar/message viewer re-poll for state ("0"/non-positive => 2s)
-summary_width = 40        # max visible width of a `gr status` summary in the picker before truncation
+refresh_interval = "2s"   # how often the Navigator/status bar/message viewer re-poll for state ("0"/non-positive => 2s)
+summary_width = 40        # max visible width of a `gr status` summary in the Navigator before truncation
 
 # Update check: `gr list` and `gr doctor` query GitHub for a newer graith release
 # and cache the result. Disable for downstream forks, packaged/offline installs,
@@ -464,12 +464,12 @@ inbox_cooldown = "30s"        # minimum interval between unread-inbox nudges to 
 inbox_detached_delay = "5s"   # settle delay before notifying a session with no attached client ("0" is immediate)
 
 [overlay]
-# Keys that jump straight to the Nth session in the picker (1st key → session 1, …).
+# Keys that jump straight to the Nth session in the Navigator (1st key → session 1, …).
 shortcut_keys = "1234567890"
 
 # Prefix key plus a command key trigger these actions while attached.
 # NOTE: all keys below are read from config (passthrough keys via
-# cli/attach.go passthroughKeysFromConfig, picker keys via overlayKeysFromConfig).
+# cli/attach.go passthroughKeysFromConfig, Navigator keys via overlayKeysFromConfig).
 # The messages/restart passthrough keys have no config field
 # yet and stay literal.
 # Each command key is a single literal character (only prefix accepts "ctrl+…").
@@ -477,15 +477,15 @@ shortcut_keys = "1234567890"
 prefix = "ctrl+b"             # the prefix key; press it, then one of the keys below
 new_session = "c"             # open the create-session form
 fork_session = "f"           # fork the current session
-delete_session = "x"         # delete a session in the picker
+delete_session = "x"         # delete a session in the Session Navigator
 detach = "d"                 # detach without stopping the agent
-session_list = "w"           # open the session picker overlay
+session_list = "w"           # open the Session Navigator
 next_session = "n"           # switch to the next session
 prev_session = "p"           # switch to the previous session
 last_session = "l"           # switch to the most recently used session
-resume_session = "R"         # open the restart menu for a session in the picker
+resume_session = "R"         # open the Session Navigator restart menu
 rename_session = ","         # prompt for a new name and rename the current session
-search = "/"                 # filter sessions in the picker
+search = "/"                 # filter sessions in the Session Navigator
 scroll_mode = "["            # open a scrollable pager over the session's history
 shell = "s"                  # open a shell in the session's worktree
 orchestrator_session = "o"   # jump to the orchestrator session
@@ -563,7 +563,7 @@ Your power comes from the graith control plane:
 - `gr msg pub --topic <topic> "text"` — broadcast to a topic
 - `gr msg sub --topic inbox --all --ack` — read and acknowledge your messages
 - `gr store --shared put/get/list` — persist documents (use --shared since you have no repo)
-- `gr status "message"` — set your status visible in the session picker
+- `gr status "message"` — set your status visible in the Session Navigator
 - `gr type <session> "text"` — type into another session
 
 ## Important notes
