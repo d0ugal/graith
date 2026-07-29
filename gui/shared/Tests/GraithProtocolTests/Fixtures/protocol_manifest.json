@@ -214,6 +214,67 @@
       ]
     },
     {
+      "name": "AgentInfoCacheMetadata",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "enabled",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "hit",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "bypassed",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "fetched_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "expires_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "AgentInfoModel",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "description",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "AgentInfoMsg",
       "swift": "na",
       "fields": [
@@ -228,6 +289,20 @@
           "name": "key",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "refresh",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "no_cache",
+          "type": {
+            "kind": "bool"
           },
           "optional": true
         }
@@ -286,6 +361,13 @@
           "optional": true
         },
         {
+          "name": "format",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
           "name": "stdout",
           "type": {
             "kind": "string"
@@ -314,11 +396,50 @@
           "optional": true
         },
         {
+          "name": "lines",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "models",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "AgentInfoModel"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "cache",
+          "type": {
+            "kind": "object",
+            "ref": "AgentInfoCacheMetadata"
+          },
+          "optional": true
+        },
+        {
           "name": "exit_code",
           "type": {
             "kind": "int"
           },
           "optional": false
+        },
+        {
+          "name": "warnings",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
         },
         {
           "name": "error",

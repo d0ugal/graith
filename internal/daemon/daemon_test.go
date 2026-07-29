@@ -974,6 +974,34 @@ func TestIsConfigStale(t *testing.T) {
 		}
 	})
 
+	t.Run("changed info commands are not stale", func(t *testing.T) {
+		createdAgent := agent
+		createdAgent.Info = config.AgentInfoCommands{
+			"model": config.AgentInfoCommand{Args: []string{"--list-models"}},
+		}
+
+		currentAgent := agent
+		currentAgent.Info = config.AgentInfoCommands{
+			"model": config.AgentInfoCommand{Args: []string{"--list-models"}, Format: config.AgentInfoFormatModelList},
+		}
+
+		infoCfg := &config.Config{
+			Agents:  map[string]config.Agent{"claude": currentAgent},
+			Sandbox: cfg.Sandbox,
+		}
+		sess := SessionState{
+			Agent: "claude",
+			CreationCfg: &CreationConfig{
+				Agent:         createdAgent,
+				SandboxConfig: cfg.Sandbox.Merge(agent.Sandbox),
+			},
+		}
+
+		if isConfigStale(sess, infoCfg) {
+			t.Error("expected not stale when only info commands differ")
+		}
+	})
+
 	t.Run("changed sandbox config is stale", func(t *testing.T) {
 		sess := SessionState{
 			Agent: "claude",

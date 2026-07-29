@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -216,20 +217,28 @@ func TestValidateOptionArgsEmptyWhenAllowed(t *testing.T) {
 
 func TestValidateAgentInfoCommands(t *testing.T) {
 	tests := map[string]struct {
-		info      map[string][]string
+		info      AgentInfoCommands
 		wantSubst string
 	}{
 		"empty key rejected": {
-			info:      map[string][]string{"": {"--version"}},
+			info:      AgentInfoCommands{"": AgentInfoCommand{Args: []string{"--version"}}},
 			wantSubst: "key must not be empty",
 		},
 		"whitespace key rejected": {
-			info:      map[string][]string{" model ": {"--list-models"}},
+			info:      AgentInfoCommands{" model ": AgentInfoCommand{Args: []string{"--list-models"}}},
 			wantSubst: "key must not have leading or trailing whitespace",
 		},
 		"empty args rejected": {
-			info:      map[string][]string{"version": {}},
+			info:      AgentInfoCommands{"version": AgentInfoCommand{}},
 			wantSubst: "args must not be empty",
+		},
+		"unknown format rejected": {
+			info:      AgentInfoCommands{"model": AgentInfoCommand{Args: []string{"--models"}, Format: "jsonpath"}},
+			wantSubst: "must be one of",
+		},
+		"bad cache ttl rejected": {
+			info:      AgentInfoCommands{"model": AgentInfoCommand{Args: []string{"--models"}, CacheTTL: "dreich"}},
+			wantSubst: "cache_ttl",
 		},
 	}
 
@@ -245,6 +254,20 @@ func TestValidateAgentInfoCommands(t *testing.T) {
 				t.Fatalf("Validate() = %v, want error containing %q", err, test.wantSubst)
 			}
 		})
+	}
+}
+
+func TestAgentInfoCacheTTL(t *testing.T) {
+	if got := (AgentInfoConfig{}).CacheTTLDuration(); got != AgentInfoCacheTTLDefault {
+		t.Fatalf("empty cache TTL = %v, want %v", got, AgentInfoCacheTTLDefault)
+	}
+
+	if got := (AgentInfoConfig{CacheTTL: "0"}).CacheTTLDuration(); got != 0 {
+		t.Fatalf("zero cache TTL = %v, want disabled", got)
+	}
+
+	if got := (AgentInfoConfig{CacheTTL: "15m"}).CacheTTLDuration(); got != 15*time.Minute {
+		t.Fatalf("custom cache TTL = %v, want 15m", got)
 	}
 }
 
@@ -278,8 +301,18 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 	}
 
 	for _, agentName := range []string{"claude", "codex", "cursor"} {
-		if !reflect.DeepEqual(got.Agents[agentName].Info, orig.Agents[agentName].Info) {
-			t.Errorf("%s info commands did not round-trip: %v", agentName, got.Agents[agentName].Info)
+		gotInfo, err := got.Agents[agentName].Info.Commands()
+		if err != nil {
+			t.Fatalf("%s round-tripped info commands: %v", agentName, err)
+		}
+
+		wantInfo, err := orig.Agents[agentName].Info.Commands()
+		if err != nil {
+			t.Fatalf("%s default info commands: %v", agentName, err)
+		}
+
+		if !reflect.DeepEqual(gotInfo, wantInfo) {
+			t.Errorf("%s info commands did not round-trip: %v", agentName, gotInfo)
 		}
 	}
 
@@ -287,13 +320,23 @@ func TestDefaultAgentArgsRoundTrip(t *testing.T) {
 		t.Fatal("expected the embedded codex agent to define option_args")
 	}
 
-	if got := orig.Agents["cursor"].Info["model"]; !reflect.DeepEqual(got, []string{"--list-models"}) {
-		t.Fatalf("cursor model info command = %v, want [--list-models]", got)
+	gotCursorModel, ok, err := orig.Agents["cursor"].Info.Command("model")
+	if err != nil || !ok {
+		t.Fatalf("cursor model info command missing: ok=%v err=%v", ok, err)
+	}
+
+	if got := gotCursorModel; !reflect.DeepEqual(got.Args, []string{"--list-models"}) || got.Format != AgentInfoFormatModelList {
+		t.Fatalf("cursor model info command = %+v, want args [--list-models] with model_list format", got)
 	}
 
 	for _, agentName := range []string{"claude", "codex"} {
-		if got := orig.Agents[agentName].Info["version"]; !reflect.DeepEqual(got, []string{"--version"}) {
-			t.Fatalf("%s version info command = %v, want [--version]", agentName, got)
+		got, ok, err := orig.Agents[agentName].Info.Command("version")
+		if err != nil || !ok {
+			t.Fatalf("%s version info command missing: ok=%v err=%v", agentName, ok, err)
+		}
+
+		if !reflect.DeepEqual(got.Args, []string{"--version"}) {
+			t.Fatalf("%s version info command = %v, want [--version]", agentName, got.Args)
 		}
 	}
 }
@@ -307,23 +350,47 @@ command = "agent"
 [agents.cursor.info]
 model = ["--list-models"]
 version = ["-v"]
+
+[agents.cursor.info.catalog]
+args = ["models"]
+format = "lines"
+cache_ttl = "10m"
 `), &cfg); err != nil {
 		t.Fatalf("unmarshal agent info config: %v", err)
 	}
 
-	if got := cfg.Agents["cursor"].Info["version"]; !reflect.DeepEqual(got, []string{"-v"}) {
+	version, ok, err := cfg.Agents["cursor"].Info.Command("version")
+	if err != nil || !ok {
+		t.Fatalf("parsed cursor version missing: ok=%v err=%v", ok, err)
+	}
+
+	if got := version.Args; !reflect.DeepEqual(got, []string{"-v"}) {
 		t.Fatalf("parsed cursor version info = %v, want [-v]", got)
 	}
 
-	merged := mergeAgent(Agent{Info: map[string][]string{"model": {"--old"}}}, Agent{
-		Info: map[string][]string{"version": {"-v"}},
+	catalog, ok, err := cfg.Agents["cursor"].Info.Command("catalog")
+	if err != nil || !ok {
+		t.Fatalf("parsed cursor catalog missing: ok=%v err=%v", ok, err)
+	}
+
+	if !reflect.DeepEqual(catalog.Args, []string{"models"}) || catalog.Format != AgentInfoFormatLines || catalog.CacheTTL != "10m" {
+		t.Fatalf("parsed cursor catalog info = %+v, want table form", catalog)
+	}
+
+	merged := mergeAgent(Agent{Info: AgentInfoCommands{"model": AgentInfoCommand{Args: []string{"--old"}}}}, Agent{
+		Info: AgentInfoCommands{"version": AgentInfoCommand{Args: []string{"-v"}}},
 	})
 
 	if _, ok := merged.Info["model"]; ok {
 		t.Fatalf("user info map should replace default info map, got %v", merged.Info)
 	}
 
-	if got := merged.Info["version"]; !reflect.DeepEqual(got, []string{"-v"}) {
+	mergedVersion, ok, err := merged.Info.Command("version")
+	if err != nil || !ok {
+		t.Fatalf("merged version info missing: ok=%v err=%v", ok, err)
+	}
+
+	if got := mergedVersion.Args; !reflect.DeepEqual(got, []string{"-v"}) {
 		t.Fatalf("merged version info = %v, want [-v]", got)
 	}
 }

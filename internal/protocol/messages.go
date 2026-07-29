@@ -765,23 +765,46 @@ type AgentCatalogResponseMsg struct {
 // When Key is empty, the daemon runs every configured info command for Agent.
 // When Key is set, only that provider-neutral key is run.
 type AgentInfoMsg struct {
-	Agent string `json:"agent"`
-	Key   string `json:"key,omitempty"`
+	Agent   string `json:"agent"`
+	Key     string `json:"key,omitempty"`
+	Refresh bool   `json:"refresh,omitempty"`
+	NoCache bool   `json:"no_cache,omitempty"`
 }
 
 // AgentInfoResult is the captured output of one configured provider info
 // command. Command and Args report the configured agent command and selected
 // info argv, not the sandbox wrapper used internally.
 type AgentInfoResult struct {
-	Key             string   `json:"key"`
-	Command         string   `json:"command"`
-	Args            []string `json:"args,omitempty"`
-	Stdout          string   `json:"stdout,omitempty"`
-	Stderr          string   `json:"stderr,omitempty"`
-	StdoutTruncated bool     `json:"stdout_truncated,omitempty"`
-	StderrTruncated bool     `json:"stderr_truncated,omitempty"`
-	ExitCode        int      `json:"exit_code"`
-	Error           string   `json:"error,omitempty"`
+	Key             string                  `json:"key"`
+	Command         string                  `json:"command"`
+	Args            []string                `json:"args,omitempty"`
+	Format          string                  `json:"format,omitempty"`
+	Stdout          string                  `json:"stdout,omitempty"`
+	Stderr          string                  `json:"stderr,omitempty"`
+	StdoutTruncated bool                    `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool                    `json:"stderr_truncated,omitempty"`
+	Lines           []string                `json:"lines,omitempty"`
+	Models          []AgentInfoModel        `json:"models,omitempty"`
+	Cache           *AgentInfoCacheMetadata `json:"cache,omitempty"`
+	ExitCode        int                     `json:"exit_code"`
+	Warnings        []string                `json:"warnings,omitempty"`
+	Error           string                  `json:"error,omitempty"`
+}
+
+// AgentInfoModel is one parsed model-list record from a provider info command.
+type AgentInfoModel struct {
+	ID          string `json:"id"`
+	Description string `json:"description,omitempty"`
+}
+
+// AgentInfoCacheMetadata describes how an agent-info result interacted with the
+// daemon's in-memory cache. Times are RFC3339Nano strings.
+type AgentInfoCacheMetadata struct {
+	Enabled   bool   `json:"enabled"`
+	Hit       bool   `json:"hit"`
+	Bypassed  bool   `json:"bypassed,omitempty"`
+	FetchedAt string `json:"fetched_at,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
 // AgentInfoResponseMsg carries all requested info command results for an agent.

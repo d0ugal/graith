@@ -113,15 +113,32 @@ Graith's own `GRAITH_*` probe markers. Auth/socket variables such as
 the caller environment.
 
 ```toml
+[agent_info]
+cache_ttl = "1h"  # default; "0" disables the daemon memory cache
+
 [agents.cursor]
 command = "agent"
 args = ["--yolo", "--model", "{model}"]
 resume_args = ["--resume", "{agent_session_id}", "--yolo"]
 
 [agents.cursor.info]
-model = ["--list-models"]
-version = ["-v"]
+version = ["-v"]  # legacy argv-array form
+
+[agents.cursor.info.model]
+args = ["--list-models"]
+format = "model_list"
+cache_ttl = "30m"  # optional per-key override
 ```
+
+The short `key = ["arg", "..."]` form is still accepted and is equivalent to
+`format = "raw"`. Use the table form when a key needs a formatter or a
+per-key cache duration. Built-in formats are:
+
+| Format | JSON fields |
+|--------|-------------|
+| `raw` | raw `stdout` and `stderr` only |
+| `lines` | `lines`, split from stdout without line endings |
+| `model_list` | `models`, parsed from `id - description` stdout lines |
 
 Claude and Codex ship with a `version` probe by default:
 
@@ -136,13 +153,25 @@ version = ["--version"]
 Info commands are for provider catalog and version probes, not session launch.
 They use only the selected `info` argv, not the normal `args`,
 `resume_args`, `option_args`, prompt injection, hooks, or included-repo flags.
+Successful results are cached in daemon memory per agent, key, and effective
+command configuration. The default cache TTL is one hour from
+`[agent_info].cache_ttl`; set it to `"0"` to disable caching, or set
+`cache_ttl` on one info table to override that key while global caching is
+enabled. The cache is not persisted, so `gr daemon restart` starts empty.
+`gr agent info --refresh` runs the provider command and updates the cache on
+success. `--no-cache` runs the provider command without reading or writing the
+cache. The two flags are mutually exclusive. Expired entries are not returned;
+if the provider fails after expiry, the failure is returned and the stale data
+remains unserved. Concurrent misses or refreshes for the same agent/key share one
+provider command where possible.
+
 Each command is bounded by a 30 second daemon timeout. Unknown agents, unknown
 keys, and agents without `info` configuration fail the request. Timeouts and
 provider command failures are returned on their specific result with non-zero
 exit status and an `error` field; the CLI still exits non-zero after rendering
 those results. Captured stdout and stderr are capped at 1 MiB each; with
-`--json`, stdout, stderr, `stdout_truncated`, `stderr_truncated`, exit code, and
-per-result errors are returned as separate fields.
+`--json`, stdout, stderr, structured fields, `cache` metadata, truncation flags,
+warnings, exit code, and per-result errors are returned as separate fields.
 
 ### Per-agent sandbox
 

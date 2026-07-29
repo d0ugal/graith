@@ -67,7 +67,13 @@ type SessionManager struct {
 	// scenarioResultMu serializes store-write + state-commit publication. Store
 	// I/O never holds mu, while the separate lock prevents two publications from
 	// leaving artifact content and metadata describing different attempts.
-	scenarioResultMu  sync.Mutex
+	scenarioResultMu sync.Mutex
+	// agentInfoCacheMu guards the in-memory provider-info cache and in-flight
+	// refresh joins. Provider stdout is intentionally not persisted; daemon
+	// restart starts with an empty cache.
+	agentInfoCacheMu  sync.Mutex
+	agentInfoCache    map[agentInfoCacheKey]agentInfoCacheEntry
+	agentInfoFlights  map[agentInfoFlightKey]*agentInfoFlight
 	state             *State
 	worktreePort      WorktreePort
 	sessions          map[string]sessionDriver
@@ -278,6 +284,8 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		stopAttempts:              make(map[string]*stopAttempt),
 		attachedClients:           make(map[string]*attachedClient),
 		hookReports:               make(map[string]hookReport),
+		agentInfoCache:            make(map[agentInfoCacheKey]agentInfoCacheEntry),
+		agentInfoFlights:          make(map[agentInfoFlightKey]*agentInfoFlight),
 		tokenIndex:                make(map[string]string),
 		pendingPairings:           make(map[string]*pendingPairing),
 		pairWaiters:               make(map[string]chan pairApproval),

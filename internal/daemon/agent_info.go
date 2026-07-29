@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +24,8 @@ const (
 	agentInfoProcessKillGrace = 250 * time.Millisecond
 	agentInfoOutputMaxBytes   = 1 << 20
 )
+
+var cleanupAgentInfoProcessGroupFunc = cleanupAgentInfoProcessGroup
 
 var agentInfoInheritedEnv = []string{
 	"HOME",
@@ -67,6 +70,10 @@ func (sm *SessionManager) AgentInfo(ctx context.Context, req protocol.AgentInfoM
 		return protocol.AgentInfoResponseMsg{}, errors.New("agent name is required")
 	}
 
+	if req.Refresh && req.NoCache {
+		return protocol.AgentInfoResponseMsg{}, errors.New("agent info refresh and no_cache are mutually exclusive")
+	}
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return protocol.AgentInfoResponseMsg{}, err
 	}
@@ -84,9 +91,17 @@ func (sm *SessionManager) AgentInfo(ctx context.Context, req protocol.AgentInfoM
 		return protocol.AgentInfoResponseMsg{}, err
 	}
 
+	defaultCacheTTL := cfg.AgentInfo.CacheTTLDuration()
+	globalCacheDisabled := strings.TrimSpace(cfg.AgentInfo.CacheTTL) != "" && defaultCacheTTL == 0
+
 	results := make([]protocol.AgentInfoResult, 0, len(keys))
 	for _, key := range keys {
-		result, err := sm.runAgentInfoCommand(ctx, cfg, agentName, agent, key, agent.Info[key], agentInfoTimeoutDefault)
+		info, _, err := agent.Info.Command(key)
+		if err != nil {
+			return protocol.AgentInfoResponseMsg{}, err
+		}
+
+		result, err := sm.agentInfoResult(ctx, cfg, agentName, agent, key, info, defaultCacheTTL, globalCacheDisabled, req)
 		if err != nil {
 			return protocol.AgentInfoResponseMsg{}, err
 		}
@@ -97,7 +112,7 @@ func (sm *SessionManager) AgentInfo(ctx context.Context, req protocol.AgentInfoM
 	return protocol.AgentInfoResponseMsg{Agent: agentName, Results: results}, nil
 }
 
-func selectAgentInfoKeys(agentName string, info map[string][]string, key string) ([]string, error) {
+func selectAgentInfoKeys(agentName string, info config.AgentInfoCommands, key string) ([]string, error) {
 	if len(info) == 0 {
 		return nil, fmt.Errorf("agent %q has no info commands configured", agentName)
 	}
@@ -116,7 +131,7 @@ func selectAgentInfoKeys(agentName string, info map[string][]string, key string)
 	return sortedAgentInfoKeys(info), nil
 }
 
-func sortedAgentInfoKeys(info map[string][]string) []string {
+func sortedAgentInfoKeys(info config.AgentInfoCommands) []string {
 	keys := make([]string, 0, len(info))
 	for key := range info {
 		keys = append(keys, key)
@@ -127,16 +142,287 @@ func sortedAgentInfoKeys(info map[string][]string) []string {
 	return keys
 }
 
+type agentInfoCacheKey struct {
+	Agent     string
+	Key       string
+	Signature string
+}
+
+type agentInfoFlightKey struct {
+	CacheKey agentInfoCacheKey
+	Mode     string
+}
+
+type agentInfoCacheEntry struct {
+	Result    protocol.AgentInfoResult
+	FetchedAt time.Time
+	ExpiresAt time.Time
+}
+
+type agentInfoFlight struct {
+	done   chan struct{}
+	result agentInfoFreshResult
+}
+
+type agentInfoFreshResult struct {
+	Result    protocol.AgentInfoResult
+	FetchedAt time.Time
+	Err       error
+}
+
+func (sm *SessionManager) agentInfoResult(
+	ctx context.Context,
+	cfg *config.Config,
+	agentName string,
+	agent config.Agent,
+	key string,
+	info config.AgentInfoCommand,
+	defaultCacheTTL time.Duration,
+	globalCacheDisabled bool,
+	req protocol.AgentInfoMsg,
+) (protocol.AgentInfoResult, error) {
+	cacheTTL := info.CacheTTLDuration(defaultCacheTTL)
+	if globalCacheDisabled {
+		cacheTTL = 0
+	}
+
+	cacheEnabled := cacheTTL > 0
+	cacheKey := agentInfoCacheKey{
+		Agent:     agentName,
+		Key:       key,
+		Signature: agentInfoCacheSignature(agent, info, cfg.Sandbox),
+	}
+
+	if cacheEnabled && !req.Refresh && !req.NoCache {
+		if entry, ok := sm.agentInfoCacheHit(cacheKey, time.Now()); ok {
+			result := cloneAgentInfoResult(entry.Result)
+			result.Cache = agentInfoCacheMetadata(true, true, false, entry.FetchedAt, entry.ExpiresAt)
+
+			return result, nil
+		}
+	}
+
+	fresh, err := sm.refreshAgentInfoResult(ctx, cfg, agentName, agent, key, info, agentInfoFlightMode(req))
+	if err != nil {
+		return protocol.AgentInfoResult{}, err
+	}
+
+	if fresh.Err != nil {
+		return protocol.AgentInfoResult{}, fresh.Err
+	}
+
+	expiresAt := time.Time{}
+
+	cacheable := fresh.Result.Error == "" && fresh.Result.ExitCode == 0
+	if cacheEnabled && !req.NoCache && cacheable {
+		expiresAt = fresh.FetchedAt.Add(cacheTTL)
+		sm.storeAgentInfoCache(cacheKey, agentInfoCacheEntry{
+			Result:    fresh.Result,
+			FetchedAt: fresh.FetchedAt,
+			ExpiresAt: expiresAt,
+		})
+	}
+
+	result := cloneAgentInfoResult(fresh.Result)
+	if cacheEnabled {
+		result.Cache = agentInfoCacheMetadata(true, false, req.Refresh || req.NoCache, fresh.FetchedAt, expiresAt)
+	} else {
+		result.Cache = agentInfoCacheMetadata(false, false, false, fresh.FetchedAt, time.Time{})
+	}
+
+	return result, nil
+}
+
+func (sm *SessionManager) agentInfoCacheHit(key agentInfoCacheKey, now time.Time) (agentInfoCacheEntry, bool) {
+	sm.agentInfoCacheMu.Lock()
+	defer sm.agentInfoCacheMu.Unlock()
+
+	if sm.agentInfoCache == nil {
+		sm.agentInfoCache = make(map[agentInfoCacheKey]agentInfoCacheEntry)
+	}
+
+	entry, ok := sm.agentInfoCache[key]
+	if !ok {
+		return agentInfoCacheEntry{}, false
+	}
+
+	if !now.Before(entry.ExpiresAt) {
+		delete(sm.agentInfoCache, key)
+
+		return agentInfoCacheEntry{}, false
+	}
+
+	entry.Result = cloneAgentInfoResult(entry.Result)
+
+	return entry, true
+}
+
+func (sm *SessionManager) storeAgentInfoCache(key agentInfoCacheKey, entry agentInfoCacheEntry) {
+	sm.agentInfoCacheMu.Lock()
+	defer sm.agentInfoCacheMu.Unlock()
+
+	if sm.agentInfoCache == nil {
+		sm.agentInfoCache = make(map[agentInfoCacheKey]agentInfoCacheEntry)
+	}
+
+	sm.sweepAgentInfoCacheLocked(time.Now(), key)
+
+	entry.Result = cloneAgentInfoResult(entry.Result)
+	entry.Result.Cache = nil
+	entry.Result.Warnings = nil
+	sm.agentInfoCache[key] = entry
+}
+
+func (sm *SessionManager) sweepAgentInfoCacheLocked(now time.Time, storing agentInfoCacheKey) {
+	for key, entry := range sm.agentInfoCache {
+		if !now.Before(entry.ExpiresAt) {
+			delete(sm.agentInfoCache, key)
+
+			continue
+		}
+
+		if key.Agent == storing.Agent && key.Key == storing.Key && key.Signature != storing.Signature {
+			delete(sm.agentInfoCache, key)
+		}
+	}
+}
+
+func (sm *SessionManager) refreshAgentInfoResult(
+	ctx context.Context,
+	cfg *config.Config,
+	agentName string,
+	agent config.Agent,
+	key string,
+	info config.AgentInfoCommand,
+	flightMode string,
+) (agentInfoFreshResult, error) {
+	cacheKey := agentInfoCacheKey{
+		Agent:     agentName,
+		Key:       key,
+		Signature: agentInfoCacheSignature(agent, info, cfg.Sandbox),
+	}
+	flightKey := agentInfoFlightKey{CacheKey: cacheKey, Mode: flightMode}
+
+	sm.agentInfoCacheMu.Lock()
+	if sm.agentInfoFlights == nil {
+		sm.agentInfoFlights = make(map[agentInfoFlightKey]*agentInfoFlight)
+	}
+
+	if flight := sm.agentInfoFlights[flightKey]; flight != nil {
+		sm.agentInfoCacheMu.Unlock()
+
+		select {
+		case <-flight.done:
+			return cloneAgentInfoFreshResult(flight.result), nil
+		case <-ctx.Done():
+			return agentInfoFreshResult{}, ctx.Err()
+		}
+	}
+
+	flight := &agentInfoFlight{done: make(chan struct{})}
+	sm.agentInfoFlights[flightKey] = flight
+	sm.agentInfoCacheMu.Unlock()
+
+	// The shared provider process is owned by the daemon and bounded by
+	// agentInfoTimeoutDefault. A leader request cancellation must not cancel the
+	// command for waiters that already joined the same flight.
+	result, err := sm.runAgentInfoCommand(context.WithoutCancel(ctx), cfg, agentName, agent, key, info, agentInfoTimeoutDefault)
+	fresh := agentInfoFreshResult{
+		Result:    result,
+		FetchedAt: time.Now(),
+		Err:       err,
+	}
+
+	sm.agentInfoCacheMu.Lock()
+	flight.result = fresh
+
+	delete(sm.agentInfoFlights, flightKey)
+	close(flight.done)
+	sm.agentInfoCacheMu.Unlock()
+
+	return cloneAgentInfoFreshResult(fresh), nil
+}
+
+func agentInfoFlightMode(req protocol.AgentInfoMsg) string {
+	switch {
+	case req.NoCache:
+		return "no_cache"
+	case req.Refresh:
+		return "refresh"
+	default:
+		return "cacheable"
+	}
+}
+
+func agentInfoCacheSignature(agent config.Agent, info config.AgentInfoCommand, globalSandbox config.SandboxConfig) string {
+	signature := struct {
+		Command          string
+		Env              map[string]string
+		Info             config.AgentInfoCommand
+		EffectiveSandbox config.SandboxConfig
+	}{
+		Command:          agent.Command,
+		Env:              agent.Env,
+		Info:             info,
+		EffectiveSandbox: globalSandbox.Merge(agent.Sandbox),
+	}
+
+	data, err := json.Marshal(signature)
+	if err != nil {
+		return fmt.Sprintf("%s:%v:%v", agent.Command, info.Args, info)
+	}
+
+	return string(data)
+}
+
+func agentInfoCacheMetadata(enabled, hit, bypassed bool, fetchedAt, expiresAt time.Time) *protocol.AgentInfoCacheMetadata {
+	meta := &protocol.AgentInfoCacheMetadata{
+		Enabled:  enabled,
+		Hit:      hit,
+		Bypassed: bypassed,
+	}
+
+	if !fetchedAt.IsZero() {
+		meta.FetchedAt = fetchedAt.UTC().Format(time.RFC3339Nano)
+	}
+
+	if !expiresAt.IsZero() {
+		meta.ExpiresAt = expiresAt.UTC().Format(time.RFC3339Nano)
+	}
+
+	return meta
+}
+
+func cloneAgentInfoFreshResult(result agentInfoFreshResult) agentInfoFreshResult {
+	result.Result = cloneAgentInfoResult(result.Result)
+
+	return result
+}
+
+func cloneAgentInfoResult(result protocol.AgentInfoResult) protocol.AgentInfoResult {
+	result.Args = append([]string(nil), result.Args...)
+	result.Lines = append([]string(nil), result.Lines...)
+	result.Models = append([]protocol.AgentInfoModel(nil), result.Models...)
+	result.Warnings = append([]string(nil), result.Warnings...)
+
+	if result.Cache != nil {
+		cache := *result.Cache
+		result.Cache = &cache
+	}
+
+	return result
+}
+
 func (sm *SessionManager) runAgentInfoCommand(
 	ctx context.Context,
 	cfg *config.Config,
 	agentName string,
 	agent config.Agent,
 	key string,
-	infoArgs []string,
+	info config.AgentInfoCommand,
 	timeout time.Duration,
 ) (protocol.AgentInfoResult, error) {
-	return sm.runAgentInfoCommandWithOutputLimit(ctx, cfg, agentName, agent, key, infoArgs, timeout, agentInfoOutputMaxBytes)
+	return sm.runAgentInfoCommandWithOutputLimit(ctx, cfg, agentName, agent, key, info, timeout, agentInfoOutputMaxBytes)
 }
 
 func (sm *SessionManager) runAgentInfoCommandWithOutputLimit(
@@ -145,7 +431,7 @@ func (sm *SessionManager) runAgentInfoCommandWithOutputLimit(
 	agentName string,
 	agent config.Agent,
 	key string,
-	infoArgs []string,
+	info config.AgentInfoCommand,
 	timeout time.Duration,
 	outputMaxBytes int,
 ) (protocol.AgentInfoResult, error) {
@@ -153,7 +439,7 @@ func (sm *SessionManager) runAgentInfoCommandWithOutputLimit(
 		return protocol.AgentInfoResult{}, fmt.Errorf("agent %q has no command configured", agentName)
 	}
 
-	if len(infoArgs) == 0 {
+	if len(info.Args) == 0 {
 		return protocol.AgentInfoResult{}, fmt.Errorf("agent %q info key %q has no args configured", agentName, key)
 	}
 
@@ -182,7 +468,7 @@ func (sm *SessionManager) runAgentInfoCommandWithOutputLimit(
 		WorktreePath:   scratchDir,
 	}
 
-	displayArgs, err := config.ExpandSlice(infoArgs, vars)
+	displayArgs, err := config.ExpandSlice(info.Args, vars)
 	if err != nil {
 		return protocol.AgentInfoResult{}, fmt.Errorf("expand agent info args for %s.%s: %w", agentName, key, err)
 	}
@@ -191,6 +477,7 @@ func (sm *SessionManager) runAgentInfoCommandWithOutputLimit(
 		Key:     key,
 		Command: agent.Command,
 		Args:    displayArgs,
+		Format:  info.FormatOrDefault(),
 	}
 
 	envMap := agentInfoEnvMap(agent, agentName, sessionName, id, scratchDir, sm.paths.Profile)
@@ -264,32 +551,33 @@ func (sm *SessionManager) runAgentInfoCommandWithOutputLimit(
 	result.StdoutTruncated = stdout.Truncated()
 	result.StderrTruncated = stderr.Truncated()
 	result.ExitCode = commandExitCode(err)
+	normalizeAgentInfoResult(&result)
 
-	cleanupErr := cleanupAgentInfoProcessGroup(pid)
+	cleanupErr := cleanupAgentInfoProcessGroupFunc(pid)
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		result.Error = fmt.Sprintf("agent info %s.%s timed out after %s", agentName, key, timeout)
-		appendAgentInfoCleanupError(&result, cleanupErr)
+		appendAgentInfoCleanupWarning(&result, cleanupErr)
 
 		return result, nil
 	}
 
 	if errors.Is(err, exec.ErrWaitDelay) {
 		result.Error = fmt.Sprintf("agent info %s.%s left output streams open after exit", agentName, key)
-		appendAgentInfoCleanupError(&result, cleanupErr)
+		appendAgentInfoCleanupWarning(&result, cleanupErr)
 
 		return result, nil
 	}
 
 	if err != nil {
 		result.Error = agentInfoRunErrorMessage(agentName, key, err, result)
-		appendAgentInfoCleanupError(&result, cleanupErr)
+		appendAgentInfoCleanupWarning(&result, cleanupErr)
 
 		return result, nil
 	}
 
 	if cleanupErr != nil {
-		result.Error = fmt.Sprintf("agent info %s.%s cleanup failed: %v", agentName, key, cleanupErr)
+		result.Warnings = append(result.Warnings, fmt.Sprintf("agent info %s.%s cleanup failed: %v", agentName, key, cleanupErr))
 	}
 
 	return result, nil
@@ -330,6 +618,64 @@ func (w *agentInfoOutput) Truncated() bool {
 	return w.truncated
 }
 
+func normalizeAgentInfoResult(result *protocol.AgentInfoResult) {
+	switch result.Format {
+	case "", config.AgentInfoFormatRaw:
+		result.Format = config.AgentInfoFormatRaw
+	case config.AgentInfoFormatLines:
+		result.Lines = agentInfoLines(result.Stdout)
+	case config.AgentInfoFormatModelList:
+		result.Models = parseAgentInfoModelList(result.Stdout)
+	default:
+		// Config validation rejects unknown formats. This fallback keeps direct
+		// unit construction from losing raw diagnostics.
+		result.Format = config.AgentInfoFormatRaw
+	}
+}
+
+func agentInfoLines(stdout string) []string {
+	if stdout == "" {
+		return nil
+	}
+
+	normalized := strings.ReplaceAll(stdout, "\r\n", "\n")
+
+	lines := strings.Split(normalized, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	for i := range lines {
+		lines[i] = strings.TrimSuffix(lines[i], "\r")
+	}
+
+	return lines
+}
+
+func parseAgentInfoModelList(stdout string) []protocol.AgentInfoModel {
+	lines := agentInfoLines(stdout)
+	models := make([]protocol.AgentInfoModel, 0, len(lines))
+
+	for _, line := range lines {
+		id, description, ok := strings.Cut(line, " - ")
+		if !ok {
+			continue
+		}
+
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+
+		models = append(models, protocol.AgentInfoModel{
+			ID:          id,
+			Description: strings.TrimSpace(description),
+		})
+	}
+
+	return models
+}
+
 func cleanupAgentInfoProcessGroup(pid int) error {
 	if pid <= 1 || exactProcessGroupGone(pid) {
 		return nil
@@ -338,18 +684,12 @@ func cleanupAgentInfoProcessGroup(pid int) error {
 	return killProcessGroup(pid, agentInfoProcessKillGrace)
 }
 
-func appendAgentInfoCleanupError(result *protocol.AgentInfoResult, err error) {
+func appendAgentInfoCleanupWarning(result *protocol.AgentInfoResult, err error) {
 	if err == nil {
 		return
 	}
 
-	if result.Error == "" {
-		result.Error = err.Error()
-
-		return
-	}
-
-	result.Error += "; cleanup failed: " + err.Error()
+	result.Warnings = append(result.Warnings, "cleanup failed: "+err.Error())
 }
 
 func (sm *SessionManager) agentInfoScratchDir(id string) (string, error) {
