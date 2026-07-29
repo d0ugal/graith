@@ -246,6 +246,30 @@ func TestAttachDecode(t *testing.T) {
 		}
 	})
 
+	t.Run("experimental request accepts raw attached fallback", func(t *testing.T) {
+		info := protocol.SessionInfo{ID: "old"}
+		want := protocol.SessionInfo{ID: "braw", Name: "bonnie"}
+		c := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", want))}}
+
+		gotSeed, err := attachDecodeWithOptions(c, "braw", attachRequestOptions{ExperimentalAttach: true}, &info)
+		if err != nil {
+			t.Fatalf("attachDecodeWithOptions() error = %v", err)
+		}
+
+		if gotSeed != nil {
+			t.Fatalf("seed = %+v, want nil raw fallback", gotSeed)
+		}
+
+		if info.ID != "braw" || info.Name != "bonnie" {
+			t.Fatalf("info = %+v, want %+v", info, want)
+		}
+
+		msg, ok := c.sends[0].Payload.(protocol.AttachMsg)
+		if !ok || !msg.ExperimentalAttach {
+			t.Fatalf("attach payload = %#v, want ExperimentalAttach=true", c.sends[0].Payload)
+		}
+	})
+
 	t.Run("read error leaves info unchanged", func(t *testing.T) {
 		info := protocol.SessionInfo{ID: "kept"}
 		c := &scriptedConn{responses: []scriptedResp{errResp(io.EOF)}}

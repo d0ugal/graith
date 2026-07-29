@@ -205,6 +205,7 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 }
 
 type emptySnapshotAttachDriver struct {
+	mu         sync.Mutex
 	done       chan struct{}
 	scrollback *grpty.Scrollback
 	createdAt  time.Time
@@ -249,12 +250,21 @@ func (d *emptySnapshotAttachDriver) Interrupt(int, time.Duration) error {
 	return nil
 }
 func (d *emptySnapshotAttachDriver) Attach(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	d.writers = append(d.writers, w)
 }
 func (d *emptySnapshotAttachDriver) Detach() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	d.writers = nil
 }
 func (d *emptySnapshotAttachDriver) DetachWriter(w io.Writer) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	for i, candidate := range d.writers {
 		if candidate == w {
 			d.writers = append(d.writers[:i], d.writers[i+1:]...)
@@ -277,6 +287,33 @@ func (d *emptySnapshotAttachDriver) AttachWithScreenSnapshot(w io.Writer) grpty.
 	d.Attach(w)
 
 	return grpty.ScreenCapture{}
+}
+func (d *emptySnapshotAttachDriver) writerCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return len(d.writers)
+}
+
+func waitForDriverWriterCount(t *testing.T, driver *emptySnapshotAttachDriver, want int) {
+	t.Helper()
+
+	deadline := time.After(5 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+
+	defer ticker.Stop()
+
+	for {
+		if got := driver.writerCount(); got == want {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("writer count = %d, want %d", driver.writerCount(), want)
+		case <-ticker.C:
+		}
+	}
 }
 
 func TestHandshake(t *testing.T) {
@@ -788,6 +825,54 @@ func TestExperimentalAttachFallsBackWhenSnapshotEmpty(t *testing.T) {
 
 	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "tail-braw\n" {
 		t.Fatalf("fallback data frame = (%d, %q), want tail data", frame.Channel, string(frame.Payload))
+	}
+}
+
+func TestExperimentalAttachFallbackDiscardsGatedWriterAndCleansUpRawAttach(t *testing.T) {
+	h := newTestHarness(t)
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-exp-cleanup.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	driver := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: sb,
+		createdAt:  time.Now().UTC(),
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["empty-exp-cleanup"] = &SessionState{
+		ID:                 "empty-exp-cleanup",
+		Name:               "empty-exp-cleanup",
+		Agent:              "claude",
+		Status:             StatusRunning,
+		ExperimentalAttach: true,
+		CreatedAt:          time.Now().UTC(),
+	}
+	h.sm.sessions["empty-exp-cleanup"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-exp-cleanup", ExperimentalAttach: true})
+
+	env := h.readControlMsg(t)
+	if env.Type != "attached" {
+		t.Fatalf("response type = %q, want attached fallback", env.Type)
+	}
+
+	waitForDriverWriterCount(t, driver, 1)
+
+	_ = h.conn.Close()
+
+	select {
+	case <-h.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not exit after client close")
+	}
+
+	if got := driver.writerCount(); got != 0 {
+		t.Fatalf("writers after fallback client close = %d, want 0", got)
 	}
 }
 

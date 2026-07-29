@@ -112,6 +112,8 @@ func signalExperimentalRefresh(ch chan<- struct{}) {
 func experimentalAttachEnterSequence() string {
 	return "" +
 		"\x1b[?1049h" + // enter alternate screen buffer
+		"\x1b[r" + // reset any inherited scroll region before repainting
+		"\x1b[0m" + // reset any inherited style before clearing
 		"\x1b[?25l" + // hide cursor while repainting
 		"\x1b[H\x1b[2J" // clear screen, cursor home
 }
@@ -152,6 +154,8 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 
 	var buf strings.Builder
 	buf.WriteString("\x1b[?2026h")
+	buf.WriteString("\x1b[r")
+	buf.WriteString("\x1b[0m")
 	buf.WriteString("\x1b[?25l")
 	buf.WriteString("\x1b[H\x1b[2J")
 

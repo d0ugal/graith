@@ -1072,6 +1072,8 @@ func WriteScreenRestore(snap *protocol.ScreenSnapshotResponseMsg) {
 
 	var buf strings.Builder
 	buf.WriteString("\x1b[?2026h")
+	buf.WriteString("\x1b[r")
+	buf.WriteString("\x1b[0m")
 	buf.WriteString("\x1b[?25l")
 	buf.WriteString("\x1b[H")
 	buf.WriteString(snap.Frame)
