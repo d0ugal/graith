@@ -1929,7 +1929,9 @@ func TestRepublishManifestsCovNoScenario(t *testing.T) {
 
 	// Unknown scenario id: republish returns before touching the store, so no
 	// manifest directory should be created (and it must not panic).
-	sm.republishManifests("sc-nope")
+	if err := sm.republishManifests("sc-nope"); err != nil {
+		t.Fatal(err)
+	}
 
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 	if _, err := os.Stat(filepath.Join(storeDir, "scenarios", "sc-nope")); !os.IsNotExist(err) {
@@ -1954,7 +1956,9 @@ func TestRepublishManifestsCovWritesStore(t *testing.T) {
 	}
 	sm.mu.Unlock()
 
-	sm.republishManifests("sc-loch")
+	if err := sm.republishManifests("sc-loch"); err != nil {
+		t.Fatal(err)
+	}
 
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 
@@ -2190,7 +2194,9 @@ func TestRepublishManifestsFullPath_Cov2(t *testing.T) {
 	}
 	sm.mu.Unlock()
 
-	sm.republishManifests("sc-blether")
+	if err := sm.republishManifests("sc-blether"); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, id := range []string{"braw-a", "canny-b"} {
 		msgs, err := msgStore.Read("inbox:"+id, id, false, "")
@@ -3433,7 +3439,7 @@ func TestAddToScenarioCommitSaveFailureRollsBackPolicyAndContract(t *testing.T) 
 	}
 
 	sc := sm.state.Scenarios["sc-add"]
-	if sc.Policy != nil || len(sc.SessionIDs) != 1 || len(sc.Sessions) != 1 {
+	if sc.Policy != nil || len(sc.SessionIDs) != 1 || len(sc.Sessions) != 1 || len(sc.PendingAdds) != 0 {
 		t.Fatalf("scenario rollback = %+v", sc)
 	}
 
@@ -3450,6 +3456,330 @@ func TestAddToScenarioCommitSaveFailureRollsBackPolicyAndContract(t *testing.T) 
 
 	if len(items) != 1 || items[0].Assignee != "braw-old" || items[0].Title != "review the old croft" {
 		t.Fatalf("todo rollback removed the legacy contract or retained the added contract: %+v", items)
+	}
+}
+
+func TestAddToScenarioInterruptedAddRecovery(t *testing.T) {
+	tests := map[string]struct {
+		point     scenarioAddInterruptPoint
+		wantAdded bool
+	}{
+		"after session creation": {point: scenarioAddInterruptAfterSessionCreate},
+		"after todo commit":      {point: scenarioAddInterruptAfterTodoCommit},
+		"before membership save": {point: scenarioAddInterruptBeforeMembership},
+		"after membership save":  {point: scenarioAddInterruptAfterMembership, wantAdded: true},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			sm, orchID := newScenarioOrchestrator(t)
+			todoDB := attachRestartableScenarioTodoStore(t, sm)
+			repo := initScenarioGitRepo(t)
+			scope := "scenario:sc-add"
+
+			sm.mu.Lock()
+			sm.state.Sessions["braw-old"] = &SessionState{ID: "braw-old", Name: "braw-old", Status: StatusStopped, RepoPath: repo}
+			sm.state.Scenarios["sc-add"] = &ScenarioState{
+				ID: "sc-add", Name: "strath-add", OrchestratorID: orchID,
+				SessionIDs: []string{"braw-old"},
+				Sessions: []ScenarioSession{{
+					Name: "braw-old", Task: "review the old croft", Repo: filepath.Base(repo),
+					Policy: &ScenarioMemberPolicyState{Required: true, Attempt: 1},
+				}},
+				Policy: &ScenarioPolicyState{
+					Completion: "all", OnExhausted: "fail", Active: true,
+				},
+			}
+			sm.mu.Unlock()
+
+			if _, err := sm.todos.Add(TodoAdd{
+				Scope: scope, Title: "review the old croft", Assignee: "braw-old", CreatedBy: scope,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			crashErr := errors.New("dreich crash")
+			sm.scenarioAddInterrupt = func(point scenarioAddInterruptPoint) error {
+				if point == test.point {
+					return crashErr
+				}
+
+				return nil
+			}
+
+			_, err := sm.AddToScenario("strath-add", protocol.ScenarioSessionInput{
+				Name: "canny-new", Repo: repo, Task: "review the new croft",
+				Policy: &protocol.ScenarioMemberPolicyInput{Timeout: "1m"},
+			}, 24, 80)
+			if !errors.Is(err, crashErr) {
+				t.Fatalf("AddToScenario error = %v, want injected crash", err)
+			}
+
+			var interruptedWorktree string
+
+			if !test.wantAdded {
+				interrupted, loadErr := LoadState(sm.paths.StateFile)
+				if loadErr != nil {
+					t.Fatal(loadErr)
+				}
+
+				for _, session := range interrupted.Sessions {
+					if session.Name == "canny-new" {
+						interruptedWorktree = session.WorktreePath
+						break
+					}
+				}
+
+				if interruptedWorktree == "" {
+					t.Fatal("interrupted add did not persist the created session")
+				}
+			}
+
+			restarted := restartScenarioAddManager(t, sm, todoDB)
+
+			scenario := restarted.state.Scenarios["sc-add"]
+			if scenario == nil {
+				t.Fatal("scenario missing after recovery")
+			}
+
+			if len(scenario.PendingAdds) != 0 {
+				t.Fatalf("pending add reservations after recovery = %+v", scenario.PendingAdds)
+			}
+
+			if scenario.ManifestPublishPending {
+				t.Fatal("manifest republish reservation survived recovery")
+			}
+
+			items, listErr := restarted.todos.List(scope, TodoFilter{})
+			if listErr != nil {
+				t.Fatal(listErr)
+			}
+
+			added := sessionByName(restarted, "canny-new")
+			if test.wantAdded {
+				if added == nil {
+					t.Fatal("committed add was rolled back")
+				}
+
+				if len(scenario.SessionIDs) != 2 || scenario.SessionIDs[1] != added.ID || len(scenario.Sessions) != 2 {
+					t.Fatalf("committed scenario roster = ids:%v sessions:%+v", scenario.SessionIDs, scenario.Sessions)
+				}
+
+				if len(items) != 2 {
+					t.Fatalf("committed scenario todos = %+v, want old and added contracts", items)
+				}
+
+				manifest := scenarioManifestFromStore(t, restarted, "sc-add", "canny-new")
+				if manifest.You.Name != "canny-new" || manifest.You.SessionID != added.ID {
+					t.Fatalf("recovered added-member manifest self = %+v, want canny-new/%s", manifest.You, added.ID)
+				}
+
+				if len(manifest.Siblings) != 1 || manifest.Siblings[0].Name != "braw-old" {
+					t.Fatalf("recovered added-member manifest siblings = %+v, want braw-old", manifest.Siblings)
+				}
+
+				msgs, msgErr := restarted.messages.Read("inbox:"+added.ID, added.ID, false, "")
+				if msgErr != nil {
+					t.Fatal(msgErr)
+				}
+
+				if len(msgs) != 1 {
+					t.Fatalf("recovered added-member manifest messages = %d, want 1", len(msgs))
+				}
+
+				return
+			}
+
+			assertNoScenarioManifest(t, restarted, "sc-add", "canny-new")
+
+			if added != nil {
+				t.Fatalf("interrupted add left session after recovery: %+v", added)
+			}
+
+			if len(scenario.SessionIDs) != 1 || len(scenario.Sessions) != 1 {
+				t.Fatalf("interrupted scenario roster = ids:%v sessions:%+v", scenario.SessionIDs, scenario.Sessions)
+			}
+
+			if len(items) != 1 || items[0].Assignee != "braw-old" {
+				t.Fatalf("interrupted scenario todos = %+v, want only original contract", items)
+			}
+
+			if _, statErr := os.Stat(interruptedWorktree); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("interrupted worktree %q still exists after recovery (stat err %v)", interruptedWorktree, statErr)
+			}
+		})
+	}
+}
+
+func TestRecoverInterruptedScenarioAddsContinuesAfterReservationFailure(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	todoDB := attachRestartableScenarioTodoStore(t, sm)
+	repo := initScenarioGitRepo(t)
+	scope := "scenario:sc-add"
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-old"] = &SessionState{ID: "braw-old", Name: "braw-old", Status: StatusStopped, RepoPath: repo}
+	sm.state.Scenarios["sc-add"] = &ScenarioState{
+		ID: "sc-add", Name: "strath-add", OrchestratorID: orchID,
+		SessionIDs: []string{"braw-old"},
+		Sessions: []ScenarioSession{{
+			Name: "braw-old", Task: "review the old croft", Repo: filepath.Base(repo),
+			Policy: &ScenarioMemberPolicyState{Required: true, Attempt: 1},
+		}},
+		Policy: &ScenarioPolicyState{
+			Completion: "all", OnExhausted: "fail", Active: true,
+		},
+	}
+	sm.mu.Unlock()
+
+	if _, err := sm.todos.Add(TodoAdd{
+		Scope: scope, Title: "review the old croft", Assignee: "braw-old", CreatedBy: scope,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	crashErr := errors.New("dreich crash")
+	sm.scenarioAddInterrupt = func(point scenarioAddInterruptPoint) error {
+		if point == scenarioAddInterruptAfterTodoCommit {
+			return crashErr
+		}
+
+		return nil
+	}
+
+	for _, memberName := range []string{"canny-first", "canny-second"} {
+		_, err := sm.AddToScenario("strath-add", protocol.ScenarioSessionInput{
+			Name: memberName, Repo: repo, Task: "review " + memberName,
+			Policy: &protocol.ScenarioMemberPolicyInput{Timeout: "1m"},
+		}, 24, 80)
+		if !errors.Is(err, crashErr) {
+			t.Fatalf("AddToScenario(%s) error = %v, want injected crash", memberName, err)
+		}
+	}
+
+	first := sessionByName(sm, "canny-first")
+	if first == nil {
+		t.Fatal("first interrupted session missing before recovery")
+	}
+
+	second := sessionByName(sm, "canny-second")
+	if second == nil {
+		t.Fatal("second interrupted session missing before recovery")
+	}
+
+	firstSeedID, err := sm.todos.ScenarioSeedItemID(scope, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := sm.todos.Add(TodoAdd{
+		Scope: scope, Title: "depend on the first croft", Assignee: orchID, CreatedBy: scope,
+		DependsOn: []string{firstSeedID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := restartScenarioAddManager(t, sm, todoDB)
+
+	scenario := restarted.state.Scenarios["sc-add"]
+	if scenario == nil {
+		t.Fatal("scenario missing after recovery")
+	}
+
+	if got := sessionByName(restarted, "canny-first"); got == nil {
+		t.Fatal("first reservation failure should keep its session for retry")
+	}
+
+	if got := sessionByName(restarted, "canny-second"); got != nil {
+		t.Fatalf("second interrupted add was blocked by first reservation failure: %+v", got)
+	}
+
+	if len(scenario.PendingAdds) != 1 || scenario.PendingAdds[0].SessionID != first.ID {
+		t.Fatalf("pending add reservations after partial recovery = %+v, want only %s", scenario.PendingAdds, first.ID)
+	}
+
+	if _, err := restarted.todos.ScenarioSeedItemID(scope, second.ID); !errors.Is(err, ErrTodoNotFound) {
+		t.Fatalf("second seed todo lookup err = %v, want ErrTodoNotFound", err)
+	}
+}
+
+func attachRestartableScenarioTodoStore(t *testing.T, sm *SessionManager) string {
+	t.Helper()
+
+	dbPath := filepath.Join(sm.paths.DataDir, "todos.sqlite")
+
+	todos, err := NewTodoStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = todos.Close() })
+
+	sm.todos = todos
+
+	return dbPath
+}
+
+func restartScenarioAddManager(t *testing.T, sm *SessionManager, todoDB string) *SessionManager {
+	t.Helper()
+
+	restarted := NewSessionManager(sm.cfg, sm.paths, sm.log)
+	restarted.sandboxResolver = func(string) (bool, error) { return false, nil }
+
+	todos, err := NewTodoStore(todoDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = todos.Close() })
+
+	restarted.todos = todos
+	restarted.SetMsgStore(sm.messages)
+
+	if err := restarted.LoadState(); err != nil {
+		t.Fatal(err)
+	}
+
+	return restarted
+}
+
+func sessionByName(sm *SessionManager, name string) *SessionState {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, session := range sm.state.Sessions {
+		if session.Name == name {
+			return session
+		}
+	}
+
+	return nil
+}
+
+func scenarioManifestFromStore(t *testing.T, sm *SessionManager, scenarioID, memberName string) scenarioManifest {
+	t.Helper()
+
+	key := fmt.Sprintf("scenarios/%s/manifest-%s.json", scenarioID, memberName)
+
+	body, err := store.Get(store.SharedStorePath(sm.paths.DataDir), key)
+	if err != nil {
+		t.Fatalf("read scenario manifest %q: %v", key, err)
+	}
+
+	var manifest scenarioManifest
+	if err := json.Unmarshal([]byte(body), &manifest); err != nil {
+		t.Fatalf("decode scenario manifest %q: %v", key, err)
+	}
+
+	return manifest
+}
+
+func assertNoScenarioManifest(t *testing.T, sm *SessionManager, scenarioID, memberName string) {
+	t.Helper()
+
+	key := fmt.Sprintf("scenarios/%s/manifest-%s.json", scenarioID, memberName)
+	if _, err := store.Get(store.SharedStorePath(sm.paths.DataDir), key); err == nil {
+		t.Fatalf("scenario manifest %q survived rollback", key)
 	}
 }
 

@@ -111,6 +111,9 @@ type SessionManager struct {
 	// beforeLifecycleSpawn is a deterministic test seam for the final shared
 	// Create/Fork/Resume admission barrier. Production leaves it nil.
 	beforeLifecycleSpawn func()
+	// scenarioAddInterrupt is a deterministic test seam for crash-recovery
+	// windows in AddToScenario. Production leaves it nil.
+	scenarioAddInterrupt func(scenarioAddInterruptPoint) error
 	// adoptSession is a private startup test seam. Production uses
 	// pty.AdoptSession. Every adoption starts in raw-drain mode so derived-screen
 	// construction cannot consume or multiply the batch's absolute deadline.
@@ -673,6 +676,8 @@ func (sm *SessionManager) installLoadedState(state *State) error {
 	recoverInterruptedScenarioStarts(state, time.Now().UTC())
 	sm.reconcileSessionCWDs(state)
 	sm.state = state
+	sm.recoverInterruptedScenarioAdds()
+	sm.recoverInterruptedScenarioManifestRepublishes()
 	sm.rebuildTokenIndex()
 	sm.rebuildDeviceTokenIndex()
 
@@ -1343,7 +1348,9 @@ func (sm *SessionManager) uniqueSessionIDLocked() string {
 	for {
 		id := generateID()
 		if _, exists := sm.state.Sessions[id]; !exists {
-			return id
+			if !sm.scenarioAddSessionIDReservedLocked(id) {
+				return id
+			}
 		}
 	}
 }

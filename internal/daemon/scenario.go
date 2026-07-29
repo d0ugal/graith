@@ -22,6 +22,15 @@ import (
 
 var validScenarioName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+type scenarioAddInterruptPoint string
+
+const (
+	scenarioAddInterruptAfterSessionCreate scenarioAddInterruptPoint = "after_session_create"
+	scenarioAddInterruptAfterTodoCommit    scenarioAddInterruptPoint = "after_todo_commit"
+	scenarioAddInterruptBeforeMembership   scenarioAddInterruptPoint = "before_membership_save"
+	scenarioAddInterruptAfterMembership    scenarioAddInterruptPoint = "after_membership_save"
+)
+
 func ValidateScenarioName(name string) error {
 	if name == "" {
 		return errors.New("scenario name must not be empty")
@@ -66,6 +75,225 @@ func (sm *SessionManager) unstarAndDelete(id string) error {
 	_, err := sm.DeleteWithChildren(id, false)
 
 	return err
+}
+
+func (sm *SessionManager) scenarioAddSessionIDReservedLocked(id string) bool {
+	for _, scenario := range sm.state.Scenarios {
+		for _, pending := range scenario.PendingAdds {
+			if pending.SessionID == id {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (sm *SessionManager) scenarioAddNameReservedLocked(name string) bool {
+	for _, scenario := range sm.state.Scenarios {
+		for _, pending := range scenario.PendingAdds {
+			if pending.MemberName == name {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func removeScenarioAddReservation(adds []ScenarioAddReservationState, sessionID string) []ScenarioAddReservationState {
+	for i, pending := range adds {
+		if pending.SessionID != sessionID {
+			continue
+		}
+
+		return append(adds[:i], adds[i+1:]...)
+	}
+
+	return adds
+}
+
+func (sm *SessionManager) reserveScenarioAddLocked(sc *ScenarioState, memberName string, todoExpected bool, now time.Time) (ScenarioAddReservationState, error) {
+	reservation := ScenarioAddReservationState{
+		SessionID:    sm.uniqueSessionIDLocked(),
+		MemberName:   memberName,
+		TodoExpected: todoExpected,
+		ReservedAt:   now.UTC(),
+	}
+	sc.PendingAdds = append(sc.PendingAdds, reservation)
+
+	if err := sm.saveState(); err != nil {
+		sc.PendingAdds = removeScenarioAddReservation(sc.PendingAdds, reservation.SessionID)
+
+		return ScenarioAddReservationState{}, err
+	}
+
+	return reservation, nil
+}
+
+func (sm *SessionManager) clearScenarioAddReservation(scenarioID, sessionID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	scenario := sm.state.Scenarios[scenarioID]
+	if scenario == nil {
+		return nil
+	}
+
+	before := len(scenario.PendingAdds)
+
+	scenario.PendingAdds = removeScenarioAddReservation(scenario.PendingAdds, sessionID)
+	if len(scenario.PendingAdds) == before {
+		return nil
+	}
+
+	return sm.saveState()
+}
+
+func (sm *SessionManager) nextScenarioManifestRepublish() (string, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for scenarioID, scenario := range sm.state.Scenarios {
+		if scenario.ManifestPublishPending {
+			return scenarioID, true
+		}
+	}
+
+	return "", false
+}
+
+func (sm *SessionManager) clearScenarioManifestPublishPending(scenarioID string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	scenario := sm.state.Scenarios[scenarioID]
+	if scenario == nil || !scenario.ManifestPublishPending {
+		return nil
+	}
+
+	scenario.ManifestPublishPending = false
+
+	return sm.saveState()
+}
+
+func (sm *SessionManager) finishScenarioManifestRepublish(scenarioID string) error {
+	if err := sm.republishManifests(scenarioID); err != nil {
+		return err
+	}
+
+	return sm.clearScenarioManifestPublishPending(scenarioID)
+}
+
+func (sm *SessionManager) recoverInterruptedScenarioManifestRepublishes() {
+	for {
+		scenarioID, ok := sm.nextScenarioManifestRepublish()
+		if !ok {
+			return
+		}
+
+		if err := sm.finishScenarioManifestRepublish(scenarioID); err != nil {
+			sm.log.Warn("failed to recover interrupted scenario manifest republish", "scenario", scenarioID, "err", err)
+
+			return
+		}
+	}
+}
+
+func (sm *SessionManager) interruptScenarioAdd(point scenarioAddInterruptPoint) error {
+	if sm.scenarioAddInterrupt == nil {
+		return nil
+	}
+
+	return sm.scenarioAddInterrupt(point)
+}
+
+type scenarioAddRecoveryReservation struct {
+	scenarioID   string
+	sessionID    string
+	memberName   string
+	todoExpected bool
+	reservedAt   time.Time
+}
+
+func (sm *SessionManager) nextInterruptedScenarioAdd(attempted map[string]struct{}) (scenarioAddRecoveryReservation, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for scenarioID, scenario := range sm.state.Scenarios {
+		for _, pending := range scenario.PendingAdds {
+			if pending.SessionID == "" {
+				continue
+			}
+
+			if _, seen := attempted[pending.SessionID]; seen {
+				continue
+			}
+
+			return scenarioAddRecoveryReservation{
+				scenarioID:   scenarioID,
+				sessionID:    pending.SessionID,
+				memberName:   pending.MemberName,
+				todoExpected: pending.TodoExpected,
+				reservedAt:   pending.ReservedAt,
+			}, true
+		}
+	}
+
+	return scenarioAddRecoveryReservation{}, false
+}
+
+func (sm *SessionManager) recoverInterruptedScenarioAdds() {
+	attempted := make(map[string]struct{})
+
+	for {
+		pending, ok := sm.nextInterruptedScenarioAdd(attempted)
+		if !ok {
+			return
+		}
+
+		attempted[pending.sessionID] = struct{}{}
+		sm.log.Info("recovering interrupted scenario add", "scenario", pending.scenarioID, "session", pending.sessionID, "member", pending.memberName, "reserved_at", pending.reservedAt)
+
+		if pending.todoExpected {
+			if sm.todos == nil {
+				sm.log.Warn("cannot recover interrupted scenario-add todo without todo store; rolling back session and reservation only", "scenario", pending.scenarioID, "session", pending.sessionID, "member", pending.memberName)
+			} else {
+				todoID, err := sm.todos.ScenarioSeedItemID("scenario:"+pending.scenarioID, pending.sessionID)
+				switch {
+				case err == nil:
+					if err := sm.todos.Remove(todoID); err != nil && !errors.Is(err, ErrTodoNotFound) {
+						sm.log.Warn("failed to remove interrupted scenario-add todo", "scenario", pending.scenarioID, "session", pending.sessionID, "member", pending.memberName, "todo", todoID, "err", err)
+
+						continue
+					}
+				case errors.Is(err, ErrTodoNotFound):
+				default:
+					sm.log.Warn("failed to locate interrupted scenario-add todo", "scenario", pending.scenarioID, "session", pending.sessionID, "member", pending.memberName, "err", err)
+
+					continue
+				}
+			}
+		}
+
+		sm.mu.RLock()
+		_, hasSession := sm.state.Sessions[pending.sessionID]
+		sm.mu.RUnlock()
+
+		if hasSession {
+			if err := sm.unstarAndDelete(pending.sessionID); err != nil {
+				sm.log.Warn("failed to delete interrupted scenario-add session", "scenario", pending.scenarioID, "session", pending.sessionID, "member", pending.memberName, "err", err)
+
+				continue
+			}
+		}
+
+		if err := sm.clearScenarioAddReservation(pending.scenarioID, pending.sessionID); err != nil {
+			sm.log.Warn("failed to clear interrupted scenario-add reservation", "scenario", pending.scenarioID, "session", pending.sessionID, "member", pending.memberName, "err", err)
+
+			continue
+		}
+	}
 }
 
 type scenarioSharedSource struct {
@@ -821,6 +1049,11 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 	for _, s := range msg.Sessions {
 		if s.Shared {
 			continue
+		}
+
+		if sm.scenarioAddNameReservedLocked(s.Name) {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("session name %q already exists", s.Name)
 		}
 
 		for _, existing := range sm.state.Sessions {
@@ -1870,7 +2103,9 @@ func (sm *SessionManager) ResumeScenario(name string, rows, cols uint16) ([]stri
 	sm.mu.Unlock()
 
 	if len(resumed) > 0 {
-		sm.republishManifests(scenarioID)
+		if err := sm.republishManifests(scenarioID); err != nil {
+			sm.log.Warn("failed to republish manifests after scenario resume", "scenario", scenarioID, "err", err)
+		}
 	}
 
 	// Deadlines are immutable wall-clock instants: manual stop and daemon
@@ -2004,6 +2239,7 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		dependencyAssignees              []string
 		legacyPolicyContracts            []struct{ sessionID, memberName string }
 		policyEnabled                    bool
+		addReservation                   ScenarioAddReservationState
 	)
 
 	found := false
@@ -2115,6 +2351,11 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 			return nil, fmt.Errorf("session name %q already exists", input.Name)
 		}
 	}
+
+	if sm.scenarioAddNameReservedLocked(input.Name) {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session name %q already exists", input.Name)
+	}
 	sm.mu.Unlock()
 
 	if policyEnabled && strings.TrimSpace(input.Task) != "" && sm.todos == nil {
@@ -2173,7 +2414,39 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 	agentHooks := input.AgentHooks
 
+	sm.mu.Lock()
+
+	scenarioForReservation := sm.state.Scenarios[scenarioID]
+	if scenarioForReservation == nil {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("scenario %q was deleted before session creation", name)
+	}
+
+	for _, existing := range sm.state.Sessions {
+		if existing.IsSoftDeleted() {
+			continue
+		}
+
+		if existing.Name == input.Name {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("session name %q already exists", input.Name)
+		}
+	}
+
+	if sm.scenarioAddNameReservedLocked(input.Name) {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("session name %q already exists", input.Name)
+	}
+
+	addReservation, err = sm.reserveScenarioAddLocked(scenarioForReservation, input.Name, strings.TrimSpace(input.Task) != "", sm.scenarioPolicyTime())
+	if err != nil {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("persist scenario add reservation: %w", err)
+	}
+	sm.mu.Unlock()
+
 	sess, err := sm.Create(CreateOpts{
+		ID:         addReservation.SessionID,
 		Name:       input.Name,
 		AgentName:  agentName,
 		RepoPath:   repoRoot,
@@ -2193,7 +2466,16 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		EnvExtra:   []map[string]string{scenarioEnv},
 	})
 	if err != nil {
+		clearErr := sm.clearScenarioAddReservation(scenarioID, addReservation.SessionID)
+		if clearErr != nil {
+			return nil, errors.Join(fmt.Errorf("create session: %w", err), fmt.Errorf("clear scenario add reservation: %w", clearErr))
+		}
+
 		return nil, fmt.Errorf("create session: %w", err)
+	}
+
+	if err := sm.interruptScenarioAdd(scenarioAddInterruptAfterSessionCreate); err != nil {
+		return nil, err
 	}
 
 	seededTodoID, seedErr := sm.seedAddedScenarioTodo(scenarioID, sess.ID, input, dependencyTodoIDs)
@@ -2214,7 +2496,15 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 			sm.log.Warn("failed to delete session after result-contract seed failed", "session", sess.ID, "err", deleteErr)
 		}
 
+		if clearErr := sm.clearScenarioAddReservation(scenarioID, addReservation.SessionID); clearErr != nil {
+			return nil, errors.Join(fmt.Errorf("seed scenario todo: %w", seedErr), fmt.Errorf("clear scenario add reservation: %w", clearErr))
+		}
+
 		return nil, fmt.Errorf("seed scenario todo: %w", seedErr)
+	}
+
+	if err := sm.interruptScenarioAdd(scenarioAddInterruptAfterTodoCommit); err != nil {
+		return nil, err
 	}
 
 	sm.mu.Lock()
@@ -2229,6 +2519,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		}
 
 		_ = sm.unstarAndDelete(sess.ID)
+
+		if clearErr := sm.clearScenarioAddReservation(scenarioID, addReservation.SessionID); clearErr != nil {
+			return nil, errors.Join(fmt.Errorf("scenario %q was deleted during session creation", name), fmt.Errorf("clear scenario add reservation: %w", clearErr))
+		}
 
 		return nil, fmt.Errorf("scenario %q was deleted during session creation", name)
 	}
@@ -2254,6 +2548,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 
 		_ = sm.unstarAndDelete(sess.ID)
 
+		if clearErr := sm.clearScenarioAddReservation(scenarioID, addReservation.SessionID); clearErr != nil {
+			return nil, errors.Join(fmt.Errorf("session %q: %w", input.Name, compileErr), fmt.Errorf("clear scenario add reservation: %w", clearErr))
+		}
+
 		return nil, fmt.Errorf("session %q: %w", input.Name, compileErr)
 	}
 
@@ -2269,6 +2567,10 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		}
 
 		_ = sm.unstarAndDelete(sess.ID)
+
+		if clearErr := sm.clearScenarioAddReservation(scenarioID, addReservation.SessionID); clearErr != nil {
+			return nil, errors.Join(policyErr, fmt.Errorf("clear scenario add reservation: %w", clearErr))
+		}
 
 		return nil, policyErr
 	}
@@ -2303,15 +2605,30 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 		}
 	}
 
+	pendingAddsBefore := append([]ScenarioAddReservationState(nil), scenario.PendingAdds...)
+	scenario.PendingAdds = removeScenarioAddReservation(scenario.PendingAdds, addReservation.SessionID)
+
+	manifestPublishPendingBefore := scenario.ManifestPublishPending
+	scenario.ManifestPublishPending = true
+
 	scenario.Sessions = append(scenario.Sessions, ScenarioSession{
 		Name: input.Name, Role: input.Role, Prompt: input.Prompt, Task: input.Task, ReadOnly: input.ReadOnly,
 		Repo: filepath.Base(repoRoot), Agent: agentName, Model: input.Model,
 		Results: results, Policy: memberPolicy,
 	})
+
+	if err := sm.interruptScenarioAdd(scenarioAddInterruptBeforeMembership); err != nil {
+		sm.mu.Unlock()
+		return nil, err
+	}
+
 	if err := sm.saveState(); err != nil {
 		scenario.SessionIDs = scenario.SessionIDs[:len(scenario.SessionIDs)-1]
 
 		scenario.Sessions = scenario.Sessions[:len(scenario.Sessions)-1]
+
+		scenario.PendingAdds = pendingAddsBefore
+		scenario.ManifestPublishPending = manifestPublishPendingBefore
 
 		if scenario.Render != nil {
 			scenario.Render.Members = scenario.Render.Members[:renderMemberCount]
@@ -2337,11 +2654,21 @@ func (sm *SessionManager) AddToScenario(name string, input protocol.ScenarioSess
 			sm.log.Warn("failed to delete session after scenario add commit failed", "session", sess.ID, "err", deleteErr)
 		}
 
+		if clearErr := sm.clearScenarioAddReservation(scenarioID, addReservation.SessionID); clearErr != nil {
+			return nil, errors.Join(fmt.Errorf("persist scenario member addition: %w", err), fmt.Errorf("clear scenario add reservation: %w", clearErr))
+		}
+
 		return nil, fmt.Errorf("persist scenario member addition: %w", err)
 	}
 	sm.mu.Unlock()
 
-	sm.republishManifests(scenarioID)
+	if err := sm.interruptScenarioAdd(scenarioAddInterruptAfterMembership); err != nil {
+		return nil, err
+	}
+
+	if err := sm.finishScenarioManifestRepublish(scenarioID); err != nil {
+		sm.log.Warn("failed to republish manifests after scenario add", "scenario", scenarioID, "err", err)
+	}
 
 	return &sess, nil
 }
@@ -2470,17 +2797,27 @@ func (sm *SessionManager) scenarioTodoTitleLimit() int {
 	return sm.todos.titleLimit()
 }
 
-func (sm *SessionManager) republishManifests(scenarioID string) {
+func (sm *SessionManager) republishManifests(scenarioID string) error {
 	sm.mu.RLock()
 
 	scenario, ok := sm.state.Scenarios[scenarioID]
 	if !ok {
 		sm.mu.RUnlock()
-		return
+
+		return nil
 	}
 
 	sessionIDs := make([]string, len(scenario.SessionIDs))
 	copy(sessionIDs, scenario.SessionIDs)
+
+	if len(sessionIDs) != len(scenario.Sessions) {
+		sessionCount := len(scenario.Sessions)
+
+		sm.mu.RUnlock()
+		sm.log.Warn("scenario manifest republish skipped due to roster mismatch", "scenario", scenarioID, "session_ids", len(sessionIDs), "sessions", sessionCount)
+
+		return fmt.Errorf("scenario %q roster mismatch: %d session ids for %d sessions", scenarioID, len(sessionIDs), sessionCount)
+	}
 
 	repos := make([]string, len(scenario.Sessions))
 
@@ -2514,12 +2851,16 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 
 	sm.mu.RUnlock()
 
+	var publishErr error
+
 	for i, id := range sessionIDs {
 		manifest := sm.buildManifest(scenarioID, msg, repos, sessionIDs, i, render)
 
 		manifestJSON, err := json.Marshal(manifest)
 		if err != nil {
 			sm.log.Error("failed to marshal manifest for republish", "session", id, "err", err)
+			publishErr = errors.Join(publishErr, fmt.Errorf("marshal manifest for session %q: %w", id, err))
+
 			continue
 		}
 
@@ -2528,6 +2869,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 			_, err = sm.messages.Publish(PublishOpts{Stream: stream, SenderID: orchestratorID, SenderName: "orchestrator", Body: string(manifestJSON)})
 			if err != nil {
 				sm.log.Error("failed to republish manifest", "session", id, "err", err)
+				publishErr = errors.Join(publishErr, fmt.Errorf("publish manifest for session %q: %w", id, err))
 			}
 		}
 	}
@@ -2535,7 +2877,8 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 	storeDir := store.SharedStorePath(sm.paths.DataDir)
 	if err := store.Init(storeDir); err != nil {
 		sm.log.Error("failed to init shared store for manifest republish", "err", err)
-		return
+
+		return errors.Join(publishErr, fmt.Errorf("init shared store for manifest republish: %w", err))
 	}
 
 	for i := range sessions {
@@ -2544,14 +2887,19 @@ func (sm *SessionManager) republishManifests(scenarioID string) {
 		data, err := json.MarshalIndent(manifest, "", "  ")
 		if err != nil {
 			sm.log.Error("failed to marshal manifest for store", "err", err)
+			publishErr = errors.Join(publishErr, fmt.Errorf("marshal manifest store entry for session %q: %w", sessions[i].Name, err))
+
 			continue
 		}
 
 		key := fmt.Sprintf("scenarios/%s/manifest-%s.json", scenarioID, sessions[i].Name)
 		if err := store.Put(storeDir, key, string(data)); err != nil {
 			sm.log.Error("failed to persist manifest", "key", key, "err", err)
+			publishErr = errors.Join(publishErr, fmt.Errorf("persist manifest %q: %w", key, err))
 		}
 	}
+
+	return publishErr
 }
 
 func (sm *SessionManager) buildScenarioRecord(sc *ScenarioState) *protocol.ScenarioRecord {
