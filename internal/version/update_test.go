@@ -73,6 +73,31 @@ func TestIsNewer(t *testing.T) {
 	}
 }
 
+func TestCompare(t *testing.T) {
+	tests := map[string]struct {
+		a       string
+		b       string
+		wantCmp int
+		wantOK  bool
+	}{
+		"newer":       {a: "v0.3.0", b: "v0.2.1", wantCmp: 1, wantOK: true},
+		"older":       {a: "v0.2.0", b: "v0.2.1", wantCmp: -1, wantOK: true},
+		"equal":       {a: "v1.2.3", b: "1.2.3", wantCmp: 0, wantOK: true},
+		"pre-release": {a: "v1.2.3-rc1", b: "v1.2.3", wantCmp: 0, wantOK: true},
+		"unavailable": {a: "dev", b: "v0.2.1", wantCmp: 0, wantOK: false},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			gotCmp, gotOK := Compare(test.a, test.b)
+			if gotCmp != test.wantCmp || gotOK != test.wantOK {
+				t.Errorf("Compare(%q, %q) = (%d, %t), want (%d, %t)",
+					test.a, test.b, gotCmp, gotOK, test.wantCmp, test.wantOK)
+			}
+		})
+	}
+}
+
 func TestBuildResult(t *testing.T) {
 	origVersion := Version
 	defer func() { Version = origVersion }()

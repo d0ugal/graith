@@ -458,6 +458,8 @@ func (sm *SessionManager) ensureOrchestrator(ctx context.Context) {
 		return
 	}
 
+	defer sm.deliverPendingGraithUpdateNotifications(ctx)
+
 	sm.mu.RLock()
 	orchID := sm.findOrchestratorID()
 
@@ -552,7 +554,13 @@ func (sm *SessionManager) reconcileOrchestratorPresenceWith(
 	orchID := sm.findOrchestratorID()
 	sm.mu.RUnlock()
 
-	if !enabled || orchID != "" {
+	if !enabled {
+		return
+	}
+
+	defer sm.deliverPendingGraithUpdateNotifications(ctx)
+
+	if orchID != "" {
 		return
 	}
 
@@ -744,6 +752,8 @@ func (sm *SessionManager) restartOrchestratorUntilRunning(ctx context.Context, i
 		_, err := resume(id, lc.DefaultRowsOrDefault(), lc.DefaultColsOrDefault())
 		if err == nil {
 			sm.log.Info("orchestrator auto-restarted", "id", id)
+			sm.deliverPendingGraithUpdateNotifications(ctx)
+
 			return
 		}
 

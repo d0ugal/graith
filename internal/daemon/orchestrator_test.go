@@ -460,6 +460,64 @@ func TestRestartOrchestratorRetriesFailedResume(t *testing.T) {
 	}
 }
 
+func TestRestartOrchestratorDeliversPendingUpdateNoticeAfterResume(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+
+	msgStore, err := NewMsgStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatalf("NewMsgStore: %v", err)
+	}
+
+	t.Cleanup(func() { _ = msgStore.Close() })
+
+	sm.messages = msgStore
+	sm.state.Sessions["ben"] = &SessionState{
+		ID:         "ben",
+		Name:       OrchestratorSessionName,
+		SystemKind: SystemKindOrchestrator,
+		StopReason: StopReasonCrash,
+	}
+
+	detectedAt := time.Date(2026, time.July, 29, 18, 30, 0, 0, time.UTC)
+	notice := graithUpdateNotificationFor(
+		GraithBuildState{Version: "v0.2.1", CommitSHA: "braw", ObservedAt: detectedAt.Add(-time.Hour)},
+		GraithBuildState{Version: "v0.3.0", CommitSHA: "canny"},
+		detectedAt,
+	)
+	sm.state.PendingGraithUpdateNotifications = []GraithUpdateNotificationState{notice}
+
+	sm.orchestratorResume = func(id string, rows, cols uint16) (SessionState, error) {
+		sm.mu.Lock()
+		defer sm.mu.Unlock()
+
+		sess := sm.state.Sessions[id]
+		sess.Status = StatusRunning
+		sess.StopReason = ""
+
+		return cloneSessionState(sess), nil
+	}
+
+	sm.restartOrchestratorUntilRunning(context.Background(), "ben", 0, sm.cfg.Orchestrator.Restart)
+
+	if len(sm.state.PendingGraithUpdateNotifications) != 0 {
+		t.Fatalf("pending update notifications after restart = %+v, want empty", sm.state.PendingGraithUpdateNotifications)
+	}
+
+	msgs, err := msgStore.Read("inbox:ben", "", false, "")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	if len(msgs) != 1 {
+		t.Fatalf("messages after restart = %d, want pending update notice delivered", len(msgs))
+	}
+
+	if !msgs[0].System || msgs[0].ThreadID != notice.ID {
+		t.Fatalf("message = %+v, want system update notice with thread %q", msgs[0], notice.ID)
+	}
+}
+
 func TestRestartOrchestratorRetryCancelledWhenDisabled(t *testing.T) {
 	sm := newOrchTestSM(t)
 	sm.cfg.Orchestrator.Enabled = true
@@ -718,6 +776,60 @@ func TestReconcileOrchestratorPresenceAfterDelete(t *testing.T) {
 
 	if created != 1 {
 		t.Fatalf("existing replacement triggered another create; calls = %d", created)
+	}
+}
+
+func TestReconcileOrchestratorPresenceDeliversPendingUpdateNotice(t *testing.T) {
+	sm := newOrchTestSM(t)
+	sm.cfg.Orchestrator.Enabled = true
+
+	msgStore, err := NewMsgStore(filepath.Join(t.TempDir(), "messages.db"))
+	if err != nil {
+		t.Fatalf("NewMsgStore: %v", err)
+	}
+
+	t.Cleanup(func() { _ = msgStore.Close() })
+
+	sm.messages = msgStore
+
+	detectedAt := time.Date(2026, time.July, 29, 18, 30, 0, 0, time.UTC)
+	notice := graithUpdateNotificationFor(
+		GraithBuildState{Version: "v0.2.1", CommitSHA: "braw", ObservedAt: detectedAt.Add(-time.Hour)},
+		GraithBuildState{Version: "v0.3.0", CommitSHA: "canny"},
+		detectedAt,
+	)
+	sm.state.PendingGraithUpdateNotifications = []GraithUpdateNotificationState{notice}
+
+	sm.reconcileOrchestratorPresenceWith(context.Background(), func(context.Context) (SessionState, error) {
+		fresh := &SessionState{
+			ID:         "fresh-orch",
+			Name:       OrchestratorSessionName,
+			SystemKind: SystemKindOrchestrator,
+			Status:     StatusRunning,
+		}
+
+		sm.mu.Lock()
+		sm.state.Sessions[fresh.ID] = fresh
+		sm.mu.Unlock()
+
+		return cloneSessionState(fresh), nil
+	})
+
+	if len(sm.state.PendingGraithUpdateNotifications) != 0 {
+		t.Fatalf("pending update notifications after reconcile = %+v, want empty", sm.state.PendingGraithUpdateNotifications)
+	}
+
+	msgs, err := msgStore.Read("inbox:fresh-orch", "", false, "")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	if len(msgs) != 1 {
+		t.Fatalf("messages after reconcile = %d, want pending update notice delivered", len(msgs))
+	}
+
+	if !msgs[0].System || msgs[0].ThreadID != notice.ID {
+		t.Fatalf("message = %+v, want system update notice with thread %q", msgs[0], notice.ID)
 	}
 }
 
