@@ -22,7 +22,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 	tailscale.com v1.102.0
 )
 
