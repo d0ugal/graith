@@ -117,6 +117,14 @@
       "notes": "A scripting/automation gate; the GUIs surface live state instead."
     },
     {
+      "id": "events.stream",
+      "category": "Session lifecycle",
+      "name": "Stream daemon events",
+      "cli": "supported", "ios": "n/a", "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-29-session-event-stream.md#platform-support",
+      "notes": "A CLI automation stream for supervisors; GUI support can be added if the fleet model needs push updates."
+    },
+    {
       "id": "session.repo-list",
       "category": "Session lifecycle",
       "name": "List available repositories for new sessions",

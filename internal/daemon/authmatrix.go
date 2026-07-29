@@ -86,6 +86,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"diagnostics":   remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
 
 	"wait":            remoteHumanRW, // targets arbitrary sessions
+	"events_sub":      remoteHumanRW, // streams fleet status + public topic bodies
 	"repo_list":       remoteHumanRW, // only useful for create, which guests can't do
 	"store_list":      remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
 	"store_get":       remoteHumanRW, // reads a document body; same sensitivity as store_list

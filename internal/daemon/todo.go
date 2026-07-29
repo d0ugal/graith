@@ -615,7 +615,7 @@ func (sm *SessionManager) emitTodoEvent(scope, event string, item TodoItem) {
 		return
 	}
 
-	if _, err := sm.messages.Publish(PublishOpts{
+	if _, err := sm.publishMessage(PublishOpts{
 		Stream:     "todo:" + scope,
 		SenderID:   systemSenderID,
 		SenderName: systemSenderName,

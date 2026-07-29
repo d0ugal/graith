@@ -2324,6 +2324,10 @@ func TestMutatingControlMessageTreatsAckReadsAsObservational(t *testing.T) {
 		t.Fatal("acknowledging subscription request was classified as mutation")
 	}
 
+	if mutatingControlMessage(encode("events_sub", protocol.EventsSubMsg{})) {
+		t.Fatal("event subscription request was classified as mutation")
+	}
+
 	if !mutatingControlMessage(encode("todo_add", protocol.TodoAddMsg{})) {
 		t.Fatal("todo mutation was classified as read-only")
 	}
@@ -2335,6 +2339,175 @@ func TestMutatingControlMessageTreatsAckReadsAsObservational(t *testing.T) {
 	if !mutatingControlMessage(encode("attach", protocol.AttachMsg{})) {
 		t.Fatal("stateful attach was classified as read-only")
 	}
+}
+
+func TestEventsSubStreamsStatusAndPublicMessages(t *testing.T) {
+	h := newTestHarness(t)
+
+	h.sendControl(t, "events_sub", protocol.EventsSubMsg{})
+	h.expectType(t, "events_following")
+
+	h.sm.onAgentStatusChange("braw1", "braw-runner", "active", "ready")
+
+	env := h.expectType(t, "event")
+
+	statusEvent := decodeEventForTest(t, env)
+	if statusEvent.Type != "status_change" ||
+		statusEvent.SessionID != "braw1" ||
+		statusEvent.Session != "braw-runner" ||
+		statusEvent.StatusKind != "agent" ||
+		statusEvent.From != "active" ||
+		statusEvent.To != "ready" ||
+		statusEvent.At == "" {
+		t.Fatalf("status event = %+v", statusEvent)
+	}
+
+	if _, err := h.sm.publishMessage(PublishOpts{
+		Stream:     "blether-topic",
+		SenderID:   "canny1",
+		SenderName: "canny",
+		Body:       "braw news",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	env = h.expectType(t, "event")
+
+	messageEvent := decodeEventForTest(t, env)
+	if messageEvent.Type != "message" ||
+		messageEvent.Topic != "blether-topic" ||
+		messageEvent.SenderID != "canny1" ||
+		messageEvent.Sender != "canny" ||
+		messageEvent.Body != "braw news" ||
+		messageEvent.MessageID == "" ||
+		messageEvent.Seq == 0 {
+		t.Fatalf("message event = %+v", messageEvent)
+	}
+
+	if _, err := h.sm.publishMessage(PublishOpts{
+		Stream:     "todo:blether",
+		SenderID:   systemSenderID,
+		SenderName: systemSenderName,
+		Body:       "system news",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	env = h.expectType(t, "event")
+
+	systemMessageEvent := decodeEventForTest(t, env)
+	if systemMessageEvent.Type != "message" ||
+		systemMessageEvent.Topic != "todo:blether" ||
+		systemMessageEvent.SenderID != systemSenderID ||
+		!systemMessageEvent.System {
+		t.Fatalf("system message event = %+v", systemMessageEvent)
+	}
+
+	h.sendControl(t, "detach", struct{}{})
+	h.expectType(t, "events_done")
+}
+
+func TestEventsSubStreamsOrphanStopLifecycleEvent(t *testing.T) {
+	h := newTestHarness(t)
+
+	putSession(h.sm, &SessionState{
+		ID:              "braw-stop",
+		Name:            "braw-stop",
+		Status:          StatusRunning,
+		StatusChangedAt: time.Now().Add(-time.Minute),
+		PID:             1 << 30,
+		PIDStartTime:    123,
+	})
+
+	h.sendControl(t, "events_sub", protocol.EventsSubMsg{})
+	h.expectType(t, "events_following")
+
+	if err := h.sm.Stop("braw-stop"); err != nil {
+		t.Fatal(err)
+	}
+
+	env := h.expectType(t, "event")
+
+	event := decodeEventForTest(t, env)
+	if event.Type != "status_change" ||
+		event.SessionID != "braw-stop" ||
+		event.Session != "braw-stop" ||
+		event.StatusKind != "session" ||
+		event.From != "running" ||
+		event.To != "stopped" ||
+		event.At == "" {
+		t.Fatalf("lifecycle event = %+v", event)
+	}
+}
+
+func TestEventsSubDoesNotStreamSyntheticExitAsAgentStatus(t *testing.T) {
+	h := newTestHarness(t)
+
+	sub, unsub := h.sm.events.Subscribe()
+	defer unsub()
+
+	h.sm.onAgentStatusChange("braw-stop", "braw-stop", "running", "stopped")
+
+	select {
+	case event := <-sub:
+		t.Fatalf("synthetic exit leaked as agent event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestEventsSubDoesNotStreamPrivateInboxMessages(t *testing.T) {
+	h := newTestHarness(t)
+
+	sub, unsub := h.sm.events.Subscribe()
+	defer unsub()
+
+	if _, err := h.sm.publishMessage(PublishOpts{
+		Stream:     "inbox:braw1",
+		SenderID:   "canny1",
+		SenderName: "canny",
+		Body:       "private blether",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case event := <-sub:
+		t.Fatalf("private inbox message leaked as event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestEventsSubDoesNotStreamSystemMessages(t *testing.T) {
+	h := newTestHarness(t)
+
+	sub, unsub := h.sm.events.Subscribe()
+	defer unsub()
+
+	if _, err := h.sm.publishMessage(PublishOpts{
+		Stream:     "_system.status",
+		SenderID:   "graith:system",
+		SenderName: "graith notifications",
+		Body:       "internal blether",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case event := <-sub:
+		t.Fatalf("system message leaked as event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func decodeEventForTest(t *testing.T, env protocol.Envelope) protocol.EventMsg {
+	t.Helper()
+
+	var event protocol.EventMsg
+	if err := protocol.DecodePayload(env, &event); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+
+	return event
 }
 
 func TestMsgPub(t *testing.T) {

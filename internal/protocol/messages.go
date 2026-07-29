@@ -431,6 +431,32 @@ type MsgInboxMsg struct {
 	Ack        bool   `json:"ack"`
 }
 
+// EventsSubMsg subscribes the client to the daemon's live, best-effort event
+// stream. The daemon replies with events_following, then zero or more event
+// envelopes until the client sends detach or disconnects.
+type EventsSubMsg struct{}
+
+// EventMsg is one daemon event emitted by `gr events`.
+type EventMsg struct {
+	Type string `json:"type"`
+	At   string `json:"at"`
+
+	SessionID string `json:"session_id,omitempty"`
+	Session   string `json:"session,omitempty"`
+
+	StatusKind string `json:"status_kind,omitempty"`
+	From       string `json:"from,omitempty"`
+	To         string `json:"to,omitempty"`
+
+	Topic     string `json:"topic,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	Seq       int64  `json:"seq,omitempty"`
+	SenderID  string `json:"sender_id,omitempty"`
+	Sender    string `json:"sender,omitempty"`
+	System    bool   `json:"system,omitempty"`
+	Body      string `json:"body,omitempty"`
+}
+
 type MsgAckMsg struct {
 	Stream     string `json:"stream"`
 	Subscriber string `json:"subscriber"`

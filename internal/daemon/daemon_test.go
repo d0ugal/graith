@@ -2162,6 +2162,41 @@ func watchSessionExit(t *testing.T, sm *SessionManager, id string) string {
 	return sm.state.Sessions[id].StopReason
 }
 
+func TestWatchSessionExitPublishesOnlySessionLifecycleEvent(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	id := "sess-exit-event"
+	sm.state.Sessions[id] = &SessionState{
+		ID: id, Name: "braw", Status: StatusRunning, Agent: "claude",
+	}
+
+	sub, unsub := sm.events.Subscribe()
+	defer unsub()
+
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+
+	select {
+	case event := <-sub:
+		if event.Type != eventTypeStatusChange ||
+			event.StatusKind != eventStatusKindSession ||
+			event.From != string(StatusRunning) ||
+			event.To != string(StatusStopped) {
+			t.Fatalf("exit event = %+v", event)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("timed out waiting for exit lifecycle event")
+	}
+
+	select {
+	case event := <-sub:
+		t.Fatalf("unexpected duplicate exit event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 // TestSessionEndCleanShutdownLabelling is the regression test for the
 // clean-vs-crash mislabelling: a SessionEnd(logout) recorded before the PTY
 // exits must yield StopReasonUser, not StopReasonCrash. It fails against the old

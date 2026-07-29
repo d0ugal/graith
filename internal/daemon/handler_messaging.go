@@ -62,7 +62,7 @@ func handleMsgPub(sm *SessionManager, auth authContext, send func(string, any), 
 		return
 	}
 
-	published, err := sm.messages.Publish(PublishOpts{Stream: m.Stream, SenderID: m.SenderID, SenderName: m.SenderName, Body: m.Body, ThreadID: m.ThreadID, ReplyTo: m.ReplyTo, NoReply: m.NoReply})
+	published, err := sm.publishMessage(PublishOpts{Stream: m.Stream, SenderID: m.SenderID, SenderName: m.SenderName, Body: m.Body, ThreadID: m.ThreadID, ReplyTo: m.ReplyTo, NoReply: m.NoReply})
 	if err != nil {
 		send("error", protocol.ErrorMsg{Message: err.Error()})
 

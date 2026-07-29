@@ -39,17 +39,22 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 	stateDeleted := !stateExists || stateAtExit.IsSoftDeleted()
 
 	var (
-		name           string
-		deleted        bool
-		isOrchestrator bool
-		stopReason     string
-		sandboxed      bool
+		name                   string
+		deleted                bool
+		isOrchestrator         bool
+		stopReason             string
+		sandboxed              bool
+		prevLifecycleStatus    SessionStatus
+		nextLifecycleStatus    SessionStatus
+		lifecycleStatusChanged bool
+		statusChangedAt        time.Time
 	)
 
 	if !stale {
 		if s, ok := sm.state.Sessions[id]; ok {
 			name = s.Name
 			isOrchestrator = s.SystemKind == SystemKindOrchestrator
+			prevLifecycleStatus = s.Status
 
 			prevSummary, prevSetAt := sm.prevStopSummaryLocked(s, id)
 
@@ -70,6 +75,9 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 			}
 
 			s.StatusChangedAt = time.Now()
+			statusChangedAt = s.StatusChangedAt
+			nextLifecycleStatus = s.Status
+			lifecycleStatusChanged = prevLifecycleStatus != nextLifecycleStatus
 			s.ExitCode = &exitCode
 			s.PID = 0
 
@@ -146,6 +154,10 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 		sm.log.Info("ignoring stale session exit", "id", id, "exit_code", sess.ExitCode())
 
 		return
+	}
+
+	if lifecycleStatusChanged {
+		sm.publishStatusChangeEvent(id, name, eventStatusKindSession, string(prevLifecycleStatus), string(nextLifecycleStatus), statusChangedAt)
 	}
 
 	if deleted {

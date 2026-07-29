@@ -725,6 +725,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sessState.Sandboxed = sandboxed
 	sessState.SandboxConfig = mergedSandbox
 	sessState.Includes = forkIncludes
+	prevStatus := sessState.Status
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 
@@ -794,8 +795,11 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// (cleaned up on delete), so disarm the early-return cleanup guard.
 	forkContextCommitted = true
 
+	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	// Symmetric with Create/resume spawn logging (issue #1104).
 	sm.log.Info("session spawned",

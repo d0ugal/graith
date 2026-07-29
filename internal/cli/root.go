@@ -387,6 +387,7 @@ func registerCommands() {
 		registerDaemonCmd()
 		registerDeleteCmd()
 		registerDoctorCmd()
+		registerEventsCmd()
 		registerForkCmd()
 		registerInfoCmd()
 		registerInterruptCmd()

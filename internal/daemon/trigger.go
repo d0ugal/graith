@@ -706,7 +706,7 @@ func (sm *SessionManager) deliverScoped(ctx context.Context, d config.DeliverCon
 		}
 
 		if err == nil {
-			_, err = sm.messages.Publish(PublishOpts{Stream: topic, SenderID: systemSenderID, SenderName: systemSenderName, Body: body})
+			_, err = sm.publishMessage(PublishOpts{Stream: topic, SenderID: systemSenderID, SenderName: systemSenderName, Body: body})
 		}
 
 		if err != nil {
@@ -808,7 +808,7 @@ func (sm *SessionManager) deliverInboxScoped(ctx context.Context, target, body s
 		return sm.notifyFromDaemon(id, body)
 	}
 
-	if _, err := sm.messages.Publish(PublishOpts{Stream: "inbox:" + id, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); err != nil {
+	if _, err := sm.publishMessage(PublishOpts{Stream: "inbox:" + id, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); err != nil {
 		sm.log.Warn("trigger: inbox publish failed", "session", id, "err", err)
 		return err
 	}
