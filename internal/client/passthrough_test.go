@@ -490,6 +490,68 @@ func assertPrefixKeyResult(t *testing.T, key byte, want PassthroughResult) {
 	}
 }
 
+func BenchmarkExperimentalAttachFullRepaintFrameBytes(b *testing.B) {
+	tests := map[string]struct {
+		cols int
+		rows int
+	}{
+		"80x24":  {cols: 80, rows: 24},
+		"120x40": {cols: 120, rows: 40},
+		"160x48": {cols: 160, rows: 48},
+		"240x72": {cols: 240, rows: 72},
+	}
+
+	for name, test := range tests {
+		b.Run(name, func(b *testing.B) {
+			frame := repaintBenchmarkFrame(test.cols, test.rows)
+			snap := protocol.ScreenSnapshotResponseMsg{
+				SessionID:     "braw",
+				Frame:         frame,
+				CursorX:       test.cols - 1,
+				CursorY:       test.rows - 1,
+				CursorVisible: true,
+				Cols:          test.cols,
+				Rows:          test.rows,
+			}
+
+			payload, err := protocol.EncodeControl("screen_snapshot_response", snap)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.SetBytes(int64(len(payload) + 5))
+			b.ResetTimer()
+
+			for i := 0; i < b.N; i++ {
+				if _, err := protocol.EncodeControl("screen_snapshot_response", snap); err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(len(payload)+5), "wire_B/op")
+		})
+	}
+}
+
+func repaintBenchmarkFrame(cols, rows int) string {
+	row := strings.Repeat("x", cols)
+
+	var buf strings.Builder
+	buf.Grow((cols + 2) * rows)
+
+	for i := 0; i < rows; i++ {
+		if i > 0 {
+			buf.WriteString("\r\n")
+		}
+
+		buf.WriteString(row)
+	}
+
+	buf.WriteString("\x1b[0m")
+
+	return buf.String()
+}
+
 func TestPrefixKeyDetach(t *testing.T) {
 	assertPrefixKeyResult(t, 'd', ResultDetached)
 }

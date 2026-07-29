@@ -835,6 +835,43 @@ func TestDataChannelForwarding(t *testing.T) {
 	h.expectType(t, "session_list")
 }
 
+func TestAttachSlowReaderDoesNotBlockPTYDrain(t *testing.T) {
+	h := newTestHarness(t)
+	h.addPTYSessionCmd(t, "braw-slow", "bonnie-slow", "sh", "-c", `
+read start
+i=0
+while [ "$i" -lt 6000 ]; do
+	printf 'braw-%04d-0123456789abcdef\n' "$i"
+	i=$((i + 1))
+done
+sleep 300
+`)
+	t.Cleanup(func() { _ = h.conn.Close() })
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-slow"})
+	h.expectType(t, "attached")
+
+	ptySess, ok := h.sm.GetPTY("braw-slow")
+	if !ok {
+		t.Fatal("missing PTY session")
+	}
+
+	if err := h.writer.WriteFrame(protocol.ChannelData, []byte("go\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := ptySess.BytesRead(); got >= 64*1024 {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("PTY read loop stalled at %d bytes with an attached slow reader", ptySess.BytesRead())
+}
+
 func TestAttachedInputRejectedDuringUpgradeClosesConnectionExplicitly(t *testing.T) {
 	h := newTestHarness(t)
 	h.addPTYSession(t, "thrawn-data", "thrawn-data")
@@ -2629,33 +2666,239 @@ func TestFrameDataWriter(t *testing.T) {
 	}
 }
 
-func TestGatedDataWriterReleasePreservesOrder(t *testing.T) {
-	var buf bytes.Buffer
+func TestAttachDataWriterOverflowDisconnectsSlowClient(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	closed := make(chan struct{})
+	closeOnce := sync.Once{}
 
-	gate := newGatedDataWriter(&buf)
+	writer := newAttachDataWriter(attachDataWriterConfig{
+		SessionID: "braw-slow",
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Mode:      attachOutputRaw,
+		MaxBytes:  8,
+		MaxChunks: 2,
+		writeFrame: func([]byte) error {
+			closeOnce.Do(func() { close(started) })
+			<-release
 
-	if _, err := gate.Write([]byte("braw")); err != nil {
+			return nil
+		},
+		closeConn: func() error {
+			close(closed)
+
+			return nil
+		},
+	})
+
+	defer func() {
+		close(release)
+		writer.Close()
+		writer.wait()
+	}()
+
+	if _, err := writer.Write([]byte("braw")); err != nil {
 		t.Fatal(err)
 	}
 
-	if buf.Len() != 0 {
-		t.Fatalf("buffer wrote before release: %q", buf.String())
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start first blocked write")
 	}
 
-	if _, err := gate.Write([]byte("-canny")); err != nil {
+	if _, err := writer.Write([]byte("cany")); err != nil {
 		t.Fatal(err)
+	}
+
+	if _, err := writer.Write([]byte("drei")); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		_, _ = writer.Write([]byte("overflow"))
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("overflow write blocked behind slow client")
+	}
+
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("overflow did not close slow client")
+	}
+
+	stats := writer.snapshotStats()
+
+	wantDroppedBytes := int64(len("cany") + len("drei") + len("overflow"))
+	if stats.droppedFrames != 2 || stats.droppedBytes != wantDroppedBytes {
+		t.Fatalf("stats dropped = (%d, %d), want queued overflow backlog", stats.droppedFrames, stats.droppedBytes)
+	}
+}
+
+func TestAttachDataWriterPreservesRawBytesAcrossAsyncBoundary(t *testing.T) {
+	frames := make(chan []byte, 2)
+
+	writer := newAttachDataWriter(attachDataWriterConfig{
+		SessionID: "braw-raw",
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Mode:      attachOutputRaw,
+		writeFrame: func(payload []byte) error {
+			frames <- append([]byte(nil), payload...)
+
+			return nil
+		},
+	})
+
+	defer func() {
+		writer.Close()
+		writer.wait()
+	}()
+
+	first := []byte("braw")
+	if _, err := writer.Write(first); err != nil {
+		t.Fatal(err)
+	}
+
+	copy(first, []byte("xxxx"))
+
+	if _, err := writer.Write([]byte("canny")); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "brawcanny"
+
+	var got []byte
+	for len(got) < len(want) {
+		select {
+		case frame := <-frames:
+			got = append(got, frame...)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for raw bytes %q", want)
+		}
+	}
+
+	if string(got) != want {
+		t.Fatalf("raw bytes = %q, want %q", got, want)
+	}
+}
+
+func TestAttachDataWriterCoalescesTerminalOwnedHints(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	closeOnce := sync.Once{}
+
+	writer := newAttachDataWriter(attachDataWriterConfig{
+		SessionID: "canny-owned",
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Mode:      attachOutputCoalesced,
+		writeFrame: func(payload []byte) error {
+			if len(payload) != 0 {
+				t.Errorf("coalesced attach payload length = %d, want 0", len(payload))
+			}
+
+			closeOnce.Do(func() { close(started) })
+			<-release
+
+			return nil
+		},
+	})
+
+	defer func() {
+		close(release)
+		writer.Close()
+		writer.wait()
+	}()
+
+	if _, err := writer.Write([]byte("first output chunk")); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("coalesced writer did not start first notification")
+	}
+
+	for i := 0; i < 10; i++ {
+		if _, err := writer.Write([]byte("dreich output chunk")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats := writer.snapshotStats()
+	if stats.enqueuedFrames != 2 {
+		t.Fatalf("enqueued frames = %d, want first in-flight plus one pending hint", stats.enqueuedFrames)
+	}
+
+	if stats.coalesced != 9 {
+		t.Fatalf("coalesced frames = %d, want 9", stats.coalesced)
+	}
+}
+
+type countingWriter struct {
+	mu     sync.Mutex
+	writes int
+	bytes  int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.writes++
+	w.bytes += len(p)
+
+	return len(p), nil
+}
+
+func (w *countingWriter) counts() (int, int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.writes, w.bytes
+}
+
+func TestGatedDataWriterCoalescesBeforeRelease(t *testing.T) {
+	target := &countingWriter{}
+
+	gate := newGatedDataWriter(target)
+
+	chunks := [][]byte{
+		[]byte("braw"),
+		bytes.Repeat([]byte("c"), 1024*1024),
+		[]byte("dreich"),
+	}
+	for _, chunk := range chunks {
+		if _, err := gate.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if writes, bytesWritten := target.counts(); writes != 0 || bytesWritten != 0 {
+		t.Fatalf("target before release = (%d writes, %d bytes), want empty", writes, bytesWritten)
 	}
 
 	if err := gate.Release(); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := gate.Write([]byte("-dreich")); err != nil {
+	if writes, bytesWritten := target.counts(); writes != 1 || bytesWritten != 0 {
+		t.Fatalf("target after release = (%d writes, %d bytes), want one zero-byte repaint hint", writes, bytesWritten)
+	}
+
+	if _, err := gate.Write([]byte("efter release")); err != nil {
 		t.Fatal(err)
 	}
 
-	if got, want := buf.String(), "braw-canny-dreich"; got != want {
-		t.Fatalf("buffer = %q, want %q", got, want)
+	if writes, bytesWritten := target.counts(); writes != 2 || bytesWritten != len("efter release") {
+		t.Fatalf("target after live write = (%d writes, %d bytes), want delegated live write", writes, bytesWritten)
 	}
 }
 

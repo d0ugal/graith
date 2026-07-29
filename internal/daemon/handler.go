@@ -79,11 +79,11 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 // connection's lifecycle.
 func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm *SessionManager, log *slog.Logger) {
 	reader := protocol.NewFrameReader(conn)
-	writer := &safeFrameWriter{writer: protocol.NewFrameWriter(conn)}
+	writer := &safeFrameWriter{conn: conn, writer: protocol.NewFrameWriter(conn)}
 
 	var (
 		attachedSessionID  string
-		attachedDataWriter io.Writer
+		attachedDataWriter attachOutputWriter
 		// attachedReadOnly drops this connection's input frames when the current
 		// attach was requested read-only (issue #31). Set on attach, cleared on
 		// detach; it is the server-side backstop to the client's input gate.
@@ -126,6 +126,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			if pty, ok := sm.GetPTY(attachedSessionID); ok {
 				pty.DetachWriter(attachedDataWriter)
 			}
+
+			if attachedDataWriter != nil {
+				attachedDataWriter.Close()
+			}
 		}
 
 		if poppedDeviceID != "" {
@@ -133,7 +137,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		}
 	}()
 
-	sendControlResult := func(msgType string, payload any) error {
+	writeControlResult := func(msgType string, payload any, timeout time.Duration) error {
 		data, err := protocol.EncodeControl(msgType, payload)
 		if err != nil {
 			log.Error("encode control", "err", err)
@@ -143,7 +147,14 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			return err
 		}
 
-		if err := writer.WriteFrame(protocol.ChannelControl, data); err != nil {
+		writeFrame := writer.WriteFrame
+		if timeout > 0 {
+			writeFrame = func(channel byte, payload []byte) error {
+				return writer.WriteFrameWithDeadline(channel, payload, timeout)
+			}
+		}
+
+		if err := writeFrame(protocol.ChannelControl, data); err != nil {
 			log.Error("write control", "type", msgType, "err", err)
 			// A response that cannot be written must terminate the connection so
 			// clients waiting in ReadControlResponse observe EOF instead of hanging.
@@ -153,6 +164,12 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 		}
 
 		return nil
+	}
+	sendControlResult := func(msgType string, payload any) error {
+		return writeControlResult(msgType, payload, 0)
+	}
+	sendControlWithDeadline := func(msgType string, payload any, timeout time.Duration) {
+		_ = writeControlResult(msgType, payload, timeout)
 	}
 	sendControl := func(msgType string, payload any) {
 		_ = sendControlResult(msgType, payload)
@@ -445,6 +462,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
 						pty.DetachWriter(attachedDataWriter)
 					}
+
+					if attachedDataWriter != nil {
+						attachedDataWriter.Close()
+					}
 				}
 
 				// Headless sessions have no interactive TUI to stream. Attaching
@@ -509,13 +530,26 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 				attachedSessionID = a.SessionID
 
-				liveDataWriter := &frameDataWriter{writer: writer}
-				attachedDataWriter = liveDataWriter
-
 				var gatedWriter *gatedDataWriter
+
 				if a.ExperimentalAttach {
+					liveDataWriter := newAttachDataWriter(attachDataWriterConfig{
+						SessionID: a.SessionID,
+						Writer:    writer,
+						Conn:      conn,
+						Log:       log,
+						Mode:      attachOutputCoalesced,
+					})
 					gatedWriter = newGatedDataWriter(liveDataWriter)
 					attachedDataWriter = gatedWriter
+				} else {
+					attachedDataWriter = newAttachDataWriter(attachDataWriterConfig{
+						SessionID: a.SessionID,
+						Writer:    writer,
+						Conn:      conn,
+						Log:       log,
+						Mode:      attachOutputRaw,
+					})
 				}
 
 				attachedReadOnly = a.ReadOnly
@@ -523,10 +557,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sm.KickAttachedClient(a.SessionID)
 				sm.SetAttachedClient(a.SessionID, conn,
 					func() {
-						_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-
 						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
-						_ = writer.WriteFrame(protocol.ChannelControl, data)
+						_ = writer.WriteFrameWithDeadline(protocol.ChannelControl, data, defaultAttachOutputWriteTimeout)
 
 						_ = conn.Close()
 					},
@@ -561,9 +593,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					if seed.Snapshot.Frame == "" {
 						output.DetachWriter(attachedDataWriter)
-						gatedWriter.Discard()
+						attachedDataWriter.Close()
 
-						attachedDataWriter = liveDataWriter
+						attachedDataWriter = newAttachDataWriter(attachDataWriterConfig{
+							SessionID: a.SessionID,
+							Writer:    writer,
+							Conn:      conn,
+							Log:       log,
+							Mode:      attachOutputRaw,
+						})
 
 						sendControl("attached", info)
 
@@ -576,8 +614,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						continue
 					}
 
-					if err := sendControlResult("experimental_attached", seed); err != nil {
-						_ = gatedWriter.Release()
+					if err := writeControlResult("experimental_attached", seed, defaultAttachOutputWriteTimeout); err != nil {
+						gatedWriter.Discard()
 
 						continue
 					}
@@ -609,6 +647,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 					if pty, ok := sm.GetPTY(attachedSessionID); ok {
 						pty.DetachWriter(attachedDataWriter)
+					}
+
+					if attachedDataWriter != nil {
+						attachedDataWriter.Close()
 					}
 
 					attachedSessionID = ""
@@ -714,7 +756,13 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
-				logsWriter := &frameDataWriter{writer: writer}
+				logsWriter := newAttachDataWriter(attachDataWriterConfig{
+					SessionID: l.SessionID,
+					Writer:    writer,
+					Conn:      conn,
+					Log:       log,
+					Mode:      attachOutputRaw,
+				})
 				ptySess.Attach(logsWriter)
 				sendControl("logs_following", struct{}{})
 
@@ -722,6 +770,8 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					f, err := reader.ReadFrame()
 					if err != nil {
 						ptySess.DetachWriter(logsWriter)
+						logsWriter.Close()
+
 						return
 					}
 
@@ -729,6 +779,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						ctrl, _ := protocol.DecodeControl(f.Payload)
 						if ctrl.Type == "detach" {
 							ptySess.DetachWriter(logsWriter)
+							logsWriter.Close()
 							sendControl("logs_done", struct{}{})
 
 							break
@@ -837,7 +888,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				handleScreenPreview(sm, auth, sendControl, msg)
 
 			case "screen_snapshot":
-				handleScreenSnapshot(sm, auth, sendControl, msg)
+				handleScreenSnapshot(sm, auth, func(msgType string, payload any) {
+					sendControlWithDeadline(msgType, payload, defaultAttachOutputWriteTimeout)
+				}, msg)
 
 			case "reload":
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
@@ -1161,12 +1214,25 @@ func (ac authContext) mayReadJailBody(sm *SessionManager) bool {
 // (handler loop + PTY readLoop) can write frames concurrently.
 type safeFrameWriter struct {
 	mu     sync.Mutex
+	conn   net.Conn
 	writer *protocol.FrameWriter
 }
 
 func (w *safeFrameWriter) WriteFrame(channel byte, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	return w.writer.WriteFrame(channel, payload)
+}
+
+func (w *safeFrameWriter) WriteFrameWithDeadline(channel byte, payload []byte, timeout time.Duration) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if timeout > 0 && w.conn != nil {
+		_ = w.conn.SetWriteDeadline(time.Now().Add(timeout))
+		defer func() { _ = w.conn.SetWriteDeadline(time.Time{}) }()
+	}
 
 	return w.writer.WriteFrame(channel, payload)
 }
@@ -1182,86 +1248,6 @@ func (w *frameDataWriter) Write(p []byte) (int, error) {
 	}
 
 	return len(p), nil
-}
-
-const gatedDataWriterBufferLimit = 1 << 20
-
-type gatedDataWriter struct {
-	mu            sync.Mutex
-	cond          *sync.Cond
-	target        io.Writer
-	released      bool
-	discarded     bool
-	buffered      [][]byte
-	bufferedBytes int
-}
-
-func newGatedDataWriter(target io.Writer) *gatedDataWriter {
-	w := &gatedDataWriter{target: target}
-	w.cond = sync.NewCond(&w.mu)
-
-	return w
-}
-
-func (w *gatedDataWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	for !w.released && w.bufferedBytes+len(p) > gatedDataWriterBufferLimit {
-		w.cond.Wait()
-	}
-
-	if w.released {
-		if w.discarded {
-			w.mu.Unlock()
-
-			return len(p), nil
-		}
-
-		w.mu.Unlock()
-
-		return w.target.Write(p)
-	}
-
-	w.buffered = append(w.buffered, append([]byte(nil), p...))
-	w.bufferedBytes += len(p)
-	w.mu.Unlock()
-
-	return len(p), nil
-}
-
-func (w *gatedDataWriter) Release() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if w.released {
-		return nil
-	}
-
-	for _, p := range w.buffered {
-		if _, err := w.target.Write(p); err != nil {
-			w.released = true
-			w.cond.Broadcast()
-
-			return err
-		}
-	}
-
-	w.released = true
-	w.buffered = nil
-	w.bufferedBytes = 0
-	w.cond.Broadcast()
-
-	return nil
-}
-
-func (w *gatedDataWriter) Discard() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.released = true
-	w.discarded = true
-	w.buffered = nil
-	w.bufferedBytes = 0
-	w.cond.Broadcast()
 }
 
 func screenSnapshotResponse(sessionID string, snap grpty.ScreenCapture) protocol.ScreenSnapshotResponseMsg {

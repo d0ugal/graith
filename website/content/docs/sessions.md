@@ -93,6 +93,14 @@ Attaching connects your terminal's stdin/stdout to the session's PTY through the
 
 The attach loop transitions between passthrough mode (raw terminal I/O) and the overlay (session picker), cycling without dropping the daemon connection: detach with `ctrl+b d`, switch sessions with `ctrl+b n/p/l`.
 
+Live attach output is bounded per client so a slow terminal or remote link cannot
+stall the session's PTY drain. Raw attach and `gr logs -f` preserve byte order,
+coalesce adjacent queued chunks, and buffer until the per-client queue reaches
+1 MiB or 16,384 chunks. Graith disconnects a client whose queue overflows or
+whose queued write cannot complete within 2 seconds, and the session keeps
+running. Experimental terminal-owned attach coalesces live output into repaint
+hints because snapshots carry the screen state.
+
 Sessions created with `gr new --experimental-attach` use the experimental
 terminal-owned attach client on future attaches. The daemon sends a coherent
 current-screen seed before live output resumes, and the client owns the outer
