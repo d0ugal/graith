@@ -274,14 +274,20 @@ func (sm *SessionManager) detectAgentStatuses() {
 			}
 		}
 
-		if status != t.prevStatus {
-			sm.onAgentStatusChange(t.id, t.name, t.prevStatus, status)
-		}
+		var (
+			statusChanged bool
+			oldStatus     string
+			sessionName   string
+		)
 
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[t.id]; ok {
+			oldStatus = s.AgentStatus
+			sessionName = s.Name
+
 			if status != s.AgentStatus {
 				s.StatusChangedAt = time.Now()
+				statusChanged = true
 			}
 
 			s.AgentStatus = status
@@ -308,6 +314,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 			}
 		}
 		sm.mu.Unlock()
+
+		if statusChanged {
+			sm.onAgentStatusChange(t.id, sessionName, oldStatus, status)
+		}
 	}
 
 	for _, id := range toAutoStop {

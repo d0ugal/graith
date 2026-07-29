@@ -88,6 +88,8 @@ func (sm *SessionManager) Delete(id string) error {
 	inPlace := sessState.InPlace
 	agentName := sessState.Agent
 	sessSystemKind := sessState.SystemKind
+	sessName := sessState.Name
+	wasSoftDeleted := sessState.IsSoftDeleted()
 	prevStatus := sessState.Status
 	sessToken := sessState.Token
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
@@ -99,8 +101,12 @@ func (sm *SessionManager) Delete(id string) error {
 		delete(sm.state.Sessions, id)
 		delete(sm.hookReports, id)
 
-		_ = sm.saveState()
+		saveErr := sm.saveState()
 		sm.mu.Unlock()
+
+		if saveErr == nil {
+			sm.publishSessionDeletedEvent(id, sessName, time.Now())
+		}
 
 		if hasClient {
 			ac.kick()
@@ -371,6 +377,10 @@ func (sm *SessionManager) Delete(id string) error {
 	}
 
 	if err == nil {
+		if !wasSoftDeleted {
+			sm.publishSessionDeletedEvent(id, sessName, time.Now())
+		}
+
 		_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
 		_ = os.Remove(sm.nonoProfilePath(id))
 		_ = os.Remove(sm.safehouseFragmentPath(id))
@@ -497,6 +507,7 @@ type bulkDeleteSnapshot struct {
 	readOnlyBranch bool
 	inPlace        bool
 	prevStatus     SessionStatus
+	wasSoftDeleted bool
 	includes       []IncludedRepoState
 	ptySess        sessionDriver
 	client         *attachedClient
@@ -752,7 +763,12 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 
 	snaps := make([]bulkDeleteSnapshot, 0, len(toDelete))
 
-	var creatingIDs []string
+	type creatingDeleteEvent struct {
+		id   string
+		name string
+	}
+
+	var creatingDeletes []creatingDeleteEvent
 
 	for _, did := range toDelete {
 		sess := sm.state.Sessions[did]
@@ -777,10 +793,10 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 
 			if ac, ok := sm.attachedClients[did]; ok {
 				delete(sm.attachedClients, did)
-				creatingIDs = append(creatingIDs, did)
+				creatingDeletes = append(creatingDeletes, creatingDeleteEvent{id: did, name: sess.Name})
 				_ = ac // kick after unlock
 			} else {
-				creatingIDs = append(creatingIDs, did)
+				creatingDeletes = append(creatingDeletes, creatingDeleteEvent{id: did, name: sess.Name})
 			}
 
 			continue
@@ -797,6 +813,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 			readOnlyBranch: sess.ReadOnlyBranch,
 			inPlace:        sess.InPlace,
 			prevStatus:     sess.Status,
+			wasSoftDeleted: sess.IsSoftDeleted(),
 			includes:       make([]IncludedRepoState, len(sess.Includes)),
 		}
 		copy(s.includes, sess.Includes)
@@ -908,13 +925,13 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 
 	// Sweep for sessions created between collectDescendants and PTY kills.
 	// Child agents may have spawned new sessions during that window.
-	deletedSet := make(map[string]bool, len(snaps)+len(creatingIDs))
+	deletedSet := make(map[string]bool, len(snaps)+len(creatingDeletes))
 	for _, s := range snaps {
 		deletedSet[s.id] = true
 	}
 
-	for _, cid := range creatingIDs {
-		deletedSet[cid] = true
+	for _, deleted := range creatingDeletes {
+		deletedSet[deleted.id] = true
 	}
 
 	const maxSweepRounds = 10
@@ -949,7 +966,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 					_ = ac
 				}
 
-				creatingIDs = append(creatingIDs, sid)
+				creatingDeletes = append(creatingDeletes, creatingDeleteEvent{id: sid, name: sess.Name})
 
 				continue
 			}
@@ -965,6 +982,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 				readOnlyBranch: sess.ReadOnlyBranch,
 				inPlace:        sess.InPlace,
 				prevStatus:     sess.Status,
+				wasSoftDeleted: sess.IsSoftDeleted(),
 				includes:       make([]IncludedRepoState, len(sess.Includes)),
 			}
 			copy(ls.includes, sess.Includes)
@@ -1093,11 +1111,14 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 		}
 	}
 
-	deletedIDs := append([]string{}, creatingIDs...)
+	deletedIDs := make([]string, 0, len(creatingDeletes)+len(snaps))
+	for _, deleted := range creatingDeletes {
+		deletedIDs = append(deletedIDs, deleted.id)
+	}
 
-	removedSet := make(map[string]bool, len(creatingIDs))
-	for _, cid := range creatingIDs {
-		removedSet[cid] = true
+	removedSet := make(map[string]bool, len(creatingDeletes))
+	for _, deleted := range creatingDeletes {
+		removedSet[deleted.id] = true
 	}
 
 	for _, s := range snaps {
@@ -1131,6 +1152,12 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 	stateErr := sm.saveState()
 	sm.mu.Unlock()
 
+	if stateErr == nil {
+		for _, deleted := range creatingDeletes {
+			sm.publishSessionDeletedEvent(deleted.id, deleted.name, time.Now())
+		}
+	}
+
 	for _, s := range snaps {
 		if succeeded[s.id] {
 			// Only drop the tombstone once the removal-from-state save is durable;
@@ -1147,6 +1174,10 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 					_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
 					_ = os.Remove(sm.nonoProfilePath(s.id))
 					_ = os.Remove(sm.safehouseFragmentPath(s.id))
+
+					if !s.wasSoftDeleted {
+						sm.publishSessionDeletedEvent(s.id, s.name, time.Now())
+					}
 				}
 			}
 		} else if teardownFailed[s.id] && stateErr == nil {

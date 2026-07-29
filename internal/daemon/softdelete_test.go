@@ -114,6 +114,63 @@ func TestSoftDeleteMarksAndPreserves(t *testing.T) {
 	}
 }
 
+func TestSoftDeletePublishesDeleteEventOnceAcrossPurge(t *testing.T) {
+	sm := newTestSessionManager(t)
+	addStoppedSession(t, sm, "braw-id", "braw")
+
+	sub, unsub := sm.events.Subscribe()
+	defer unsub()
+
+	if _, err := sm.SoftDelete("braw-id"); err != nil {
+		t.Fatalf("SoftDelete() error = %v", err)
+	}
+
+	select {
+	case event := <-sub:
+		if event.Type != eventTypeSessionDeleted ||
+			event.SessionID != "braw-id" ||
+			event.Session != "braw" {
+			t.Fatalf("soft delete event = %+v", event)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("timed out waiting for soft delete event")
+	}
+
+	if err := sm.Delete("braw-id"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	select {
+	case event := <-sub:
+		t.Fatalf("purge emitted duplicate delete event: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestDeleteCreatingSessionPublishesDeleteEvent(t *testing.T) {
+	sm := newTestSessionManager(t)
+	s := addStoppedSession(t, sm, "braw-id", "braw")
+	s.Status = StatusCreating
+
+	sub, unsub := sm.events.Subscribe()
+	defer unsub()
+
+	if err := sm.Delete("braw-id"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	select {
+	case event := <-sub:
+		if event.Type != eventTypeSessionDeleted ||
+			event.SessionID != "braw-id" ||
+			event.Session != "braw" {
+			t.Fatalf("delete event = %+v", event)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("timed out waiting for delete event")
+	}
+}
+
 func TestSoftDeleteRejections(t *testing.T) {
 	t.Run("starred", func(t *testing.T) {
 		sm := newTestSessionManager(t)

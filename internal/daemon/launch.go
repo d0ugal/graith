@@ -366,11 +366,18 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 	// sm.mu is held here, so sm.cfg is read directly rather than via Config()
 	// (which would take the read lock and deadlock).
 	giveUp := s.StuckRestarts >= sm.cfg.Launch.MaxRestartsOrDefault()
+
+	var lifecycleEvent pendingStatusChangeEvent
+
 	if giveUp {
+		prevStatus := s.Status
+
 		sm.setStopReasonLocked(st.id, s, StopReasonWatchdog)
 		s.Status = StatusErrored
 		s.StatusChangedAt = time.Now()
 		applyLifecycleSummaryLocked(s, "Stuck on launch and exceeded watchdog restart budget")
+
+		lifecycleEvent = pendingSessionStatusChangeEvent(st.id, s, prevStatus)
 	} else {
 		// Mark for a fresh start so a forced-id agent (Claude) uses --session-id
 		// rather than --resume against a conversation that was never persisted —
@@ -381,8 +388,12 @@ func (sm *SessionManager) recoverStuckLaunch(st stuckSession, timeout time.Durat
 		s.StuckRestarts++
 	}
 
-	_ = sm.saveState()
+	if err := sm.saveState(); err != nil {
+		lifecycleEvent = pendingStatusChangeEvent{}
+	}
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	if giveUp {
 		sm.log.Warn("startup watchdog giving up on stuck session (restart budget exhausted)", logCtx...)

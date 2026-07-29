@@ -138,6 +138,7 @@ type SessionManager struct {
 	// snapshot-to-file-lock interleaving. Production leaves it nil.
 	persistLatestStateBeforeLock func()
 	persistUpgradeBeforeLock     func()
+	events                       *eventBroker
 	messages                     *MsgStore
 	todos                        *TodoStore
 	scenarioResults              scenarioResultPersistence
@@ -319,6 +320,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		signalRequests:            make(map[string]signalRequest),
 		newLoopTicker:             newRealLoopTicker,
 		newLoopTimer:              newRealLoopTimer,
+		events:                    newEventBroker(cfg.Messages.SubscriberBufferOrDefault()),
 		cfg:                       cfg,
 		paths:                     paths,
 		log:                       log,

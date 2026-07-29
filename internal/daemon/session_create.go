@@ -1100,6 +1100,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.Includes = includes
 	sessState.DriverKind = driverKind
 	sessState.ReadOnlyRevision = readOnlyRevision
+	prevStatus := sessState.Status
 	sessState.Status = StatusRunning
 	sessState.StatusChangedAt = time.Now()
 	sessState.LaunchGeneration = 1
@@ -1163,8 +1164,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, fmt.Errorf("persist session state: %w", err)
 	}
 
+	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	// Record the fresh-session spawn symmetrically with "resume: pty spawned"
 	// (issue #1104): pid/pgid for OS-level signal forensics, sandboxed so a

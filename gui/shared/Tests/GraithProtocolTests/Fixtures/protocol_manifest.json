@@ -1207,6 +1207,115 @@
       ]
     },
     {
+      "name": "EventMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "type",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "session",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "status_kind",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "from",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "to",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "topic",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "message_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "seq",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "sender_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "sender",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "system",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "body",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "EventsSubMsg",
+      "swift": "na",
+      "fields": []
+    },
+    {
       "name": "FleetSummary",
       "swift": "required",
       "swift_type": "FleetSummary",

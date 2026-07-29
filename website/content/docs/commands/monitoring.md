@@ -183,6 +183,40 @@ most 32 MiB of parsed search text in memory, truncates any single turn cached
 for search at 128 Ki runes, returns snippets of at most 240 runes, and caps one
 paginated query window at 1,000 results.
 
+### `gr events`
+
+Stream live daemon events until interrupted. Use it in supervisors that would
+otherwise poll `gr list` to notice session readiness, stops, deletes, or public
+topic messages.
+
+```console
+$ gr events --json
+{"type":"status_change","at":"2026-07-29T12:00:00Z","session_id":"abc123","session":"fix-auth","status_kind":"agent","from":"active","to":"ready"}
+{"type":"message","at":"2026-07-29T12:00:02Z","topic":"review-ready","message_id":"msg_abc","seq":7,"sender_id":"abc123","sender":"fix-auth","body":"PR ready"}
+{"type":"session_deleted","at":"2026-07-29T12:00:04Z","session_id":"abc123","session":"fix-auth"}
+```
+
+Without `--json`, the command prints compact human-readable lines. Agent-mode
+clients automatically enable JSON output.
+
+`status_change` events use `status_kind: "agent"` for detected agent states
+such as `active`, `ready`, or `error`, and `status_kind: "session"` for daemon
+lifecycle states such as sessions becoming `running`, stopping, or erroring.
+
+`message` events include public topic publishes only. They include
+`system: true` when the sender is a daemon-authored system notice. Direct inbox
+messages (`inbox:<id>`) and `_system.*` streams are not emitted; use
+`gr msg inbox --wait` or `gr msg inbox --follow` for private direct messages.
+
+`session_deleted` is emitted when a session is hidden by soft delete, or when a
+live/non-deleted session is hard-deleted directly. A later purge of an already
+soft-deleted session does not emit a second deletion event.
+
+The stream is best-effort and not replayable. If a subscriber disconnects or is
+too slow, use `gr list --json` and `gr msg sub --topic <name> --all` to rebuild
+current state. The stream is fleet-wide for authenticated users and sessions,
+matching the visibility of `gr list` plus public topic subscriptions.
+
 ### `gr logs <name-or-id>` (alias: `l`)
 
 Show session output without attaching.

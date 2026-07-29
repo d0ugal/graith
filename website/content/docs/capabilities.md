@@ -59,10 +59,12 @@ as live state.
 | Migrate session to another agent | ✅ | ✅ | ✅ |
 | Set session status summary | ✅ | ✅ | ✅ |
 | Block until a session matches a condition <sup>2</sup> | ✅ | — | — |
+| Stream daemon events <sup>3</sup> | ✅ | — | — |
 | List available repositories for new sessions | ✅ | ✅ | ✅ |
 
 <sup>1</sup> Search conversation transcripts: V1 ships the shared daemon query/result model and `gr search`; native interactive presentation is planned.
 <sup>2</sup> Block until a session matches a condition: A scripting/automation gate; the GUIs surface live state instead. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
+<sup>3</sup> Stream daemon events: A CLI automation stream for supervisors; GUI support can be added if the fleet model needs push updates. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-29-session-event-stream.md#platform-support)
 
 ### Terminal I/O
 

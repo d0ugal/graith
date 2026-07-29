@@ -88,6 +88,12 @@
       "platform_decision": "docs/design/2026-07-17-platform-scope-policy.md#platform-support"
     },
     {
+      "id": "events.stream",
+      "ios": "n/a",
+      "macos": "n/a",
+      "platform_decision": "docs/design/2026-07-29-session-event-stream.md#platform-support"
+    },
+    {
       "id": "session.repo-list",
       "ios": "supported",
       "macos": "supported"

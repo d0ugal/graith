@@ -146,6 +146,8 @@ var registeredTypes = []any{
 	MsgPubMsg{},
 	MsgSubMsg{},
 	MsgInboxMsg{},
+	EventsSubMsg{},
+	EventMsg{},
 	MsgAckMsg{},
 	MsgTopicsMsg{},
 	MsgConversationMsg{},
@@ -410,6 +412,8 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"MsgPubMsg":               {SwiftRequired, "MsgPubMsg"},
 	"MsgSubMsg":               {SwiftNA, ""},
 	"MsgInboxMsg":             {SwiftNA, ""},
+	"EventsSubMsg":            {SwiftNA, ""}, // CLI-only supervisory event stream
+	"EventMsg":                {SwiftNA, ""}, // CLI-only supervisory event stream
 	"MsgAckMsg":               {SwiftRequired, "MsgAckMsg"},
 	"MsgTopicsMsg":            {SwiftNA, ""},
 	"MsgConversationMsg":      {SwiftRequired, "MsgConversationMsg"},

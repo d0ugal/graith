@@ -18,10 +18,14 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 		"session", sessionName, "id", sessionID,
 		"from", oldStatus, "to", newStatus)
 
+	if shouldPublishAgentStatusEvent(oldStatus, newStatus) {
+		sm.publishStatusChangeEvent(sessionID, sessionName, eventStatusKindAgent, oldStatus, newStatus, time.Now())
+	}
+
 	if sm.messages != nil {
 		body := fmt.Sprintf("Session %q status changed: %s → %s", sessionName, oldStatus, newStatus)
 
-		_, err := sm.messages.Publish(PublishOpts{Stream: "_system.status", SenderID: sessionID, SenderName: sessionName, Body: body})
+		_, err := sm.publishMessage(PublishOpts{Stream: "_system.status", SenderID: sessionID, SenderName: sessionName, Body: body})
 		if err != nil {
 			sm.log.Error("failed to publish status change", "err", err)
 		}
@@ -45,6 +49,10 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 	}
 
 	sm.sendNotification(sessionName, newStatus, notifCfg.Command)
+}
+
+func shouldPublishAgentStatusEvent(oldStatus, newStatus string) bool {
+	return oldStatus != "running" || newStatus != "stopped"
 }
 
 // systemSenderID / systemSenderName identify messages the daemon authors
@@ -93,7 +101,7 @@ func (sm *SessionManager) notifyFromDaemonWithOpts(ctx context.Context, sessionI
 		return fmt.Errorf("no message store to publish notification to session %q", sessionID)
 	}
 
-	if _, err := sm.messages.Publish(PublishOpts{
+	if _, err := sm.publishMessage(PublishOpts{
 		Stream:     "inbox:" + sessionID,
 		SenderID:   systemSenderID,
 		SenderName: systemSenderName,

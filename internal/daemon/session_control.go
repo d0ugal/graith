@@ -112,8 +112,12 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 
 	killed, err := sm.killVerifiedProcess(pid, startTime)
 
+	var lifecycleEvent pendingStatusChangeEvent
+
 	sm.mu.Lock()
 	if s, ok := sm.state.Sessions[id]; ok {
+		prevStatus := s.Status
+
 		switch {
 		case killed:
 			s.Status = StatusStopped
@@ -133,9 +137,13 @@ func (sm *SessionManager) stopWithReason(id, reason, initiator string) error {
 			applyLifecycleSummaryLocked(s, "Process already exited")
 		}
 
-		_ = sm.saveState()
+		if saveErr := sm.saveState(); saveErr == nil {
+			lifecycleEvent = pendingSessionStatusChangeEvent(id, s, prevStatus)
+		}
 	}
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	rollbackErr := sm.finishStopAttempt(id, attempt, err != nil)
 
@@ -299,8 +307,13 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 		sm.logStoppingPID(id, name, StopReasonUser, "stop-children-orphan", pid, pid)
 
 		killed, killErr := sm.killVerifiedProcess(pid, startTime)
+
+		var lifecycleEvent pendingStatusChangeEvent
+
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok {
+			prevStatus := s.Status
+
 			switch {
 			case killed:
 				s.Status = StatusStopped
@@ -324,9 +337,13 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 				stopped = append(stopped, id)
 			}
 
-			_ = sm.saveState()
+			if saveErr := sm.saveState(); saveErr == nil {
+				lifecycleEvent = pendingSessionStatusChangeEvent(id, s, prevStatus)
+			}
 		}
 		sm.mu.Unlock()
+
+		sm.publishPendingStatusChangeEvent(lifecycleEvent)
 	}
 
 	// Sweep for sessions created between collectDescendants and the stop loop.
@@ -500,8 +517,12 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 			"old_output_bytes", ptySess.BytesRead())
 		ptySess.Close()
 
+		var lifecycleEvent pendingStatusChangeEvent
+
 		sm.mu.Lock()
 		if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
+			prevStatus := s.Status
+
 			exitCode := ptySess.ExitCode()
 			s.Status = StatusStopped
 			s.StatusChangedAt = time.Now()
@@ -509,9 +530,13 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 			s.PID = 0
 			s.PIDStartTime = 0
 
-			_ = sm.saveState()
+			if saveErr := sm.saveState(); saveErr == nil {
+				lifecycleEvent = pendingSessionStatusChangeEvent(id, s, prevStatus)
+			}
 		}
 		sm.mu.Unlock()
+
+		sm.publishPendingStatusChangeEvent(lifecycleEvent)
 	} else if !hasPTY {
 		sm.mu.Lock()
 
@@ -526,8 +551,15 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 
 			killed, killErr := sm.killVerifiedProcess(pid, startTime)
 
+			var (
+				lifecycleEvent pendingStatusChangeEvent
+				restartErr     error
+			)
+
 			sm.mu.Lock()
 			if s, ok := sm.state.Sessions[id]; ok && s.Status == StatusRunning {
+				prevStatus := s.Status
+
 				switch {
 				case killed:
 					s.Status = StatusStopped
@@ -553,13 +585,20 @@ func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context
 					applyLifecycleSummaryLocked(s,
 						fmt.Sprintf("Cannot restart: orphaned process (PID %d) — %v", pid, killErr))
 
-					_ = sm.saveState()
-					sm.mu.Unlock()
+					restartErr = fmt.Errorf("cannot restart: orphaned process (PID %d) could not be killed: %w", pid, killErr)
+				}
 
-					return SessionState{}, fmt.Errorf("cannot restart: orphaned process (PID %d) could not be killed: %w", pid, killErr)
+				if saveErr := sm.saveState(); saveErr == nil {
+					lifecycleEvent = pendingSessionStatusChangeEvent(id, s, prevStatus)
 				}
 			}
 			sm.mu.Unlock()
+
+			sm.publishPendingStatusChangeEvent(lifecycleEvent)
+
+			if restartErr != nil {
+				return SessionState{}, restartErr
+			}
 		} else {
 			sm.mu.Unlock()
 		}

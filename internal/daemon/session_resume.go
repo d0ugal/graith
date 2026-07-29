@@ -144,12 +144,16 @@ func (sm *SessionManager) ConvertToInteractive(id string, rows, cols uint16) (Se
 	sessState.StatusChangedAt = time.Now()
 	sm.setStopReasonLocked(id, sessState, StopReasonConvert)
 
+	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
+
 	if err := sm.saveState(); err != nil {
 		sm.mu.Unlock()
 		return SessionState{}, fmt.Errorf("persist driver flip: %w", err)
 	}
 
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	// Relaunch interactively via the existing resume path (spawns a real PTY with
 	// resume_args → `claude --resume <agent_session_id>`).
@@ -1068,6 +1072,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	applyLifecycleSummaryLocked(sessState, lifecycleSummary)
 
+	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
 	if err := sm.saveState(); err != nil {
 		sessState.Status = prevStatus
 		sessState.StatusChangedAt = prevStatusChangedAt
@@ -1127,6 +1132,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	scenarioIDForRepublish := sessState.ScenarioID
 	result := cloneSessionState(sessState)
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	// Record the resume spawn with the scrollback wiring so the restart pipeline
 	// is traceable end to end (issue #1087): which PID now owns the session and

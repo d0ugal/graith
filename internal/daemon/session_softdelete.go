@@ -149,6 +149,7 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionSta
 	sessState.StatusChangedAt = now
 	applyLifecycleSummaryLocked(sessState, softDeleteSummary(expiresAt))
 
+	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
 	if err := sm.saveState(); err != nil {
 		// Roll back: the session stays live and fully consistent (nothing has
 		// been removed from the runtime maps or killed yet).
@@ -175,6 +176,8 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionSta
 	}
 
 	sm.mu.Unlock()
+
+	sm.publishPendingStatusChangeEvent(lifecycleEvent)
 
 	// Stop the agent outside the lock using Delete's kill path (detach → kill →
 	// grace → force-kill → Close), NOT Stop's single SIGTERM. The marker is
@@ -227,6 +230,13 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionSta
 	if hasClient {
 		ac.kick()
 	}
+
+	deletedAt := time.Time{}
+	if snapshot.DeletedAt != nil {
+		deletedAt = *snapshot.DeletedAt
+	}
+
+	sm.publishSessionDeletedEvent(id, snapshot.Name, deletedAt)
 
 	return snapshot, nil
 }

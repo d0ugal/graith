@@ -1471,7 +1471,7 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 		stream := "inbox:" + id
 		if sm.messages != nil {
-			_, err = sm.messages.Publish(PublishOpts{Stream: stream, SenderID: msg.ParentSessionID, SenderName: "orchestrator", Body: string(manifestJSON)})
+			_, err = sm.publishMessage(PublishOpts{Stream: stream, SenderID: msg.ParentSessionID, SenderName: "orchestrator", Body: string(manifestJSON)})
 			if err != nil {
 				sm.log.Error("failed to publish scenario manifest", "session", id, "err", err)
 			}
@@ -2975,7 +2975,7 @@ func (sm *SessionManager) republishManifests(scenarioID string) error {
 
 		stream := "inbox:" + id
 		if sm.messages != nil {
-			_, err = sm.messages.Publish(PublishOpts{Stream: stream, SenderID: orchestratorID, SenderName: "orchestrator", Body: string(manifestJSON)})
+			_, err = sm.publishMessage(PublishOpts{Stream: stream, SenderID: orchestratorID, SenderName: "orchestrator", Body: string(manifestJSON)})
 			if err != nil {
 				sm.log.Error("failed to republish manifest", "session", id, "err", err)
 				publishErr = errors.Join(publishErr, fmt.Errorf("publish manifest for session %q: %w", id, err))
