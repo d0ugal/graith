@@ -182,6 +182,15 @@ generated commit whose parent is the labeled PR head. Forks, mixed-code PRs,
 missing tokens, and artifact build failures fail or skip with an actionable
 message instead of publishing bytes.
 
+The generated commit is authored by
+`github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>`.
+Renovate is configured to ignore only that generated author when deciding
+whether its branch was manually edited, so Renovate can still rebase or retry
+native dependency PRs after metadata generation. If Renovate refreshes the
+branch after a generated commit, repeat the exact-head review and reapply
+`native-artifact-approved` so the workflow regenerates the commit on the new
+head.
+
 New Apple artifacts use the tag
 `libghostty-vt-<short Ghostty commit>-go-<short go-libghostty commit>-zig-<Zig version>`;
 Linux artifacts append `-linux`. Release notes bind the full Ghostty commit,
