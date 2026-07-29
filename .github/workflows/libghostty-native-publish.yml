@@ -35,6 +35,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GH_TOKEN: ${{ github.token }}
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty
+          GRAITH_LIBGHOSTTY_ZIG_JOBS: "2"
           GRAITH_LIBGHOSTTY_SOURCE_BUILD: '1'
         run: |
           set -euo pipefail
@@ -59,7 +60,13 @@ jobs:
           # The script runs host Go helpers while cross-building the library;
           # do not let the target artifact GOARCH select an unexecutable
           # helper binary on the amd64 runner.
-          env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
+          evidence="$RUNNER_TEMP/source-build-$GOARCH.time"
+          if ! /usr/bin/time -v -o "$evidence" \
+            env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"; then
+            cat "$evidence" || true
+            exit 1
+          fi
+          cat "$evidence"
           mkdir -p "$RUNNER_TEMP/bundle/pkgconfig"
           mkdir -p "$RUNNER_TEMP/bundle/include"
           cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"

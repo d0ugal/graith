@@ -2080,12 +2080,26 @@ test_source_archive_policy() {
     fi
 }
 
+libghostty_zig_job_arg() {
+    if [[ -n "${GRAITH_LIBGHOSTTY_ZIG_JOBS:-}" ]]; then
+        [[ "$GRAITH_LIBGHOSTTY_ZIG_JOBS" =~ ^[1-9][0-9]*$ ]] || {
+            die "GRAITH_LIBGHOSTTY_ZIG_JOBS must be a positive integer"
+            return 1
+        }
+        printf '%s\n' "-j$GRAITH_LIBGHOSTTY_ZIG_JOBS"
+    fi
+}
+
 source_build() {
     local target="${1:-}"
     local output="${2:-}"
     if [[ -z "$target" || -z "$output" ]]; then
         echo "usage: $0 source-build <zig-target> <output-library>" >&2
         return 2
+    fi
+    local zig_job_arg
+    if ! zig_job_arg="$(libghostty_zig_job_arg)"; then
+        return 1
     fi
     if ! require_exact_zig; then
         return 1
@@ -2111,9 +2125,15 @@ source_build() {
 
     (
         cd "$source"
+        local -a zig_args=(
+            --global-cache-dir "$NATIVE_WORK/zig-global"
+            --cache-dir "$NATIVE_WORK/zig-local"
+        )
+        if [[ -n "$zig_job_arg" ]]; then
+            zig_args+=("$zig_job_arg")
+        fi
         zig build \
-            --global-cache-dir "$NATIVE_WORK/zig-global" \
-            --cache-dir "$NATIVE_WORK/zig-local" \
+            "${zig_args[@]}" \
             -Demit-lib-vt=true \
             -Demit-xcframework=false \
             -Doptimize=ReleaseFast \
@@ -2145,14 +2165,24 @@ source_test() {
         echo "usage: $0 source-test <zig-target>" >&2
         return 2
     fi
+    local zig_job_arg
+    if ! zig_job_arg="$(libghostty_zig_job_arg)"; then
+        return 1
+    fi
     verify_metadata "$source"
     # Ghostty enables the slow runtime safety asserted by test-lib-vt only in
     # Debug builds; release artifacts remain ReleaseFast in source_build above.
     (
         cd "$source"
+        local -a zig_args=(
+            --global-cache-dir "$NATIVE_WORK/zig-global"
+            --cache-dir "$NATIVE_WORK/zig-local"
+        )
+        if [[ -n "$zig_job_arg" ]]; then
+            zig_args+=("$zig_job_arg")
+        fi
         zig build test-lib-vt \
-            --global-cache-dir "$NATIVE_WORK/zig-global" \
-            --cache-dir "$NATIVE_WORK/zig-local" \
+            "${zig_args[@]}" \
             -Demit-lib-vt=true \
             -Demit-xcframework=false \
             -Doptimize=Debug \
