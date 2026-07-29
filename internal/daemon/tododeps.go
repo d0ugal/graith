@@ -347,6 +347,31 @@ func (s *TodoStore) ScenarioSeedItemIDs(scope string) (map[string]string, error)
 	return out, nil
 }
 
+// ScenarioSeedItemID returns the scenario-seeded top-level todo ID for the
+// original member assignee.
+func (s *TodoStore) ScenarioSeedItemID(scope, originalAssignee string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var id string
+
+	err := s.db.QueryRow(
+		`SELECT todo.id
+		 FROM todo_scenario_seeds seed
+		 JOIN todos todo ON todo.id = seed.todo_id
+		 WHERE seed.scope = ? AND seed.original_assignee = ? AND todo.scope = ?`,
+		scope, originalAssignee, scope).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrTodoNotFound
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("query scenario seed todo: %w", err)
+	}
+
+	return id, nil
+}
+
 // ScenarioCurrentSeedItemIDs returns the scenario-seeded top-level todo ID
 // for each member's current assignee. Unlike ScenarioSeedItemIDs, this uses
 // mutable assignment because it is used to validate contracts whose progress

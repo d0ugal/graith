@@ -1149,7 +1149,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	}
 
 	if scenarioIDForRepublish != "" {
-		sm.republishManifests(scenarioIDForRepublish)
+		if err := sm.republishManifests(scenarioIDForRepublish); err != nil {
+			sm.log.Warn("failed to republish manifests after session resume", "scenario", scenarioIDForRepublish, "err", err)
+		}
 	}
 
 	return result, nil

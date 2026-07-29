@@ -698,6 +698,8 @@ func run(
 		sm.resumeTombstones()
 		sm.reconcileSoftDeletedOrphans()
 		sm.cleanupOrphanedProcesses()
+		sm.recoverInterruptedScenarioAdds()
+		sm.recoverInterruptedScenarioManifestRepublishes()
 
 		if err := removeUpgradeJournal(adoptFrom, manifest); err != nil {
 			// Adoption is already committed and its live PTYs have left the

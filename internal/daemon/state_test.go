@@ -1396,8 +1396,8 @@ func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 29 {
-		t.Fatalf("CurrentStateVersion = %d, want 29", CurrentStateVersion)
+	if CurrentStateVersion != 30 {
+		t.Fatalf("CurrentStateVersion = %d, want 30", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

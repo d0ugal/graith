@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 29
+const CurrentStateVersion = 30
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -390,14 +390,19 @@ func cloneSessionState(s *SessionState) SessionState {
 }
 
 type ScenarioState struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	OrchestratorID string            `json:"orchestrator_id"`
-	Goal           string            `json:"goal"`
-	SessionIDs     []string          `json:"session_ids"`
-	Sessions       []ScenarioSession `json:"sessions"`
-	CreatedAt      time.Time         `json:"created_at"`
-	SourceFileHash string            `json:"source_file_hash,omitempty"`
+	ID             string                        `json:"id"`
+	Name           string                        `json:"name"`
+	OrchestratorID string                        `json:"orchestrator_id"`
+	Goal           string                        `json:"goal"`
+	SessionIDs     []string                      `json:"session_ids"`
+	Sessions       []ScenarioSession             `json:"sessions"`
+	PendingAdds    []ScenarioAddReservationState `json:"pending_adds,omitempty"`
+	// ManifestPublishPending is set in the same write that commits a dynamic
+	// scenario member add. It is cleared only after the scenario manifest store
+	// and member inboxes have been republished.
+	ManifestPublishPending bool      `json:"manifest_publish_pending,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	SourceFileHash         string    `json:"source_file_hash,omitempty"`
 	// Triggers are the scenario-embedded [[trigger]] blocks (issue #1027). They
 	// are set only once the two-phase start succeeds, so a rolled-back scenario
 	// never activates them. SessionManager.allTriggers enumerates namespaced
@@ -409,6 +414,17 @@ type ScenarioState struct {
 	Completion ScenarioCompletionState        `json:"completion,omitempty"`
 	Policy     *ScenarioPolicyState           `json:"policy,omitempty"`
 	Render     *ScenarioRenderState           `json:"render,omitempty"`
+}
+
+// ScenarioAddReservationState is the durable reserve record for a dynamic
+// scenario member addition. It is written before the member session or todo
+// contract is created, and is cleared in the same state write that commits the
+// member to the scenario roster.
+type ScenarioAddReservationState struct {
+	SessionID    string    `json:"session_id"`
+	MemberName   string    `json:"member_name"`
+	TodoExpected bool      `json:"todo_expected,omitempty"`
+	ReservedAt   time.Time `json:"reserved_at"`
 }
 
 // ScenarioRenderState persists the one immutable context used to render an
@@ -872,6 +888,7 @@ var migrations = map[int]func(*State) error{
 	26: migrateV26ToV27,
 	27: migrateV27ToV28,
 	28: migrateV28ToV29,
+	29: migrateV29ToV30,
 }
 
 func generateToken() (string, error) {
@@ -1183,6 +1200,10 @@ func migrateV27ToV28(state *State) error {
 // older binaries would treat those sessions as ordinary mirrors with no backing
 // source and skip detached-worktree cleanup on delete.
 func migrateV28ToV29(_ *State) error { return nil }
+
+// migrateV29ToV30 is additive. Existing scenarios have no interrupted
+// dynamic-add reservations to recover.
+func migrateV29ToV30(_ *State) error { return nil }
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state
