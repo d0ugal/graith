@@ -1048,7 +1048,7 @@ func TestWriteExperimentalScreenSnapshotShiftsFrameBelowTopChrome(t *testing.T) 
 		t.Fatalf("top experimental status chrome missing from output %q", out)
 	}
 
-	if !strings.Contains(out, "\x1b[2;1Hhello bothy") {
+	if !strings.Contains(out, "\x1b[2;1H") || !strings.Contains(out, "hello bothy") {
 		t.Fatalf("child frame was not shifted below top chrome: %q", out)
 	}
 

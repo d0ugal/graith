@@ -51,6 +51,12 @@ and hyperlink features, and terminal query responses are incomplete. The Graith
 status bar is composed inside the owned frame, host scrollback is not the
 primary history surface, and refreshes fall back to full snapshots when the
 client and daemon cannot compute dirty-row updates from a shared snapshot base.
+When the status bar or read-only indicator is visible and the terminal has at
+least two rows, the experimental client reserves one top or bottom row according
+to `[status_bar].position` and resizes the child PTY to the remaining viewport.
+The reserved row is Graith chrome, not child terminal content; cursor and mouse
+cell coordinates that reach the child are translated accordingly. One-row
+terminals suppress chrome so the child keeps the line.
 
 When an existing session creates a child session, omitted labels inherit from
 the parent by default. Supplying `--label` sets the child's complete label set

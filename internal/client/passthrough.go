@@ -702,6 +702,11 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 				n = len(input)
 			}
 
+			if opts.TerminalOwned && opts.experimentalChrome != nil {
+				input = opts.experimentalChrome.translateMouseInput(input)
+				n = len(input)
+			}
+
 			// Translate left-button drag gestures into arrow-key presses before
 			// the prefix scan. Emitted arrow sequences contain no prefix byte,
 			// and mouse-wheel/other events pass through untouched.
