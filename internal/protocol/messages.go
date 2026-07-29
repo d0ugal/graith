@@ -153,6 +153,21 @@ type AttachMsg struct {
 type ExperimentalAttachSeedMsg struct {
 	Session  SessionInfo               `json:"session"`
 	Snapshot ScreenSnapshotResponseMsg `json:"snapshot"`
+	History  TerminalHistoryMsg        `json:"history,omitempty"`
+}
+
+type TerminalHistoryMsg struct {
+	Lines        []TerminalHistoryLineMsg `json:"lines,omitempty"`
+	MaxLines     int                      `json:"max_lines,omitempty"`
+	Truncated    bool                     `json:"truncated,omitempty"`
+	ActiveScreen string                   `json:"active_screen,omitempty"`
+}
+
+type TerminalHistoryLineMsg struct {
+	Frame            string `json:"frame"`
+	Width            int    `json:"width,omitempty"`
+	Wrapped          bool   `json:"wrapped,omitempty"`
+	WrapContinuation bool   `json:"wrap_continuation,omitempty"`
 }
 
 const (

@@ -1027,17 +1027,18 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		})
 	} else {
 		ptySess, err = newPTYSession(grpty.SessionOpts{
-			ID:         id,
-			Command:    command,
-			Args:       finalArgs,
-			Dir:        cwd,
-			Env:        env,
-			Rows:       rows,
-			Cols:       cols,
-			LogPath:    logPath,
-			MaxLogSize: lc.MaxLogBytesOrDefault(),
-			InputDelay: lc.InputDelayDuration(),
-			Logger:     sm.log,
+			ID:                  id,
+			Command:             command,
+			Args:                finalArgs,
+			Dir:                 cwd,
+			Env:                 env,
+			Rows:                rows,
+			Cols:                cols,
+			LogPath:             logPath,
+			MaxLogSize:          lc.MaxLogBytesOrDefault(),
+			InputDelay:          lc.InputDelayDuration(),
+			Logger:              sm.log,
+			TerminalHistoryRows: cfgSnapshot.Limits.LogLinesOrDefault(),
 		})
 	}
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // captureStdout (shared with store_test.go) redirects os.Stdout for the
@@ -88,5 +89,36 @@ func TestDispatchUnknownResultContinues(t *testing.T) {
 	done, err := l.dispatch(client.PassthroughResult(9999))
 	if done || err != nil {
 		t.Errorf("dispatch(unknown) = (%v, %v), want (false, nil)", done, err)
+	}
+}
+
+func TestTerminalHistoryClearedAfterLiveOutputAndRestoredByFreshSeed(t *testing.T) {
+	l := &attachLoop{}
+	seed := &protocol.ExperimentalAttachSeedMsg{
+		History: protocol.TerminalHistoryMsg{
+			MaxLines:     17,
+			ActiveScreen: "primary",
+			Lines: []protocol.TerminalHistoryLineMsg{
+				{Frame: "braw\x1b[0m", Width: 4},
+			},
+		},
+	}
+
+	l.setExperimentalSeed(seed)
+
+	if !l.hasTerminalHistory {
+		t.Fatal("fresh experimental seed did not install terminal history")
+	}
+
+	l.clearTerminalHistory()
+
+	if l.hasTerminalHistory || len(l.terminalHistory.Lines) != 0 {
+		t.Fatalf("terminal history after live output = %+v, present=%v; want cleared", l.terminalHistory, l.hasTerminalHistory)
+	}
+
+	l.setExperimentalSeed(seed)
+
+	if !l.hasTerminalHistory || len(l.terminalHistory.Lines) != 1 {
+		t.Fatalf("terminal history after fresh seed = %+v, present=%v; want restored", l.terminalHistory, l.hasTerminalHistory)
 	}
 }

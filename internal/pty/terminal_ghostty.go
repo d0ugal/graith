@@ -32,10 +32,11 @@ type ghosttyTerminal struct {
 	rowIterator *libghostty.RenderStateRowIterator
 	rowCells    *libghostty.RenderStateRowCells
 
-	cols  int
-	rows  int
-	cells []Cell
-	dirty bool
+	cols        int
+	rows        int
+	historyRows int
+	cells       []Cell
+	dirty       bool
 
 	// Ghostty's public C options cannot set default_modes at the exact pin.
 	// Track ESC across Write boundaries so RIS can restore Graith's default
@@ -52,8 +53,20 @@ type ghosttyTerminal struct {
 var _ Terminal = (*ghosttyTerminal)(nil)
 var _ terminalSnapshotter = (*ghosttyTerminal)(nil)
 var _ terminalInputModer = (*ghosttyTerminal)(nil)
+var _ terminalHistorySnapshotter = (*ghosttyTerminal)(nil)
 
 func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
+	// The visible screen model keeps native scrollback disabled. Enabling it
+	// changes resize reflow semantics; the process helper uses a separate
+	// bounded mirror terminal when attach history is requested.
+	return newGhosttyTerminalWithScrollback(cols, rows, 0)
+}
+
+func newGhosttyTerminalWithHistory(cols, rows, historyRows int) (gt *ghosttyTerminal, err error) {
+	return newGhosttyTerminalWithScrollback(cols, rows, resolveTerminalHistoryRows(historyRows, cols))
+}
+
+func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyTerminal, err error) {
 	defer func() {
 		if recover() != nil {
 			err = errGhosttyBindingPanic
@@ -78,11 +91,7 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 
 	terminal, err := libghostty.NewTerminal(
 		libghostty.WithSize(cols16, rows16),
-		// Graith's bounded raw Scrollback is authoritative and is replayed when
-		// reconstructing a helper. The native backend only needs the visible
-		// viewport; retaining historical native lines multiplies memory by width
-		// and helper count without exposing any additional product behavior.
-		libghostty.WithMaxScrollback(0),
+		libghostty.WithMaxScrollback(uint(historyRows)),
 		libghostty.WithWritePty(func(_ *libghostty.Terminal, data []byte) {
 			gt.pendingPtyReplies = append(gt.pendingPtyReplies, data...)
 		}),
@@ -133,6 +142,7 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 
 	gt.terminal = terminal
 	gt.modeSet = terminal.ModeSet
+	gt.historyRows = historyRows
 
 	if err = gt.modeSet(libghostty.ModeGraphemeCluster, true); err != nil {
 		return nil, fmt.Errorf("enable go-libghostty grapheme clustering: %w", err)
@@ -460,6 +470,89 @@ func (gt *ghosttyTerminal) InputModes() (TerminalInputModes, error) {
 	return modes, nil
 }
 
+func (gt *ghosttyTerminal) SnapshotWithHistory() (TerminalSnapshot, error) {
+	snapshot, err := gt.Snapshot()
+	if err != nil {
+		return TerminalSnapshot{}, err
+	}
+
+	history, err := gt.HistorySnapshot(gt.historyRows)
+	if err != nil {
+		return TerminalSnapshot{}, err
+	}
+
+	snapshot.History = history
+
+	return snapshot, nil
+}
+
+func (gt *ghosttyTerminal) HistorySnapshot(limit int) (history TerminalHistory, err error) {
+	defer func() {
+		if recover() != nil {
+			history = TerminalHistory{}
+			err = errGhosttyBindingPanic
+		}
+	}()
+
+	if gt.terminal == nil {
+		return TerminalHistory{}, errGhosttyClosed
+	}
+
+	screen, err := gt.terminal.ActiveScreen()
+	if err != nil {
+		return TerminalHistory{}, fmt.Errorf("read go-libghostty active screen: %w", err)
+	}
+
+	activeScreen := TerminalScreenPrimary
+	if screen == libghostty.ScreenAlternate {
+		activeScreen = TerminalScreenAlternate
+	}
+
+	history = TerminalHistory{
+		MaxLines:     gt.historyRows,
+		ActiveScreen: activeScreen,
+	}
+
+	if activeScreen != TerminalScreenPrimary {
+		return history, nil
+	}
+
+	rows, err := gt.terminal.ScrollbackRows()
+	if err != nil {
+		return TerminalHistory{}, fmt.Errorf("read go-libghostty scrollback rows: %w", err)
+	}
+
+	if rows == 0 {
+		return history, nil
+	}
+
+	if limit <= 0 || limit > gt.historyRows {
+		limit = gt.historyRows
+	}
+
+	start := 0
+	if int(rows) > limit {
+		start = int(rows) - limit
+		history.Truncated = true
+	}
+
+	if gt.historyRows > 0 && int(rows) >= gt.historyRows {
+		history.Truncated = true
+	}
+
+	history.Lines = make([]TerminalHistoryLine, 0, int(rows)-start)
+	for y := start; y < int(rows); y++ {
+		line, err := gt.historyLine(y)
+		if err != nil {
+			return TerminalHistory{}, err
+		}
+
+		history.Lines = append(history.Lines, line)
+	}
+
+	return history, nil
+}
+
 func (gt *ghosttyTerminal) Close() (err error) {
 	defer func() {
 		if recover() != nil {
@@ -557,6 +650,82 @@ func (gt *ghosttyTerminal) convertCell() (Cell, error) {
 		return Cell{}, err
 	}
 
+	return convertGhosttyCell(raw, style, graphemes)
+}
+
+func (gt *ghosttyTerminal) historyLine(y int) (TerminalHistoryLine, error) {
+	if y < 0 || y > int(^uint32(0)) {
+		return TerminalHistoryLine{}, errGhosttyBindingPanic
+	}
+
+	cells := make([]Cell, gt.cols)
+
+	rowRef, err := gt.terminal.GridRef(libghostty.Point{
+		Tag: libghostty.PointTagHistory,
+		X:   0,
+		Y:   uint32(y),
+	})
+	if err != nil {
+		return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history row %d: %w", y, err)
+	}
+
+	row, err := rowRef.Row()
+	if err != nil {
+		return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history row metadata %d: %w", y, err)
+	}
+
+	wrapped, err := row.Wrap()
+	if err != nil {
+		return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history row wrap %d: %w", y, err)
+	}
+
+	wrapContinuation, err := row.WrapContinuation()
+	if err != nil {
+		return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history row wrap continuation %d: %w", y, err)
+	}
+
+	for x := 0; x < gt.cols; x++ {
+		ref, err := gt.terminal.GridRef(libghostty.Point{
+			Tag: libghostty.PointTagHistory,
+			X:   uint16(x),
+			Y:   uint32(y),
+		})
+		if err != nil {
+			return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history cell %d,%d: %w", x, y, err)
+		}
+
+		raw, err := ref.Cell()
+		if err != nil {
+			return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history raw cell %d,%d: %w", x, y, err)
+		}
+
+		style, err := ref.Style()
+		if err != nil {
+			return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history style %d,%d: %w", x, y, err)
+		}
+
+		graphemes, err := ref.Graphemes()
+		if err != nil {
+			return TerminalHistoryLine{}, fmt.Errorf("read go-libghostty history graphemes %d,%d: %w", x, y, err)
+		}
+
+		cell, err := convertGhosttyCell(raw, style, graphemes)
+		if err != nil {
+			return TerminalHistoryLine{}, fmt.Errorf("convert go-libghostty history cell %d,%d: %w", x, y, err)
+		}
+
+		cells[x] = cell
+	}
+
+	return TerminalHistoryLine{
+		Frame:            renderHistoryLineFrame(cells, !wrapped),
+		Width:            gt.cols,
+		Wrapped:          wrapped,
+		WrapContinuation: wrapContinuation,
+	}, nil
+}
+
+func convertGhosttyCell(raw *libghostty.Cell, style *libghostty.Style, graphemes []uint32) (Cell, error) {
 	content := ghosttyGraphemes(graphemes)
 
 	wide, err := raw.Wide()

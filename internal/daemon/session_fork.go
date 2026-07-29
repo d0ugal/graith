@@ -655,19 +655,21 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	startedAt := time.Now()
 
 	lc := sm.Config().Lifecycle
+	historyRows := sm.Config().Limits.LogLinesOrDefault()
 
 	ptySess, err := newPTYSession(grpty.SessionOpts{
-		ID:         id,
-		Command:    command,
-		Args:       finalArgs,
-		Dir:        worktreePath,
-		Env:        env,
-		Rows:       rows,
-		Cols:       cols,
-		LogPath:    logPath,
-		MaxLogSize: lc.MaxLogBytesOrDefault(),
-		InputDelay: lc.InputDelayDuration(),
-		Logger:     sm.log,
+		ID:                  id,
+		Command:             command,
+		Args:                finalArgs,
+		Dir:                 worktreePath,
+		Env:                 env,
+		Rows:                rows,
+		Cols:                cols,
+		LogPath:             logPath,
+		MaxLogSize:          lc.MaxLogBytesOrDefault(),
+		InputDelay:          lc.InputDelayDuration(),
+		Logger:              sm.log,
+		TerminalHistoryRows: historyRows,
 	})
 	if err != nil {
 		slot.release()

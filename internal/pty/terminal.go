@@ -78,6 +78,7 @@ type TerminalSnapshot struct {
 	Cols          int
 	Rows          int
 	InputModes    TerminalInputModes
+	History       TerminalHistory
 }
 
 const (
@@ -149,6 +150,35 @@ func discardTerminalPtyReplies(term Terminal) {
 	_ = drainTerminalPtyReplies(term)
 }
 
+// TerminalHistory is a bounded, formatted snapshot of rows retained by the
+// terminal backend before the visible viewport. Frames are ANSI-styled terminal
+// row replays, not raw PTY bytes, so attach clients do not need to reconstruct
+// historical terminal state from lossy logs.
+type TerminalHistory struct {
+	Lines        []TerminalHistoryLine
+	MaxLines     int
+	Truncated    bool
+	ActiveScreen string
+}
+
+type TerminalHistoryLine struct {
+	Frame            string
+	Width            int
+	Wrapped          bool
+	WrapContinuation bool
+}
+
+const (
+	TerminalScreenPrimary   = "primary"
+	TerminalScreenAlternate = "alternate"
+)
+
+func terminalFactoryWithHistory(rows int) func(cols, rows int) (Terminal, error) {
+	return func(cols, termRows int) (Terminal, error) {
+		return newTerminalWithHistory(cols, termRows, rows)
+	}
+}
+
 // terminalWriteChunkBytes keeps replay writes below the strictest built-in
 // backend request limit. Hydration can be configured above that limit, so it
 // must be streamed without weakening the per-request allocation bound.
@@ -185,6 +215,12 @@ type terminalSnapshotter interface {
 
 type terminalInputModer interface {
 	InputModes() (TerminalInputModes, error)
+}
+
+// terminalHistorySnapshotter is implemented by backends that can include
+// bounded terminal-aware history with the coherent viewport snapshot.
+type terminalHistorySnapshotter interface {
+	SnapshotWithHistory() (TerminalSnapshot, error)
 }
 
 // HelperProcessIdentity identifies a native terminal helper across an exec.
@@ -282,6 +318,21 @@ func (m TerminalInputModes) normalized() TerminalInputModes {
 	}
 
 	return m
+}
+
+func snapshotTerminalWithHistory(term Terminal) (TerminalSnapshot, error) {
+	if snapshotter, ok := term.(terminalHistorySnapshotter); ok {
+		snapshot, err := snapshotter.SnapshotWithHistory()
+		if err != nil {
+			return TerminalSnapshot{}, err
+		}
+
+		snapshot.InputModes = snapshot.InputModes.normalized()
+
+		return snapshot, nil
+	}
+
+	return snapshotTerminal(term)
 }
 
 func clampSize(cols, rows int) (int, int) {

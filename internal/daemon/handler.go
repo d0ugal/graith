@@ -589,7 +589,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					seed := protocol.ExperimentalAttachSeedMsg{
 						Session:  info,
 						Snapshot: screenSnapshotResponse(a.SessionID, snapshot),
+						History:  terminalHistoryResponse(snapshot.History),
 					}
+					trimExperimentalAttachSeedHistory(&seed)
 
 					if seed.Snapshot.Frame == "" {
 						output.DetachWriter(attachedDataWriter)
@@ -1325,6 +1327,55 @@ func screenSnapshotRows(rows []grpty.ScreenRow) []protocol.ScreenSnapshotRowMsg 
 	}
 
 	return out
+}
+
+func terminalHistoryResponse(history grpty.TerminalHistory) protocol.TerminalHistoryMsg {
+	resp := protocol.TerminalHistoryMsg{
+		MaxLines:     history.MaxLines,
+		Truncated:    history.Truncated,
+		ActiveScreen: history.ActiveScreen,
+	}
+	if len(history.Lines) == 0 {
+		return resp
+	}
+
+	resp.Lines = make([]protocol.TerminalHistoryLineMsg, len(history.Lines))
+	for i, line := range history.Lines {
+		resp.Lines[i] = protocol.TerminalHistoryLineMsg{
+			Frame:            line.Frame,
+			Width:            line.Width,
+			Wrapped:          line.Wrapped,
+			WrapContinuation: line.WrapContinuation,
+		}
+	}
+
+	return resp
+}
+
+func trimExperimentalAttachSeedHistory(seed *protocol.ExperimentalAttachSeedMsg) {
+	if seed == nil {
+		return
+	}
+
+	for terminalHistoryMessagePresent(seed.History) {
+		data, err := protocol.EncodeControl("experimental_attached", *seed)
+		if err != nil || len(data) <= protocol.MaxPayload {
+			return
+		}
+
+		if len(seed.History.Lines) == 0 {
+			seed.History = protocol.TerminalHistoryMsg{}
+
+			return
+		}
+
+		seed.History.Lines = seed.History.Lines[1:]
+		seed.History.Truncated = true
+	}
+}
+
+func terminalHistoryMessagePresent(history protocol.TerminalHistoryMsg) bool {
+	return len(history.Lines) > 0 || history.MaxLines > 0 || history.Truncated || history.ActiveScreen != ""
 }
 
 func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.SessionInfo {

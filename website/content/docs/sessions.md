@@ -109,9 +109,10 @@ hints because snapshots carry the screen state.
 
 Sessions created with `gr new --experimental-attach` use the experimental
 terminal-owned attach client on future attaches. The daemon sends a coherent
-current-screen seed before live output resumes, and the client owns the outer
-alternate screen for that attach. Sessions created without the flag keep the
-default raw passthrough behavior. When an attach request asks for the
+current-screen seed before live output resumes, including bounded
+terminal-aware primary-screen history retained by the daemon. The client owns
+the outer alternate screen for that attach. Sessions created without the flag
+keep the default raw passthrough behavior. When an attach request asks for the
 experimental handshake but the daemon answers with ordinary attach output (for
 example an older compatible daemon that ignores the experimental flag, or a
 current daemon falling back because the screen seed is empty), the client
@@ -132,10 +133,11 @@ application cursor-key, and keypad modes from the same daemon-side terminal
 model. Wheel events go to child mouse tracking when requested, use
 alternate-scroll cursor keys for alternate-screen children without mouse
 tracking, and otherwise wait for the local terminal-aware history surface.
-Pixel-coordinate mouse reporting is still incomplete. Host-terminal scrollback
-is not the history surface in this mode. The Graith status bar is composed
-inside the owned frame, with read-only attach still replacing it with the
-persistent read-only indicator.
+Host-terminal scrollback is not the history surface in this mode; `ctrl+b [`
+can inspect the retained formatted attach seed until live output advances the
+screen, then falls back to raw logs. Pixel-coordinate mouse reporting is still
+incomplete. The Graith status bar is composed inside the owned frame, with
+read-only attach still replacing it with the persistent read-only indicator.
 When the status bar or read-only indicator is visible and the terminal has at
 least two rows, Graith reserves one top or bottom row according to
 `[status_bar].position` and resizes the child PTY to the remaining rows. The

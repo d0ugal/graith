@@ -40,9 +40,10 @@ you're offline.
 
 `--experimental-attach` makes future attaches to that session request the
 terminal-owned attach handshake. The daemon seeds the client with a coherent
-current-screen snapshot before live output resumes, and the client owns the outer
-alternate screen instead of injecting chrome into the child PTY stream. This is
-experimental and intentionally opt-in per session.
+current-screen snapshot and bounded terminal-aware primary-screen history before
+live output resumes, and the client owns the outer alternate screen instead of
+injecting chrome into the child PTY stream. This is experimental and
+intentionally opt-in per session.
 
 Graith interprets child terminal mode changes from its daemon-side terminal
 model and mirrors mouse, focus, bracketed-paste, application cursor-key, and
@@ -55,8 +56,11 @@ labels remain visible but are not forwarded as host hyperlinks, and
 notification/image protocols are ignored or stripped. Wheel events go to child
 mouse tracking when requested, use alternate-scroll cursor keys for
 alternate-screen children without mouse tracking, and otherwise wait for the
-local terminal-aware history surface. Refreshes use dirty-row updates when the
-client and daemon share a compatible snapshot base, falling back to full
+local terminal-aware history surface. The Graith status bar is composed inside
+the owned frame, host scrollback is not the primary history surface, and
+`ctrl+b [` uses the retained formatted attach seed until live output advances
+the screen before falling back to raw logs. Refreshes use dirty-row updates when
+the client and daemon share a compatible snapshot base, falling back to full
 snapshots when needed.
 When the status bar or read-only indicator is visible and the terminal has at
 least two rows, the experimental client reserves one top or bottom row according

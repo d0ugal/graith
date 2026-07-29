@@ -204,12 +204,26 @@ func (h *testHarness) addPTYSession(t *testing.T, id, name string) {
 	h.sm.mu.Unlock()
 }
 
+func mustTestScrollback(t *testing.T) *grpty.Scrollback {
+	t.Helper()
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "scrollback.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = sb.Close() })
+
+	return sb
+}
+
 type emptySnapshotAttachDriver struct {
 	mu         sync.Mutex
 	done       chan struct{}
 	scrollback *grpty.Scrollback
 	createdAt  time.Time
 	writers    []io.Writer
+	snapshot   grpty.ScreenCapture
 }
 
 func (d *emptySnapshotAttachDriver) ProcessPID() int { return 0 }
@@ -275,7 +289,7 @@ func (d *emptySnapshotAttachDriver) DetachWriter(w io.Writer) {
 }
 func (d *emptySnapshotAttachDriver) ScreenPreview() string { return "" }
 func (d *emptySnapshotAttachDriver) ScreenSnapshot() grpty.ScreenCapture {
-	return grpty.ScreenCapture{}
+	return d.snapshot
 }
 func (d *emptySnapshotAttachDriver) ScrollbackFile() *grpty.Scrollback {
 	return d.scrollback
@@ -286,7 +300,7 @@ func (d *emptySnapshotAttachDriver) LastOutputAt() time.Time {
 func (d *emptySnapshotAttachDriver) AttachWithScreenSnapshot(w io.Writer) grpty.ScreenCapture {
 	d.Attach(w)
 
-	return grpty.ScreenCapture{}
+	return d.snapshot
 }
 func (d *emptySnapshotAttachDriver) writerCount() int {
 	d.mu.Lock()
@@ -804,6 +818,127 @@ func TestExperimentalAttachSendsSeed(t *testing.T) {
 
 	if seed.Snapshot.InputModes == nil || seed.Snapshot.InputModes.MouseTracking != protocol.TerminalMouseTrackingNone {
 		t.Fatalf("seed input modes = %+v, want default mouse tracking", seed.Snapshot.InputModes)
+	}
+}
+
+func TestExperimentalAttachSeedIncludesTerminalHistory(t *testing.T) {
+	h := newTestHarness(t)
+
+	driver := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		createdAt:  time.Now().UTC(),
+		scrollback: mustTestScrollback(t),
+		snapshot: grpty.ScreenCapture{
+			Frame:         "current bothy",
+			Cols:          12,
+			Rows:          3,
+			CursorVisible: true,
+			History: grpty.TerminalHistory{
+				MaxLines:     17,
+				ActiveScreen: grpty.TerminalScreenPrimary,
+				Lines: []grpty.TerminalHistoryLine{
+					{
+						Frame:            "\x1b[31mbraw history\x1b[0m",
+						Width:            12,
+						Wrapped:          true,
+						WrapContinuation: false,
+					},
+					{
+						Frame:            "canny continuation\x1b[0m",
+						Width:            12,
+						WrapContinuation: true,
+					},
+				},
+			},
+		},
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["hist-exp"] = &SessionState{
+		ID:                 "hist-exp",
+		Name:               "hist-exp",
+		Agent:              "claude",
+		Status:             StatusRunning,
+		ExperimentalAttach: true,
+		CreatedAt:          time.Now().UTC(),
+	}
+	h.sm.sessions["hist-exp"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "hist-exp", ExperimentalAttach: true})
+
+	env := h.expectType(t, "experimental_attached")
+
+	var seed protocol.ExperimentalAttachSeedMsg
+	if err := protocol.DecodePayload(env, &seed); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := seed.History.ActiveScreen; got != grpty.TerminalScreenPrimary {
+		t.Fatalf("history active screen = %q, want primary", got)
+	}
+
+	if seed.History.MaxLines != 17 || len(seed.History.Lines) != 2 {
+		t.Fatalf("history = %+v, want two bounded lines", seed.History)
+	}
+
+	if !strings.Contains(seed.History.Lines[0].Frame, "braw history") || !seed.History.Lines[0].Wrapped {
+		t.Fatalf("first history line = %+v, want wrapped braw history", seed.History.Lines[0])
+	}
+
+	if !seed.History.Lines[1].WrapContinuation {
+		t.Fatalf("second history line = %+v, want wrap continuation", seed.History.Lines[1])
+	}
+
+	for _, line := range seed.History.Lines {
+		if strings.Contains(line.Frame, "READ-ONLY") || strings.Contains(line.Frame, "hist-exp") {
+			t.Fatalf("history line includes Graith chrome: %+v", line)
+		}
+	}
+}
+
+func TestExperimentalAttachSeedHistoryTrimKeepsControlPayloadBounded(t *testing.T) {
+	const lineCount = 8
+
+	seed := protocol.ExperimentalAttachSeedMsg{
+		Session: protocol.SessionInfo{ID: "trim-exp", Name: "trim-exp"},
+		Snapshot: protocol.ScreenSnapshotResponseMsg{
+			SessionID:     "trim-exp",
+			Frame:         "current bothy",
+			Cols:          12,
+			Rows:          3,
+			CursorVisible: true,
+		},
+		History: protocol.TerminalHistoryMsg{
+			MaxLines:     lineCount,
+			ActiveScreen: grpty.TerminalScreenPrimary,
+			Lines:        make([]protocol.TerminalHistoryLineMsg, lineCount),
+		},
+	}
+	for i := range seed.History.Lines {
+		seed.History.Lines[i] = protocol.TerminalHistoryLineMsg{
+			Frame: strings.Repeat("braw", 175*1024),
+			Width: 12,
+		}
+	}
+
+	trimExperimentalAttachSeedHistory(&seed)
+
+	data, err := protocol.EncodeControl("experimental_attached", seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(data) > protocol.MaxPayload {
+		t.Fatalf("encoded seed payload = %d bytes, want at most %d", len(data), protocol.MaxPayload)
+	}
+
+	if got := len(seed.History.Lines); got == 0 || got >= lineCount {
+		t.Fatalf("history lines after trim = %d, want some but fewer than %d", got, lineCount)
+	}
+
+	if !seed.History.Truncated {
+		t.Fatal("trimmed history did not set truncated")
 	}
 }
 

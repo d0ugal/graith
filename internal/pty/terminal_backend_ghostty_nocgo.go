@@ -12,6 +12,10 @@ func newTerminal(_, _ int) (Terminal, error) {
 	return nil, errLibghosttyRequiresCGO
 }
 
+func newTerminalWithHistory(_, _, _ int) (Terminal, error) {
+	return nil, errLibghosttyRequiresCGO
+}
+
 // TerminalBackend reports the explicitly selected backend even when this
 // binary cannot initialize it because cgo was disabled.
 func TerminalBackend() string { return TerminalBackendLibghosttyHelper }

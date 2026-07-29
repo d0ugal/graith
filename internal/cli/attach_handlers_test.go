@@ -288,6 +288,53 @@ func TestOnScrollModeUsesDaemonDefaultOnEveryReconnect(t *testing.T) {
 	}
 }
 
+func TestOnScrollModePrefersTerminalHistory(t *testing.T) {
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+	}}
+	withLoopSeams(t, fake)
+
+	origCfg := cfg
+	origFetch := fetchScrollback
+	origView := runScrollView
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		fetchScrollback = origFetch
+		runScrollView = origView
+	})
+
+	cfg = config.Default()
+	fetchScrollback = func(*config.Config, config.Paths, string, string, int) string {
+		t.Fatal("raw scrollback should not be fetched when terminal history is available")
+
+		return ""
+	}
+
+	var viewed string
+
+	runScrollView = func(_ string, content string, _ client.ScrollKeys) {
+		viewed = content
+	}
+
+	l := newLoop("braw", "bothy")
+	l.hasTerminalHistory = true
+	l.terminalHistory = protocol.TerminalHistoryMsg{
+		Lines: []protocol.TerminalHistoryLineMsg{
+			{Frame: "braw", Wrapped: true},
+			{Frame: "canny"},
+		},
+	}
+
+	if done, err := l.onScrollMode(); done || err != nil {
+		t.Fatalf("onScrollMode() = (%v, %v), want (false, nil)", done, err)
+	}
+
+	if viewed != "brawcanny" {
+		t.Fatalf("scroll view content = %q, want formatted terminal history", viewed)
+	}
+}
+
 // --- handlers reachable via the freshClient / restoreScreen seams ----------
 
 func TestOnLastSession(t *testing.T) {
