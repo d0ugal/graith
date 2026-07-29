@@ -6564,14 +6564,14 @@ func TestCovKillVerifiedProcess(t *testing.T) {
 		}
 	})
 
-	t.Run("live pid with mismatched start time errors", func(t *testing.T) {
-		// startTime=1 will not match the real start time, so the identity
-		// check fails and no signal is sent.
+	t.Run("live pid with mismatched start time is already gone", func(t *testing.T) {
+		// startTime=1 will not match the real start time, so the recorded
+		// process generation is already gone and no signal is sent.
 		pid := spawnContainedSleeper(t)
 
-		_, err := sm.killVerifiedProcess(pid, 1)
-		if err == nil {
-			t.Fatal("expected identity-mismatch error")
+		killed, err := sm.killVerifiedProcess(pid, 1)
+		if killed || err != nil {
+			t.Fatalf("got (killed=%v, err=%v), want (false, nil)", killed, err)
 		}
 
 		if !isProcessAlive(pid) {

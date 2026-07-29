@@ -563,7 +563,37 @@ func canonicalCursorHooksWorktree(worktreePath string) string {
 		return ""
 	}
 
-	return filepath.Clean(config.ResolvePath(worktreePath))
+	path := config.ExpandPath(worktreePath)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+
+	return canonicalPathWithExistingSymlinkPrefix(path)
+}
+
+func canonicalPathWithExistingSymlinkPrefix(path string) string {
+	cleaned := filepath.Clean(path)
+	current := cleaned
+
+	var missing []string
+
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+
+			return filepath.Clean(resolved)
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return cleaned
+		}
+
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 func validSHA256Hex(value string) bool {
@@ -1074,11 +1104,12 @@ func removeCursorClaim(quarantine string) error {
 
 // removeGeneratedCursorHooks releases one session's ownership. It removes only
 // the exact regular file object whose bytes match the marker, and only when no
-// other persisted owner remains. Markerless, unreadable, modified, or
-// concurrently replaced files are preserved.
-func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath string) {
+// other persisted owner remains. Markerless hooks are ignored, modified or
+// concurrently replaced files are preserved, and true cleanup uncertainty is
+// returned so destructive delete/recovery paths can keep their tombstone owner.
+func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath string) error {
 	if worktreePath == "" {
-		return
+		return nil
 	}
 
 	sm.cursorHooksMu.Lock()
@@ -1090,61 +1121,91 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			sm.log.Warn("cursor hooks ownership marker unreadable; leaving hooks in place", "session_id", sessionID, "err", err)
+
+			return fmt.Errorf("read cursor hooks ownership marker: %w", err)
 		}
 
-		return
+		return nil
 	}
 
 	ownership, err := decodeCursorHooksOwnership(recorded, worktreePath)
 	if err != nil {
 		sm.log.Warn("cursor hooks ownership marker invalid; leaving hooks in place", "session_id", sessionID, "err", err)
 
-		return
+		return fmt.Errorf("decode cursor hooks ownership marker: %w", err)
 	}
 
 	if ownership.WorktreePath != canonicalCursorHooksWorktree(worktreePath) {
 		sm.log.Warn("cursor hooks ownership marker names a different worktree; leaving hooks in place", "session_id", sessionID, "marker_worktree", ownership.WorktreePath, "worktree", worktreePath)
 
-		return
+		return fmt.Errorf("cursor hooks ownership marker names worktree %s, not %s", ownership.WorktreePath, canonicalCursorHooksWorktree(worktreePath))
 	}
 
 	owners, scanErr := sm.cursorHooksOwnersFor(worktreePath, sessionID, true)
 	if scanErr != nil {
 		sm.log.Warn("cursor hooks ownership metadata unreadable; leaving hooks in place", "session_id", sessionID, "err", scanErr)
 
-		return
+		return fmt.Errorf("scan cursor hooks ownership metadata: %w", scanErr)
 	}
 
 	if other := otherPersistedCursorHooksOwners(owners, sessionID); len(other) > 0 {
 		if err := removeCursorHooksOwnershipMarker(markerPath); err != nil {
 			sm.log.Warn("failed to release shared cursor hooks ownership", "session_id", sessionID, "remaining_owners", other, "err", err)
+
+			return err
 		}
 
-		return
+		return nil
 	}
 
 	hooksPath := filepath.Join(worktreePath, ".cursor", "hooks.json")
 
 	claimed, err := claimCursorHooks(hooksPath)
 	if err != nil {
-		if !errors.Is(err, errCursorHooksRaced) {
+		if !errors.Is(err, errCursorHooksRaced) && !errors.Is(err, os.ErrNotExist) {
 			sm.log.Warn("failed to claim cursor hooks for cleanup", "session_id", sessionID, "err", err)
+
+			return err
 		}
 
-		return
+		if err := syncCursorHooksDir(filepath.Dir(hooksPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("sync missing cursor hooks cleanup: %w", err)
+		}
+
+		if err := removeCursorHooksOwnershipMarker(markerPath); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
 	runCursorHooksRaceHook(cursorHooksAfterClaim)
 
 	claimedData, err := readClaimedCursorHooks(claimed)
-	if err != nil || !strings.EqualFold(ownership.SHA256, sha256Hex(claimedData)) {
+	if err != nil {
 		if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
 			sm.log.Warn("cursor hooks ownership changed during cleanup; content preserved in quarantine", "session_id", sessionID, "err", restoreErr)
-		} else {
-			sm.log.Info("leaving modified cursor hooks in place", "session_id", sessionID, "path", hooksPath)
+
+			return errors.Join(err, restoreErr)
 		}
 
-		return
+		return err
+	}
+
+	if !strings.EqualFold(ownership.SHA256, sha256Hex(claimedData)) {
+		if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
+			sm.log.Warn("cursor hooks ownership changed during cleanup; content preserved in quarantine", "session_id", sessionID, "err", restoreErr)
+
+			return restoreErr
+		}
+
+		sm.log.Info("leaving modified cursor hooks in place", "session_id", sessionID, "path", hooksPath)
+
+		if err := removeCursorHooksOwnershipMarker(markerPath); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
 	// Make the public-path removal durable before dropping marker authority. If
@@ -1157,12 +1218,26 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 			sm.log.Warn("failed to sync cursor hooks claim; restored hooks", "session_id", sessionID, "err", err)
 		}
 
-		return
+		return err
 	}
 
-	// Remove this marker and every stale structured marker for the same
-	// worktree before deleting the quarantined artifact. A failure restores the
-	// artifact without overwriting anything that appeared at the public path.
+	// Delete the quarantined artifact before removing marker authority. If marker
+	// removal later fails or the daemon crashes in between, the marker can retry
+	// against an already-absent hooks.json after the directory sync below.
+	if err := removeCursorClaim(claimed); err != nil && !errors.Is(err, os.ErrNotExist) {
+		sm.log.Warn("failed to remove cursor hooks", "session_id", sessionID, "err", err)
+
+		return err
+	}
+
+	if err := syncCursorHooksDir(filepath.Dir(hooksPath)); err != nil {
+		sm.log.Warn("failed to sync cursor hooks cleanup", "session_id", sessionID, "err", err)
+
+		return err
+	}
+
+	// Remove this marker and every stale structured marker for the same worktree
+	// only after public-path absence is durable.
 	markers := []string{markerPath}
 	for _, owner := range owners {
 		if !owner.persisted && owner.markerPath != markerPath {
@@ -1172,25 +1247,13 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 
 	for _, path := range markers {
 		if err := removeCursorHooksOwnershipMarker(path); err != nil {
-			if restoreErr := restoreCursorClaim(claimed, hooksPath); restoreErr != nil {
-				sm.log.Warn("failed to remove cursor hooks ownership marker; content preserved in quarantine", "session_id", sessionID, "err", errors.Join(err, restoreErr))
-			} else {
-				sm.log.Warn("failed to remove cursor hooks ownership marker; restored hooks", "session_id", sessionID, "err", err)
-			}
+			sm.log.Warn("failed to remove cursor hooks ownership marker", "session_id", sessionID, "err", err)
 
-			return
+			return err
 		}
 	}
 
-	if err := removeCursorClaim(claimed); err != nil && !errors.Is(err, os.ErrNotExist) {
-		sm.log.Warn("failed to remove cursor hooks", "session_id", sessionID, "err", err)
-
-		return
-	}
-
-	if err := syncCursorHooksDir(filepath.Dir(hooksPath)); err != nil {
-		sm.log.Warn("failed to sync cursor hooks cleanup", "session_id", sessionID, "err", err)
-	}
+	return nil
 }
 
 // injectHooks dispatches lifecycle-hook injection to the agent-specific
@@ -1218,7 +1281,7 @@ func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string,
 // object at the pathname, then removes the graith rule from the worktree.
 func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string) {
 	if agentName == "cursor" {
-		sm.removeGeneratedCursorHooks(sessionID, worktreePath)
+		_ = sm.removeGeneratedCursorHooks(sessionID, worktreePath)
 	}
 
 	dir := sm.hookDir(sessionID)
@@ -1227,6 +1290,29 @@ func (sm *SessionManager) cleanupHooks(sessionID, agentName, worktreePath string
 	}
 
 	cleanupCursorRule(worktreePath)
+}
+
+func (sm *SessionManager) cleanupHooksForDelete(sessionID, agentName, worktreePath string) error {
+	if agentName == "cursor" {
+		if err := sm.removeGeneratedCursorHooks(sessionID, worktreePath); err != nil {
+			return err
+		}
+
+		if _, err := os.Lstat(sm.cursorHooksOwnershipPath(sessionID)); err == nil {
+			return errors.New("cursor hook ownership cleanup remains unresolved")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("verify cursor hook ownership cleanup: %w", err)
+		}
+	}
+
+	dir := sm.hookDir(sessionID)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove hook directory: %w", err)
+	}
+
+	cleanupCursorRule(worktreePath)
+
+	return nil
 }
 
 type removedHookCleanupCandidate struct {
@@ -1275,7 +1361,10 @@ func (sm *SessionManager) completeRemovedHookCleanup(persist bool) error {
 		}
 
 		if candidate.agent == "cursor" {
-			sm.removeGeneratedCursorHooks(candidate.id, candidate.worktreePath)
+			if err := sm.removeGeneratedCursorHooks(candidate.id, candidate.worktreePath); err != nil {
+				errs = append(errs, fmt.Errorf("cleanup session %s generated Cursor hooks: %w", candidate.id, err))
+				continue
+			}
 
 			if _, err := os.Lstat(sm.cursorHooksOwnershipPath(candidate.id)); err == nil {
 				errs = append(errs, fmt.Errorf("session %s cursor hook ownership cleanup remains unresolved", candidate.id))
