@@ -179,24 +179,31 @@ func fetchLatestVersion(repository string, timeout time.Duration) (string, error
 }
 
 func IsNewer(latest, current string) bool {
-	latestParts := parseVersion(latest)
+	cmp, ok := Compare(latest, current)
+	return ok && cmp > 0
+}
 
-	currentParts := parseVersion(current)
-	if latestParts == nil || currentParts == nil {
-		return false
+// Compare compares two Graith release versions. It returns ok=false when either
+// version does not contain a parseable major.minor.patch triple.
+func Compare(a, b string) (cmp int, ok bool) {
+	aParts := parseVersion(a)
+	bParts := parseVersion(b)
+
+	if aParts == nil || bParts == nil {
+		return 0, false
 	}
 
 	for i := 0; i < 3; i++ {
-		if latestParts[i] > currentParts[i] {
-			return true
+		if aParts[i] > bParts[i] {
+			return 1, true
 		}
 
-		if latestParts[i] < currentParts[i] {
-			return false
+		if aParts[i] < bParts[i] {
+			return -1, true
 		}
 	}
 
-	return false
+	return 0, true
 }
 
 func parseVersion(v string) []int {

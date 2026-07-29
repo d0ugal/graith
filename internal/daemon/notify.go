@@ -78,17 +78,34 @@ func isSystemSender(senderID string) bool {
 // which would otherwise mark an author surfaced and never retry — can react.
 // Fire-and-forget callers may ignore the return.
 func (sm *SessionManager) notifyFromDaemon(sessionID, body string) error {
+	return sm.notifyFromDaemonWithOpts(context.Background(), sessionID, body, daemonNotificationOpts{})
+}
+
+type daemonNotificationOpts struct {
+	threadID string
+}
+
+// notifyFromDaemonWithOpts publishes synchronously, then uses ctx for the
+// best-effort inbox poke. Pass a daemon-lived context unless skipping that poke
+// on cancellation is intentional.
+func (sm *SessionManager) notifyFromDaemonWithOpts(ctx context.Context, sessionID, body string, opts daemonNotificationOpts) error {
 	if sm.messages == nil {
 		return fmt.Errorf("no message store to publish notification to session %q", sessionID)
 	}
 
-	if _, err := sm.messages.Publish(PublishOpts{Stream: "inbox:" + sessionID, SenderID: systemSenderID, SenderName: systemSenderName, Body: body}); err != nil {
+	if _, err := sm.messages.Publish(PublishOpts{
+		Stream:     "inbox:" + sessionID,
+		SenderID:   systemSenderID,
+		SenderName: systemSenderName,
+		Body:       body,
+		ThreadID:   opts.threadID,
+	}); err != nil {
 		sm.log.Error("failed to publish daemon notification", "session", sessionID, "err", err)
 		return err
 	}
 
-	sm.startBackgroundTask(context.Background(), func(ctx context.Context) {
-		sm.notifyInboxContext(ctx, sessionID, systemSenderID, systemSenderName, false)
+	sm.startBackgroundTask(ctx, func(taskCtx context.Context) {
+		sm.notifyInboxContext(taskCtx, sessionID, systemSenderID, systemSenderName, false)
 	})
 
 	return nil

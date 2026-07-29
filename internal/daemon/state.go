@@ -567,6 +567,14 @@ type State struct {
 	Version   int                       `json:"version"`
 	Sessions  map[string]*SessionState  `json:"sessions"`
 	Scenarios map[string]*ScenarioState `json:"scenarios,omitempty"`
+	// GraithBuild records the last daemon build observed at startup. It lets a
+	// newer daemon detect version transitions without notifying on every restart.
+	GraithBuild *GraithBuildState `json:"graith_build,omitempty"`
+	// PendingGraithUpdateNotifications is a durable outbox for orchestrator
+	// update notices. Entries are cleared only after their system inbox message
+	// exists, so a stopped or not-yet-created orchestrator still learns about the
+	// update after reconciliation.
+	PendingGraithUpdateNotifications []GraithUpdateNotificationState `json:"pending_graith_update_notifications,omitempty"`
 	// UpgradeCleanup is durable ownership of agent process generations which
 	// could not be adopted or synchronously reaped across an exec upgrade. More
 	// than one generation can exist for an ID after state/manifest mismatch, so
@@ -591,6 +599,20 @@ type State struct {
 	// guarantee survives a daemon restart. Bounded (see PRWatchConfig.MaxPromptedAuthors)
 	// so it can't grow without limit on a busy public repo.
 	PRWatchPromptedAuthors map[string]bool `json:"pr_watch_prompted_authors,omitempty"`
+}
+
+type GraithBuildState struct {
+	Version    string    `json:"version,omitempty"`
+	CommitSHA  string    `json:"commit_sha,omitempty"`
+	ObservedAt time.Time `json:"observed_at,omitempty"`
+}
+
+type GraithUpdateNotificationState struct {
+	ID         string           `json:"id"`
+	Kind       string           `json:"kind"`
+	Previous   GraithBuildState `json:"previous"`
+	Current    GraithBuildState `json:"current"`
+	DetectedAt time.Time        `json:"detected_at"`
 }
 
 type UpgradeCleanupState struct {

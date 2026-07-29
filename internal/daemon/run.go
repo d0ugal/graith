@@ -792,6 +792,10 @@ func run(
 
 	logTerminalBackendSelection(log)
 
+	if err := sm.recordCurrentGraithBuildObservation(); err != nil {
+		log.Error("failed to record Graith build observation", "err", err)
+	}
+
 	defer func() { _ = l.Close() }()
 
 	serverCtx, serverCancel := context.WithCancel(context.Background())

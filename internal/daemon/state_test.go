@@ -50,6 +50,51 @@ func TestStateSaveLoad(t *testing.T) {
 	}
 }
 
+func TestStateSaveLoadGraithUpdateNotificationState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	detectedAt := time.Date(2026, time.July, 29, 18, 30, 0, 0, time.UTC)
+
+	state := NewState()
+	state.GraithBuild = &GraithBuildState{
+		Version:    "v0.3.0",
+		CommitSHA:  "canny",
+		ObservedAt: detectedAt,
+	}
+	state.PendingGraithUpdateNotifications = []GraithUpdateNotificationState{{
+		ID:         "graith-update-braw",
+		Kind:       graithUpdateKindUpgrade,
+		Previous:   GraithBuildState{Version: "v0.2.1", CommitSHA: "braw", ObservedAt: detectedAt.Add(-time.Hour)},
+		Current:    GraithBuildState{Version: "v0.3.0", CommitSHA: "canny", ObservedAt: detectedAt},
+		DetectedAt: detectedAt,
+	}}
+
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded.GraithBuild == nil || loaded.GraithBuild.Version != "v0.3.0" || loaded.GraithBuild.CommitSHA != "canny" {
+		t.Fatalf("GraithBuild = %+v, want persisted build", loaded.GraithBuild)
+	}
+
+	if len(loaded.PendingGraithUpdateNotifications) != 1 {
+		t.Fatalf("pending update notifications = %d, want 1", len(loaded.PendingGraithUpdateNotifications))
+	}
+
+	notice := loaded.PendingGraithUpdateNotifications[0]
+	if notice.ID != "graith-update-braw" || notice.Kind != graithUpdateKindUpgrade {
+		t.Fatalf("pending notice = %+v, want persisted ID/kind", notice)
+	}
+
+	if !notice.DetectedAt.Equal(detectedAt) {
+		t.Errorf("DetectedAt = %v, want %v", notice.DetectedAt, detectedAt)
+	}
+}
+
 func TestStateLoadDropsRemovedExperimentalAttachOnSave(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	before := []byte(`{

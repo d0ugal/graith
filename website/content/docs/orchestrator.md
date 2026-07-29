@@ -38,6 +38,31 @@ When `[orchestrator] agent` is empty, the orchestrator inherits the top-level `d
 
 When enabled, the orchestrator session is created automatically and reachable via `ctrl+b o`.
 
+## Update notices
+
+When the daemon detects that the running Graith build changed while the
+orchestrator is enabled, it sends the orchestrator a system inbox notice. The
+notice includes the previous and new Graith versions, commit metadata when
+available, the detection time, and whether the transition looks like an
+upgrade, downgrade, same-version daemon replacement, or unavailable version
+metadata.
+
+Delivery is durable and deduplicated through the daemon message store. The daemon
+retries pending notices on startup, orchestrator reconciliation, and successful
+orchestrator supervisor restart. A stopped orchestrator is resumed for the inbox
+notice, and an enabled orchestrator that is recreated after the update receives
+the pending notice once it exists. If message publication keeps failing, the
+notice stays pending until one of those retry paths runs again. No notice is
+queued for updates detected while `[orchestrator] enabled = false`.
+
+Same-version daemon replacements include commit-only rebuilds. Version
+comparison uses Graith's existing numeric parsing, so prerelease suffixes can be
+reported as same-version replacements when the numeric version is unchanged.
+
+On receipt, the orchestrator should inspect release notes, configuration
+changes, and new capabilities when useful, then proactively suggest applicable
+configuration, workflow, trigger, or skill updates to the human.
+
 ## Starting fresh
 
 Delete the orchestrator to discard its current conversation and recreate it
