@@ -3327,6 +3327,12 @@ func TestStartScenarioPolicyActivationSaveFailureRollsBackContracts(t *testing.T
 	sm.state.Sessions["braw-live"] = &SessionState{
 		ID: "braw-live", Name: "braw-live", Status: StatusRunning, RepoPath: repo,
 	}
+	sm.state.Sessions["canny-live"] = &SessionState{
+		ID: "canny-live", Name: "canny-live", Status: StatusRunning, RepoPath: repo,
+	}
+	sm.state.Sessions["dreich-live"] = &SessionState{
+		ID: "dreich-live", Name: "dreich-live", Status: StatusRunning, RepoPath: repo,
+	}
 	sm.mu.Unlock()
 
 	sm.saveStateFault = func() error {
@@ -3344,7 +3350,9 @@ func TestStartScenarioPolicyActivationSaveFailureRollsBackContracts(t *testing.T
 		Name:            "strath-rollback",
 		Policy:          &protocol.ScenarioPolicyInput{},
 		Sessions: []protocol.ScenarioSessionInput{
-			{Name: "braw-live", Repo: repo, Task: "review the croft", Shared: true},
+			{Name: "braw-live", Repo: repo, Task: "prepare the croft", Shared: true, DependsOn: []string{"dreich-live"}},
+			{Name: "canny-live", Repo: repo, Task: "inspect the croft", Shared: true, DependsOn: []string{"braw-live"}},
+			{Name: "dreich-live", Repo: repo, Task: "supply the croft", Shared: true},
 		},
 	}, 24, 80)
 	if err == nil || !strings.Contains(err.Error(), "persist scenario activation") {
@@ -3364,6 +3372,350 @@ func TestStartScenarioPolicyActivationSaveFailureRollsBackContracts(t *testing.T
 
 	if len(items) != 0 {
 		t.Fatalf("seeded result contracts survived rollback: %+v", items)
+	}
+}
+
+func TestStartScenarioPolicyActivationRollbackKeepsScenarioOnDeleteFailure(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.cfg.Lifecycle.ProcessKillGrace = "20ms"
+	sm.mu.Unlock()
+
+	var (
+		replaced []sessionDriver
+		wedged   *wedgeDriver
+	)
+
+	t.Cleanup(func() {
+		if wedged != nil {
+			wedged.markExited()
+		}
+
+		for _, driver := range replaced {
+			if !driver.Exited() {
+				_ = driver.ForceKill()
+			}
+
+			select {
+			case <-driver.Done():
+			case <-time.After(5 * time.Second):
+				t.Errorf("timeout waiting for replaced scenario driver to exit")
+			}
+
+			driver.Close()
+		}
+	})
+
+	sm.saveStateFault = func() error {
+		for _, scenario := range sm.state.Scenarios {
+			if scenario.Name != "strath-recover" || scenario.Policy == nil || !scenario.Policy.Active {
+				continue
+			}
+
+			if wedged == nil {
+				id := scenario.SessionIDs[0]
+				if existing := sm.sessions[id]; existing != nil {
+					replaced = append(replaced, existing)
+				}
+
+				wedged = newWedgeDriver(false)
+				sm.sessions[id] = wedged
+
+				if sess := sm.state.Sessions[id]; sess != nil {
+					sess.PID = 4242
+					sess.PIDStartTime = 7
+				}
+			}
+
+			return errors.New("dreich disk")
+		}
+
+		return nil
+	}
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-recover",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-live", Repo: repo, Task: "prepare the croft"},
+		},
+	}, 24, 80)
+	sm.saveStateFault = nil
+
+	if err == nil || !strings.Contains(err.Error(), "persist scenario activation") {
+		t.Fatalf("error = %v, want activation persistence failure", err)
+	}
+
+	if !strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("error = %v, want rollback failure detail", err)
+	}
+
+	if wedged == nil {
+		t.Fatal("activation fault did not install wedged driver")
+	}
+
+	sm.mu.RLock()
+
+	var scenario *ScenarioState
+
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == "strath-recover" {
+			scenario = sc
+			break
+		}
+	}
+
+	var keptSessionID string
+	if scenario != nil && len(scenario.SessionIDs) > 0 {
+		keptSessionID = scenario.SessionIDs[0]
+	}
+
+	keptSession := sm.state.Sessions[keptSessionID]
+	_, keptDriver := sm.sessions[keptSessionID]
+	sm.mu.RUnlock()
+
+	if scenario == nil {
+		t.Fatal("scenario record was removed despite rollback delete failure")
+	}
+
+	if scenario.Policy != nil && scenario.Policy.Active {
+		t.Fatalf("scenario policy stayed active after failed activation rollback: %+v", scenario.Policy)
+	}
+
+	if keptSession == nil || !keptDriver {
+		t.Fatalf("failed member is not recoverable: session=%+v driver=%v", keptSession, keptDriver)
+	}
+
+	if keptSession.Status != StatusErrored {
+		t.Fatalf("failed member status = %q, want %q", keptSession.Status, StatusErrored)
+	}
+
+	items, listErr := sm.todos.ListAll(TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("seeded contracts survived rollback: %+v", items)
+	}
+
+	wedged.markExited()
+
+	if _, err := sm.DeleteScenario("strath-recover"); err != nil {
+		t.Fatalf("retry scenario deletion after wedged member exits: %v", err)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, sc := range sm.state.Scenarios {
+		if sc.Name == "strath-recover" {
+			t.Fatalf("scenario survived retry cleanup: %+v", sc)
+		}
+	}
+
+	if _, ok := sm.state.Sessions[keptSessionID]; ok {
+		t.Fatalf("failed member survived retry cleanup: %s", keptSessionID)
+	}
+}
+
+func TestStartScenarioPolicyActivationRollbackIgnoresStoppedMember(t *testing.T) {
+	sm, orchID := newScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.cfg.Lifecycle.ProcessKillGrace = "20ms"
+	sm.mu.Unlock()
+
+	var stoppedSessionID string
+
+	sm.saveStateFault = func() error {
+		for _, scenario := range sm.state.Scenarios {
+			if scenario.Name != "strath-stopped-rollback" || scenario.Policy == nil || !scenario.Policy.Active {
+				continue
+			}
+
+			if stoppedSessionID == "" {
+				stoppedSessionID = scenario.SessionIDs[0]
+
+				if sess := sm.state.Sessions[stoppedSessionID]; sess != nil {
+					sess.Status = StatusStopped
+				}
+			}
+
+			return errors.New("dreich disk")
+		}
+
+		return nil
+	}
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: orchID,
+		Name:            "strath-stopped-rollback",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-live", Repo: repo, Task: "prepare the croft"},
+		},
+	}, 24, 80)
+	sm.saveStateFault = nil
+
+	if err == nil || !strings.Contains(err.Error(), "persist scenario activation") {
+		t.Fatalf("error = %v, want activation persistence failure", err)
+	}
+
+	if strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("error = %v, benign stop failure should not fail rollback", err)
+	}
+
+	if stoppedSessionID == "" {
+		t.Fatal("activation fault did not mark a member stopped")
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, scenario := range sm.state.Scenarios {
+		if scenario.Name == "strath-stopped-rollback" {
+			t.Fatalf("scenario survived rollback after successful delete: %+v", scenario)
+		}
+	}
+
+	if _, ok := sm.state.Sessions[stoppedSessionID]; ok {
+		t.Fatalf("stopped member survived rollback delete: %s", stoppedSessionID)
+	}
+}
+
+func TestStartScenarioPolicyActivationTodoCleanupFailureIsRecoverable(t *testing.T) {
+	sm := startScenarioOrchestrator(t)
+	sm.todos = newTestTodoStore(t)
+	repo := initScenarioGitRepo(t)
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw-live"] = &SessionState{
+		ID: "braw-live", Name: "braw-live", Status: StatusRunning, RepoPath: repo,
+	}
+	sm.state.Sessions["canny-live"] = &SessionState{
+		ID: "canny-live", Name: "canny-live", Status: StatusRunning, RepoPath: repo,
+	}
+	sm.mu.Unlock()
+
+	var blockerID string
+
+	sm.saveStateFault = func() error {
+		for _, scenario := range sm.state.Scenarios {
+			if scenario.Name != "strath-todo-recover" || scenario.Policy == nil || !scenario.Policy.Active {
+				continue
+			}
+
+			if blockerID == "" {
+				scope := "scenario:" + scenario.ID
+
+				seedIDs, err := sm.todos.ScenarioSeedItemIDs(scope)
+				if err != nil {
+					return err
+				}
+
+				blocker, err := sm.todos.Add(TodoAdd{
+					Scope:     scope,
+					Title:     "guard the croft",
+					DependsOn: []string{seedIDs["braw-live"]},
+					CreatedBy: "canny-live",
+				})
+				if err != nil {
+					return err
+				}
+
+				blockerID = blocker.ID
+			}
+
+			return errors.New("dreich disk")
+		}
+
+		return nil
+	}
+
+	_, err := sm.StartScenario(protocol.ScenarioStartMsg{
+		CallerSessionID: "ben-orch",
+		Name:            "strath-todo-recover",
+		Policy:          &protocol.ScenarioPolicyInput{},
+		Sessions: []protocol.ScenarioSessionInput{
+			{Name: "braw-live", Repo: repo, Task: "prepare the croft", Shared: true},
+			{Name: "canny-live", Repo: repo, Task: "inspect the croft", Shared: true, DependsOn: []string{"braw-live"}},
+		},
+	}, 24, 80)
+	sm.saveStateFault = nil
+
+	if err == nil || !strings.Contains(err.Error(), "rollback failed") {
+		t.Fatalf("error = %v, want rollback failure detail", err)
+	}
+
+	if blockerID == "" {
+		t.Fatal("activation fault did not install dependent todo blocker")
+	}
+
+	sm.mu.RLock()
+
+	var keptScenario *ScenarioState
+
+	for _, scenario := range sm.state.Scenarios {
+		if scenario.Name == "strath-todo-recover" {
+			keptScenario = scenario
+			break
+		}
+	}
+
+	sm.mu.RUnlock()
+
+	if keptScenario == nil {
+		t.Fatal("scenario record was removed despite todo cleanup failure")
+	}
+
+	if keptScenario.Rollback == nil || len(keptScenario.Rollback.SeededTodoIDs) != 2 {
+		t.Fatalf("scenario rollback marker = %+v, want seeded todo cleanup marker", keptScenario.Rollback)
+	}
+
+	items, listErr := sm.todos.ListAll(TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("todo cleanup failure should leave the blocked seed and blocker: %+v", items)
+	}
+
+	if err := sm.todos.Remove(blockerID); err != nil {
+		t.Fatalf("remove external blocker: %v", err)
+	}
+
+	if _, err := sm.DeleteScenario("strath-todo-recover"); err != nil {
+		t.Fatalf("retry scenario deletion after todo blocker removed: %v", err)
+	}
+
+	items, listErr = sm.todos.ListAll(TodoFilter{})
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("retry scenario deletion left seeded todos: %+v", items)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, scenario := range sm.state.Scenarios {
+		if scenario.Name == "strath-todo-recover" {
+			t.Fatalf("scenario survived retry cleanup: %+v", scenario)
+		}
+	}
+
+	if sm.state.Sessions["braw-live"] == nil || sm.state.Sessions["canny-live"] == nil {
+		t.Fatal("shared sessions were removed during retry cleanup")
 	}
 }
 

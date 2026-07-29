@@ -1430,28 +1430,24 @@ func (sm *SessionManager) StartScenario(msg protocol.ScenarioStartMsg, rows, col
 
 	if scenario == nil {
 		sm.mu.Unlock()
-		sm.removeScenarioTodos(seededTodoIDs)
+		_ = sm.removeScenarioTodos(seededTodoIDs)
 
 		return nil, fmt.Errorf("scenario %q was deleted during todo seeding", msg.Name)
 	}
+
+	previousTriggers := append([]config.TriggerConfig(nil), scenario.Triggers...)
+	previousPolicy, previousMemberPolicies := cloneScenarioPolicyRuntime(scenario)
 
 	scenario.Triggers = scenarioTriggers
 	activateScenarioPolicy(scenario, sm.scenarioPolicyTime())
 
 	if err := sm.saveState(); err != nil {
-		delete(sm.state.Scenarios, scenarioID)
-		_ = sm.saveState()
+		restoreScenarioPolicyRuntime(scenario, previousPolicy, previousMemberPolicies)
+		scenario.Triggers = previousTriggers
 		sm.mu.Unlock()
-		sm.removeScenarioTodos(seededTodoIDs)
 
-		for _, id := range startedIDs {
-			if stopErr := sm.stopWithReason(id, StopReasonUser, "scenario-rollback"); stopErr != nil {
-				sm.log.Warn("scenario activation rollback: stop failed", "session", id, "err", stopErr)
-			}
-
-			if deleteErr := sm.unstarAndDelete(id); deleteErr != nil {
-				sm.log.Warn("scenario activation rollback: delete failed", "session", id, "err", deleteErr)
-			}
+		if rollbackErr := sm.rollbackScenarioAfterActivationFailure(scenarioID, startedIDs, seededTodoIDs); rollbackErr != nil {
+			return nil, fmt.Errorf("persist scenario activation: %w (rollback failed: %w)", err, rollbackErr)
 		}
 
 		return nil, fmt.Errorf("persist scenario activation: %w", err)
@@ -1783,9 +1779,10 @@ func (sm *SessionManager) DeleteScenarioContext(ctx context.Context, name string
 	sm.mu.Lock()
 
 	var (
-		sessionIDs []string
-		scenarioID string
-		sharedSet  map[int]bool
+		sessionIDs      []string
+		scenarioID      string
+		rollbackTodoIDs []string
+		sharedSet       map[int]bool
 	)
 
 	for id, sc := range sm.state.Scenarios {
@@ -1794,6 +1791,10 @@ func (sm *SessionManager) DeleteScenarioContext(ctx context.Context, name string
 			copy(sessionIDs, sc.SessionIDs)
 
 			scenarioID = id
+
+			if sc.Rollback != nil {
+				rollbackTodoIDs = append([]string(nil), sc.Rollback.SeededTodoIDs...)
+			}
 
 			if sc.Policy != nil && !sc.Policy.Paused {
 				sc.Policy.Paused = true
@@ -1881,8 +1882,13 @@ func (sm *SessionManager) DeleteScenarioContext(ctx context.Context, name string
 		deleted = append(deleted, id)
 	}
 
-	// Only remove the scenario record if all sessions were cleaned up.
-	recordRemoved := len(deleteErrors) == 0
+	var todoFailures []string
+	if len(deleteErrors) == 0 && len(rollbackTodoIDs) > 0 {
+		todoFailures = sm.removeScenarioTodos(rollbackTodoIDs)
+	}
+
+	// Only remove the scenario record if all sessions and seeded contracts were cleaned up.
+	recordRemoved := len(deleteErrors) == 0 && len(todoFailures) == 0
 
 	sm.mu.Lock()
 	removedScenario := sm.state.Scenarios[scenarioID]
@@ -1914,6 +1920,10 @@ func (sm *SessionManager) DeleteScenarioContext(ctx context.Context, name string
 
 	if len(deleteErrors) > 0 {
 		return deleted, fmt.Errorf("failed to delete %d session(s): %v — scenario record kept for retry", len(deleteErrors), deleteErrors)
+	}
+
+	if len(todoFailures) > 0 {
+		return deleted, fmt.Errorf("failed to remove %d scenario todo(s): %s - scenario record kept for retry", len(todoFailures), strings.Join(todoFailures, "; "))
 	}
 
 	return deleted, nil
@@ -2777,16 +2787,115 @@ func (sm *SessionManager) rollbackScenarioAfterSeedFailure(scenarioID string, se
 	return failed
 }
 
-func (sm *SessionManager) removeScenarioTodos(ids []string) {
-	if sm.todos == nil {
-		return
-	}
+// rollbackScenarioAfterActivationFailure tears down members created for a
+// scenario whose final activation save failed. Stop failures are logged but do
+// not by themselves keep the scenario record; Delete is the commit boundary
+// that proves whether a live member still needs recovery.
+func (sm *SessionManager) rollbackScenarioAfterActivationFailure(scenarioID string, startedIDs, seededTodoIDs []string) error {
+	var failures []string
 
-	for _, id := range ids {
-		if err := sm.todos.Remove(id); err != nil && !errors.Is(err, ErrTodoNotFound) {
-			sm.log.Warn("failed to remove scenario todo during rollback", "todo", id, "err", err)
+	for _, id := range startedIDs {
+		if err := sm.stopWithReason(id, StopReasonUser, "scenario-rollback"); err != nil {
+			sm.log.Warn("scenario activation rollback: stop failed", "session", id, "err", err)
 		}
 	}
+
+	for i := len(startedIDs) - 1; i >= 0; i-- {
+		id := startedIDs[i]
+		if err := sm.unstarAndDelete(id); err != nil {
+			sm.log.Warn("scenario activation rollback: delete failed", "session", id, "err", err)
+			failures = append(failures, fmt.Sprintf("delete %s: %v", id, err))
+		}
+	}
+
+	failures = append(failures, sm.removeScenarioTodos(seededTodoIDs)...)
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if len(failures) > 0 {
+		if scenario := sm.state.Scenarios[scenarioID]; scenario != nil {
+			scenario.Rollback = &ScenarioRollbackState{
+				SeededTodoIDs: append([]string(nil), seededTodoIDs...),
+			}
+		}
+
+		if err := sm.saveState(); err != nil {
+			failures = append(failures, fmt.Sprintf("persist recovery state: %v", err))
+		}
+
+		return errors.New(strings.Join(failures, "; "))
+	}
+
+	removedScenario := sm.state.Scenarios[scenarioID]
+	wasDirty := sm.scenarioPolicyDirty[scenarioID]
+
+	delete(sm.state.Scenarios, scenarioID)
+	delete(sm.scenarioPolicyDirty, scenarioID)
+
+	if err := sm.saveState(); err != nil {
+		if removedScenario != nil {
+			sm.state.Scenarios[scenarioID] = removedScenario
+		}
+
+		if wasDirty {
+			sm.scenarioPolicyDirty[scenarioID] = true
+		}
+
+		return fmt.Errorf("persist scenario rollback: %w", err)
+	}
+
+	return nil
+}
+
+func (sm *SessionManager) removeScenarioTodos(ids []string) []string {
+	if sm.todos == nil {
+		return nil
+	}
+
+	pending := append([]string(nil), ids...)
+	lastErr := make(map[string]error, len(ids))
+
+	for len(pending) > 0 {
+		next := make([]string, 0, len(pending))
+		removedAny := false
+
+		for i := len(pending) - 1; i >= 0; i-- {
+			id := pending[i]
+
+			err := sm.todos.Remove(id)
+			if err == nil || errors.Is(err, ErrTodoNotFound) {
+				delete(lastErr, id)
+
+				removedAny = true
+
+				continue
+			}
+
+			lastErr[id] = err
+			next = append(next, id)
+		}
+
+		if !removedAny {
+			pending = next
+			break
+		}
+
+		pending = next
+	}
+
+	failures := make([]string, 0, len(pending))
+	for _, id := range pending {
+		err := lastErr[id]
+		if err == nil {
+			err = errors.New("not removed")
+		}
+
+		sm.log.Warn("failed to remove scenario todo during rollback", "todo", id, "err", err)
+		failures = append(failures, fmt.Sprintf("todo %s: %v", id, err))
+	}
+
+	return failures
 }
 
 func (sm *SessionManager) scenarioTodoTitleLimit() int {

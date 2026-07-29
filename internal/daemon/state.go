@@ -414,6 +414,11 @@ type ScenarioState struct {
 	Completion ScenarioCompletionState        `json:"completion,omitempty"`
 	Policy     *ScenarioPolicyState           `json:"policy,omitempty"`
 	Render     *ScenarioRenderState           `json:"render,omitempty"`
+	Rollback   *ScenarioRollbackState         `json:"rollback,omitempty"`
+}
+
+type ScenarioRollbackState struct {
+	SeededTodoIDs []string `json:"seeded_todo_ids,omitempty"`
 }
 
 // ScenarioAddReservationState is the durable reserve record for a dynamic
