@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -383,10 +384,10 @@ func TestGhosttyExchangeRejectsMalformedReplies(t *testing.T) {
 		"unknown status":        append([]byte(nil), valid...),
 		"invalid status":        ghosttyTestReply(ghosttyOpWrite, ghosttyStatusInvalid, nil),
 		"protocol status":       ghosttyTestReply(ghosttyOpWrite, ghosttyStatusProtocol, nil),
-		"ok unexpected payload": ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, []byte("canny")),
 		"error with payload":    ghosttyTestReply(ghosttyOpWrite, ghosttyStatusNative, []byte("dreich")),
 		"truncated payload":     ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, nil),
 		"oversized payload":     ghosttyTestReplyHeader(ghosttyOpWrite, ghosttyStatusOK, ghosttyMaxReplyBytes+1),
+		"oversized write reply": ghosttyTestReplyHeader(ghosttyOpWrite, ghosttyStatusOK, ghosttyMaxWriteReplyBytes+1),
 	}
 	tests["bad magic"][0] = 'X'
 	tests["bad version"][4]++
@@ -427,6 +428,61 @@ func TestGhosttyExchangeRejectsMalformedReplies(t *testing.T) {
 			t.Fatalf("snapshot error = %v, want truncated communication failure", err)
 		}
 	})
+}
+
+func TestGhosttyWriteReplyPayloadIsDrained(t *testing.T) {
+	reply := []byte("\x1b[?62;1c")
+	parent, child := net.Pipe()
+	terminal := &ghosttyProcessTerminal{
+		conn:            parent,
+		cols:            1,
+		rows:            1,
+		rpcTimeout:      time.Second,
+		shutdownTimeout: 10 * time.Millisecond,
+		reapTimeout:     10 * time.Millisecond,
+	}
+
+	t.Cleanup(func() { _ = parent.Close() })
+
+	serverDone := make(chan error, 1)
+
+	go func() {
+		defer func() { _ = child.Close() }()
+
+		op, payload, err := readGhosttyRequest(child)
+		if err != nil {
+			serverDone <- err
+
+			return
+		}
+
+		if op != ghosttyOpWrite {
+			serverDone <- fmt.Errorf("operation = %d, want write", op)
+
+			return
+		}
+
+		if !bytes.Equal(payload, []byte("braw")) {
+			serverDone <- fmt.Errorf("payload = %q, want braw", payload)
+
+			return
+		}
+
+		_, err = child.Write(ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, reply))
+		serverDone <- err
+	}()
+
+	if _, err := terminal.Write([]byte("braw")); err != nil {
+		t.Fatalf("write terminal: %v", err)
+	}
+
+	if got := terminal.DrainPtyReplies(); !bytes.Equal(got, reply) {
+		t.Fatalf("drained PTY replies = %q, want %q", got, reply)
+	}
+
+	if err := <-serverDone; err != nil {
+		t.Fatalf("scripted helper: %v", err)
+	}
 }
 
 func TestGhosttyHelperExitDuringEveryOperation(t *testing.T) {
@@ -649,6 +705,23 @@ func TestGhosttyPinProbeReplyWriterBounds(t *testing.T) {
 
 	if got := encoded.Len(); got != 13 {
 		t.Fatalf("encoded pin probe reply = %d bytes, want 13", got)
+	}
+}
+
+func TestGhosttyWriteReplyWriterAllowsBoundedPayload(t *testing.T) {
+	payload := []byte("\x1b[?62;1c")
+
+	var encoded bytes.Buffer
+	if err := writeGhosttyReply(&encoded, ghosttyOpWrite, ghosttyStatusOK, payload); err != nil {
+		t.Fatalf("write valid write reply: %v", err)
+	}
+
+	if !bytes.Equal(encoded.Bytes(), ghosttyTestReply(ghosttyOpWrite, ghosttyStatusOK, payload)) {
+		t.Fatalf("encoded write reply = %q, want valid frame", encoded.Bytes())
+	}
+
+	if err := writeGhosttyReply(io.Discard, ghosttyOpWrite, ghosttyStatusOK, bytes.Repeat([]byte("x"), ghosttyMaxWriteReplyBytes+1)); !errors.Is(err, errGhosttyHelperProtocol) {
+		t.Fatalf("oversized write reply error = %v, want protocol violation", err)
 	}
 }
 
@@ -1484,7 +1557,7 @@ func TestGhosttyHelperFailureDuringFreezeRecoversAfterThaw(t *testing.T) {
 	<-terminal.waitDone
 
 	session.mu.Lock()
-	writeErr := session.writeScreenLocked(payload)
+	_, writeErr := session.writeScreenLocked(payload)
 	pending := session.screenRecoveryPending
 	session.mu.Unlock()
 
@@ -1640,7 +1713,7 @@ func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
 		log:                  slog.New(slog.NewTextHandler(&logs, nil)),
 	}
 
-	if err := session.writeScreenLocked(poison); !errors.Is(err, errGhosttyHelperNative) {
+	if _, err := session.writeScreenLocked(poison); !errors.Is(err, errGhosttyHelperNative) {
 		t.Fatalf("poison write error = %v, want native failure", err)
 	}
 
@@ -1661,7 +1734,7 @@ func TestGhosttyPoisonReplayFallsBackOnceAndKeepsLogsPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := session.writeScreenLocked(safe); err != nil {
+	if _, err := session.writeScreenLocked(safe); err != nil {
 		t.Fatalf("write after poison recovery: %v", err)
 	}
 

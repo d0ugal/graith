@@ -344,6 +344,13 @@ func (d *fullSnapshotDriver) ScreenSnapshot() grpty.ScreenCapture {
 	return d.full
 }
 
+func (d *emptySnapshotAttachDriver) attachedWriters() []io.Writer {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return append([]io.Writer(nil), d.writers...)
+}
+
 func TestHandshake(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -901,6 +908,114 @@ func TestExperimentalAttachFallbackDiscardsGatedWriterAndCleansUpRawAttach(t *te
 
 	if got := driver.writerCount(); got != 0 {
 		t.Fatalf("writers after fallback client close = %d, want 0", got)
+	}
+}
+
+func TestAttachFiltersTerminalAuthorityFromScrollbackTail(t *testing.T) {
+	h := newTestHarness(t)
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "tail-filter.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = sb.Close() })
+
+	if _, err := sb.Write([]byte("tail\x1b[6n-braw\x1b]52;c;Ym9ubmll\x1b\\-croft\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	driver := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: sb,
+		createdAt:  time.Now().UTC(),
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["tail-filter"] = &SessionState{
+		ID:        "tail-filter",
+		Name:      "tail-filter",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["tail-filter"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "tail-filter"})
+	h.expectType(t, "attached")
+
+	frame, err := h.reader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "tail-braw-croft\n" {
+		t.Fatalf("tail frame = (%d, %q), want filtered data", frame.Channel, string(frame.Payload))
+	}
+}
+
+func TestAttachFiltersTerminalAuthorityFromLiveOutput(t *testing.T) {
+	h := newTestHarness(t)
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "live-filter.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = sb.Close() })
+
+	driver := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: sb,
+		createdAt:  time.Now().UTC(),
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["live-filter"] = &SessionState{
+		ID:        "live-filter",
+		Name:      "live-filter",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["live-filter"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "live-filter"})
+	h.expectType(t, "attached")
+
+	deadline := time.Now().Add(time.Second)
+
+	writers := driver.attachedWriters()
+	for len(writers) != 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+
+		writers = driver.attachedWriters()
+	}
+
+	if got := len(writers); got != 1 {
+		t.Fatalf("attached writers = %d, want 1", got)
+	}
+
+	writeDone := make(chan error, 1)
+
+	go func() {
+		_, err := writers[0].Write([]byte("live\x1b[6n-braw\x1b]8;;https://example.invalid\x1b\\ link\x1b]8;;\x1b\\"))
+		writeDone <- err
+	}()
+
+	frame, err := h.reader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "live-braw link" {
+		t.Fatalf("live frame = (%d, %q), want filtered data", frame.Channel, string(frame.Payload))
+	}
+
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -3003,6 +3118,54 @@ func TestAttachDataWriterPreservesRawBytesAcrossAsyncBoundary(t *testing.T) {
 
 	if string(got) != want {
 		t.Fatalf("raw bytes = %q, want %q", got, want)
+	}
+}
+
+func TestAttachDataWriterFiltersTerminalAuthority(t *testing.T) {
+	frames := make(chan []byte, 2)
+
+	writer := newAttachDataWriter(attachDataWriterConfig{
+		SessionID: "braw-filtered",
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Mode:      attachOutputRaw,
+		writeFrame: func(payload []byte) error {
+			frames <- append([]byte(nil), payload...)
+
+			return nil
+		},
+	})
+
+	defer func() {
+		writer.Close()
+		writer.wait()
+	}()
+
+	inputs := [][]byte{
+		[]byte("tail\x1b[6n-braw"),
+		[]byte("\x1b]52;c;Ym9ubmll"),
+		[]byte("\x1b\\-croft"),
+	}
+
+	for _, input := range inputs {
+		if _, err := writer.Write(input); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := "tail-braw-croft"
+
+	var got []byte
+	for len(got) < len(want) {
+		select {
+		case frame := <-frames:
+			got = append(got, frame...)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for filtered bytes %q", want)
+		}
+	}
+
+	if string(got) != want {
+		t.Fatalf("filtered bytes = %q, want %q", got, want)
 	}
 }
 

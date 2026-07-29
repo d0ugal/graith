@@ -46,11 +46,17 @@ experimental and intentionally opt-in per session.
 
 Current limitations: child terminal mode changes are interpreted by Graith's
 daemon-side terminal model instead of being forwarded directly to the host
-emulator, so child-driven mouse/focus/bracketed-paste modes, OSC clipboard/title
-and hyperlink features, and terminal query responses are incomplete. The Graith
-status bar is composed inside the owned frame, host scrollback is not the
-primary history surface, and refreshes fall back to full snapshots when the
-client and daemon cannot compute dirty-row updates from a shared snapshot base.
+emulator. The daemon-side model is the only authority for child terminal query
+replies; attached clients filter those query sequences plus unsafe
+OSC/DCS/APC side-effect protocols before they can reach the host terminal.
+Window-title changes stay model-local, clipboard writes are denied, hyperlink
+labels remain visible but are not forwarded as host hyperlinks, and
+notification/image protocols are ignored or stripped. Child-driven
+mouse/focus/bracketed-paste modes remain incomplete. The Graith status bar is
+composed inside the owned frame, host scrollback is not the primary history
+surface, and refreshes fall back to full snapshots when the client and daemon
+cannot compute dirty-row updates from a shared snapshot base.
+
 When the status bar or read-only indicator is visible and the terminal has at
 least two rows, the experimental client reserves one top or bottom row according
 to `[status_bar].position` and resizes the child PTY to the remaining viewport.
@@ -125,6 +131,11 @@ When a session is created:
 ## `gr attach [name-or-id]` (alias: `a`)
 
 Attach to a session. If no name is given, opens the session picker overlay.
+
+For PTY sessions, the daemon-side terminal model owns terminal query replies.
+Attach output is filtered so the host terminal does not also answer child
+queries or apply unsafe OSC/DCS/APC side effects such as clipboard,
+notification, or image protocols.
 
 | Flag | Description |
 |------|-------------|

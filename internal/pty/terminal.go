@@ -105,6 +105,23 @@ type Terminal interface {
 	Close() error
 }
 
+type terminalPtyReplyDrainer interface {
+	DrainPtyReplies() []byte
+}
+
+func drainTerminalPtyReplies(term Terminal) []byte {
+	drainer, ok := term.(terminalPtyReplyDrainer)
+	if !ok {
+		return nil
+	}
+
+	return drainer.DrainPtyReplies()
+}
+
+func discardTerminalPtyReplies(term Terminal) {
+	_ = drainTerminalPtyReplies(term)
+}
+
 // terminalWriteChunkBytes keeps replay writes below the strictest built-in
 // backend request limit. Hydration can be configured above that limit, so it
 // must be streamed without weakening the per-request allocation bound.
@@ -118,6 +135,8 @@ func writeTerminalChunks(term Terminal, p []byte) error {
 		if err != nil {
 			return err
 		}
+
+		discardTerminalPtyReplies(term)
 
 		if n != len(chunk) {
 			return io.ErrShortWrite

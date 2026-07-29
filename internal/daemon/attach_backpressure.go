@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/protocol"
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 const (
@@ -68,6 +69,7 @@ type boundedAttachDataWriter struct {
 	coalesceBytes int
 	writeFrame    func([]byte) error
 	closeConn     func() error
+	filter        grpty.AttachOutputFilter
 
 	queue       [][]byte
 	queuedBytes int
@@ -164,20 +166,18 @@ func (w *boundedAttachDataWriter) Write(p []byte) (int, error) {
 
 		return len(p), nil
 	}
-	w.mu.Unlock()
 
-	payload := append([]byte(nil), p...)
-
-	overflow := false
-	droppedBytes := 0
-
-	w.mu.Lock()
-	if w.closed {
-		w.recordDroppedLocked(len(payload))
+	filtered := w.filter.Filter(p)
+	if len(filtered) == 0 {
 		w.mu.Unlock()
 
 		return len(p), nil
 	}
+
+	payload := append([]byte(nil), filtered...)
+
+	overflow := false
+	droppedBytes := 0
 
 	if len(w.queue) >= w.maxChunks || w.queuedBytes+len(payload) > w.maxBytes {
 		droppedFrames := len(w.queue) + 1
@@ -361,6 +361,15 @@ func (w *boundedAttachDataWriter) nextPayload() ([]byte, bool) {
 	w.queuedBytes -= len(payload)
 
 	return payload, true
+}
+
+func writeAttachDataFrame(writer *safeFrameWriter, p []byte) error {
+	filtered := grpty.FilterAttachOutput(p)
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	return writer.WriteFrameWithDeadline(protocol.ChannelData, filtered, defaultAttachOutputWriteTimeout)
 }
 
 // gatedDataWriter is used only for terminal-owned attach seeding. It suppresses

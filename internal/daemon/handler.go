@@ -606,7 +606,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						sendControl("attached", info)
 
 						if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
-							_ = writer.WriteFrame(protocol.ChannelData, tail)
+							_ = writeAttachDataFrame(writer, tail)
 						}
 
 						output.Attach(attachedDataWriter)
@@ -632,7 +632,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("attached", info)
 
 				if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
-					_ = writer.WriteFrame(protocol.ChannelData, tail)
+					_ = writeAttachDataFrame(writer, tail)
 				}
 
 				output.Attach(attachedDataWriter)

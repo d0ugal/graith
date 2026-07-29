@@ -91,6 +91,12 @@ gr attach fix-auth-bug
 
 Attaching connects your terminal's stdin/stdout to the session's PTY through the daemon. Only one client attaches at a time; a new client kicks the previous.
 
+For PTY sessions, the daemon-side terminal model owns terminal query replies.
+Attached clients render visible output but filter query sequences and unsafe
+OSC/DCS/APC side-effect protocols before they reach the host terminal, so a
+detached session and an attached session expose the same child-facing terminal
+authority.
+
 The attach loop transitions between passthrough mode (raw terminal I/O) and the overlay (session picker), cycling without dropping the daemon connection: detach with `ctrl+b d`, switch sessions with `ctrl+b n/p/l`.
 
 Live attach output is bounded per client so a slow terminal or remote link cannot
@@ -115,12 +121,18 @@ While experimental, this mode renders from daemon-maintained screen snapshots
 instead of forwarding all child terminal control traffic directly to your
 emulator. The initial attach uses a full-screen seed; later refreshes use
 dirty-row updates when the client and daemon share a compatible snapshot base,
-falling back to full snapshots or raw attach when needed. Expect incomplete
-support for child-driven mouse/focus/bracketed-paste modes, OSC features such as
-clipboard/window-title/hyperlinks, and terminal query responses. Host-terminal
-scrollback is not the history surface in this mode. The Graith status bar is
-composed inside the owned frame, with read-only attach still replacing it with
-the persistent read-only indicator.
+falling back to full snapshots or raw attach when needed. The daemon-side
+terminal model is the only authority for terminal query replies, so attached
+clients filter those query sequences and unsafe OSC/DCS/APC side-effect
+protocols before they reach the host terminal. Window-title changes stay
+model-local, clipboard writes are denied, hyperlink labels remain visible but
+are not forwarded as host hyperlinks, and notification/image protocols are
+ignored or stripped. Expect incomplete support for child-driven
+mouse/focus/bracketed-paste modes. Host-terminal scrollback is not the history
+surface in this mode. The Graith status bar is composed inside the owned frame,
+with read-only attach still replacing it with the persistent read-only
+indicator.
+
 When the status bar or read-only indicator is visible and the terminal has at
 least two rows, Graith reserves one top or bottom row according to
 `[status_bar].position` and resizes the child PTY to the remaining rows. The

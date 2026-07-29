@@ -218,7 +218,7 @@ func TestTerminalFailureDuringFreezeReplaysAfterThaw(t *testing.T) {
 	}
 
 	session.mu.Lock()
-	err = session.writeScreenLocked([]byte("dreich"))
+	_, err = session.writeScreenLocked([]byte("dreich"))
 	pending := session.screenRecoveryPending
 	session.mu.Unlock()
 
@@ -303,7 +303,7 @@ func TestAsyncScreenRecoveryPublishesOnlyCoherentRawGeneration(t *testing.T) {
 	}
 
 	session.mu.Lock()
-	if err := session.writeScreenLocked(marker); err != nil {
+	if _, err := session.writeScreenLocked(marker); err != nil {
 		session.mu.Unlock()
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestAsyncScreenRecoveryRequeuesAfterExhaustedStaleBatch(t *testing.T) {
 		}
 
 		session.mu.Lock()
-		if err := session.writeScreenLocked(marker); err != nil {
+		if _, err := session.writeScreenLocked(marker); err != nil {
 			session.mu.Unlock()
 			t.Fatal(err)
 		}
@@ -681,7 +681,7 @@ func TestScreenShortWriteTriggersRecovery(t *testing.T) {
 		log:           slog.Default(),
 	}
 	session.mu.Lock()
-	err = session.writeScreenLocked([]byte("dreich"))
+	_, err = session.writeScreenLocked([]byte("dreich"))
 	session.mu.Unlock()
 
 	if !errors.Is(err, io.ErrShortWrite) {
