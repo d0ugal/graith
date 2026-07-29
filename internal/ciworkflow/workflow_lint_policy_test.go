@@ -1,6 +1,7 @@
 package ciworkflow
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -604,6 +605,48 @@ func TestGolangciLintBuildTagCoverage(t *testing.T) {
 	assertContains(t, docs, "macOS build/test lanes compile that surface")
 	assertContains(t, docs, "run the FSEvents and")
 	assertContains(t, docs, "native terminal tests")
+}
+
+func TestLibghosttyArchivePolicyFixtureUsesPinnedZigVersion(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	lockText := readPolicyFile(t, filepath.Join(repoRoot, "libghostty-native.lock.json"))
+	nativeScript := readPolicyFile(t, filepath.Join(repoRoot, "scripts/libghostty-native.sh"))
+
+	var lock struct {
+		Zig struct {
+			Version string `json:"version"`
+		} `json:"zig"`
+	}
+	if err := json.Unmarshal([]byte(lockText), &lock); err != nil {
+		t.Fatalf("parse native dependency lock: %v", err)
+	}
+
+	if lock.Zig.Version == "" {
+		t.Fatal("native dependency lock is missing zig.version")
+	}
+
+	markerLine := libghosttyArchivePolicyZigMarkerLine(nativeScript)
+	if markerLine == "" {
+		t.Fatal("archive policy fixture does not embed a Zig marker")
+	}
+
+	if !strings.Contains(markerLine, "$REQUIRED_ZIG") {
+		t.Fatalf("archive policy fixture Zig marker = %q, want lock-driven $REQUIRED_ZIG", markerLine)
+	}
+
+	if strings.Contains(markerLine, lock.Zig.Version) {
+		t.Fatalf("archive policy fixture hard-codes current Zig version %q: %q", lock.Zig.Version, markerLine)
+	}
+}
+
+func libghosttyArchivePolicyZigMarkerLine(nativeScript string) string {
+	for _, line := range strings.Split(nativeScript, "\n") {
+		if strings.Contains(line, "graith_zig_version") {
+			return line
+		}
+	}
+
+	return ""
 }
 
 func validateAttestationVerifyCommand(code, stepName, repository, signerWorkflow string) error {

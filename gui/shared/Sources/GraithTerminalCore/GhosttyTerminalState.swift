@@ -31,16 +31,19 @@ public final class GhosttyTerminalState {
         self.cols = cols
         self.rows = rows
 
-        let opts = GhosttyTerminalOptions(
-            cols: cols,
-            rows: rows,
-            max_scrollback: maxScrollback
-        )
-
         var term: GhosttyTerminal?
-        let result = ghostty_terminal_new(nil, &term, opts)
-        if result == GHOSTTY_SUCCESS {
-            self.terminal = term
+        let result = ghostty_terminal_new(nil, &term, cols, rows)
+        if result == GHOSTTY_SUCCESS, let term {
+            var scrollbackLines = maxScrollback
+            if ghostty_terminal_set(
+                term,
+                GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+                &scrollbackLines
+            ) == GHOSTTY_SUCCESS {
+                self.terminal = term
+            } else {
+                ghostty_terminal_free(term)
+            }
         }
 
         var rs: GhosttyRenderState?

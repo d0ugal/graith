@@ -1874,7 +1874,8 @@ func TestGhosttyCreatePayloadOmitsHistoryWhenDisabled(t *testing.T) {
 	}
 }
 
-// TestGhosttySustainedScrollDoesNotRetainHistory guards WithMaxScrollback(0)
+// TestGhosttySustainedScrollDoesNotRetainHistory guards the zero native
+// scrollback limits
 // across native dependency updates. Static-link baselines vary by platform and
 // referenced native symbols, so the guard compares scroll workloads against an
 // idle helper and then verifies doubling scroll input does not materially grow

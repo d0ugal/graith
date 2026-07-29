@@ -89,9 +89,8 @@ func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyT
 		dirty: true,
 	}
 
-	terminal, err := libghostty.NewTerminal(
+	options := []libghostty.TerminalOption{
 		libghostty.WithSize(cols16, rows16),
-		libghostty.WithMaxScrollback(uint(historyRows)),
 		libghostty.WithWritePty(func(_ *libghostty.Terminal, data []byte) {
 			gt.pendingPtyReplies = append(gt.pendingPtyReplies, data...)
 		}),
@@ -135,7 +134,21 @@ func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyT
 
 			return attrs, true
 		}),
-	)
+	}
+	if historyRows > 0 {
+		options = append(options, libghostty.WithMaxScrollbackLines(uint(historyRows)))
+	} else {
+		// Graith's bounded raw Scrollback is authoritative and is replayed when
+		// reconstructing a helper. The native backend only needs the visible
+		// viewport; retaining historical native lines multiplies memory by width
+		// and helper count without exposing any additional product behavior.
+		options = append(options,
+			libghostty.WithMaxScrollbackBytes(0),
+			libghostty.WithMaxScrollbackLines(0),
+		)
+	}
+
+	terminal, err := libghostty.NewTerminal(options...)
 	if err != nil {
 		return nil, fmt.Errorf("create go-libghostty terminal: %w", err)
 	}
@@ -159,7 +172,7 @@ func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyT
 		return nil, fmt.Errorf("disable Kitty file medium: %w", err)
 	}
 
-	if err = terminal.SetKittyImageMediumTempFile(false); err != nil {
+	if err = terminal.SetKittyImageMediumTempFile(nil); err != nil {
 		return nil, fmt.Errorf("disable Kitty temporary-file medium: %w", err)
 	}
 
