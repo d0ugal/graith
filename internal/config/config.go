@@ -2753,6 +2753,212 @@ type Keybindings struct {
 	Overlay OverlayKeybindings `toml:"overlay"`
 }
 
+const DefaultPrefixByte byte = 0x02
+
+type keybindingField struct {
+	name  string
+	value func(Keybindings) string
+}
+
+var passthroughKeybindingActionOrder = []keybindingField{
+	{"detach", func(k Keybindings) string { return k.Detach }},
+	{"session_list", func(k Keybindings) string { return k.SessionList }},
+	{"messages", func(k Keybindings) string { return k.Messages }},
+	{"shell", func(k Keybindings) string { return k.Shell }},
+	{"next_session", func(k Keybindings) string { return k.NextSession }},
+	{"prev_session", func(k Keybindings) string { return k.PrevSession }},
+	{"restart_session", func(k Keybindings) string { return k.RestartSession }},
+	{"last_session", func(k Keybindings) string { return k.LastSession }},
+	{"new_session", func(k Keybindings) string { return k.NewSession }},
+	{"fork_session", func(k Keybindings) string { return k.ForkSession }},
+	{"orchestrator_session", func(k Keybindings) string { return k.OrchestratorSession }},
+	{"rename_session", func(k Keybindings) string { return k.RenameSession }},
+	{"scroll_mode", func(k Keybindings) string { return k.ScrollMode }},
+}
+
+var pickerKeybindingFields = []keybindingField{
+	{"delete_session", func(k Keybindings) string { return k.DeleteSession }},
+	{"resume_session", func(k Keybindings) string { return k.ResumeSession }},
+	{"search", func(k Keybindings) string { return k.Search }},
+}
+
+var overlayKeybindingFields = []keybindingField{
+	{"up", func(k Keybindings) string { return k.Overlay.Up }},
+	{"down", func(k Keybindings) string { return k.Overlay.Down }},
+	{"page_up", func(k Keybindings) string { return k.Overlay.PageUp }},
+	{"page_down", func(k Keybindings) string { return k.Overlay.PageDown }},
+	{"top", func(k Keybindings) string { return k.Overlay.Top }},
+	{"bottom", func(k Keybindings) string { return k.Overlay.Bottom }},
+	{"cancel", func(k Keybindings) string { return k.Overlay.Cancel }},
+	{"message_pin", func(k Keybindings) string { return k.Overlay.MessagePin }},
+	{"message_expand_all", func(k Keybindings) string { return k.Overlay.MessageExpandAll }},
+	{"message_collapse_all", func(k Keybindings) string { return k.Overlay.MessageCollapseAll }},
+	{"message_next_conversation", func(k Keybindings) string { return k.Overlay.MessageNextConv }},
+	{"message_prev_conversation", func(k Keybindings) string { return k.Overlay.MessagePrevConv }},
+	{"message_topics", func(k Keybindings) string { return k.Overlay.MessageTopics }},
+	{"message_direct", func(k Keybindings) string { return k.Overlay.MessageDirect }},
+}
+
+var supportedTUIKeyNames = map[string]struct{}{
+	"space":     {},
+	"enter":     {},
+	"esc":       {},
+	"up":        {},
+	"down":      {},
+	"left":      {},
+	"right":     {},
+	"pgup":      {},
+	"pgdown":    {},
+	"home":      {},
+	"end":       {},
+	"tab":       {},
+	"shift+tab": {},
+	"backspace": {},
+	"delete":    {},
+	"insert":    {},
+}
+
+// PassthroughKeybindingActionOrder returns the prefix-command action names in
+// the exact order used by the passthrough runtime. Earlier actions win when a
+// user configures duplicate keys.
+func PassthroughKeybindingActionOrder() []string {
+	out := make([]string, len(passthroughKeybindingActionOrder))
+	for i, action := range passthroughKeybindingActionOrder {
+		out[i] = action.name
+	}
+
+	return out
+}
+
+func ParseKeybindingPrefixByte(value string) (byte, error) {
+	if b, ok := parseCtrlLetter(strings.TrimSpace(value)); ok {
+		return b, nil
+	}
+
+	if len(value) == 1 && isPrintableASCII(value[0]) {
+		return value[0], nil
+	}
+
+	return 0, errors.New("must be ctrl+a through ctrl+z, or exactly one printable ASCII byte")
+}
+
+func ParseKeybindingActionByte(value string) (byte, error) {
+	if len(value) != 1 {
+		return 0, errors.New("must be exactly one printable ASCII byte")
+	}
+
+	if !isPrintableASCII(value[0]) {
+		return 0, errors.New("must be exactly one printable ASCII byte")
+	}
+
+	return value[0], nil
+}
+
+func NormalizeTUIKeyName(value string) string {
+	if value == " " {
+		return "space"
+	}
+
+	if len(value) > 1 {
+		return strings.ToLower(value)
+	}
+
+	return value
+}
+
+func ValidateTUIKeyName(value string) error {
+	value = NormalizeTUIKeyName(value)
+	if value == "" || strings.TrimSpace(value) != value || strings.ContainsAny(value, " \t\r\n") {
+		return errors.New("must be one supported Bubble Tea key name, without surrounding whitespace")
+	}
+
+	if len(value) == 1 && isPrintableASCII(value[0]) {
+		return nil
+	}
+
+	if _, ok := supportedTUIKeyNames[value]; ok {
+		return nil
+	}
+
+	if _, ok := parseCtrlLetter(value); ok {
+		return nil
+	}
+
+	if strings.HasPrefix(value, "f") {
+		n, err := strconv.Atoi(strings.TrimPrefix(value, "f"))
+		if err == nil && n >= 1 && n <= 12 {
+			return nil
+		}
+	}
+
+	return errors.New("must be a supported Bubble Tea key name (single printable ASCII key, space, enter, esc, arrows, pgup/pgdown, home/end, tab/shift+tab, f1..f12, or ctrl+a through ctrl+z)")
+}
+
+func parseCtrlLetter(value string) (byte, bool) {
+	value = strings.ToLower(value)
+	if strings.HasPrefix(value, "ctrl+") && len(value) == len("ctrl+a") {
+		ch := value[len("ctrl+"):]
+		if ch[0] >= 'a' && ch[0] <= 'z' {
+			return ch[0] - 'a' + 1, true
+		}
+	}
+
+	return 0, false
+}
+
+func isPrintableASCII(b byte) bool {
+	return b >= 0x20 && b < 0x7f
+}
+
+func keybindingLabel(b byte) string {
+	if b == ' ' {
+		return "space"
+	}
+
+	if isPrintableASCII(b) {
+		return string(b)
+	}
+
+	return fmt.Sprintf("0x%02x", b)
+}
+
+func (k Keybindings) Validate() error {
+	var errs []error
+
+	// Programmatic Config values in tests may leave Keybindings at zero. Real
+	// config loads start from Default(), so user-provided partial tables are
+	// validated after defaults have filled every action field.
+	if k == (Keybindings{}) {
+		return nil
+	}
+
+	if _, err := ParseKeybindingPrefixByte(k.Prefix); err != nil {
+		errs = append(errs, fmt.Errorf("keybindings.prefix %q: %w", k.Prefix, err))
+	}
+
+	for _, field := range passthroughKeybindingActionOrder {
+		if _, err := ParseKeybindingActionByte(field.value(k)); err != nil {
+			errs = append(errs, fmt.Errorf("keybindings.%s %q: %w", field.name, field.value(k), err))
+		}
+	}
+
+	for _, field := range pickerKeybindingFields {
+		if err := ValidateTUIKeyName(field.value(k)); err != nil {
+			errs = append(errs, fmt.Errorf("keybindings.%s %q: %w", field.name, field.value(k), err))
+		}
+	}
+
+	for _, field := range overlayKeybindingFields {
+		for _, key := range strings.Fields(field.value(k)) {
+			if err := ValidateTUIKeyName(key); err != nil {
+				errs = append(errs, fmt.Errorf("keybindings.overlay.%s %q: %w", field.name, key, err))
+			}
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
 // Conflicts reports keybinding collisions among the prefix-action commands —
 // the keys pressed after the prefix while attached to a session. Two commands
 // bound to the same key mean only the first (in the passthrough switch order)
@@ -2762,50 +2968,85 @@ type Keybindings struct {
 // empty slice means no conflicts. The result feeds a warning, not an error, so
 // a misconfiguration is surfaced without refusing to start (issue #1233).
 func (k Keybindings) Conflicts() []string {
-	binds := []struct{ label, key string }{
-		{"detach", k.Detach},
-		{"session_list", k.SessionList},
-		{"shell", k.Shell},
-		{"next_session", k.NextSession},
-		{"prev_session", k.PrevSession},
-		{"last_session", k.LastSession},
-		{"new_session", k.NewSession},
-		{"fork_session", k.ForkSession},
-		{"orchestrator_session", k.OrchestratorSession},
-		{"rename_session", k.RenameSession},
-		{"scroll_mode", k.ScrollMode},
-		{"messages", k.Messages},
-		{"restart_session", k.RestartSession},
-	}
+	var conflicts []string
 
-	seen := map[string][]string{}
+	prefix, prefixErr := ParseKeybindingPrefixByte(k.Prefix)
+	seen := map[byte]string{}
 
-	for _, b := range binds {
-		if b.key == "" {
+	for _, action := range passthroughKeybindingActionOrder {
+		b, err := ParseKeybindingActionByte(action.value(k))
+		if err != nil {
 			continue
 		}
 
-		seen[b.key] = append(seen[b.key], b.label)
+		label := keybindingLabel(b)
+		if prefixErr == nil && b == prefix {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"keybinding %q is both the prefix and %s; pressing the prefix twice sends a literal prefix byte, so %s is unreachable",
+				label, action.name, action.name))
+		}
+
+		if winner, ok := seen[b]; ok {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"keybinding %q is bound to both %s and %s; %s wins because passthrough handles prefix commands in runtime order",
+				label, winner, action.name, winner))
+
+			continue
+		}
+
+		seen[b] = action.name
 	}
 
-	// Sort the keys so the warning order is deterministic.
-	keys := make([]string, 0, len(seen))
-	for key := range seen {
-		keys = append(keys, key)
-	}
+	conflicts = append(conflicts, k.pickerConflicts()...)
 
-	sort.Strings(keys)
+	return conflicts
+}
 
+func (k Keybindings) pickerConflicts() []string {
 	var conflicts []string
 
-	for _, key := range keys {
-		labels := seen[key]
-		if len(labels) > 1 {
-			conflicts = append(conflicts, fmt.Sprintf(
-				"keybinding %q is bound to multiple prefix commands: %s",
-				key, strings.Join(labels, ", ")))
+	seen := map[string]string{}
+	add := func(action, value string) {
+		key := NormalizeTUIKeyName(value)
+		if err := ValidateTUIKeyName(key); err != nil {
+			return
 		}
+
+		if winner, ok := seen[key]; ok {
+			if winner != action {
+				conflicts = append(conflicts, fmt.Sprintf(
+					"picker key %q is bound to both %s and %s; %s wins in session picker list mode",
+					key, winner, action, winner))
+			}
+
+			return
+		}
+
+		seen[key] = action
 	}
+
+	for _, key := range strings.Fields(k.Overlay.Cancel) {
+		add("overlay.cancel", key)
+	}
+
+	add("picker view previous", "h")
+	add("picker view previous", "left")
+	add("picker view next", "l")
+	add("picker view next", "right")
+	add("picker attach/restore", "enter")
+	add("delete_session", k.DeleteSession)
+	add("picker restart session", "r")
+	add("resume_session", k.ResumeSession)
+	add("search", k.Search)
+	add("picker stop", "S")
+	add("picker star", "s")
+	add("picker fold", "space")
+	add("picker fold all", "C")
+	add("picker move down", "j")
+	add("picker move down", "down")
+	add("picker move up", "k")
+	add("picker move up", "up")
+	add("picker next group", "tab")
 
 	return conflicts
 }
@@ -4009,6 +4250,10 @@ func (c *Config) Validate() error {
 	// Validate the [remote] block statically (fail-closed when enabled). Runtime
 	// listener provisioning (tailnet IP, TLS cert) is deferred to the daemon.
 	if err := c.Remote.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.Keybindings.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

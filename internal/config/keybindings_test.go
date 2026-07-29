@@ -110,6 +110,161 @@ func TestKeybindingsConflicts(t *testing.T) {
 			t.Errorf("empty bindings reported as conflicting: %v", got)
 		}
 	})
+
+	t.Run("runtime order names the actual winner", func(t *testing.T) {
+		k := Default().Keybindings
+		k.Messages = "s"
+		k.Shell = "s"
+
+		got := k.Conflicts()
+		if len(got) != 1 {
+			t.Fatalf("Conflicts() = %v, want exactly one collision", got)
+		}
+
+		if !strings.Contains(got[0], "messages wins") {
+			t.Errorf("collision message %q should name messages as the runtime winner", got[0])
+		}
+	})
+
+	t.Run("prefix collision reports unreachable action", func(t *testing.T) {
+		k := Default().Keybindings
+		k.Prefix = "d"
+		k.Detach = "d"
+
+		got := k.Conflicts()
+		if len(got) == 0 {
+			t.Fatal("expected a prefix/action collision")
+		}
+
+		if !strings.Contains(got[0], "prefix") || !strings.Contains(got[0], "detach") || !strings.Contains(got[0], "unreachable") {
+			t.Errorf("prefix collision message %q should explain detach is unreachable", got[0])
+		}
+	})
+
+	t.Run("picker cancel shadows picker action", func(t *testing.T) {
+		k := Default().Keybindings
+		k.Overlay.Cancel = "q esc ctrl+c x"
+
+		got := k.Conflicts()
+		if len(got) != 1 {
+			t.Fatalf("Conflicts() = %v, want exactly one picker collision", got)
+		}
+
+		if !strings.Contains(got[0], "overlay.cancel") || !strings.Contains(got[0], "delete_session") {
+			t.Errorf("picker collision message %q should name cancel and delete_session", got[0])
+		}
+	})
+
+	t.Run("picker configured action shadows fixed action", func(t *testing.T) {
+		k := Default().Keybindings
+		k.Search = "s"
+
+		got := k.Conflicts()
+		if len(got) != 1 {
+			t.Fatalf("Conflicts() = %v, want exactly one picker collision", got)
+		}
+
+		if !strings.Contains(got[0], "search wins") || !strings.Contains(got[0], "picker star") {
+			t.Errorf("picker collision message %q should name search as the winner over star", got[0])
+		}
+	})
+}
+
+func TestKeybindingValidationRejectsInvalidPassthroughActions(t *testing.T) {
+	tests := map[string]string{
+		"empty":       `messages = ""`,
+		"multi_char":  `messages = "dd"`,
+		"multibyte":   `messages = "é"`,
+		"nul":         `messages = "\u0000"`,
+		"bad_prefix":  `prefix = "ctrl+space"`,
+		"trimmed_key": `messages = " m "`,
+	}
+
+	for name, line := range tests {
+		t.Run(name, func(t *testing.T) {
+			assertLoadRejectsKeybinding(t, "[keybindings]", line, "keybindings.")
+		})
+	}
+}
+
+func TestKeybindingValidationAcceptsPickerTUIKeyNames(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[keybindings]
+delete_session = "ctrl+d"
+resume_session = "f5"
+search = " "
+`
+
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(cfgPath); err != nil {
+		t.Fatalf("Load rejected picker TUI key names: %v", err)
+	}
+}
+
+func TestOverlayKeybindingValidationRejectsInvalidNames(t *testing.T) {
+	tests := map[string]string{
+		"unknown_cancel": `cancel = "escape"`,
+		"bad_ctrl":       `cancel = "ctrl-c"`,
+		"multibyte":      `message_pin = "é"`,
+	}
+
+	for name, line := range tests {
+		t.Run(name, func(t *testing.T) {
+			assertLoadRejectsKeybinding(t, "[keybindings.overlay]", line, "keybindings.overlay.")
+		})
+	}
+}
+
+func assertLoadRejectsKeybinding(t *testing.T, header, line, wantError string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := header + "\n" + line + "\n"
+
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(cfgPath)
+	if err == nil {
+		t.Fatal("Load() = nil, want validation error")
+	}
+
+	if !strings.Contains(err.Error(), wantError) {
+		t.Errorf("error %q should contain %q", err, wantError)
+	}
+}
+
+func TestParseKeybindingPrefixPreservesPrintableLiteralBytes(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  byte
+	}{
+		"uppercase": {input: "A", want: 'A'},
+		"space":     {input: " ", want: ' '},
+		"backtick":  {input: "`", want: '`'},
+		"ctrl+b":    {input: "ctrl+b", want: 0x02},
+		"trimmed":   {input: " CTRL+A ", want: 0x01},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseKeybindingPrefixByte(test.input)
+			if err != nil {
+				t.Fatalf("ParseKeybindingPrefixByte(%q): %v", test.input, err)
+			}
+
+			if got != test.want {
+				t.Errorf("ParseKeybindingPrefixByte(%q) = %#x, want %#x", test.input, got, test.want)
+			}
+		})
+	}
 }
 
 // TestLoadPopulatesKeybindingConflictWarnings verifies a conflicting config

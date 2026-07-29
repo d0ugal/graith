@@ -1,27 +1,24 @@
 package cli
 
-import "strings"
+import (
+	"github.com/d0ugal/graith/internal/client"
+	"github.com/d0ugal/graith/internal/config"
+)
 
-func parseKeyByte(s string) byte {
-	if len(s) == 0 {
-		return 0
+func parseKeyByte(s string) client.PassthroughKey {
+	b, err := config.ParseKeybindingActionByte(s)
+	if err != nil {
+		return client.PassthroughKey{}
 	}
 
-	return s[0]
+	return client.NewPassthroughKey(b)
 }
 
 func parsePrefixKey(s string) byte {
-	s = strings.TrimSpace(strings.ToLower(s))
-	if strings.HasPrefix(s, "ctrl+") && len(s) == 6 {
-		ch := s[5]
-		if ch >= 'a' && ch <= 'z' {
-			return ch - 'a' + 1
-		}
+	b, err := config.ParseKeybindingPrefixByte(s)
+	if err != nil {
+		return config.DefaultPrefixByte
 	}
 
-	if len(s) == 1 {
-		return s[0]
-	}
-
-	return 0x02 // default ctrl+b
+	return b
 }

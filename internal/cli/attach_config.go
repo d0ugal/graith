@@ -46,21 +46,25 @@ func orderAgents(agents map[string]config.Agent, def string) []string {
 // passthroughKeysFromConfig builds the prefix-action keybindings for the attach
 // passthrough loop from the [keybindings] config table.
 func passthroughKeysFromConfig() client.PassthroughKeys {
+	return passthroughKeysFromKeybindings(cfg.Keybindings)
+}
+
+func passthroughKeysFromKeybindings(keybindings config.Keybindings) client.PassthroughKeys {
 	return client.PassthroughKeys{
-		Prefix:              parsePrefixKey(cfg.Keybindings.Prefix),
-		Detach:              parseKeyByte(cfg.Keybindings.Detach),
-		SessionList:         parseKeyByte(cfg.Keybindings.SessionList),
-		Shell:               parseKeyByte(cfg.Keybindings.Shell),
-		NextSession:         parseKeyByte(cfg.Keybindings.NextSession),
-		PrevSession:         parseKeyByte(cfg.Keybindings.PrevSession),
-		LastSession:         parseKeyByte(cfg.Keybindings.LastSession),
-		NewSession:          parseKeyByte(cfg.Keybindings.NewSession),
-		ForkSession:         parseKeyByte(cfg.Keybindings.ForkSession),
-		OrchestratorSession: parseKeyByte(cfg.Keybindings.OrchestratorSession),
-		RenameSession:       parseKeyByte(cfg.Keybindings.RenameSession),
-		ScrollMode:          parseKeyByte(cfg.Keybindings.ScrollMode),
-		Messages:            parseKeyByte(cfg.Keybindings.Messages),
-		RestartSession:      parseKeyByte(cfg.Keybindings.RestartSession),
+		Prefix:              parsePrefixKey(keybindings.Prefix),
+		Detach:              parseKeyByte(keybindings.Detach),
+		SessionList:         parseKeyByte(keybindings.SessionList),
+		Shell:               parseKeyByte(keybindings.Shell),
+		NextSession:         parseKeyByte(keybindings.NextSession),
+		PrevSession:         parseKeyByte(keybindings.PrevSession),
+		LastSession:         parseKeyByte(keybindings.LastSession),
+		NewSession:          parseKeyByte(keybindings.NewSession),
+		ForkSession:         parseKeyByte(keybindings.ForkSession),
+		OrchestratorSession: parseKeyByte(keybindings.OrchestratorSession),
+		RenameSession:       parseKeyByte(keybindings.RenameSession),
+		ScrollMode:          parseKeyByte(keybindings.ScrollMode),
+		Messages:            parseKeyByte(keybindings.Messages),
+		RestartSession:      parseKeyByte(keybindings.RestartSession),
 	}
 }
 
@@ -68,16 +72,30 @@ func passthroughKeysFromConfig() client.PassthroughKeys {
 // [keybindings] config table.
 func overlayKeysFromConfig() client.OverlayKeys {
 	return client.OverlayKeys{
-		DeleteSession: cfg.Keybindings.DeleteSession,
-		ResumeSession: cfg.Keybindings.ResumeSession,
-		Search:        cfg.Keybindings.Search,
+		DeleteSession: pickerActionKey(cfg.Keybindings.DeleteSession),
+		ResumeSession: pickerActionKey(cfg.Keybindings.ResumeSession),
+		Search:        pickerActionKey(cfg.Keybindings.Search),
+		Cancel:        splitTUIKeysFromConfig(cfg.Keybindings.Overlay.Cancel),
 	}
+}
+
+func pickerActionKey(value string) string {
+	return config.NormalizeTUIKeyName(value)
+}
+
+func splitTUIKeysFromConfig(value string) []string {
+	keys := client.SplitKeys(value)
+	for i := range keys {
+		keys[i] = config.NormalizeTUIKeyName(keys[i])
+	}
+
+	return keys
 }
 
 // overrideKeys replaces def with the parsed config value when it names at least
 // one key, so an unset [keybindings.overlay] field keeps its built-in default.
 func overrideKeys(cfgVal string, def []string) []string {
-	if ks := client.SplitKeys(cfgVal); len(ks) > 0 {
+	if ks := splitTUIKeysFromConfig(cfgVal); len(ks) > 0 {
 		return ks
 	}
 

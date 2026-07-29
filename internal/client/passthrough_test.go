@@ -11,11 +11,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
 var testOpts = PassthroughOpts{
-	Keys: PassthroughKeys{Prefix: 0x02, Detach: 'd', SessionList: 'w', Shell: 's', NextSession: 'n', PrevSession: 'p'},
+	Keys: PassthroughKeys{
+		Prefix:      0x02,
+		Detach:      NewPassthroughKey('d'),
+		SessionList: NewPassthroughKey('w'),
+		Shell:       NewPassthroughKey('s'),
+		NextSession: NewPassthroughKey('n'),
+		PrevSession: NewPassthroughKey('p'),
+	},
 }
 
 type lockedWriter struct {
@@ -1061,11 +1069,17 @@ func TestProcessKittyPrefix(t *testing.T) {
 		{"surrounded by data", "hello\x1b[98;5uworld", "hello\x02world"},
 		{"non-ctrl same codepoint", "\x1b[98u", "\x1b[98u"},
 		{"unrelated sequence", "\x1b[100;5u", "\x1b[100;5u"},
+		{"printable prefix ignores kitty ctrl sequence", "\x1b[161;5u", "\x1b[161;5u"},
 		{"no sequences", "plain text", "plain text"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := string(processKittyPrefix([]byte(tt.input), 0x02))
+			prefix := byte(0x02)
+			if tt.name == "printable prefix ignores kitty ctrl sequence" {
+				prefix = 'A'
+			}
+
+			got := string(processKittyPrefix([]byte(tt.input), prefix))
 			if got != tt.want {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
@@ -1476,20 +1490,56 @@ func TestEscapeSequenceNotPrefixIsForwarded(t *testing.T) {
 var prefixKeyOpts = PassthroughOpts{
 	Keys: PassthroughKeys{
 		Prefix:              0x02, // ctrl+b
-		Detach:              'd',
-		SessionList:         'w',
-		Shell:               's',
-		NextSession:         'n',
-		PrevSession:         'p',
-		LastSession:         'l',
-		NewSession:          'c',
-		ForkSession:         'f',
-		OrchestratorSession: 'o',
-		RenameSession:       ',',
-		ScrollMode:          '[',
-		Messages:            'm',
-		RestartSession:      'r',
+		Detach:              NewPassthroughKey('d'),
+		SessionList:         NewPassthroughKey('w'),
+		Shell:               NewPassthroughKey('s'),
+		NextSession:         NewPassthroughKey('n'),
+		PrevSession:         NewPassthroughKey('p'),
+		LastSession:         NewPassthroughKey('l'),
+		NewSession:          NewPassthroughKey('c'),
+		ForkSession:         NewPassthroughKey('f'),
+		OrchestratorSession: NewPassthroughKey('o'),
+		RenameSession:       NewPassthroughKey(','),
+		ScrollMode:          NewPassthroughKey('['),
+		Messages:            NewPassthroughKey('m'),
+		RestartSession:      NewPassthroughKey('r'),
 	},
+}
+
+func TestPassthroughActionBindingsCoverConfigOrder(t *testing.T) {
+	want := map[string]passthroughActionBinding{
+		"detach":               {key: NewPassthroughKey('d'), result: ResultDetached},
+		"session_list":         {key: NewPassthroughKey('w'), result: ResultOverlay},
+		"messages":             {key: NewPassthroughKey('m'), result: ResultMessageOverlay},
+		"shell":                {key: NewPassthroughKey('s'), result: ResultShell},
+		"next_session":         {key: NewPassthroughKey('n'), result: ResultNextSession},
+		"prev_session":         {key: NewPassthroughKey('p'), result: ResultPrevSession},
+		"restart_session":      {key: NewPassthroughKey('r'), result: ResultRestart},
+		"last_session":         {key: NewPassthroughKey('l'), result: ResultLastSession},
+		"new_session":          {key: NewPassthroughKey('c'), result: ResultNewSession},
+		"fork_session":         {key: NewPassthroughKey('f'), result: ResultForkSession},
+		"orchestrator_session": {key: NewPassthroughKey('o'), result: ResultOrchestratorSession},
+		"rename_session":       {key: NewPassthroughKey(','), result: ResultRenameSession},
+		"scroll_mode":          {key: NewPassthroughKey('['), result: ResultScrollMode},
+	}
+
+	order := config.PassthroughKeybindingActionOrder()
+
+	got := prefixKeyOpts.Keys.actionBindings()
+	if len(got) != len(order) {
+		t.Fatalf("actionBindings len = %d, want %d for %v", len(got), len(order), order)
+	}
+
+	for i, name := range order {
+		binding, ok := want[name]
+		if !ok {
+			t.Fatalf("config action order contains untested action %q", name)
+		}
+
+		if got[i] != binding {
+			t.Errorf("actionBindings[%d] for %s = %+v, want %+v", i, name, got[i], binding)
+		}
+	}
 }
 
 // runPrefixSequence feeds the raw prefix byte followed by the given key(s) into
@@ -1563,16 +1613,31 @@ func TestPrefixKeyActions2(t *testing.T) {
 func runPrefixSequenceWithOpts(t *testing.T, opts PassthroughOpts, keys []byte) PassthroughResult {
 	t.Helper()
 
+	result, _ := runPrefixSequenceWithOptsAndData(t, opts, keys, nil)
+
+	return result
+}
+
+func runPrefixSequenceWithOptsAndData(t *testing.T, opts PassthroughOpts, keys []byte, followup []byte) (PassthroughResult, [][]byte) {
+	t.Helper()
+
 	clientConn, daemonConn := net.Pipe()
-	defer func() { _ = daemonConn.Close() }()
 
 	c := newTestClient(clientConn)
+	received := make(chan []byte, 10)
 
 	go func() {
+		defer close(received)
+
 		r := protocol.NewFrameReader(daemonConn)
 		for {
-			if _, err := r.ReadFrame(); err != nil {
+			frame, err := r.ReadFrame()
+			if err != nil {
 				return
+			}
+
+			if frame.Channel == protocol.ChannelData {
+				received <- append([]byte(nil), frame.Payload...)
 			}
 		}
 	}()
@@ -1583,17 +1648,37 @@ func runPrefixSequenceWithOpts(t *testing.T, opts PassthroughOpts, keys []byte) 
 	go func() {
 		time.Sleep(30 * time.Millisecond)
 
-		_, _ = stdinW.Write([]byte{opts.Keys.Prefix})
+		prefix := opts.Keys.Prefix
+		if prefix == 0 {
+			prefix = config.DefaultPrefixByte
+		}
+
+		_, _ = stdinW.Write([]byte{prefix})
 
 		time.Sleep(10 * time.Millisecond)
 
 		_, _ = stdinW.Write(keys)
+
+		if len(followup) > 0 {
+			time.Sleep(20 * time.Millisecond)
+
+			_, _ = stdinW.Write(followup)
+		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	return c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+	result := c.runPassthroughLoop(ctx, opts, stdinR, stdout, nil)
+
+	_ = daemonConn.Close()
+
+	var frames [][]byte
+	for frame := range received {
+		frames = append(frames, frame)
+	}
+
+	return result, frames
 }
 
 // TestPrefixKeyConfigurable is the regression test for issue #918: the detach,
@@ -1603,9 +1688,9 @@ func runPrefixSequenceWithOpts(t *testing.T, opts PassthroughOpts, keys []byte) 
 func TestPrefixKeyConfigurable(t *testing.T) {
 	opts := PassthroughOpts{Keys: PassthroughKeys{
 		Prefix:      0x02,
-		Detach:      'q',
-		SessionList: 'z',
-		Shell:       'v',
+		Detach:      NewPassthroughKey('q'),
+		SessionList: NewPassthroughKey('z'),
+		Shell:       NewPassthroughKey('v'),
 	}}
 
 	cases := []struct {
@@ -1631,10 +1716,68 @@ func TestPrefixKeyConfigurable(t *testing.T) {
 // detach mapped to 'q' forwards the byte and takes no action (ResultQuit via the
 // context deadline).
 func TestPrefixKeyOldLiteralIgnoredAfterRemap(t *testing.T) {
-	opts := PassthroughOpts{Keys: PassthroughKeys{Prefix: 0x02, Detach: 'q'}}
+	opts := PassthroughOpts{Keys: PassthroughKeys{Prefix: 0x02, Detach: NewPassthroughKey('q')}}
 
 	if got := runPrefixSequenceWithOpts(t, opts, []byte{'d'}); got == ResultDetached {
 		t.Fatal("prefix+'d' should not detach when detach is remapped to 'q'")
+	}
+}
+
+func TestPrefixKeyZeroBindingIsNotLiveAction(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{
+		Prefix: 0x02,
+		Detach: NewPassthroughKey('d'),
+	}}
+
+	result, frames := runPrefixSequenceWithOptsAndData(t, opts, []byte{0}, []byte{0x02, 'd'})
+	if result != ResultDetached {
+		t.Fatalf("result = %d, want trailing detach", result)
+	}
+
+	if len(frames) == 0 {
+		t.Fatal("prefix+NUL should be forwarded to the daemon, got no data frames")
+	}
+
+	if !bytes.Equal(frames[0], []byte{0x02, 0}) {
+		t.Fatalf("prefix+NUL forwarded %v, want [0x02 0x00]", frames[0])
+	}
+}
+
+func TestPrefixKeyZeroPrefixFallsBackToDefault(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{
+		Detach: NewPassthroughKey('d'),
+	}}
+
+	if got := runPrefixSequenceWithOpts(t, opts, []byte{'d'}); got != ResultDetached {
+		t.Fatalf("zero prefix fallback result = %d, want %d", got, ResultDetached)
+	}
+}
+
+func TestPrefixKeyCollisionExecutesRuntimeWinner(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{
+		Prefix:   0x02,
+		Shell:    NewPassthroughKey('s'),
+		Messages: NewPassthroughKey('s'),
+	}}
+
+	if got := runPrefixSequenceWithOpts(t, opts, []byte{'s'}); got != ResultMessageOverlay {
+		t.Fatalf("prefix+s = %d, want messages to win over shell", got)
+	}
+}
+
+func TestPrefixKeyConfiguredActionDoesNotForwardPTYBytes(t *testing.T) {
+	opts := PassthroughOpts{Keys: PassthroughKeys{
+		Prefix:   0x02,
+		Messages: NewPassthroughKey('m'),
+	}}
+
+	result, frames := runPrefixSequenceWithOptsAndData(t, opts, []byte{'m'}, nil)
+	if result != ResultMessageOverlay {
+		t.Fatalf("prefix+m = %d, want message overlay", result)
+	}
+
+	if len(frames) != 0 {
+		t.Fatalf("configured prefix action forwarded PTY data: %q", frames)
 	}
 }
 
@@ -1644,23 +1787,23 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 	var buf bytes.Buffer
 
 	showHelpBar(&buf, PassthroughKeys{
-		Detach:              'Q',
-		SessionList:         'Z',
-		Shell:               'V',
-		OrchestratorSession: 'O',
-		LastSession:         'L',
-		NextSession:         'N',
-		PrevSession:         'P',
-		NewSession:          'C',
-		ForkSession:         'F',
-		RenameSession:       'M',
-		ScrollMode:          'B',
-		Messages:            'G',
-		RestartSession:      'R',
+		Detach:              NewPassthroughKey('Q'),
+		SessionList:         NewPassthroughKey('Z'),
+		Shell:               NewPassthroughKey(' '),
+		OrchestratorSession: NewPassthroughKey('O'),
+		LastSession:         NewPassthroughKey('L'),
+		NextSession:         NewPassthroughKey('N'),
+		PrevSession:         NewPassthroughKey('P'),
+		NewSession:          NewPassthroughKey('C'),
+		ForkSession:         NewPassthroughKey('F'),
+		RenameSession:       NewPassthroughKey('M'),
+		ScrollMode:          NewPassthroughKey('B'),
+		Messages:            NewPassthroughKey('G'),
+		RestartSession:      NewPassthroughKey('R'),
 	})
 
 	got := buf.String()
-	for _, want := range []string{"Q detach", "Z navigator", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "R restart"} {
+	for _, want := range []string{"Q detach", "Z navigator", "space shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "R restart"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help bar missing %q; got %q", want, got)
 		}
@@ -1675,9 +1818,9 @@ func TestPrefixRenameScrollHonorConfiguredKeys(t *testing.T) {
 	opts := PassthroughOpts{
 		Keys: PassthroughKeys{
 			Prefix:        0x02,
-			Detach:        'd', // detach is config-driven (#918); bind it so the trailing prefix+d ends the loop
-			RenameSession: 'R',
-			ScrollMode:    'S',
+			Detach:        NewPassthroughKey('d'), // detach is config-driven (#918); bind it so the trailing prefix+d ends the loop
+			RenameSession: NewPassthroughKey('R'),
+			ScrollMode:    NewPassthroughKey('S'),
 		},
 	}
 

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 	"golang.org/x/term"
 )
@@ -122,6 +123,10 @@ func parseKittyCSIu(input []byte, pos int) (int, int, int, int, bool) {
 // key (ctrl+letter). Press/repeat events are replaced with the raw prefix byte;
 // release events are removed entirely. Non-matching sequences are left as-is.
 func processKittyPrefix(input []byte, prefixByte byte) []byte {
+	if prefixByte < 1 || prefixByte > 26 {
+		return input
+	}
+
 	prefixCP := int(prefixByte) + 96
 
 	var out []byte
@@ -158,11 +163,31 @@ func processKittyPrefix(input []byte, prefixByte byte) []byte {
 	return append(out, input[copied:]...)
 }
 
-// keyLabel renders a keybinding byte for display in the help bar. Printable
-// ASCII bytes show as themselves; anything else (unset or control) shows "?".
-func keyLabel(b byte) string {
-	if b >= 0x20 && b < 0x7f {
-		return string(b)
+type PassthroughKey struct {
+	Byte byte
+	// Enabled distinguishes an intentionally absent programmatic binding from a
+	// live NUL byte. Config files cannot disable actions with an empty string;
+	// validation rejects invalid bindings before production clients are built.
+	Enabled bool
+}
+
+func NewPassthroughKey(b byte) PassthroughKey {
+	return PassthroughKey{Byte: b, Enabled: true}
+}
+
+func (k PassthroughKey) matches(b byte) bool {
+	return k.Enabled && k.Byte == b
+}
+
+// keyLabel renders a keybinding for display in the help bar. Printable ASCII
+// bytes show as themselves; unset or non-printable keys show "?".
+func keyLabel(k PassthroughKey) string {
+	if k.Enabled && k.Byte == ' ' {
+		return "space"
+	}
+
+	if k.Enabled && k.Byte >= 0x20 && k.Byte < 0x7f {
+		return string(k.Byte)
 	}
 
 	return "?"
@@ -210,19 +235,71 @@ func (sw *syncWriter) Write(p []byte) (int, error) {
 
 type PassthroughKeys struct {
 	Prefix              byte
-	Detach              byte
-	SessionList         byte
-	Shell               byte
-	NextSession         byte
-	PrevSession         byte
-	LastSession         byte
-	NewSession          byte
-	ForkSession         byte
-	OrchestratorSession byte
-	RenameSession       byte
-	ScrollMode          byte
-	Messages            byte
-	RestartSession      byte
+	Detach              PassthroughKey
+	SessionList         PassthroughKey
+	Shell               PassthroughKey
+	NextSession         PassthroughKey
+	PrevSession         PassthroughKey
+	LastSession         PassthroughKey
+	NewSession          PassthroughKey
+	ForkSession         PassthroughKey
+	OrchestratorSession PassthroughKey
+	RenameSession       PassthroughKey
+	ScrollMode          PassthroughKey
+	Messages            PassthroughKey
+	RestartSession      PassthroughKey
+}
+
+type passthroughActionBinding struct {
+	key    PassthroughKey
+	result PassthroughResult
+}
+
+func (keys PassthroughKeys) actionBindings() []passthroughActionBinding {
+	bindings := make([]passthroughActionBinding, 0, len(config.PassthroughKeybindingActionOrder()))
+
+	for _, name := range config.PassthroughKeybindingActionOrder() {
+		switch name {
+		case "detach":
+			bindings = append(bindings, passthroughActionBinding{key: keys.Detach, result: ResultDetached})
+		case "session_list":
+			bindings = append(bindings, passthroughActionBinding{key: keys.SessionList, result: ResultOverlay})
+		case "messages":
+			bindings = append(bindings, passthroughActionBinding{key: keys.Messages, result: ResultMessageOverlay})
+		case "shell":
+			bindings = append(bindings, passthroughActionBinding{key: keys.Shell, result: ResultShell})
+		case "next_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.NextSession, result: ResultNextSession})
+		case "prev_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.PrevSession, result: ResultPrevSession})
+		case "restart_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.RestartSession, result: ResultRestart})
+		case "last_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.LastSession, result: ResultLastSession})
+		case "new_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.NewSession, result: ResultNewSession})
+		case "fork_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.ForkSession, result: ResultForkSession})
+		case "orchestrator_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.OrchestratorSession, result: ResultOrchestratorSession})
+		case "rename_session":
+			bindings = append(bindings, passthroughActionBinding{key: keys.RenameSession, result: ResultRenameSession})
+		case "scroll_mode":
+			bindings = append(bindings, passthroughActionBinding{key: keys.ScrollMode, result: ResultScrollMode})
+		}
+	}
+
+	return bindings
+}
+
+func (keys PassthroughKeys) matchAction(key byte) (PassthroughResult, bool) {
+	for _, binding := range keys.actionBindings() {
+		if binding.key.matches(key) {
+			return binding.result, true
+		}
+	}
+
+	return ResultQuit, false
 }
 
 type PassthroughOpts struct {
@@ -502,6 +579,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 	}
 
 	prefixByte := keys.Prefix
+	if prefixByte == 0 {
+		prefixByte = config.DefaultPrefixByte
+	}
+
 	hasKitty := kittyCtrlSeq(prefixByte) != nil
 
 	// sendInput forwards keystrokes to the daemon, except in read-only mode
@@ -788,46 +869,12 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					switch key {
 					case prefixByte:
 						sendInput([]byte{prefixByte})
-					case keys.Detach:
-						setResult(ResultDetached)
-						return
-					case keys.SessionList, 0:
-						setResult(ResultOverlay)
-						return
-					case keys.Messages:
-						setResult(ResultMessageOverlay)
-						return
-					case keys.Shell:
-						setResult(ResultShell)
-						return
-					case keys.NextSession:
-						setResult(ResultNextSession)
-						return
-					case keys.PrevSession:
-						setResult(ResultPrevSession)
-						return
-					case keys.RestartSession:
-						setResult(ResultRestart)
-						return
-					case keys.LastSession:
-						setResult(ResultLastSession)
-						return
-					case keys.NewSession:
-						setResult(ResultNewSession)
-						return
-					case keys.ForkSession:
-						setResult(ResultForkSession)
-						return
-					case keys.OrchestratorSession:
-						setResult(ResultOrchestratorSession)
-						return
-					case keys.RenameSession:
-						setResult(ResultRenameSession)
-						return
-					case keys.ScrollMode:
-						setResult(ResultScrollMode)
-						return
 					default:
+						if result, ok := keys.matchAction(key); ok {
+							setResult(result)
+							return
+						}
+
 						sendInput([]byte{prefixByte, key})
 					}
 

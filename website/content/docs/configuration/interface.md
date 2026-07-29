@@ -30,13 +30,30 @@ messages             = "m"       # open the message viewer for the current sessi
 restart_session      = "r"       # restart (resume) the current session
 ```
 
-The prefix key accepts values like `ctrl+b`, `ctrl+x`, or a single character; the rest are single characters pressed after the prefix (or, for `delete_session`/`resume_session`/`search`, inside the Session Navigator). graith handles both raw control bytes and Kitty keyboard protocol sequences, so it works in extended-protocol terminals like Ghostty.
+The prefix key accepts `ctrl+a` through `ctrl+z`, or exactly one printable ASCII
+byte. Literal bytes are preserved: `A` is different from `a`, and a single space
+is a valid literal prefix. Prefix-command actions are exactly one printable
+ASCII byte pressed after the prefix; empty strings, multi-character values,
+multi-byte text, and NUL are rejected at config load. Picker action fields
+(`delete_session`, `resume_session`, and `search`) accept one supported Bubble
+Tea key name such as `x`, `space`, `ctrl+d`, or `f5`. graith handles both raw
+control bytes and Kitty keyboard protocol sequences, so it works in
+extended-protocol terminals like Ghostty.
 
-If two prefix commands share a key, graith warns at load time and starts anyway (only the first command in passthrough order fires).
+If two prefix commands share a key, or a prefix command uses the same byte as the
+prefix itself, graith warns at load time and starts anyway. The warning names the
+action that wins in passthrough runtime order.
 
 ### Overlay keys
 
-The full-screen overlays (message viewer and scroll pager) read their keys from `[keybindings.overlay]`. Each value is a space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea) key names; pressing any listed key triggers the action. A partial table overrides only the keys it names.
+The message viewer and scroll pager read navigation and cancel aliases from
+`[keybindings.overlay]`. The session picker reads only `cancel` from this table;
+its navigation keys are fixed, and its action keys are the top-level
+`delete_session`, `resume_session`, and `search` bindings. Each overlay-table
+value is a space-separated list of
+[Bubble Tea](https://github.com/charmbracelet/bubbletea) key names; pressing any
+listed key triggers the action. A partial table overrides only the actions it
+names. A named action's aliases replace the default aliases for that action.
 
 ```toml
 [keybindings.overlay]
@@ -59,6 +76,12 @@ message_direct            = "d"
 ```
 
 See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybinding reference.
+
+Terminal control sequences such as Kitty keyboard protocol, paste markers, mouse
+reports, and viewport-owned pager navigation are fixed input handling, not
+remappable user-action bindings. macOS menu shortcuts use native Command-key
+equivalents in the app; daemon config is not pushed into GUI shortcut
+definitions.
 
 ## Overlay
 

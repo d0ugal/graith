@@ -469,10 +469,9 @@ shortcut_keys = "1234567890"
 
 # Prefix key plus a command key trigger these actions while attached.
 # NOTE: all keys below are read from config (passthrough keys via
-# cli/attach.go passthroughKeysFromConfig, Navigator keys via overlayKeysFromConfig).
-# The messages/restart passthrough keys have no config field
-# yet and stay literal.
-# Each command key is a single literal character (only prefix accepts "ctrl+…").
+# passthroughKeysFromConfig, Navigator keys via overlayKeysFromConfig).
+# Each command key is exactly one printable ASCII byte (only prefix accepts
+# "ctrl+…" as an alias for control bytes).
 [keybindings]
 prefix = "ctrl+b"             # the prefix key; press it, then one of the keys below
 new_session = "c"             # open the create-session form
@@ -496,7 +495,8 @@ restart_session = "r"        # restart (resume) the current session
 # pager). Each value is a space-separated list of
 # bubbletea key names (single letters, "up", "down", "enter", "esc", "pgup",
 # "ctrl+d", ...); pressing any listed key triggers the action. A partial table
-# only overrides the keys it names — unset keys keep these defaults.
+# only overrides the actions it names — unset actions keep these defaults. A
+# named action's aliases replace the default aliases for that action.
 [keybindings.overlay]
 # Shared navigation.
 up = "k up"                              # move selection / cursor up

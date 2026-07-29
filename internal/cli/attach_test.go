@@ -3,6 +3,7 @@ package cli
 import (
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -173,17 +174,17 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 
 	want := client.PassthroughKeys{
 		Prefix:              0x01, // ctrl+a
-		Detach:              'q',
-		SessionList:         'z',
-		Shell:               'v',
-		NextSession:         'n',
-		PrevSession:         'p',
-		LastSession:         'l',
-		NewSession:          'c',
-		ForkSession:         'f',
-		OrchestratorSession: 'o',
-		Messages:            'm',
-		RestartSession:      'r',
+		Detach:              client.NewPassthroughKey('q'),
+		SessionList:         client.NewPassthroughKey('z'),
+		Shell:               client.NewPassthroughKey('v'),
+		NextSession:         client.NewPassthroughKey('n'),
+		PrevSession:         client.NewPassthroughKey('p'),
+		LastSession:         client.NewPassthroughKey('l'),
+		NewSession:          client.NewPassthroughKey('c'),
+		ForkSession:         client.NewPassthroughKey('f'),
+		OrchestratorSession: client.NewPassthroughKey('o'),
+		Messages:            client.NewPassthroughKey('m'),
+		RestartSession:      client.NewPassthroughKey('r'),
 	}
 	if keys != want {
 		t.Errorf("passthroughKeysFromConfig() = %+v, want %+v", keys, want)
@@ -227,6 +228,29 @@ func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
 	}
 }
 
+func TestDefaultOverlayCancelKeepsCtrlC(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = config.Default()
+
+	picker := overlayKeysFromConfig()
+	if !slices.Contains(picker.Cancel, "ctrl+c") {
+		t.Errorf("picker cancel keys from config.Default() = %v, want ctrl+c", picker.Cancel)
+	}
+
+	msg := messageKeysFromConfig()
+	if !slices.Contains(msg.Cancel, "ctrl+c") {
+		t.Errorf("message cancel keys from config.Default() = %v, want ctrl+c", msg.Cancel)
+	}
+
+	scroll := scrollKeysFromConfig()
+	if !slices.Contains(scroll.Cancel, "ctrl+c") {
+		t.Errorf("scroll cancel keys from config.Default() = %v, want ctrl+c", scroll.Cancel)
+	}
+}
+
 // TestRemotePassthroughKeysFromConfig verifies remote attach still wires
 // session_list and shell (regression for the #918 review): without them,
 // prefix+w / prefix+s forward raw bytes to the remote agent instead of hitting
@@ -238,27 +262,53 @@ func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
-			Prefix:      "ctrl+b",
-			Detach:      "d",
-			SessionList: "w",
-			Shell:       "s",
-			NextSession: "n",
-			PrevSession: "p",
+			Prefix:              "ctrl+b",
+			Detach:              "d",
+			SessionList:         "w",
+			Shell:               "s",
+			NextSession:         "n",
+			PrevSession:         "p",
+			LastSession:         "l",
+			NewSession:          "c",
+			ForkSession:         "f",
+			OrchestratorSession: "o",
+			RenameSession:       ",",
+			ScrollMode:          "[",
+			Messages:            "m",
+			RestartSession:      "r",
 		},
 	}
 
 	keys := remotePassthroughKeysFromConfig()
 
-	if keys.SessionList != 'w' {
-		t.Errorf("remote SessionList = %q, want 'w'", keys.SessionList)
+	if keys.SessionList != client.NewPassthroughKey('w') {
+		t.Errorf("remote SessionList = %v, want 'w'", keys.SessionList)
 	}
 
-	if keys.Shell != 's' {
-		t.Errorf("remote Shell = %q, want 's'", keys.Shell)
+	if keys.Shell != client.NewPassthroughKey('s') {
+		t.Errorf("remote Shell = %v, want 's'", keys.Shell)
 	}
 
-	if keys.Detach != 'd' || keys.Prefix != 0x02 {
-		t.Errorf("remote Detach/Prefix = %q/%#x, want 'd'/0x02", keys.Detach, keys.Prefix)
+	if keys.Messages != client.NewPassthroughKey('m') {
+		t.Errorf("remote Messages = %v, want 'm'", keys.Messages)
+	}
+
+	if keys.RestartSession != client.NewPassthroughKey('r') {
+		t.Errorf("remote RestartSession = %v, want 'r'", keys.RestartSession)
+	}
+
+	if keys.LastSession != client.NewPassthroughKey('l') ||
+		keys.NewSession != client.NewPassthroughKey('c') ||
+		keys.ForkSession != client.NewPassthroughKey('f') ||
+		keys.OrchestratorSession != client.NewPassthroughKey('o') ||
+		keys.RenameSession != client.NewPassthroughKey(',') ||
+		keys.ScrollMode != client.NewPassthroughKey('[') {
+		t.Errorf("remote local-only action keys missing: last=%v new=%v fork=%v orchestrator=%v rename=%v scroll=%v",
+			keys.LastSession, keys.NewSession, keys.ForkSession, keys.OrchestratorSession, keys.RenameSession, keys.ScrollMode)
+	}
+
+	if keys.Detach != client.NewPassthroughKey('d') || keys.Prefix != 0x02 {
+		t.Errorf("remote Detach/Prefix = %v/%#x, want 'd'/0x02", keys.Detach, keys.Prefix)
 	}
 }
 
@@ -270,17 +320,40 @@ func TestOverlayKeysFromConfig(t *testing.T) {
 
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
-			DeleteSession: "z",
+			DeleteSession: " ",
 			ResumeSession: "Z",
 			Search:        "?",
+			Overlay: config.OverlayKeybindings{
+				Cancel: "q Esc CTRL+C",
+			},
 		},
 	}
 
 	keys := overlayKeysFromConfig()
 
-	want := client.OverlayKeys{DeleteSession: "z", ResumeSession: "Z", Search: "?"}
-	if keys != want {
+	want := client.OverlayKeys{DeleteSession: "space", ResumeSession: "Z", Search: "?", Cancel: []string{"q", "esc", "ctrl+c"}}
+	if !reflect.DeepEqual(keys, want) {
 		t.Errorf("overlayKeysFromConfig() = %+v, want %+v", keys, want)
+	}
+}
+
+func TestPickerActionKeyNormalizesSpace(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"letter":       {input: "x", want: "x"},
+		"shifted":      {input: "X", want: "X"},
+		"space":        {input: " ", want: "space"},
+		"control_name": {input: "CTRL+D", want: "ctrl+d"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := pickerActionKey(test.input); got != test.want {
+				t.Errorf("pickerActionKey(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
 	}
 }
 

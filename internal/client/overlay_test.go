@@ -1968,6 +1968,32 @@ func TestUpdate_Stop_Cancel(t *testing.T) {
 	}
 }
 
+func TestUpdate_Stop_EnterDeclines(t *testing.T) {
+	called := false
+	stopFn := func(string) error {
+		called = true
+		return nil
+	}
+
+	m := sizedModel(t, overlayTestSessions(), "")
+	m.stopSession = stopFn
+
+	updated, _ := sendKey(m, "S")
+	updated, cmd := sendKey(updated, "enter")
+
+	if cmd != nil {
+		t.Fatal("enter should decline stop confirmation, not return a stop command")
+	}
+
+	if asOverlay(updated).state != stateList {
+		t.Fatalf("state = %v, want stateList after enter declines", asOverlay(updated).state)
+	}
+
+	if called {
+		t.Fatal("enter should not call stopSession")
+	}
+}
+
 // --- Update: restart menu ---
 
 func TestUpdate_RestartMenu_Stopped(t *testing.T) {
@@ -2854,6 +2880,29 @@ func TestOverlayConfigurableKeys(t *testing.T) {
 	}
 }
 
+func TestOverlayConfigurableSpaceKey(t *testing.T) {
+	cases := map[string]struct {
+		keys OverlayKeys
+		want overlayState
+	}{
+		"delete": {keys: OverlayKeys{DeleteSession: "space"}, want: stateConfirmDelete},
+		"resume": {keys: OverlayKeys{ResumeSession: "space"}, want: stateRestartMenu},
+		"search": {keys: OverlayKeys{Search: "space"}, want: stateFilter},
+	}
+
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "", nil, func(string, bool) error { return nil }, nil, nil)
+			m.applyKeys(test.keys)
+
+			updated, _ := sendSpecialKey(m, tea.KeySpace)
+			if got := asOverlay(updated).state; got != test.want {
+				t.Fatalf("space-bound %s state = %v, want %v", name, got, test.want)
+			}
+		})
+	}
+}
+
 // TestOverlayOldLiteralIgnoredAfterRemap confirms the previously-hardcoded
 // literals no longer trigger their action once the key is rebound.
 func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
@@ -2890,6 +2939,37 @@ func TestOverlayDefaultKeysWhenUnset(t *testing.T) {
 	updated, _ := sendKey(m, "x")
 	if got := asOverlay(updated).state; got != stateConfirmDelete {
 		t.Fatalf("default 'x' should open confirm-delete, got %v", got)
+	}
+}
+
+func TestOverlayDefaultCancelIncludesCtrlC(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+
+	_, cmd := sendKey(m, "ctrl+c")
+	if cmd == nil {
+		t.Fatal("ctrl+c should quit the picker by default")
+	}
+
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("ctrl+c command should produce QuitMsg")
+	}
+}
+
+func TestOverlayCancelKeyRemapped(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.applyKeys(OverlayKeys{Cancel: []string{"z"}})
+
+	if _, cmd := sendKey(m, "q"); cmd != nil {
+		t.Fatal("old cancel key q should be inert after cancel remap")
+	}
+
+	_, cmd := sendKey(m, "z")
+	if cmd == nil {
+		t.Fatal("remapped cancel key should quit")
+	}
+
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("remapped cancel command should produce QuitMsg")
 	}
 }
 
@@ -3126,6 +3206,32 @@ func TestUpdate_ConfirmDeleteCancel(t *testing.T) {
 
 	if om.selected != nil {
 		t.Error("cancelling delete should not select a session")
+	}
+}
+
+func TestUpdate_ConfirmDeleteEnterDeclines(t *testing.T) {
+	called := false
+	deleteFn := func(string, bool) error {
+		called = true
+		return nil
+	}
+
+	m := newOverlayModel(overlayTestSessions(), "", nil, deleteFn, nil, nil)
+
+	updated, _ := sendKey(m, "x")
+	updated, cmd := sendKey(asOverlay(updated), "enter")
+
+	if cmd != nil {
+		t.Fatal("enter should decline delete confirmation, not return a delete command")
+	}
+
+	om := asOverlay(updated)
+	if om.state != stateList {
+		t.Fatalf("state = %v, want stateList after enter declines", om.state)
+	}
+
+	if called {
+		t.Fatal("enter should not call deleteSession")
 	}
 }
 
