@@ -509,6 +509,40 @@ public struct ScreenSnapshotRowMsg: Codable, Sendable {
     }
 }
 
+public struct TerminalInputModes: Codable, Sendable {
+    public var mouseTracking: String
+    public var mouseFormat: String
+    public var focus: Bool
+    public var bracketedPaste: Bool
+    public var keyboardLocked: Bool
+    public var applicationCursorKeys: Bool
+    public var applicationKeypad: Bool
+    public var alternateScreen: Bool
+    public var alternateScroll: Bool
+    public init(mouseTracking: String = "none", mouseFormat: String = "x10",
+                focus: Bool = false, bracketedPaste: Bool = false,
+                keyboardLocked: Bool = false, applicationCursorKeys: Bool = false,
+                applicationKeypad: Bool = false, alternateScreen: Bool = false,
+                alternateScroll: Bool = false) {
+        self.mouseTracking = mouseTracking; self.mouseFormat = mouseFormat
+        self.focus = focus; self.bracketedPaste = bracketedPaste
+        self.keyboardLocked = keyboardLocked; self.applicationCursorKeys = applicationCursorKeys
+        self.applicationKeypad = applicationKeypad; self.alternateScreen = alternateScreen
+        self.alternateScroll = alternateScroll
+    }
+    enum CodingKeys: String, CodingKey {
+        case mouseTracking = "mouse_tracking"
+        case mouseFormat = "mouse_format"
+        case focus
+        case bracketedPaste = "bracketed_paste"
+        case keyboardLocked = "keyboard_locked"
+        case applicationCursorKeys = "application_cursor_keys"
+        case applicationKeypad = "application_keypad"
+        case alternateScreen = "alternate_screen"
+        case alternateScroll = "alternate_scroll"
+    }
+}
+
 public struct ScreenSnapshotResponseMsg: Codable, Sendable {
     public var sessionID: String
     public var frame: String
@@ -521,13 +555,16 @@ public struct ScreenSnapshotResponseMsg: Codable, Sendable {
     public var cursorVisible: Bool
     public var cols: Int
     public var rows: Int
+    public var inputModes: TerminalInputModes?
     public init(sessionID: String, frame: String, cursorX: Int = 0, cursorY: Int = 0,
                 cursorVisible: Bool = false, cols: Int = 0, rows: Int = 0,
                 rowDeltas: [ScreenSnapshotRowMsg]? = nil, delta: Bool? = nil,
-                deltaFrom: UInt64? = nil, snapshotID: UInt64? = nil) {
+                deltaFrom: UInt64? = nil, snapshotID: UInt64? = nil,
+                inputModes: TerminalInputModes? = nil) {
         self.sessionID = sessionID; self.frame = frame; self.rowDeltas = rowDeltas
         self.delta = delta; self.deltaFrom = deltaFrom; self.snapshotID = snapshotID; self.cursorX = cursorX
         self.cursorY = cursorY; self.cursorVisible = cursorVisible; self.cols = cols; self.rows = rows
+        self.inputModes = inputModes
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
@@ -541,6 +578,7 @@ public struct ScreenSnapshotResponseMsg: Codable, Sendable {
         case cursorVisible = "cursor_visible"
         case cols
         case rows
+        case inputModes = "input_modes"
     }
 }
 

@@ -1260,7 +1260,7 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 		return nil, errGhosttyHelperProtocol
 	}
 
-	total := 13
+	total := 13 + ghosttySnapshotInputModeBytes
 	for _, cell := range snapshot.Cells {
 		if len(cell.Content) > ghosttyMaxCellContentBytes || !utf8.ValidString(cell.Content) ||
 			!validGhosttyColor(cell.Style.FG) || !validGhosttyColor(cell.Style.BG) ||
@@ -1298,6 +1298,10 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 		_, _ = buf.Write(record)
 		_, _ = buf.WriteString(cell.Content)
 	}
+
+	modeBits := make([]byte, ghosttySnapshotInputModeBytes)
+	binary.BigEndian.PutUint32(modeBits, encodeGhosttySnapshotInputModes(snapshot.InputModes))
+	_, _ = buf.Write(modeBits)
 
 	return buf.Bytes(), nil
 }
@@ -1361,11 +1365,136 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 		payload = payload[16+contentLen:]
 	}
 
-	if len(payload) != 0 {
+	switch len(payload) {
+	case 0:
+		snapshot.InputModes = TerminalInputModes{
+			MouseTracking: TerminalMouseTrackingNone,
+			MouseFormat:   TerminalMouseFormatX10,
+		}
+	case ghosttySnapshotInputModeBytes:
+		snapshot.InputModes = decodeGhosttySnapshotInputModes(binary.BigEndian.Uint32(payload))
+	default:
 		return TerminalSnapshot{}, errGhosttyHelperProtocol
 	}
 
 	return snapshot, nil
+}
+
+const (
+	ghosttySnapshotInputModeBytes = 4
+
+	ghosttySnapshotMouseTrackingMask = 0x7
+	ghosttySnapshotMouseFormatShift  = 3
+	ghosttySnapshotMouseFormatMask   = 0x7 << ghosttySnapshotMouseFormatShift
+
+	ghosttySnapshotFocusBit          = 1 << 6
+	ghosttySnapshotPasteBit          = 1 << 7
+	ghosttySnapshotKeyboardLockedBit = 1 << 8
+	ghosttySnapshotCursorKeysBit     = 1 << 9
+	ghosttySnapshotKeypadBit         = 1 << 10
+	ghosttySnapshotAltScreenBit      = 1 << 11
+	ghosttySnapshotAltScrollBit      = 1 << 12
+)
+
+func encodeGhosttySnapshotInputModes(m TerminalInputModes) uint32 {
+	m = m.normalized()
+
+	var bits uint32
+
+	switch m.MouseTracking {
+	case TerminalMouseTrackingX10:
+		bits |= 1
+	case TerminalMouseTrackingNormal:
+		bits |= 2
+	case TerminalMouseTrackingButton:
+		bits |= 3
+	case TerminalMouseTrackingAny:
+		bits |= 4
+	}
+
+	var format uint32
+
+	switch m.MouseFormat {
+	case TerminalMouseFormatUTF8:
+		format = 1
+	case TerminalMouseFormatSGR:
+		format = 2
+	case TerminalMouseFormatURxvt:
+		format = 3
+	case TerminalMouseFormatSGRPixels:
+		format = 4
+	}
+
+	bits |= format << ghosttySnapshotMouseFormatShift
+
+	if m.Focus {
+		bits |= ghosttySnapshotFocusBit
+	}
+
+	if m.BracketedPaste {
+		bits |= ghosttySnapshotPasteBit
+	}
+
+	if m.KeyboardLocked {
+		bits |= ghosttySnapshotKeyboardLockedBit
+	}
+
+	if m.ApplicationCursorKeys {
+		bits |= ghosttySnapshotCursorKeysBit
+	}
+
+	if m.ApplicationKeypad {
+		bits |= ghosttySnapshotKeypadBit
+	}
+
+	if m.AlternateScreen {
+		bits |= ghosttySnapshotAltScreenBit
+	}
+
+	if m.AlternateScroll {
+		bits |= ghosttySnapshotAltScrollBit
+	}
+
+	return bits
+}
+
+func decodeGhosttySnapshotInputModes(bits uint32) TerminalInputModes {
+	modes := TerminalInputModes{
+		MouseTracking: TerminalMouseTrackingNone,
+		MouseFormat:   TerminalMouseFormatX10,
+	}
+
+	switch bits & ghosttySnapshotMouseTrackingMask {
+	case 1:
+		modes.MouseTracking = TerminalMouseTrackingX10
+	case 2:
+		modes.MouseTracking = TerminalMouseTrackingNormal
+	case 3:
+		modes.MouseTracking = TerminalMouseTrackingButton
+	case 4:
+		modes.MouseTracking = TerminalMouseTrackingAny
+	}
+
+	switch (bits & ghosttySnapshotMouseFormatMask) >> ghosttySnapshotMouseFormatShift {
+	case 1:
+		modes.MouseFormat = TerminalMouseFormatUTF8
+	case 2:
+		modes.MouseFormat = TerminalMouseFormatSGR
+	case 3:
+		modes.MouseFormat = TerminalMouseFormatURxvt
+	case 4:
+		modes.MouseFormat = TerminalMouseFormatSGRPixels
+	}
+
+	modes.Focus = bits&ghosttySnapshotFocusBit != 0
+	modes.BracketedPaste = bits&ghosttySnapshotPasteBit != 0
+	modes.KeyboardLocked = bits&ghosttySnapshotKeyboardLockedBit != 0
+	modes.ApplicationCursorKeys = bits&ghosttySnapshotCursorKeysBit != 0
+	modes.ApplicationKeypad = bits&ghosttySnapshotKeypadBit != 0
+	modes.AlternateScreen = bits&ghosttySnapshotAltScreenBit != 0
+	modes.AlternateScroll = bits&ghosttySnapshotAltScrollBit != 0
+
+	return modes
 }
 
 func validGhosttyColor(color Color) bool {

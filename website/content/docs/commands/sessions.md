@@ -44,25 +44,29 @@ current-screen snapshot before live output resumes, and the client owns the oute
 alternate screen instead of injecting chrome into the child PTY stream. This is
 experimental and intentionally opt-in per session.
 
-Current limitations: child terminal mode changes are interpreted by Graith's
-daemon-side terminal model instead of being forwarded directly to the host
-emulator. The daemon-side model is the only authority for child terminal query
-replies; attached clients filter those query sequences plus unsafe
+Graith interprets child terminal mode changes from its daemon-side terminal
+model and mirrors mouse, focus, bracketed-paste, application cursor-key, and
+keypad behavior to the outer terminal for the attach. The daemon-side model is
+the only authority for child terminal query replies; attached clients filter
+those query sequences plus unsafe
 OSC/DCS/APC side-effect protocols before they can reach the host terminal.
 Window-title changes stay model-local, clipboard writes are denied, hyperlink
 labels remain visible but are not forwarded as host hyperlinks, and
-notification/image protocols are ignored or stripped. Child-driven
-mouse/focus/bracketed-paste modes remain incomplete. The Graith status bar is
-composed inside the owned frame, host scrollback is not the primary history
-surface, and refreshes fall back to full snapshots when the client and daemon
-cannot compute dirty-row updates from a shared snapshot base.
-
+notification/image protocols are ignored or stripped. Wheel events go to child
+mouse tracking when requested, use alternate-scroll cursor keys for
+alternate-screen children without mouse tracking, and otherwise wait for the
+local terminal-aware history surface. Refreshes use dirty-row updates when the
+client and daemon share a compatible snapshot base, falling back to full
+snapshots when needed.
 When the status bar or read-only indicator is visible and the terminal has at
 least two rows, the experimental client reserves one top or bottom row according
 to `[status_bar].position` and resizes the child PTY to the remaining viewport.
 The reserved row is Graith chrome, not child terminal content; cursor and mouse
 cell coordinates that reach the child are translated accordingly. One-row
 terminals suppress chrome so the child keeps the line.
+Current limitations still include
+pixel-coordinate mouse reporting, OSC clipboard/title and hyperlink features,
+and terminal query responses.
 
 When an existing session creates a child session, omitted labels inherit from
 the parent by default. Supplying `--label` sets the child's complete label set

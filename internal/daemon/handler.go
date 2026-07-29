@@ -1263,6 +1263,51 @@ func screenSnapshotResponse(sessionID string, snap grpty.ScreenCapture) protocol
 		CursorVisible: snap.CursorVisible,
 		Cols:          snap.Cols,
 		Rows:          snap.Rows,
+		InputModes:    screenInputModes(snap.InputModes),
+	}
+}
+
+func screenInputModes(m grpty.TerminalInputModes) *protocol.TerminalInputModes {
+	return &protocol.TerminalInputModes{
+		MouseTracking:         protocolMouseTracking(m.MouseTracking),
+		MouseFormat:           protocolMouseFormat(m.MouseFormat),
+		Focus:                 m.Focus,
+		BracketedPaste:        m.BracketedPaste,
+		KeyboardLocked:        m.KeyboardLocked,
+		ApplicationCursorKeys: m.ApplicationCursorKeys,
+		ApplicationKeypad:     m.ApplicationKeypad,
+		AlternateScreen:       m.AlternateScreen,
+		AlternateScroll:       m.AlternateScroll,
+	}
+}
+
+func protocolMouseTracking(tracking string) string {
+	switch tracking {
+	case grpty.TerminalMouseTrackingX10:
+		return protocol.TerminalMouseTrackingX10
+	case grpty.TerminalMouseTrackingNormal:
+		return protocol.TerminalMouseTrackingNormal
+	case grpty.TerminalMouseTrackingButton:
+		return protocol.TerminalMouseTrackingButton
+	case grpty.TerminalMouseTrackingAny:
+		return protocol.TerminalMouseTrackingAny
+	default:
+		return protocol.TerminalMouseTrackingNone
+	}
+}
+
+func protocolMouseFormat(format string) string {
+	switch format {
+	case grpty.TerminalMouseFormatUTF8:
+		return protocol.TerminalMouseFormatUTF8
+	case grpty.TerminalMouseFormatSGR:
+		return protocol.TerminalMouseFormatSGR
+	case grpty.TerminalMouseFormatURxvt:
+		return protocol.TerminalMouseFormatURxvt
+	case grpty.TerminalMouseFormatSGRPixels:
+		return protocol.TerminalMouseFormatSGRPixels
+	default:
+		return protocol.TerminalMouseFormatX10
 	}
 }
 

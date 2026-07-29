@@ -30,6 +30,7 @@ type ScreenCapture struct {
 	CursorVisible bool
 	Cols          int
 	Rows          int
+	InputModes    TerminalInputModes
 }
 
 func (s *Session) ScreenSnapshot() ScreenCapture {
@@ -237,6 +238,7 @@ func renderSnapshotFrame(snapshot TerminalSnapshot) ScreenCapture {
 		CursorVisible: snapshot.CursorVisible,
 		Cols:          cols,
 		Rows:          rows,
+		InputModes:    snapshot.InputModes.normalized(),
 	}
 }
 
@@ -248,6 +250,7 @@ func renderSnapshotDelta(snapshot, base TerminalSnapshot) ScreenCapture {
 		CursorVisible: snapshot.CursorVisible,
 		Cols:          snapshot.Cols,
 		Rows:          snapshot.Rows,
+		InputModes:    snapshot.InputModes.normalized(),
 	}
 
 	for y := 0; y < snapshot.Rows; y++ {

@@ -155,6 +155,32 @@ type ExperimentalAttachSeedMsg struct {
 	Snapshot ScreenSnapshotResponseMsg `json:"snapshot"`
 }
 
+const (
+	TerminalMouseTrackingNone   = "none"
+	TerminalMouseTrackingX10    = "x10"
+	TerminalMouseTrackingNormal = "normal"
+	TerminalMouseTrackingButton = "button"
+	TerminalMouseTrackingAny    = "any"
+
+	TerminalMouseFormatX10       = "x10"
+	TerminalMouseFormatUTF8      = "utf8"
+	TerminalMouseFormatSGR       = "sgr"
+	TerminalMouseFormatURxvt     = "urxvt"
+	TerminalMouseFormatSGRPixels = "sgr_pixels"
+)
+
+type TerminalInputModes struct {
+	MouseTracking         string `json:"mouse_tracking"`
+	MouseFormat           string `json:"mouse_format"`
+	Focus                 bool   `json:"focus"`
+	BracketedPaste        bool   `json:"bracketed_paste"`
+	KeyboardLocked        bool   `json:"keyboard_locked"`
+	ApplicationCursorKeys bool   `json:"application_cursor_keys"`
+	ApplicationKeypad     bool   `json:"application_keypad"`
+	AlternateScreen       bool   `json:"alternate_screen"`
+	AlternateScroll       bool   `json:"alternate_scroll"`
+}
+
 // AttachConvertMsg requests converting a headless (one-shot stream-json) session
 // into an interactive PTY session so it can be attached to (headless phase 5,
 // issue #1137). The daemon stops the headless process, flips the session's
@@ -711,6 +737,7 @@ type ScreenSnapshotResponseMsg struct {
 	CursorVisible bool                   `json:"cursor_visible"`
 	Cols          int                    `json:"cols"`
 	Rows          int                    `json:"rows"`
+	InputModes    *TerminalInputModes    `json:"input_modes,omitempty"`
 }
 
 type StatusRequestMsg struct {

@@ -4301,6 +4301,14 @@
             "kind": "int"
           },
           "optional": false
+        },
+        {
+          "name": "input_modes",
+          "type": {
+            "kind": "object",
+            "ref": "TerminalInputModes"
+          },
+          "optional": true
         }
       ]
     },
@@ -5156,6 +5164,76 @@
               "kind": "object",
               "ref": "StoreEntryInfo"
             }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TerminalInputModes",
+      "swift": "required",
+      "swift_type": "TerminalInputModes",
+      "fields": [
+        {
+          "name": "mouse_tracking",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "mouse_format",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "focus",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "bracketed_paste",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "keyboard_locked",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "application_cursor_keys",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "application_keypad",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "alternate_screen",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "alternate_scroll",
+          "type": {
+            "kind": "bool"
           },
           "optional": false
         }

@@ -46,6 +46,10 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 		chrome = newExperimentalAttachChrome(*opts.Info, opts.ReadOnly, position, rows, cols)
 	}
 
+	modeMirror := newExperimentalTerminalModeMirror(stdout)
+	inputRouter := newExperimentalInputRouter(chrome, modeMirror, opts.LocalHistoryScroll)
+	inputRouter.readOnly = opts.ReadOnly
+
 	refreshCh := make(chan struct{}, 1)
 	viewport := &experimentalAttachViewport{}
 
@@ -73,10 +77,15 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 	writeExperimentalAttachSeedWithChrome(stdout, opts.ExperimentalSeed, chrome)
 	seedSnapshotID := opts.ExperimentalSeed.Snapshot.SnapshotID
 
+	if opts.ExperimentalSeed != nil {
+		inputRouter.updateSnapshot(&opts.ExperimentalSeed.Snapshot)
+	}
+
 	opts.StatusBar = nil
 	opts.ExperimentalSeed = nil
 	opts.TerminalOwned = true
 	opts.experimentalChrome = chrome
+	opts.experimentalInput = inputRouter
 	opts.terminalRefresh = refreshCh
 	opts.experimentalSnapshotID = seedSnapshotID
 	opts.experimentalViewport = viewport
