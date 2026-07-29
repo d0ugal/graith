@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	grpty "github.com/d0ugal/graith/internal/pty"
@@ -221,24 +222,10 @@ func (sm *SessionManager) resumeWithSummaryContext(ctx context.Context, id strin
 	return sm.resumeWithSummaryAndPromptLocked(ctx, id, rows, cols, lifecycleSummary, "")
 }
 
-// resumeWithSummaryAndPrompt starts (or restarts) a session's agent in its
-// existing worktree. When seedPrompt is non-empty it is appended as the agent's
-// positional opening prompt — used by Migrate to seed a freshly-swapped agent
-// with the rendered prior conversation. A seeded start is treated as a fresh
-// start (uses agent.Args, not resume_args) and clears FreshStart afterwards so
-// subsequent resumes use the new agent's native resume.
-func (sm *SessionManager) resumeWithSummaryAndPrompt(id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
-	if err := sm.beginLifecycleOperation(); err != nil {
-		return SessionState{}, err
-	}
-	defer sm.endLifecycleOperation()
-
-	unlock := sm.lockSessionLaunch(id)
-	defer unlock()
-
-	return sm.resumeWithSummaryAndPromptLocked(context.Background(), id, rows, cols, lifecycleSummary, seedPrompt)
-}
-
+// resumeWithSummaryAndPromptLocked starts a session while the caller already
+// holds the per-session launch gate. Callers that pass a seed prompt must mark
+// FreshStart before launch when the seed should use fresh-start args rather
+// than resume_args; FreshStart is cleared after the launch state is committed.
 func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
 	worktreePort := sm.worktreePort
 	if worktreePort == nil {
@@ -557,6 +544,10 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	sessScenarioID := sessState.ScenarioID
 	sessScenarioRole := sessState.ScenarioRole
 	sessScenarioGoal := sessState.ScenarioGoal
+
+	if seedPrompt == "" {
+		seedPrompt = migrationRecoverySeedPrompt(sessState)
+	}
 
 	sm.mu.Unlock()
 
@@ -1155,4 +1146,16 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	}
 
 	return result, nil
+}
+
+func migrationRecoverySeedPrompt(sess *SessionState) string {
+	if sess == nil || !sess.FreshStart || sess.MigratedFrom == nil || sess.MigratedFrom.RenderedPath == "" {
+		return ""
+	}
+
+	if filepath.Base(filepath.Dir(sess.MigratedFrom.RenderedPath)) != "migrate-"+sess.ID {
+		return ""
+	}
+
+	return transcript.BuildSeedPrompt(sess.MigratedFrom.Agent, sess.MigratedFrom.RenderedPath)
 }
