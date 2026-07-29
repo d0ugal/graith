@@ -295,6 +295,44 @@ func TestRunRemoteAttachUsesTerminalOwnedSeed(t *testing.T) {
 	}
 }
 
+func TestRunRemoteAttachUnsupportedPrefixActionNotice(t *testing.T) {
+	buf := setOutBufForRemote(t, false)
+
+	origCfg := cfg
+	origConnect := connectRemoteForCLI
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		connectRemoteForCLI = origConnect
+	})
+
+	cfg = config.Default()
+
+	fake := &scriptedConn{
+		responses: []scriptedResp{
+			okResp(payloadEnv("session_list", protocol.SessionListMsg{
+				Sessions: []protocol.SessionInfo{{ID: "session-braw", Name: "braw"}},
+			})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "session-braw", Name: "braw"})),
+		},
+		passthroughResult: func() client.PassthroughResult {
+			return client.ResultMessageOverlay
+		},
+	}
+	connectRemoteForCLI = func(config.Paths, *client.RemoteHost, ed25519.PrivateKey, uint16, uint16) (remoteAttachConn, error) {
+		return fake, nil
+	}
+
+	err := runRemoteAttach(&client.RemoteHost{Host: "ben.tailnet.ts.net"}, nil, "braw")
+	if err != nil {
+		t.Fatalf("runRemoteAttach: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "this prefix action is not yet supported over a remote attach") {
+		t.Fatalf("remote fallback output = %q, want unsupported prefix action notice", buf.String())
+	}
+}
+
 func TestRunRemoteAttachRejectsRawAttachResponse(t *testing.T) {
 	setOutBufForRemote(t, false)
 

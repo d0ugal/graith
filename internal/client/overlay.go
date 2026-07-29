@@ -999,6 +999,7 @@ type overlayModel struct {
 	keyDelete string
 	keyResume string
 	keySearch string
+	keyCancel []string
 }
 
 // OverlayKeys carries the configurable Navigator keybindings from [keybindings].
@@ -1007,6 +1008,7 @@ type OverlayKeys struct {
 	DeleteSession string
 	ResumeSession string
 	Search        string
+	Cancel        []string
 }
 
 // applyKeys overrides the model's list-mode keybindings with any non-empty
@@ -1022,6 +1024,10 @@ func (m *overlayModel) applyKeys(keys OverlayKeys) {
 
 	if keys.Search != "" {
 		m.keySearch = keys.Search
+	}
+
+	if len(keys.Cancel) > 0 {
+		m.keyCancel = keys.Cancel
 	}
 }
 
@@ -1569,6 +1575,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		keyDelete:        "x",
 		keyResume:        "R",
 		keySearch:        "/",
+		keyCancel:        []string{"q", "esc", "ctrl+c"},
 	}
 }
 
@@ -2173,7 +2180,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case stateFilter:
 			switch msg.String() {
-			case "esc":
+			case "esc", "ctrl+c":
 				m.state = stateList
 				m.filterInput.Blur()
 				m.filterInput.SetValue("")
@@ -2307,10 +2314,11 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case stateList:
-			switch msg.String() {
-			case "q", "esc":
+			if matchKey(m.keyCancel, msg.String()) {
 				return m, tea.Quit
+			}
 
+			switch msg.String() {
 			case "left", "h":
 				m.switchView(m.view.prev())
 
@@ -2387,6 +2395,13 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resizeList()
 
 				return m, nil
+
+			case m.keySearch:
+				m.filterInput.SetValue("")
+				m.filterInput.Focus()
+				m.state = stateFilter
+
+				return m, textinput.Blink
 
 			case "S":
 				if m.view == viewDeleted {
@@ -2478,13 +2493,6 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				return m, m.fetchPreviewCmd()
-
-			case m.keySearch:
-				m.filterInput.SetValue("")
-				m.filterInput.Focus()
-				m.state = stateFilter
-
-				return m, textinput.Blink
 
 			case "j", "down":
 				m.list.CursorDown()
@@ -2923,14 +2931,14 @@ func (m *overlayModel) View() tea.View {
 
 		if m.view == viewDeleted {
 			// The Deleted view offers only restore.
-			helpParts = append(helpParts, "enter restore", "◂▸ view", m.keySearch+" filter", "q quit")
+			helpParts = append(helpParts, "enter restore", "◂▸ view", m.keySearch+" filter", keyHint(m.keyCancel)+" quit")
 		} else {
 			helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter")
 			if m.view == viewRepo || m.view == viewLabels || m.view == viewScenario {
 				helpParts = append(helpParts, "tab group")
 			}
 
-			helpParts = append(helpParts, "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", "q quit")
+			helpParts = append(helpParts, "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", keyHint(m.keyCancel)+" quit")
 		}
 
 		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))

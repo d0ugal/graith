@@ -32,6 +32,9 @@ extension FocusedValues {
 /// via `@FocusedValue`; app-global items (font size, renderer, refresh) act on
 /// the shared `SessionStore`. Terminal actions (Copy/Paste/Clear) are dispatched
 /// down the responder chain so they reach the focused terminal view.
+///
+/// These are native macOS menu key equivalents, not daemon-configured terminal
+/// keybindings. The terminal/TUI config intentionally does not rewrite them.
 struct GraithCommands: Commands {
     @ObservedObject var store: SessionStore
     @FocusedValue(\.windowState) private var windowState: WindowState?

@@ -17,7 +17,9 @@ Default `ctrl+b`, configurable via `keybindings.prefix`.
 
 Press the prefix key to show a help bar at the bottom of the screen (it clears
 after the next keypress), then press one of these. Each key is configurable via
-the matching `keybindings.*` field (defaults shown):
+the matching `keybindings.*` field (defaults shown). Prefix-command keys must be
+exactly one printable ASCII byte; empty strings, multi-character values,
+multi-byte text, and NUL are rejected at config load.
 
 | Key | Action | Config key |
 |-----|--------|-----------|
@@ -36,8 +38,15 @@ the matching `keybindings.*` field (defaults shown):
 | `r` | Restart/resume the current session | `restart_session` |
 | `ctrl+b` | Send a literal prefix byte to the agent | -- |
 
-If two prefix commands share a key, graith starts but warns at load time and
-only the first in passthrough order fires — pick distinct keys.
+The prefix key accepts `ctrl+a` through `ctrl+z`, or exactly one printable ASCII
+byte. Literal bytes are preserved: `A` is different from `a`, and a single space
+is a valid literal prefix. If a prefix command collides with another command or
+with the prefix byte, graith starts but warns at load time and names the action
+that wins in passthrough runtime order — pick distinct keys.
+
+Picker action keys (`delete_session`, `resume_session`, and `search`) accept one
+supported Bubble Tea key name such as `x`, `space`, `ctrl+d`, or `f5`; they are
+matched inside the session picker rather than after the passthrough prefix.
 
 ### Literal prefix
 
@@ -64,7 +73,7 @@ to sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
 | `l` / Right | Next view mode |
 | Tab | Jump to the next group in grouped views |
 | Enter | Attach to the highlighted session |
-| `q` / Esc | Close the Navigator |
+| `q` / Esc / Ctrl-C | Close the Navigator |
 
 ### View modes
 
@@ -92,7 +101,7 @@ Cycle with `h`/`l` or arrows:
 | Space | Fold/unfold children of a parent session |
 | `C` | Fold/unfold all parent sessions |
 | `/` | Enter filter mode (type to search by name, repo, or label) |
-| Esc (in filter) | Clear filter and return to list |
+| Esc / Ctrl-C (in filter) | Clear filter and return to list |
 
 Text search narrows the selected view, so searching while in **Labels** keeps the
 cross-repository label grouping. Refresh preserves the selected label group when
@@ -133,18 +142,46 @@ configurable navigation vocabulary and add their own action keys.
 
 | Overlay | Keys | Config keys |
 |---------|------|-------------|
-| Message viewer | `j`/`k` older/newer message · `pgdn`/`pgup` scroll a long message · `g`/`G` first/latest · `h`/`l` conversation/topic · `t` topics · `d` direct messages · `enter` pin message or toggle topic namespace · `O`/`C` expand/collapse all messages · `q` close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_topics`/`message_direct`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
-| Scroll pager | `g`/`G` top/bottom · `q` quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
+| Message viewer | `j`/`k` older/newer message · `pgdn`/`pgup` scroll a long message · `g`/`G` first/latest · `h`/`l` conversation/topic · `t` topics · `d` direct messages · `enter` pin message or toggle topic namespace · `O`/`C` expand/collapse all messages · `q`/Esc/Ctrl-C close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_topics`/`message_direct`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
+| Scroll pager | `g`/`G` top/bottom · `q`/Esc/Ctrl-C quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
 
 ## Configuring overlay keys
 
-The full-screen overlays read their keys from the `[keybindings.overlay]` config
-table. Each value is a space-separated list of [Bubble Tea](https://github.com/charmbracelet/bubbletea)
-key names (single letters, `up`, `down`, `enter`, `esc`, `pgup`, `ctrl+d`, …);
-any listed key triggers the action. A partial table overrides only the keys it
-names — the rest keep their defaults. See
-[interface configuration]({{< relref "configuration/interface.md" >}}) for the
-full list and defaults.
+The message viewer and scroll pager read navigation and cancel aliases from the
+`[keybindings.overlay]` config table. The session picker reads only
+`overlay.cancel` from that table; its navigation keys are fixed, and its action
+keys (`delete_session`, `resume_session`, and `search`) are the top-level
+single-byte bindings. Each overlay-table value is a space-separated list of
+[Bubble Tea](https://github.com/charmbracelet/bubbletea) key names (single
+letters, `up`, `down`, `enter`, `esc`, `pgup`, `ctrl+d`, …); any listed key
+triggers the action. Picker filter mode keeps Esc/Ctrl-C as the clear/cancel
+keys so printable aliases can still be typed into the search field. A partial
+table overrides only the actions it names, and a named action's aliases replace
+the default aliases for that action. See [interface configuration]({{< relref "configuration/interface.md" >}})
+for the full list and defaults.
+
+Terminal control sequences such as Kitty keyboard protocol, paste markers, mouse
+reports, and viewport-owned pager navigation are not remappable keybindings.
+macOS menu shortcuts use native Command-key equivalents in the app; daemon config
+does not rewrite those platform shortcuts.
+
+## macOS menu shortcuts
+
+The macOS app keeps native menu key equivalents local to the app rather than
+loading them from daemon config.
+
+| Shortcut | Action |
+|----------|--------|
+| Command-N | New session |
+| Command-Shift-N | New window |
+| Command-C / Command-V / Command-A | Copy, paste, select all in the focused terminal |
+| Command-Shift-] / Command-Shift-[ | Next / previous session |
+| Command-1 through Command-9 | Jump to the matching session position |
+| Command-R | Refresh |
+| Command-D | Split right / close split |
+| Command-= / Command-Minus / Command-0 | Increase, decrease, reset terminal font size |
+| Command-K | Clear the focused terminal |
+| Command-F / Command-G / Command-Shift-G | Find, find next, find previous |
 
 ## Shell
 
