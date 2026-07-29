@@ -464,6 +464,21 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset").Run, "gh release upload")
 	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset").Run, "Published Linux artifact digest")
 
+	for name, step := range map[string]P11WorkflowStep{
+		"apple build cache":   appleCache,
+		"apple publish cache": p11WorkflowStep(t, applePublishJob, "Check for existing Apple artifact"),
+		"apple publish":       applePublish,
+		"linux build cache":   p11WorkflowStep(t, linuxBuildJob, "Check for existing Linux artifact"),
+		"linux publish cache": p11WorkflowStep(t, linuxPublishJob, "Check for existing Linux artifact"),
+		"linux publish":       p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset"),
+	} {
+		if step.Env["REPOSITORY"] != "${{ github.repository }}" {
+			t.Fatalf("%s step REPOSITORY env = %q, want github.repository", name, step.Env["REPOSITORY"])
+		}
+
+		assertGhReleaseCommandsUseExplicitRepo(t, name, step.Run)
+	}
+
 	commit := p11WorkflowStep(t, generate, "Commit generated native files if changed")
 	assertContains(t, commit.Run, `git commit-tree "$tree_sha" -p "$SOURCE_SHA"`)
 	assertContains(t, commit.Run, `git checkout --detach "$generated_sha"`)
@@ -482,6 +497,17 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 	assertContains(t, pushStep.Run, `git push origin "HEAD:$HEAD_REF"`)
 	assertNotContains(t, pushStep.Run, "--force")
 	assertNotContains(t, pushStep.Run, "${{ github.head_ref }}")
+}
+
+func assertGhReleaseCommandsUseExplicitRepo(t *testing.T, stepName, run string) {
+	t.Helper()
+
+	for _, line := range strings.Split(run, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "gh release ") && !strings.Contains(line, `--repo "$REPOSITORY"`) {
+			t.Fatalf("%s release command %q must pass --repo \"$REPOSITORY\"", stepName, line)
+		}
+	}
 }
 
 func TestLibghosttyNativeGeneratedCommitBundleRoundTrips(t *testing.T) {

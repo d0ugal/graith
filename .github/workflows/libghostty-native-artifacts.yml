@@ -124,6 +124,7 @@ jobs:
         id: apple-cache
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -134,11 +135,11 @@ jobs:
           zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
           tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag"
 
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          if ! gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
             exit 0
           fi
 
-          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          remote_digest="$(gh release view "$tag" --repo "$REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
           if [ -z "$remote_digest" ]; then
             exit 0
           fi
@@ -150,7 +151,7 @@ jobs:
               ;;
           esac
 
-          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-apple-notes.md"
+          gh release view "$tag" --repo "$REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/existing-apple-notes.md"
           grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
           grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
           grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-apple-notes.md"
@@ -229,11 +230,11 @@ jobs:
           zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
           tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag"
 
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          if ! gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
             exit 0
           fi
 
-          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          remote_digest="$(gh release view "$tag" --repo "$REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
           if [ -z "$remote_digest" ]; then
             exit 0
           fi
@@ -245,7 +246,7 @@ jobs:
               ;;
           esac
 
-          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-apple-notes.md"
+          gh release view "$tag" --repo "$REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/existing-apple-notes.md"
           grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
           grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-apple-notes.md"
           grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-apple-notes.md"
@@ -296,14 +297,14 @@ jobs:
           Source pull request: #$PR_NUMBER
           EOF
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes-file "$notes"
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" --repo "$REPOSITORY" --notes-file "$notes"
           else
-            gh release create "$tag" --title "$tag" --notes-file "$notes"
+            gh release create "$tag" --repo "$REPOSITORY" --title "$tag" --notes-file "$notes"
           fi
 
-          gh release upload "$tag" "$archive#$asset" --clobber=false
-          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          gh release upload "$tag" "$archive#$asset" --repo "$REPOSITORY" --clobber=false
+          remote_digest="$(gh release view "$tag" --repo "$REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
           if [ "$remote_digest" != "sha256:$asset_sha" ]; then
             echo "::error::Published Apple artifact digest $remote_digest does not match built SHA-256 $asset_sha."
             exit 1
@@ -361,6 +362,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GOARCH: ${{ matrix.goarch }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -371,11 +373,11 @@ jobs:
           zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
           tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux"
 
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          if ! gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
             exit 0
           fi
 
-          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          remote_digest="$(gh release view "$tag" --repo "$REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
           if [ -z "$remote_digest" ]; then
             exit 0
           fi
@@ -387,7 +389,7 @@ jobs:
               ;;
           esac
 
-          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-linux-notes.md"
+          gh release view "$tag" --repo "$REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/existing-linux-notes.md"
           grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
           grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
           grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-linux-notes.md"
@@ -495,11 +497,11 @@ jobs:
           zig_tag="$(printf '%s' "$zig_version" | tr -c 'A-Za-z0-9._-' '-')"
           tag="libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux"
 
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          if ! gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
             exit 0
           fi
 
-          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          remote_digest="$(gh release view "$tag" --repo "$REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
           if [ -z "$remote_digest" ]; then
             exit 0
           fi
@@ -511,7 +513,7 @@ jobs:
               ;;
           esac
 
-          gh release view "$tag" --json body --jq .body > "$RUNNER_TEMP/existing-linux-notes.md"
+          gh release view "$tag" --repo "$REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/existing-linux-notes.md"
           grep -Fqx "Ghostty commit: $ghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
           grep -Fqx "go-libghostty commit: $go_libghostty_commit" "$RUNNER_TEMP/existing-linux-notes.md"
           grep -Fqx "Zig version: $zig_version" "$RUNNER_TEMP/existing-linux-notes.md"
@@ -557,15 +559,15 @@ jobs:
           Source pull request: #$PR_NUMBER
           EOF
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes-file "$notes"
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" --repo "$REPOSITORY" --notes-file "$notes"
           else
-            gh release create "$tag" --title "$tag" --notes-file "$notes" ||
-              gh release view "$tag" >/dev/null
+            gh release create "$tag" --repo "$REPOSITORY" --title "$tag" --notes-file "$notes" ||
+              gh release view "$tag" --repo "$REPOSITORY" >/dev/null
           fi
 
-          gh release upload "$tag" "$archive#$asset" --clobber=false
-          remote_digest="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
+          gh release upload "$tag" "$archive#$asset" --repo "$REPOSITORY" --clobber=false
+          remote_digest="$(gh release view "$tag" --repo "$REPOSITORY" --json assets --jq ".assets[] | select(.name == \"$asset\") | .digest")"
           if [ "$remote_digest" != "sha256:$asset_sha" ]; then
             echo "::error::Published Linux artifact digest $remote_digest does not match built SHA-256 $asset_sha."
             exit 1
