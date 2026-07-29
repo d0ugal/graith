@@ -23,16 +23,17 @@ import (
 )
 
 const (
-	ghosttyHelperArg       = "--graith-internal-libghostty-helper"
-	ghosttyHelperEnv       = "GRAITH_INTERNAL_LIBGHOSTTY_HELPER"
-	ghosttyPinnedExecFD    = 3
-	ghosttyHelperFD        = 4
-	ghosttyProtocolVersion = 1
-	ghosttyRPCTimeout      = 5 * time.Second
-	ghosttyShutdownTimeout = 250 * time.Millisecond
-	ghosttyReapTimeout     = 2 * time.Second
-	ghosttyMaxRequestBytes = 1 * 1024 * 1024
-	ghosttyMaxReplyBytes   = 32 * 1024 * 1024
+	ghosttyHelperArg          = "--graith-internal-libghostty-helper"
+	ghosttyHelperEnv          = "GRAITH_INTERNAL_LIBGHOSTTY_HELPER"
+	ghosttyPinnedExecFD       = 3
+	ghosttyHelperFD           = 4
+	ghosttyProtocolVersion    = 1
+	ghosttyRPCTimeout         = 5 * time.Second
+	ghosttyShutdownTimeout    = 250 * time.Millisecond
+	ghosttyReapTimeout        = 2 * time.Second
+	ghosttyMaxRequestBytes    = 1 * 1024 * 1024
+	ghosttyMaxReplyBytes      = 32 * 1024 * 1024
+	ghosttyMaxWriteReplyBytes = 64 * 1024
 	// A terminal cell is one grapheme, not arbitrary retained output. This
 	// generous cap contains malicious combining-mark runs without affecting
 	// ordinary emoji or composed scripts.
@@ -322,9 +323,10 @@ type ghosttyProcessTerminal struct {
 	cols int
 	rows int
 
-	cache    TerminalSnapshot
-	dirty    bool
-	fatalErr error
+	cache             TerminalSnapshot
+	dirty             bool
+	fatalErr          error
+	pendingPtyReplies []byte
 
 	closeOnce sync.Once
 	closeErr  error
@@ -612,14 +614,26 @@ func (gt *ghosttyProcessTerminal) Write(p []byte) (int, error) {
 		return 0, errGhosttyHelperLimit
 	}
 
-	if _, err := gt.exchangeLocked(ghosttyOpWrite, p); err != nil {
+	reply, err := gt.exchangeLocked(ghosttyOpWrite, p)
+	if err != nil {
 		return 0, err
 	}
 
+	gt.pendingPtyReplies = append(gt.pendingPtyReplies, reply...)
 	gt.dirty = true
 	gt.cache = TerminalSnapshot{}
 
 	return len(p), nil
+}
+
+func (gt *ghosttyProcessTerminal) DrainPtyReplies() []byte {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
+	out := append([]byte(nil), gt.pendingPtyReplies...)
+	gt.pendingPtyReplies = nil
+
+	return out
 }
 
 func (gt *ghosttyProcessTerminal) Resize(cols, rows int) error {
@@ -987,7 +1001,11 @@ func validateGhosttyReply(op, status byte, length, cols, rows int) error {
 		if length != 1 {
 			return errGhosttyHelperProtocol
 		}
-	case ghosttyOpCreate, ghosttyOpWrite, ghosttyOpResize, ghosttyOpClose:
+	case ghosttyOpWrite:
+		if length > ghosttyMaxWriteReplyBytes {
+			return errGhosttyHelperProtocol
+		}
+	case ghosttyOpCreate, ghosttyOpResize, ghosttyOpClose:
 		if length != 0 {
 			return errGhosttyHelperProtocol
 		}
@@ -1060,6 +1078,8 @@ func serveGhosttyHelper(conn net.Conn) error {
 
 			if _, err = terminal.Write(payload); err != nil {
 				status = ghosttyStatusNative
+			} else {
+				reply = terminal.DrainPtyReplies()
 			}
 		case ghosttyOpResize:
 			if terminal == nil || len(payload) != 4 {
@@ -1187,6 +1207,10 @@ func writeGhosttyReply(w io.Writer, op, status byte, payload []byte) error {
 			}
 		case ghosttyOpPinProbe:
 			if len(payload) != 1 {
+				return errGhosttyHelperProtocol
+			}
+		case ghosttyOpWrite:
+			if len(payload) > ghosttyMaxWriteReplyBytes {
 				return errGhosttyHelperProtocol
 			}
 		default:

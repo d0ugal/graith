@@ -42,6 +42,7 @@ type Session struct {
 	upgradeInputBlocked atomic.Bool
 	writers             []io.Writer
 	screen              Terminal
+	terminalPtyReplies  chan []byte
 	closed              bool
 	closeOnce           sync.Once
 	// screenFactory is fixed at construction and provides a deterministic seam
@@ -225,6 +226,7 @@ func newSessionWithTerminalFactory(
 		screenHydrationBytes: defaultScreenHydrationBytes,
 		done:                 make(chan struct{}),
 		readDone:             make(chan struct{}),
+		terminalPtyReplies:   make(chan []byte, terminalPtyReplyQueueSize),
 		createdAt:            launchedAt,
 		log:                  log,
 	}
@@ -238,6 +240,7 @@ func newSessionWithTerminalFactory(
 		"path", opts.LogPath, "existing_bytes", written, "max_size", opts.MaxLogSize)
 
 	go s.readLoop()
+	go s.terminalPtyReplyLoop()
 	go s.waitLoop()
 
 	return s, nil
@@ -376,6 +379,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		screenInitializing:  true,
 		done:                make(chan struct{}),
 		readDone:            make(chan struct{}),
+		terminalPtyReplies:  make(chan []byte, terminalPtyReplyQueueSize),
 		adoptedPID:          opts.PID,
 		adoptedStartTime:    startTime,
 		adoptedAt:           time.Now(),
@@ -394,6 +398,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	s.screenHydrationBytes = hydrate
 	go s.readLoop()
+	go s.terminalPtyReplyLoop()
 
 	if opts.DegradedScreen {
 		s.mu.Lock()
@@ -715,6 +720,7 @@ func (s *Session) ScrollbackFile() *Scrollback {
 
 func (s *Session) readLoop() {
 	defer close(s.readDone)
+	defer s.closeTerminalPtyReplyQueue()
 
 	buf := make([]byte, 32*1024)
 
@@ -779,7 +785,7 @@ func (s *Session) readLoop() {
 				s.afterScrollbackAppend()
 			}
 
-			screenErr := s.writeScreenLocked(chunk)
+			ptyReplies, screenErr := s.writeScreenLocked(chunk)
 			s.lastOutputMu.Lock()
 			s.lastOutputAt = time.Now()
 			s.lastOutputMu.Unlock()
@@ -796,6 +802,10 @@ func (s *Session) readLoop() {
 			if screenErr != nil {
 				s.log.Warn("terminal parser failed; screen reset",
 					"session", s.ID, "error", screenErr)
+			}
+
+			if len(ptyReplies) > 0 {
+				s.enqueueTerminalPtyReplies(ptyReplies)
 			}
 
 			// Record the first byte of PTY output. Its absence is the signature
@@ -944,10 +954,10 @@ func (s *Session) QuiesceIOForUpgrade(ctx context.Context) (func(), error) {
 // failure or exits, replace it immediately and reconstruct the screen from the
 // bounded persistent scrollback tail. The caller has already appended chunk to
 // Scrollback and must hold s.mu.
-func (s *Session) writeScreenLocked(chunk []byte) error {
+func (s *Session) writeScreenLocked(chunk []byte) ([]byte, error) {
 	if s.screenInitializing {
 		s.screenRecoveryGeneration++
-		return nil
+		return nil, nil
 	}
 
 	n, err := s.screen.Write(chunk)
@@ -955,13 +965,15 @@ func (s *Session) writeScreenLocked(chunk []byte) error {
 		err = io.ErrShortWrite
 	}
 
+	ptyReplies := drainTerminalPtyReplies(s.screen)
+
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
 
-		return errors.Join(err, recoveryErr)
+		return ptyReplies, errors.Join(err, recoveryErr)
 	}
 
-	return nil
+	return ptyReplies, nil
 }
 
 // replaceScreenLocked reconstructs the derived terminal model from persistent
@@ -1397,6 +1409,8 @@ func writeTerminalChunksContext(ctx context.Context, term Terminal, p []byte) er
 			return err
 		}
 
+		discardTerminalPtyReplies(term)
+
 		if n != len(chunk) {
 			return io.ErrShortWrite
 		}
@@ -1560,6 +1574,8 @@ func (s *Session) Interrupt(count int, delay time.Duration) error {
 
 var errSessionIOQuiesced = errors.New("session input is temporarily unavailable during daemon upgrade")
 
+const terminalPtyReplyQueueSize = 64
+
 func (s *Session) lockInputWriter() error {
 	for !s.writeMu.TryLock() {
 		if s.upgradeInputBlocked.Load() {
@@ -1591,6 +1607,58 @@ func (s *Session) writeInputLocked(data []byte) error {
 	}
 
 	return nil
+}
+
+func (s *Session) writeTerminalPtyReplies(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+
+	if err := s.lockInputWriter(); err != nil {
+		return err
+	}
+	defer s.writeMu.Unlock()
+
+	return s.writeInputLocked(data)
+}
+
+func (s *Session) terminalPtyReplyLoop() {
+	for data := range s.terminalPtyReplies {
+		if err := s.writeTerminalPtyReplies(data); err != nil {
+			if errors.Is(err, errSessionIOQuiesced) {
+				s.log.Warn("terminal query reply unavailable during upgrade", "session", s.ID)
+			} else {
+				s.log.Debug("terminal query reply failed", "session", s.ID, "error", err)
+			}
+		}
+	}
+}
+
+func (s *Session) closeTerminalPtyReplyQueue() {
+	if s.terminalPtyReplies != nil {
+		close(s.terminalPtyReplies)
+	}
+}
+
+func (s *Session) enqueueTerminalPtyReplies(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+
+	reply := append([]byte(nil), data...)
+	if s.terminalPtyReplies == nil {
+		if err := s.writeTerminalPtyReplies(reply); err != nil {
+			s.log.Debug("terminal query reply failed", "session", s.ID, "error", err)
+		}
+
+		return
+	}
+
+	select {
+	case s.terminalPtyReplies <- reply:
+	default:
+		s.log.Warn("terminal query reply dropped; queue full", "session", s.ID)
+	}
 }
 
 // NotifyUserInput records that the attached user just typed something.

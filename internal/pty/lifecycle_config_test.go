@@ -515,7 +515,7 @@ func TestDegradedScreenRecoveryBackoffPreservesAndReplaysRawOutput(t *testing.T)
 		}
 
 		s.mu.Lock()
-		_ = s.writeScreenLocked(chunk)
+		_, _ = s.writeScreenLocked(chunk)
 		s.mu.Unlock()
 		_ = s.ScreenPreview()
 	}

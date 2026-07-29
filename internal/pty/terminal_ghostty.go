@@ -45,6 +45,8 @@ type ghosttyTerminal struct {
 	// the pin changes; exposing default_modes in the C API is the desired
 	// upstream simplification.
 	previousByteWasESC bool
+
+	pendingPtyReplies []byte
 }
 
 var _ Terminal = (*ghosttyTerminal)(nil)
@@ -67,6 +69,12 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 		return nil, err
 	}
 
+	gt = &ghosttyTerminal{
+		cols:  cols,
+		rows:  rows,
+		dirty: true,
+	}
+
 	terminal, err := libghostty.NewTerminal(
 		libghostty.WithSize(cols16, rows16),
 		// Graith's bounded raw Scrollback is authoritative and is replayed when
@@ -74,18 +82,56 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 		// viewport; retaining historical native lines multiplies memory by width
 		// and helper count without exposing any additional product behavior.
 		libghostty.WithMaxScrollback(0),
+		libghostty.WithWritePty(func(_ *libghostty.Terminal, data []byte) {
+			gt.pendingPtyReplies = append(gt.pendingPtyReplies, data...)
+		}),
+		libghostty.WithClipboardWrite(func(_ *libghostty.Terminal, _ libghostty.ClipboardWrite) libghostty.ClipboardWriteResult {
+			return libghostty.ClipboardWriteDenied
+		}),
+		libghostty.WithTitleChanged(func(_ *libghostty.Terminal) {}),
+		libghostty.WithEnquiry(func(_ *libghostty.Terminal) []byte {
+			return nil
+		}),
+		libghostty.WithXtversion(func(_ *libghostty.Terminal) string {
+			return "graith"
+		}),
+		libghostty.WithSizeReport(func(_ *libghostty.Terminal) (libghostty.SizeReportSize, bool) {
+			return libghostty.SizeReportSize{
+				Rows:       uint16(gt.rows), //nolint:gosec // G115: rows were validated as uint16 for libghostty
+				Columns:    uint16(gt.cols), //nolint:gosec // G115: cols were validated as uint16 for libghostty
+				CellWidth:  8,
+				CellHeight: 16,
+			}, true
+		}),
+		libghostty.WithColorScheme(func(_ *libghostty.Terminal) (libghostty.ColorScheme, bool) {
+			return libghostty.ColorSchemeDark, true
+		}),
+		libghostty.WithDeviceAttributes(func(_ *libghostty.Terminal) (libghostty.DeviceAttributes, bool) {
+			attrs := libghostty.DeviceAttributes{
+				Primary: libghostty.DeviceAttributesPrimary{
+					ConformanceLevel: libghostty.DAConformanceVT220,
+					NumFeatures:      1,
+				},
+				Secondary: libghostty.DeviceAttributesSecondary{
+					DeviceType:      libghostty.DADeviceTypeVT220,
+					FirmwareVersion: 0,
+					ROMCartridge:    0,
+				},
+				Tertiary: libghostty.DeviceAttributesTertiary{
+					UnitID: 0,
+				},
+			}
+			attrs.Primary.Features[0] = libghostty.DAFeatureANSIColor
+
+			return attrs, true
+		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create go-libghostty terminal: %w", err)
 	}
 
-	gt = &ghosttyTerminal{
-		terminal: terminal,
-		modeSet:  terminal.ModeSet,
-		cols:     cols,
-		rows:     rows,
-		dirty:    true,
-	}
+	gt.terminal = terminal
+	gt.modeSet = terminal.ModeSet
 
 	if err = gt.modeSet(libghostty.ModeGraphemeCluster, true); err != nil {
 		return nil, fmt.Errorf("enable go-libghostty grapheme clustering: %w", err)
@@ -126,6 +172,13 @@ func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 	}
 
 	return gt, nil
+}
+
+func (gt *ghosttyTerminal) DrainPtyReplies() []byte {
+	out := append([]byte(nil), gt.pendingPtyReplies...)
+	gt.pendingPtyReplies = nil
+
+	return out
 }
 
 func (gt *ghosttyTerminal) Write(p []byte) (n int, err error) {
