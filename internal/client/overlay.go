@@ -1664,7 +1664,7 @@ func (m *overlayModel) switchView(view viewMode) {
 	m.rebuildForView()
 
 	if selectedID != "" {
-		m.selectSessionByIDAndLabel(selectedID, selectedLabel)
+		_ = m.selectSessionByIDAndLabel(selectedID, selectedLabel)
 	}
 }
 
@@ -1678,7 +1678,7 @@ func (m *overlayModel) restorePickerState(state PickerState) {
 	m.rebuildForView()
 
 	if state.SessionID != "" {
-		m.selectSessionByIDAndLabel(state.SessionID, state.LabelGroup)
+		_ = m.selectSessionByIDAndLabel(state.SessionID, state.LabelGroup)
 	} else if m.currentSessionID != "" {
 		m.selectSessionByID(m.currentSessionID)
 	}
@@ -1694,15 +1694,15 @@ func (m *overlayModel) pickerState() PickerState {
 	return state
 }
 
-func (m *overlayModel) selectSessionByID(id string) {
-	m.selectSessionByIDAndLabel(id, "")
+func (m *overlayModel) selectSessionByID(id string) bool {
+	return m.selectSessionByIDAndLabel(id, "")
 }
 
-func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
+func (m *overlayModel) selectSessionByIDAndLabel(id, label string) bool {
 	for i, item := range m.list.Items() {
 		if si, ok := item.(sessionItem); ok && si.info.ID == id && (label == "" || sessionlabel.Equal(si.labelGroup, label)) {
 			m.list.Select(i)
-			return
+			return true
 		}
 	}
 	// If a refresh removed the selected label but the session still appears in
@@ -1712,7 +1712,7 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 		for i, item := range m.list.Items() {
 			if si, ok := item.(sessionItem); ok && si.info.ID == id {
 				m.list.Select(i)
-				return
+				return true
 			}
 		}
 	}
@@ -1735,7 +1735,7 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 			for i, item := range m.list.Items() {
 				if si, ok := item.(sessionItem); ok && si.info.ID == cur && sessionlabel.Equal(si.labelGroup, label) {
 					m.list.Select(i)
-					return
+					return true
 				}
 			}
 		}
@@ -1743,7 +1743,7 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 		for i, item := range m.list.Items() {
 			if si, ok := item.(sessionItem); ok && si.info.ID == cur {
 				m.list.Select(i)
-				return
+				return true
 			}
 		}
 
@@ -1753,6 +1753,41 @@ func (m *overlayModel) selectSessionByIDAndLabel(id, label string) {
 	if _, ok := m.list.SelectedItem().(groupHeader); ok {
 		m.list.CursorDown()
 	}
+
+	return false
+}
+
+func (m *overlayModel) selectSessionNearIndex(index int) bool {
+	items := m.list.Items()
+	if len(items) == 0 {
+		return false
+	}
+
+	index = max(0, min(index, len(items)-1))
+	if _, ok := items[index].(groupHeader); ok {
+		for i := index - 1; i >= 0; i-- {
+			if _, ok := items[i].(sessionItem); ok {
+				m.list.Select(i)
+				return true
+			}
+		}
+	}
+
+	for i := index; i < len(items); i++ {
+		if _, ok := items[i].(sessionItem); ok {
+			m.list.Select(i)
+			return true
+		}
+	}
+
+	for i := index - 1; i >= 0; i-- {
+		if _, ok := items[i].(sessionItem); ok {
+			m.list.Select(i)
+			return true
+		}
+	}
+
+	return false
 }
 
 func (m *overlayModel) parentsWithChildren() []string {
@@ -1933,6 +1968,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		curSID := ""
 		curLabel := ""
+		curIndex := m.list.Index()
 
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			curSID = item.info.ID
@@ -1948,8 +1984,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildForView()
 		m.resizeList()
 
-		if curSID != "" {
-			m.selectSessionByIDAndLabel(curSID, curLabel)
+		if curSID != "" && !m.selectSessionByIDAndLabel(curSID, curLabel) {
+			m.selectSessionNearIndex(curIndex)
 		}
 
 		return m, tea.Batch(m.fetchPreviewCmd(), m.refreshTickCmd())

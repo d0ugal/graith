@@ -158,6 +158,19 @@ func sessionItemsByID(items []list.Item) map[string]sessionItem {
 	return result
 }
 
+func requireSelectedSessionID(t *testing.T, m *overlayModel, want string) {
+	t.Helper()
+
+	item, ok := m.list.SelectedItem().(sessionItem)
+	if !ok {
+		t.Fatalf("selected item = %T, want sessionItem", m.list.SelectedItem())
+	}
+
+	if item.info.ID != want {
+		t.Fatalf("selected session = %q, want %q", item.info.ID, want)
+	}
+}
+
 // renderItem builds a compactDelegate for the given sessions and renders the
 // item at index into a string, using the standard 120x10 list dimensions.
 func renderItem(sessions []protocol.SessionInfo, current string, index int) string {
@@ -5344,6 +5357,55 @@ func TestUpdate_DeleteResultRefreshesAuthoritativeState(t *testing.T) {
 	}
 }
 
+func TestUpdate_DeleteResultRefreshPreservesMiddleSelectionPosition(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := sizedModel(t, sessions, "")
+	m.selectSessionByID("s1")
+	requireSelectedSessionID(t, m, "s1")
+
+	updated, _ := m.Update(deleteResultMsg{sessionID: "s1"})
+	remaining := []protocol.SessionInfo{sessions[1], sessions[2]}
+	updated, _ = asOverlay(updated).Update(refreshSessionsMsg{sessions: remaining})
+
+	requireSelectedSessionID(t, asOverlay(updated), "s2")
+}
+
+func TestUpdate_DeleteResultRefreshPreservesFinalSelectionPosition(t *testing.T) {
+	sessions := overlayTestSessions()
+	m := sizedModel(t, sessions, "")
+	m.selectSessionByID("s2")
+	requireSelectedSessionID(t, m, "s2")
+
+	if got, want := m.list.Index(), len(m.list.Items())-1; got != want {
+		t.Fatalf("selected index = %d, want final item index %d", got, want)
+	}
+
+	updated, _ := m.Update(deleteResultMsg{sessionID: "s2"})
+	remaining := []protocol.SessionInfo{sessions[0], sessions[2]}
+	updated, _ = asOverlay(updated).Update(refreshSessionsMsg{sessions: remaining})
+
+	requireSelectedSessionID(t, asOverlay(updated), "s1")
+}
+
+func TestUpdate_DeleteResultRefreshPreservesGroupedSelectionPosition(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "braw", Name: "braw", RepoName: "bothy", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "canny", Name: "canny", RepoName: "bothy", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+		{ID: "dreich", Name: "dreich", RepoName: "croft", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
+	}
+	m := sizedModel(t, sessions, "")
+	m.view = viewRepo
+	m.rebuildForView()
+	m.selectSessionByID("canny")
+	requireSelectedSessionID(t, m, "canny")
+
+	updated, _ := m.Update(deleteResultMsg{sessionID: "canny"})
+	remaining := []protocol.SessionInfo{sessions[0], sessions[2]}
+	updated, _ = asOverlay(updated).Update(refreshSessionsMsg{sessions: remaining})
+
+	requireSelectedSessionID(t, asOverlay(updated), "braw")
+}
+
 func TestUpdate_DeleteResultLastSessionRefreshesToEmpty(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{ID: "only", Name: "neep", RepoName: "repo", Status: "running", CreatedAt: time.Now().Format(time.RFC3339)},
@@ -5362,6 +5424,10 @@ func TestUpdate_DeleteResultLastSessionRefreshesToEmpty(t *testing.T) {
 
 	if got := countSessionItems(asOverlay(updated)); got != 0 {
 		t.Errorf("sessions after refresh = %d, want 0", got)
+	}
+
+	if _, ok := asOverlay(updated).list.SelectedItem().(sessionItem); ok {
+		t.Fatal("empty refresh should not leave a session selected")
 	}
 }
 
