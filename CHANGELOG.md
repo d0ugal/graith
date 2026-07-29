@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.70.6](https://github.com/d0ugal/graith/compare/v0.70.5...v0.70.6) (2026-07-29)
+
+
+### Features
+
+* add experimental terminal-owned attach mode ([c0742b5](https://github.com/d0ugal/graith/commit/c0742b5358e2f937c6dc3ed81567b4a6209de152))
+
+
+### Bug Fixes
+
+* automate libghostty artifact refresh ([96a5cf5](https://github.com/d0ugal/graith/commit/96a5cf56e95995aab773d3f3c8bbf6d8f5774570))
+
+
+### Tests
+
+* **ci:** cover dev-release classifier routing ([42719c2](https://github.com/d0ugal/graith/commit/42719c2c780a711481a9298198334e98ba0fd35b))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v43.285.7 ([#1819](https://github.com/d0ugal/graith/issues/1819)) ([636c6dd](https://github.com/d0ugal/graith/commit/636c6dd98cdbd759920212ea8c0c3e1ae36a15d7))
+* **deps:** update renovate/renovate docker tag to v43.286.0 ([#1822](https://github.com/d0ugal/graith/issues/1822)) ([1bd4f36](https://github.com/d0ugal/graith/commit/1bd4f362c366551f926f48012744cfaff93b8d24))
+
 ## [0.70.5](https://github.com/d0ugal/graith/compare/v0.70.4...v0.70.5) (2026-07-28)
 
 
