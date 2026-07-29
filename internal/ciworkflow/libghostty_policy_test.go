@@ -253,6 +253,11 @@ func TestLibghosttyLinuxArtifactsRemainTrustedAndLockComplete(t *testing.T) {
 	nativePublish := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native-publish.yml"))
 	nativeScript := readPolicyFile(t, filepath.Join(repoRoot, "scripts/libghostty-native.sh"))
 
+	devReleaseWorkflow := p11ReadWorkflowSummary(t, filepath.Join(repoRoot, ".github/workflows/dev-release.yml"))
+	goreleaserWorkflow := p11ReadWorkflowSummary(t, filepath.Join(repoRoot, ".github/workflows/goreleaser.yml"))
+	nativeWorkflow := p11ReadWorkflowSummary(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native.yml"))
+	nativePublishWorkflow := p11ReadWorkflowSummary(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native-publish.yml"))
+
 	var lock struct {
 		Ghostty struct {
 			LinuxArtifacts map[string]struct {
@@ -305,13 +310,64 @@ func TestLibghosttyLinuxArtifactsRemainTrustedAndLockComplete(t *testing.T) {
 	assertContains(t, nativeScript, "unexpected include path")
 	assertRegexp(t, nativeScript, `realpath.*include_path`)
 	assertRegexp(t, nativeScript, `cflag_tokens\[\@\].*2`)
+	assertContains(t, nativeScript, "libghostty_zig_job_arg()")
+	assertContains(t, nativeScript, "GRAITH_LIBGHOSTTY_ZIG_JOBS must be a positive integer")
+	assertContains(t, nativeScript, `printf '%s\n' "-j$GRAITH_LIBGHOSTTY_ZIG_JOBS"`)
+	assertContains(t, nativeScript, `zig_args+=("$zig_job_arg")`)
 	assertContains(t, native, "unset CGO_CFLAGS CGO_CPPFLAGS CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH")
 	assertContains(t, native, `source-build "$TARGET" "$LIBRARY"`)
+	assertContains(t, native, `source-test "$TARGET"`)
+
+	backendStep := p11WorkflowStep(t, p11WorkflowJob(t, nativeWorkflow, "linux-adapter"), "Compile and optionally run the isolated backend")
+	assertContains(t, backendStep.Env["GRAITH_LIBGHOSTTY_ZIG_JOBS"], "2")
+	assertContains(t, backendStep.Run, `source-test "$TARGET"`)
+
+	for name, step := range map[string]P11WorkflowStep{
+		"dev-release": p11WorkflowStep(t,
+			p11WorkflowJob(t, devReleaseWorkflow, "build-linux"),
+			"Build the exact pinned Linux dependency unit"),
+		"goreleaser": p11WorkflowStep(t,
+			p11WorkflowJob(t, goreleaserWorkflow, "build-linux"),
+			"Build the exact pinned native dependency unit"),
+		"libghostty-native": p11WorkflowStep(t,
+			p11WorkflowJob(t, nativeWorkflow, "linux-adapter"),
+			"Build the exact Ghostty source pin"),
+		"libghostty-native-publish": p11WorkflowStep(t,
+			p11WorkflowJob(t, nativePublishWorkflow, "publish"),
+			"Build from the pinned source revision"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertContains(t, step.Env["GRAITH_LIBGHOSTTY_ZIG_JOBS"], "2")
+			assertContains(t, step.Run, "source-build")
+		})
+	}
+
+	publishSourceBuild := p11WorkflowStep(t, p11WorkflowJob(t, nativePublishWorkflow, "publish"), "Build from the pinned source revision")
+	assertContains(t, publishSourceBuild.Run, `/usr/bin/time -v -o "$evidence"`)
+	assertContains(t, publishSourceBuild.Run, `cat "$evidence"`)
 
 	contractStep := mustMatchString(t, native, `(?ms)name: Contract-test the published Linux artifact.*?(?:\n      - name:|\z)`)
 	assertNotContains(t, contractStep, "if: needs.changes.outputs.dependency-unit")
 	assertRegexp(t, nativePublish, `(?ms)gh release create.*?gh release view`)
 	assertRegexp(t, nativePublish, `actions/checkout@[0-9a-f]{40}`)
+}
+
+func TestLibghosttyZigJobsValidationFailsBeforeSourceWork(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	command := exec.Command(filepath.Join(repoRoot, "scripts/libghostty-native.sh"), "source-test", "x86_64-linux-gnu")
+
+	command.Env = append(os.Environ(),
+		"GRAITH_LIBGHOSTTY_WORK="+t.TempDir(),
+		"GRAITH_LIBGHOSTTY_ZIG_JOBS=0",
+	)
+
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("source-test with invalid Zig jobs unexpectedly succeeded:\n%s", output)
+	}
+
+	assertContains(t, string(output), "GRAITH_LIBGHOSTTY_ZIG_JOBS must be a positive integer")
+	assertNotContains(t, string(output), "metadata")
 }
 
 func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T) {
@@ -506,6 +562,9 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 
 	linuxBuild := p11WorkflowStep(t, linuxBuildJob, "Build and pack Linux artifact")
 	assertContains(t, linuxBuild.Env["GRAITH_LIBGHOSTTY_ARTIFACT_INPUTS"], "1")
+	assertContains(t, linuxBuild.Env["GRAITH_LIBGHOSTTY_ZIG_JOBS"], "2")
+	assertContains(t, linuxBuild.Run, `/usr/bin/time -v -o "$evidence"`)
+	assertContains(t, linuxBuild.Run, `cat "$evidence"`)
 	assertContains(t, linuxBuild.Run, `"$RUNNER_TEMP/libghosttyarchive" pack`)
 	assertContains(t, p11WorkflowStep(t, linuxBuildJob, "Check for existing Linux artifact").Run, "verified immutable Linux artifact already published")
 	assertContains(t, p11WorkflowStep(t, linuxBuildJob, "Upload built Linux artifact").Uses, "actions/upload-artifact")
@@ -583,6 +642,17 @@ func assertGhReleaseCommandsUseExplicitRepo(t *testing.T, stepName, run string) 
 			t.Fatalf("%s release command %q must pass --repo \"$REPOSITORY\"", stepName, line)
 		}
 	}
+}
+
+func p11ReadWorkflowSummary(t *testing.T, path string) P11WorkflowSummary {
+	t.Helper()
+
+	workflow, err := ReadP11WorkflowSummary(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return workflow
 }
 
 func p11WorkflowStepIndex(t *testing.T, job P11WorkflowJob, name string) int {

@@ -227,6 +227,7 @@ jobs:
           EVIDENCE_ARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_ZIG_JOBS: "2"
           LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
           PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}/pkgconfig
           TARGET: ${{ matrix.target }}
@@ -319,6 +320,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_ZIG_JOBS: "2"
           LIBRARY: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract/libghostty-vt.a
           PKG_CONFIG_PATH: ${{ runner.temp }}/ghostty-${{ matrix.goarch }}-contract/pkgconfig
           RUN_TESTS: ${{ matrix.run_tests }}

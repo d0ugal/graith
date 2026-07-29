@@ -370,6 +370,7 @@ jobs:
         env:
           GRAITH_LIBGHOSTTY_KEEP_WORK: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_ZIG_JOBS: "2"
           LIBRARY: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}.a
           PKG_CONFIG_PATH: ${{ runner.temp }}/libghostty-${{ matrix.goarch }}/pkgconfig
           TARGET: ${{ matrix.target }}

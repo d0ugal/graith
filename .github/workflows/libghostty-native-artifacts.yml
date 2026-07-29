@@ -430,10 +430,17 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GRAITH_LIBGHOSTTY_ARTIFACT_INPUTS: "1"
           GRAITH_LIBGHOSTTY_WORK: ${{ runner.temp }}/ghostty-linux-${{ matrix.goarch }}
+          GRAITH_LIBGHOSTTY_ZIG_JOBS: "2"
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"
+          evidence="$RUNNER_TEMP/source-build-${GOARCH}.time"
+          if ! /usr/bin/time -v -o "$evidence" \
+            env GOARCH=amd64 scripts/libghostty-native.sh source-build "$TARGET" "$RUNNER_TEMP/libghostty-vt.a"; then
+            cat "$evidence" || true
+            exit 1
+          fi
+          cat "$evidence"
           mkdir -p "$RUNNER_TEMP/bundle/pkgconfig" "$RUNNER_TEMP/bundle/include"
           cp "$RUNNER_TEMP/libghostty-vt.a" "$RUNNER_TEMP/bundle/"
           cp -R gui/shared/Sources/CGhosttyVT/include/. "$RUNNER_TEMP/bundle/include/"
