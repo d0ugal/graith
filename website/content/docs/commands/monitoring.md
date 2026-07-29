@@ -101,6 +101,88 @@ and system sessions. Its `labels` field is always the complete array (including
 `[]` for an unlabelled session). USD cost isn't shown, a planned opt-in via a
 user-supplied price table.
 
+### `gr search <query>`
+
+Search conversation transcripts across sessions. V1 supports Claude Code and
+Codex transcripts and uses the same canonical transcript readers as migration
+and token accounting, so hidden reasoning and other excluded provider fields are
+not indexed. Search is local to the daemon; query text and matched transcript
+bodies are not sent to external services.
+
+```console
+$ gr search "permission denied"
+braw (braw-id)  claude/user  graith  2026-07-29T10:00:00Z
+  ...got [permission denied] opening the cache...
+  locator: s:braw-id:a:claude:n:sess-braw:t:4
+```
+
+| Flag | Description |
+|------|-------------|
+| `--session <name-or-id>` | Search one session |
+| `--children` | With `--session`, include descendants of that session |
+| `--repo <name-or-path>` | Filter by repo name or path |
+| `--agent <name>` | Filter by agent name |
+| `--kind <kind>` | Filter by message kind: `user`, `assistant`, `tool`, or `context`; repeat or comma-separate |
+| `--since <time>` | Include messages at or after an RFC3339 timestamp or `YYYY-MM-DD` date |
+| `--until <time>` | Include messages at or before an RFC3339 timestamp or `YYYY-MM-DD` date |
+| `--state <state>` | Filter by session state: `all` (default), `active` (`running`/`creating`), or `stopped` (`stopped`/`errored`) |
+| `--deleted` | Include soft-deleted sessions |
+| `--limit <n>` | Result count, default 20 and capped at 200 |
+| `--cursor <cursor>` | Continue from a previous response's `next_cursor` |
+
+Search is literal and case-insensitive. It is not fuzzy or semantic. Results are
+ordered deterministically by newest message timestamp when available, then
+session creation time, session ID, migrated/current generation, agent, native
+agent session ID, and transcript turn index. Time filters only match turns whose
+transcript record provided a parseable timestamp.
+
+Cold transcript parses are bounded per source: search reads at most 16 MiB and
+keeps at most 10,000 turns from one transcript source. Responses set
+`truncated` when pagination or resource bounds mean more matching content may
+exist outside the returned window. When a source bound is hit, v1 searches the
+oldest records read from that source and omits later transcript content.
+
+Each result includes the owning session, agent, message kind, optional timestamp,
+a bounded UTF-8 snippet, match ranges, and an opaque locator. Snippets strip
+ANSI and terminal control sequences before matching and display. The locator is
+for clients to reopen the owning context; do not parse it in scripts. Use
+`--json` for the stable structured form:
+
+```console
+$ gr search "bothy" --json | jq '.results[0]'
+{
+  "session_id": "braw-id",
+  "session_name": "braw",
+  "repo_path": "/Users/me/Code/graith",
+  "repo_name": "graith",
+  "agent": "claude",
+  "agent_session_id": "sess-braw",
+  "kind": "user",
+  "timestamp": "2026-07-29T10:00:00Z",
+  "snippet": "fix the bothy",
+  "matches": [{"start": 8, "end": 13}],
+  "locator": "s:braw-id:a:claude:n:sess-braw:t:0"
+}
+```
+
+Unsupported agents are reported in `unsupported_agents` rather than silently
+counting as zero results. Soft-deleted sessions are excluded unless `--deleted`
+is set. Purged sessions are absent from state and are no longer searchable.
+When a session has cross-agent migration or fork provenance, search includes
+both the current transcript and the persisted `migrated_from` source transcript.
+Those generations are not coalesced; if the same phrase appears in both, both
+results are returned with distinct `agent`, `agent_session_id`, and `locator`
+values.
+
+Search uses bounded on-demand scanning with an in-memory cache keyed by
+transcript path, size, and mtime. Appends, replacement, truncation, resume, and
+migration become searchable on the next query that observes the changed
+fingerprint. A daemon restart drops the cache and rebuilds it on demand. The
+daemon bounds scanner line size through the `[transcript]` config, stores at
+most 32 MiB of parsed search text in memory, truncates any single turn cached
+for search at 128 Ki runes, returns snippets of at most 240 runes, and caps one
+paginated query window at 1,000 results.
+
 ### `gr logs <name-or-id>` (alias: `l`)
 
 Show session output without attaching.

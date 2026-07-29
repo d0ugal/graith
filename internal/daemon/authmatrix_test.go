@@ -90,6 +90,7 @@ func TestRemoteAllowed(t *testing.T) {
 		{"guest cannot scenario_status", roleRemoteGuest, "scenario_status", false},
 		{"guest cannot wait", roleRemoteGuest, "wait", false},
 		{"guest cannot agent_info", roleRemoteGuest, "agent_info", false},
+		{"guest cannot search conversations", roleRemoteGuest, "search", false},
 
 		// roleRemoteHuman: everything except local-only.
 		{"human can list", roleRemoteHuman, "list", true},
@@ -112,10 +113,12 @@ func TestRemoteAllowed(t *testing.T) {
 		{"human cannot publish scenario result", roleRemoteHuman, "scenario_result_publish", false},
 		{"human can read DMs", roleRemoteHuman, "msg_conversation", true},
 		{"human can wait", roleRemoteHuman, "wait", true},
+		{"human can search conversations", roleRemoteHuman, "search", true},
 
 		// Remote sessions: everything except local-only (self/descendant applied later).
 		{"session can attach", roleSession, "attach", true},
 		{"session can agent_info", roleSession, "agent_info", true},
+		{"session can reach search handler for human-only denial", roleSession, "search", true},
 		{"session can status_report", roleSession, "status_report", true},
 		{"session can publish own scenario result", roleSession, "scenario_result_publish", true},
 		{"session cannot upgrade", roleSession, "upgrade", false},

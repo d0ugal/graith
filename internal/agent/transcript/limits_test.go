@@ -78,24 +78,26 @@ func TestConfiguredLineCapGovernsReader(t *testing.T) {
 	path := writeLines(t, []string{line})
 
 	// Default cap: the line fits, one turn, nothing dropped.
-	turns, dropped, err := claudeReader{}.read(path)
+	turns, dropped, truncated, err := claudeReader{}.read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read (default cap): %v", err)
 	}
 
-	if len(turns) != 1 || dropped != 0 {
-		t.Fatalf("default cap: got %d turns, %d dropped; want 1 turn, 0 dropped", len(turns), dropped)
+	if len(turns) != 1 || dropped != 0 || truncated {
+		t.Fatalf("default cap: got %d turns, %d dropped, truncated=%v; want 1 turn, 0 dropped, false",
+			len(turns), dropped, truncated)
 	}
 
 	// Tiny cap: the line exceeds the scanner buffer and is skipped.
 	Configure(1024, 0)
 
-	turns, dropped, err = claudeReader{}.read(path)
+	turns, dropped, truncated, err = claudeReader{}.read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read (tiny cap): %v", err)
 	}
 
-	if len(turns) != 0 || dropped != 1 {
-		t.Fatalf("tiny cap: got %d turns, %d dropped; want 0 turns, 1 dropped", len(turns), dropped)
+	if len(turns) != 0 || dropped != 1 || truncated {
+		t.Fatalf("tiny cap: got %d turns, %d dropped, truncated=%v; want 0 turns, 1 dropped, false",
+			len(turns), dropped, truncated)
 	}
 }

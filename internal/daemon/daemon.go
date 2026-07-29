@@ -162,6 +162,7 @@ type SessionManager struct {
 	triggers     *triggerState
 	completion   *scenarioCompletionRuntime
 	tokens       *tokenCache
+	search       *conversationSearchCache
 	launch       *launchThrottle
 	// sessionLaunchLocks serialize resume/restart decisions per session. They
 	// close the compare-to-launch race between an automatic scenario retry and
@@ -307,6 +308,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		triggers:                  newTriggerState(),
 		completion:                newScenarioCompletionRuntime(),
 		tokens:                    newTokenCache(),
+		search:                    newConversationSearchCache(),
 		launch:                    newLaunchThrottle(cfg.Launch.MaxConcurrentOrDefault()),
 		resourceSamples:           make(map[string][]ResourceSample),
 		resourceKick:              make(chan struct{}, 1),

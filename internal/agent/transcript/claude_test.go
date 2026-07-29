@@ -31,13 +31,13 @@ func TestClaudeReaderWalksChainAndPairsTools(t *testing.T) {
 	}
 	path := writeLines(t, lines)
 
-	turns, dropped, err := claudeReader{}.read(path)
+	turns, dropped, truncated, err := claudeReader{}.read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 
-	if dropped != 1 {
-		t.Errorf("dropped = %d, want 1", dropped)
+	if dropped != 1 || truncated {
+		t.Errorf("dropped = %d truncated=%v, want 1 false", dropped, truncated)
 	}
 
 	want := []struct {
@@ -84,9 +84,13 @@ func TestClaudeReaderWalksChainAndPairsTools(t *testing.T) {
 func TestClaudeReaderEmptyYieldsNoTurns(t *testing.T) {
 	path := writeLines(t, []string{`{"type":"summary","uuid":"s1"}`})
 
-	turns, _, err := claudeReader{}.read(path)
+	turns, _, truncated, err := claudeReader{}.read(path, readOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if truncated {
+		t.Fatal("truncated = true, want false")
 	}
 
 	if len(turns) != 0 {

@@ -24,6 +24,13 @@
       "cli": "supported", "ios": "supported", "macos": "supported"
     },
     {
+      "id": "session.conversation-search",
+      "category": "Session lifecycle",
+      "name": "Search conversation transcripts",
+      "cli": "supported", "ios": "planned", "macos": "planned",
+      "notes": "V1 ships the shared daemon query/result model and `gr search`; native interactive presentation is planned."
+    },
+    {
       "id": "session.labels",
       "category": "Session lifecycle",
       "name": "Create, update, and filter by session labels",

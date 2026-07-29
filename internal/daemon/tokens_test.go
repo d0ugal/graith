@@ -249,6 +249,54 @@ func TestTokenLoopKnownZeroVsUnknown(t *testing.T) {
 	}
 }
 
+func TestTokenLoopUsesNativeTranscriptRootForCodex(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	worktree := t.TempDir()
+	writeSearchCodexTranscript(t, root, worktree, "sess-codex",
+		`{"type":"event_msg","timestamp":"2026-07-29T10:00:00Z","payload":{"type":"token_count","total":42}}`,
+	)
+
+	sm := newTokenTestSM(map[string]*SessionState{
+		"canny": {
+			ID: "canny", Agent: "codex", AgentSessionID: "sess-codex",
+			NativeTranscriptRoot: root, WorktreePath: worktree, Status: StatusRunning,
+		},
+	})
+
+	sm.runTokenTick(context.Background())
+
+	got := sm.state.Sessions["canny"].Tokens
+	if got == nil || got.Total != 42 {
+		t.Fatalf("Tokens = %+v, want Codex total 42 from native transcript root", got)
+	}
+}
+
+func TestTokenLoopFallsBackToDefaultCodexRootForOldState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+
+	worktree := t.TempDir()
+	writeSearchCodexTranscript(t, root, worktree, "sess-codex",
+		`{"type":"event_msg","timestamp":"2026-07-29T10:00:00Z","payload":{"type":"token_count","total":17}}`,
+	)
+
+	sm := newTokenTestSM(map[string]*SessionState{
+		"bide": {
+			ID: "bide", Agent: "codex", AgentSessionID: "sess-codex",
+			WorktreePath: worktree, Status: StatusRunning,
+		},
+	})
+
+	sm.runTokenTick(context.Background())
+
+	got := sm.state.Sessions["bide"].Tokens
+	if got == nil || got.Total != 17 {
+		t.Fatalf("Tokens = %+v, want Codex total 17 from default root fallback", got)
+	}
+}
+
 func TestSetTokenStatsIdentityGuard(t *testing.T) {
 	// If the session's agent identity changes between the off-lock parse and the
 	// write-back, the stale parse must NOT be published (migration mislabel).
@@ -271,6 +319,14 @@ func TestSetTokenStatsIdentityGuard(t *testing.T) {
 	if got := sm.state.Sessions["braw"].Tokens; got == nil || got.Total != 42 {
 		t.Errorf("matching identity should publish: %+v", got)
 	}
+
+	sm.state.Sessions["braw"].NativeTranscriptRoot = "/hame/new"
+	staleRoot := tokenTarget{id: "braw", agent: "codex", agentSessionID: "new-id", stateRoot: "/hame/old", worktreePath: "/w"}
+	sm.setTokenStats(staleRoot, &TokenStats{Total: 999})
+
+	if got := sm.state.Sessions["braw"].Tokens; got == nil || got.Total != 42 {
+		t.Errorf("stale root should not publish: %+v", got)
+	}
 }
 
 func TestTokenFingerprintIncludesIdentity(t *testing.T) {
@@ -282,6 +338,11 @@ func TestTokenFingerprintIncludesIdentity(t *testing.T) {
 
 	if a == b {
 		t.Error("fingerprint should differ when the agent identity differs")
+	}
+
+	c := tokenFingerprint(tokenTarget{agent: "codex", agentSessionID: "id2", stateRoot: "/hame/codex", worktreePath: "/w"}, src)
+	if b == c {
+		t.Error("fingerprint should differ when the native transcript root differs")
 	}
 }
 

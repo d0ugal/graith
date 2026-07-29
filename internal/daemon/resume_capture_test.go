@@ -167,6 +167,10 @@ func TestCaptureNativeSessionIDCodex(t *testing.T) {
 	if got := sm.state.Sessions["bide"].AgentSessionID; got != "braw-native-id" {
 		t.Fatalf("AgentSessionID = %q; want braw-native-id", got)
 	}
+
+	if got := sm.state.Sessions["bide"].NativeTranscriptRoot; got != root {
+		t.Fatalf("NativeTranscriptRoot = %q; want %q", got, root)
+	}
 }
 
 func TestCaptureNativeSessionIDReconstructsAfterExecCancellation(t *testing.T) {
@@ -200,6 +204,10 @@ func TestCaptureNativeSessionIDReconstructsAfterExecCancellation(t *testing.T) {
 
 	if state.NativeStateRoot != "" || state.NativeCaptureStartedAt != nil {
 		t.Fatalf("capture restart metadata was not cleared: %+v", state)
+	}
+
+	if state.NativeTranscriptRoot != root {
+		t.Fatalf("NativeTranscriptRoot = %q; want %q", state.NativeTranscriptRoot, root)
 	}
 
 	args, _ := resolveResumeArgs(config.Agent{ResumeArgs: []string{"resume", "{agent_session_id}"}}, "codex", state.AgentSessionID, false)

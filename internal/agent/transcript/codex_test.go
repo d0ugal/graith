@@ -22,13 +22,13 @@ func TestCodexReaderRolesAndToolPairing(t *testing.T) {
 	}
 	path := writeLines(t, lines)
 
-	turns, dropped, err := codexReader{}.read(path)
+	turns, dropped, truncated, err := codexReader{}.read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 
-	if dropped != 0 {
-		t.Errorf("dropped = %d, want 0", dropped)
+	if dropped != 0 || truncated {
+		t.Errorf("dropped = %d truncated=%v, want 0 false", dropped, truncated)
 	}
 
 	want := []struct {
@@ -338,7 +338,7 @@ func TestAppendCodexTurnUnpairedOutputCov(t *testing.T) {
 		Type:   "function_call_output",
 		CallID: "orphan",
 		Output: []byte(`"orphaned neeps"`),
-	}, &turns, toolIdx)
+	}, time.Time{}, &turns, toolIdx)
 
 	if len(turns) != 1 {
 		t.Fatalf("got %d turns, want 1", len(turns))
@@ -353,7 +353,7 @@ func TestAppendCodexTurnUnpairedOutputCov(t *testing.T) {
 		Type:   "function_call_output",
 		CallID: "orphan-empty",
 		Output: []byte(`""`),
-	}, &turns, toolIdx)
+	}, time.Time{}, &turns, toolIdx)
 
 	if len(turns) != 1 {
 		t.Errorf("empty orphan output should add no turn; got %d turns", len(turns))
@@ -371,12 +371,12 @@ func TestAppendCodexTurnCustomToolAliasesCov(t *testing.T) {
 		Name:      "browser",
 		Arguments: `{"url":"x"}`,
 		CallID:    "ct1",
-	}, &turns, toolIdx)
+	}, time.Time{}, &turns, toolIdx)
 	appendCodexTurn(codexResponseItem{
 		Type:   "custom_tool_call_output",
 		CallID: "ct1",
 		Output: []byte(`"rendered"`),
-	}, &turns, toolIdx)
+	}, time.Time{}, &turns, toolIdx)
 
 	if len(turns) != 1 {
 		t.Fatalf("got %d turns, want 1", len(turns))

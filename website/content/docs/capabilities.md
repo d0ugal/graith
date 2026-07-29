@@ -44,6 +44,7 @@ as live state.
 |------------|:---:|:---:|:---:|
 | List sessions | ✅ | ✅ | ✅ |
 | Filter and search sessions | ✅ | ✅ | ✅ |
+| Search conversation transcripts <sup>1</sup> | ✅ | 🚧 | 🚧 |
 | Create, update, and filter by session labels | ✅ | ✅ | ✅ |
 | Create session | ✅ | ✅ | ✅ |
 | Stop session | ✅ | ✅ | ✅ |
@@ -57,10 +58,11 @@ as live state.
 | Fork session | ✅ | ✅ | ✅ |
 | Migrate session to another agent | ✅ | ✅ | ✅ |
 | Set session status summary | ✅ | ✅ | ✅ |
-| Block until a session matches a condition <sup>1</sup> | ✅ | — | — |
+| Block until a session matches a condition <sup>2</sup> | ✅ | — | — |
 | List available repositories for new sessions | ✅ | ✅ | ✅ |
 
-<sup>1</sup> Block until a session matches a condition: A scripting/automation gate; the GUIs surface live state instead. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
+<sup>1</sup> Search conversation transcripts: V1 ships the shared daemon query/result model and `gr search`; native interactive presentation is planned.
+<sup>2</sup> Block until a session matches a condition: A scripting/automation gate; the GUIs surface live state instead. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-platform-scope-policy.md#platform-support)
 
 ### Terminal I/O
 

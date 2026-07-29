@@ -12,8 +12,10 @@
 package transcript
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Agent identifiers for supported source transcripts.
@@ -54,10 +56,11 @@ type ToolCall struct {
 
 // Turn is one neutral conversation turn.
 type Turn struct {
-	Role     Role
-	Text     string
-	Tool     *ToolCall // non-nil when Role == RoleTool
-	SrcAgent string    // source agent that produced the turn
+	Role      Role
+	Text      string
+	Timestamp time.Time
+	Tool      *ToolCall // non-nil when Role == RoleTool
+	SrcAgent  string    // source agent that produced the turn
 }
 
 // Conversation is the parsed, normalized transcript.
@@ -65,11 +68,27 @@ type Conversation struct {
 	SrcAgent     string
 	Turns        []Turn
 	DroppedLines int // unparseable/skipped lines (format drift, partial tail)
+	Truncated    bool
 }
 
 // reader parses an agent's transcript file into ordered turns.
 type reader interface {
-	read(path string) ([]Turn, int, error)
+	read(path string, opts readOptions) ([]Turn, int, bool, error)
+}
+
+// ReadOptions bounds transcript parsing for latency-sensitive callers such as
+// search. Zero values preserve the full-read behaviour used by migration and
+// token accounting.
+type ReadOptions struct {
+	Context           context.Context
+	MaxBytesPerSource int64
+	MaxTurnsPerSource int
+}
+
+type readOptions struct {
+	ctx               context.Context
+	maxBytesPerSource int64
+	maxTurnsPerSource int
 }
 
 func readerFor(agent string) (reader, error) {
@@ -95,23 +114,63 @@ func Supported(agent string) bool {
 // transcripts and as a fallback). Returns ErrNoTurns if the transcript parsed
 // but yielded nothing usable.
 func Read(agent, agentSessionID, worktreePath string) (*Conversation, error) {
+	return ReadWithRoot(agent, agentSessionID, worktreePath, "")
+}
+
+// ReadWithRoot is Read scoped to an explicit agent-native state root when the
+// provider supports one.
+func ReadWithRoot(agent, agentSessionID, worktreePath, stateRoot string) (*Conversation, error) {
+	sources, err := LocateWithRoot(agent, agentSessionID, worktreePath, stateRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	return ReadFrom(agent, sources)
+}
+
+// ReadFrom parses already-located transcript sources. It exists for callers
+// that fingerprint sources before parsing, such as token accounting and search.
+func ReadFrom(agent string, sources []Source) (*Conversation, error) {
+	return ReadFromWithOptions(agent, sources, ReadOptions{})
+}
+
+// ReadFromWithOptions parses already-located transcript sources with optional
+// read bounds.
+func ReadFromWithOptions(agent string, sources []Source, opts ReadOptions) (*Conversation, error) {
 	r, err := readerFor(agent)
 	if err != nil {
 		return nil, err
 	}
 
-	path, err := locate(agent, agentSessionID, worktreePath)
-	if err != nil {
-		return nil, err
-	}
+	readOpts := normalizeReadOptions(opts)
 
-	turns, dropped, err := r.read(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s transcript %s: %w", agent, path, err)
+	var (
+		turns     []Turn
+		dropped   int
+		truncated bool
+	)
+
+	for _, source := range sources {
+		if err := readOpts.contextErr(); err != nil {
+			return nil, err
+		}
+
+		srcTurns, srcDropped, srcTruncated, readErr := r.read(source.Path, readOpts)
+		if readErr != nil {
+			return nil, fmt.Errorf("read %s transcript %s: %w", agent, source.Path, readErr)
+		}
+
+		turns = append(turns, srcTurns...)
+		dropped += srcDropped
+		truncated = truncated || srcTruncated
 	}
 
 	turns = pairToolOutputs(turns)
 	if len(turns) == 0 {
+		if truncated {
+			return &Conversation{SrcAgent: agent, Turns: nil, DroppedLines: dropped, Truncated: true}, nil
+		}
+
 		return nil, ErrNoTurns
 	}
 
@@ -119,16 +178,17 @@ func Read(agent, agentSessionID, worktreePath string) (*Conversation, error) {
 		turns[i].SrcAgent = agent
 	}
 
-	return &Conversation{SrcAgent: agent, Turns: turns, DroppedLines: dropped}, nil
+	return &Conversation{SrcAgent: agent, Turns: turns, DroppedLines: dropped, Truncated: truncated}, nil
 }
 
-// locate resolves the on-disk transcript path for an agent/session.
-func locate(agent, agentSessionID, worktreePath string) (string, error) {
+// locateWithRoot resolves the on-disk transcript path for an agent/session,
+// optionally scoped to an agent-native state root such as CODEX_HOME.
+func locateWithRoot(agent, agentSessionID, worktreePath, stateRoot string) (string, error) {
 	switch agent {
 	case AgentClaude:
 		return locateClaude(agentSessionID)
 	case AgentCodex:
-		return locateCodex(agentSessionID, worktreePath)
+		return locateCodexInRoot(stateRoot, agentSessionID, worktreePath)
 	default:
 		return "", fmt.Errorf("%w: %q", ErrUnsupportedAgent, agent)
 	}
@@ -139,4 +199,41 @@ func locate(agent, agentSessionID, worktreePath string) (string, error) {
 // be added in one place without touching each reader.
 func pairToolOutputs(turns []Turn) []Turn {
 	return turns
+}
+
+func normalizeReadOptions(opts ReadOptions) readOptions {
+	return readOptions{
+		ctx:               opts.Context,
+		maxBytesPerSource: opts.MaxBytesPerSource,
+		maxTurnsPerSource: opts.MaxTurnsPerSource,
+	}
+}
+
+func (o readOptions) contextErr() error {
+	if o.ctx == nil {
+		return nil
+	}
+
+	select {
+	case <-o.ctx.Done():
+		return o.ctx.Err()
+	default:
+		return nil
+	}
+}
+
+func parseTimestamp(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+
+	if ts, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return ts
+	}
+
+	if ts, err := time.Parse(time.RFC3339, value); err == nil {
+		return ts
+	}
+
+	return time.Time{}
 }
