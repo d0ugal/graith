@@ -212,6 +212,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	sourceCodex := codexOptsForAgent(agentName, cloneCodexOptions(source.Codex))
 
 	sourceAgentSessionID := source.AgentSessionID
+	sourceNativeTranscriptRoot := sessionNativeTranscriptRoot(source)
 	sourceLabels := append([]string{}, source.Labels...)
 	sourceAgentHooks := source.AgentHooks
 	hookFilesNeeded := sourceAgentHooks
@@ -323,7 +324,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// fork — unsupported/missing/empty source transcript — fails fast. The
 	// source session keeps running throughout; we only read its on-disk history.
 	if crossAgent {
-		conv, err := transcript.Read(srcAgent, sourceAgentSessionID, srcWorktree)
+		conv, err := transcript.ReadWithRoot(srcAgent, sourceAgentSessionID, srcWorktree, sourceNativeTranscriptRoot)
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("read source transcript: %w", err)
@@ -737,10 +738,18 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		SandboxConfig: cfgSnapshot.Sandbox.Merge(agent.Sandbox),
 	}
 
-	if scrapesID(agentName) && agentSessionID == "" {
-		captureStartedAt := startedAt.UTC()
-		sessState.NativeStateRoot = env["CODEX_HOME"]
-		sessState.NativeCaptureStartedAt = &captureStartedAt
+	if scrapesID(agentName) {
+		root := nativeTranscriptRootForLaunch(agentName, agentSessionID, env["CODEX_HOME"], sessState.NativeTranscriptRoot)
+		sessState.NativeTranscriptRoot = root
+
+		if agentSessionID == "" {
+			captureStartedAt := startedAt.UTC()
+			sessState.NativeStateRoot = root
+			sessState.NativeCaptureStartedAt = &captureStartedAt
+		} else {
+			sessState.NativeStateRoot = ""
+			sessState.NativeCaptureStartedAt = nil
+		}
 	}
 
 	// Record cross-agent provenance (surfaced via SessionInfo.MigratedFrom) and,
@@ -749,11 +758,12 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// Migrate; a fork is distinguished by having a live ParentID.
 	if crossAgent {
 		sessState.MigratedFrom = &MigrationInfo{
-			Agent:          srcAgent,
-			Model:          sourceModel,
-			AgentSessionID: sourceAgentSessionID,
-			RenderedPath:   forkContextPath,
-			At:             time.Now().UTC(),
+			Agent:                srcAgent,
+			Model:                sourceModel,
+			AgentSessionID:       sourceAgentSessionID,
+			NativeTranscriptRoot: sourceNativeTranscriptRoot,
+			RenderedPath:         forkContextPath,
+			At:                   time.Now().UTC(),
 		}
 	}
 

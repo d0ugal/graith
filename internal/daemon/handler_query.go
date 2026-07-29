@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
@@ -117,6 +118,30 @@ func handleAgentCatalog(sm *SessionManager, send func(string, any)) {
 		Agents:       entries,
 		DefaultAgent: cfg.DefaultAgent,
 	})
+}
+
+// handleSearch returns local conversation-search results. Transcript bodies can
+// contain sensitive user content, so v1 restricts this to human operators.
+func handleSearch(ctx context.Context, sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
+	if !auth.isHuman() {
+		send("error", protocol.ErrorMsg{Message: "conversation search requires a human operator"})
+
+		return
+	}
+
+	req, ok := decodePayload[protocol.SearchMsg](msg, send, "invalid search message")
+	if !ok {
+		return
+	}
+
+	resp, err := sm.SearchConversations(ctx, req)
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return
+	}
+
+	send("search_response", resp)
 }
 
 // handleGC runs the orphan garbage collector (dry-run unless Force) and returns

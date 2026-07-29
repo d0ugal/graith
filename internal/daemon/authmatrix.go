@@ -82,6 +82,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"config":        remoteHumanRW, // effective config (env secrets redacted) + diff (GUI config viewer, #904)
 	"agent_catalog": remoteHumanRW, // configured agent names + default_agent (GUI agent pickers, #1234)
 	"agent_info":    remoteHumanRW, // executes configured provider info commands; human/sessions only
+	"search":        remoteHumanRW, // transcript bodies are sensitive; handler restricts to humans
 	"diagnostics":   remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
 
 	"wait":            remoteHumanRW, // targets arbitrary sessions

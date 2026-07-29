@@ -1,6 +1,8 @@
 package transcript
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -41,6 +43,40 @@ func TestBoundedLineReaderEnforcesExactCap(t *testing.T) {
 	}
 }
 
+func TestBoundedLineReaderHonorsTotalByteLimit(t *testing.T) {
+	r := newBoundedLineReader(strings.NewReader("12345\n67890\n"), 32).limitTotalBytes(6)
+
+	if !r.scan() {
+		t.Fatal("first record was not returned")
+	}
+
+	if got := string(r.bytes()); got != "12345" {
+		t.Fatalf("first record = %q, want 12345", got)
+	}
+
+	if r.scan() {
+		t.Fatal("second record returned after total byte limit")
+	}
+
+	if !r.truncated {
+		t.Fatal("truncated = false, want true")
+	}
+}
+
+func TestBoundedLineReaderHonorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	r := newBoundedLineReader(strings.NewReader("braw\n"), 32).withContext(ctx)
+	if r.scan() {
+		t.Fatal("scan returned a record after context cancellation")
+	}
+
+	if !errors.Is(r.err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", r.err)
+	}
+}
+
 func TestBoundedLineReaderContinuesPastOversizedMiddle(t *testing.T) {
 	// The defect the issue's continuation requirement targets: an over-cap record
 	// in the MIDDLE of the stream must not terminate iteration. Every later valid
@@ -62,6 +98,35 @@ func TestBoundedLineReaderContinuesPastOversizedMiddle(t *testing.T) {
 
 	if r.oversized != 2 {
 		t.Fatalf("oversized = %d, want 2", r.oversized)
+	}
+}
+
+func TestReadFromWithOptionsHonorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	path := writeLines(t, []string{
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"braw"}]}}`,
+	})
+
+	_, err := ReadFromWithOptions(AgentCodex, []Source{{Path: path}}, ReadOptions{Context: ctx})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadFromWithOptions err = %v, want context.Canceled", err)
+	}
+}
+
+func TestReadFromWithOptionsReportsTruncatedWithoutTurns(t *testing.T) {
+	path := writeLines(t, []string{
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"braw"}]}}`,
+	})
+
+	conv, err := ReadFromWithOptions(AgentCodex, []Source{{Path: path}}, ReadOptions{MaxBytesPerSource: 1})
+	if err != nil {
+		t.Fatalf("ReadFromWithOptions: %v", err)
+	}
+
+	if conv == nil || !conv.Truncated || len(conv.Turns) != 0 {
+		t.Fatalf("conversation = %+v, want truncated with no turns", conv)
 	}
 }
 
@@ -134,30 +199,32 @@ func TestBoundedLineReaderLimitRecordsCountsSkipped(t *testing.T) {
 // assertReadSubFloorCap is the buffer-floor regression body: a valid record
 // between the configured 1 KiB cap and the old 64 KiB initial-buffer floor was
 // silently accepted before the fix. It must now be dropped under the small cap.
-func assertReadSubFloorCap(t *testing.T, read func(string) ([]Turn, int, error), line string) {
+func assertReadSubFloorCap(t *testing.T, read func(string, readOptions) ([]Turn, int, bool, error), line string) {
 	t.Helper()
 	resetScanLimits(t)
 
 	path := writeLines(t, []string{line})
 
-	turns, dropped, err := read(path)
+	turns, dropped, truncated, err := read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read (default cap): %v", err)
 	}
 
-	if len(turns) != 1 || dropped != 0 {
-		t.Fatalf("default cap: got %d turns, %d dropped; want 1 turn, 0 dropped", len(turns), dropped)
+	if len(turns) != 1 || dropped != 0 || truncated {
+		t.Fatalf("default cap: got %d turns, %d dropped, truncated=%v; want 1 turn, 0 dropped, false",
+			len(turns), dropped, truncated)
 	}
 
 	Configure(1024, 0)
 
-	turns, dropped, err = read(path)
+	turns, dropped, truncated, err = read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read (1 KiB cap): %v", err)
 	}
 
-	if len(turns) != 0 || dropped != 1 {
-		t.Fatalf("1 KiB cap: got %d turns, %d dropped; want 0 turns, 1 dropped", len(turns), dropped)
+	if len(turns) != 0 || dropped != 1 || truncated {
+		t.Fatalf("1 KiB cap: got %d turns, %d dropped, truncated=%v; want 0 turns, 1 dropped, false",
+			len(turns), dropped, truncated)
 	}
 }
 
@@ -323,16 +390,20 @@ func TestCodexMetadataStopsAtPhysicalWindow(t *testing.T) {
 // over-cap record in the middle of the stream (exceeding both the 1 KiB cap and
 // the old 64 KiB floor) must be drained, not fatal, so the later valid records
 // still land as turns "afore" then "efter".
-func assertReadOversizedMiddleKeepsLater(t *testing.T, read func(string) ([]Turn, int, error), lines []string) {
+func assertReadOversizedMiddleKeepsLater(t *testing.T, read func(string, readOptions) ([]Turn, int, bool, error), lines []string) {
 	t.Helper()
 	resetScanLimits(t)
 	Configure(1024, 0)
 
 	path := writeLines(t, lines)
 
-	turns, dropped, err := read(path)
+	turns, dropped, truncated, err := read(path, readOptions{})
 	if err != nil {
 		t.Fatalf("read: %v", err)
+	}
+
+	if truncated {
+		t.Fatal("truncated = true, want false")
 	}
 
 	if dropped != 1 {

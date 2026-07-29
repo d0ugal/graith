@@ -12,6 +12,11 @@
       "macos": "supported"
     },
     {
+      "id": "session.conversation-search",
+      "ios": "planned",
+      "macos": "planned"
+    },
+    {
       "id": "session.labels",
       "ios": "supported",
       "macos": "supported"

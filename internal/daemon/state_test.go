@@ -164,6 +164,39 @@ func TestStatePreservesExplicitEmptyNonInteractiveArgs(t *testing.T) {
 	}
 }
 
+func TestStatePreservesNativeTranscriptRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	state := &State{Sessions: map[string]*SessionState{
+		"braw": {
+			ID: "braw", Name: "braw", Agent: "codex", AgentSessionID: "codex-id",
+			NativeTranscriptRoot: "/hame/codex-state", Status: StatusStopped,
+			MigratedFrom: &MigrationInfo{
+				Agent: "claude", AgentSessionID: "claude-id",
+				NativeTranscriptRoot: "/hame/claude-state",
+				At:                   time.Date(2026, 7, 29, 10, 0, 0, 0, time.UTC),
+			},
+		},
+	}}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := loaded.Sessions["braw"]
+	if s.NativeTranscriptRoot != "/hame/codex-state" {
+		t.Fatalf("NativeTranscriptRoot = %q, want persisted root", s.NativeTranscriptRoot)
+	}
+
+	if s.MigratedFrom == nil || s.MigratedFrom.NativeTranscriptRoot != "/hame/claude-state" {
+		t.Fatalf("MigratedFrom.NativeTranscriptRoot = %+v, want persisted root", s.MigratedFrom)
+	}
+}
+
 func TestStateOmitsAgentInfoFromCreationConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 
@@ -1441,8 +1474,8 @@ func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 30 {
-		t.Fatalf("CurrentStateVersion = %d, want 30", CurrentStateVersion)
+	if CurrentStateVersion != 31 {
+		t.Fatalf("CurrentStateVersion = %d, want 31", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

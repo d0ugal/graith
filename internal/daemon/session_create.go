@@ -1104,10 +1104,18 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	sessState.StatusChangedAt = time.Now()
 	sessState.LaunchGeneration = 1
 
-	if scrapesID(agentName) && agentSessionID == "" {
-		captureStartedAt := startedAt.UTC()
-		sessState.NativeStateRoot = env["CODEX_HOME"]
-		sessState.NativeCaptureStartedAt = &captureStartedAt
+	if scrapesID(agentName) {
+		root := nativeTranscriptRootForLaunch(agentName, agentSessionID, env["CODEX_HOME"], sessState.NativeTranscriptRoot)
+		sessState.NativeTranscriptRoot = root
+
+		if agentSessionID == "" {
+			captureStartedAt := startedAt.UTC()
+			sessState.NativeStateRoot = root
+			sessState.NativeCaptureStartedAt = &captureStartedAt
+		} else {
+			sessState.NativeStateRoot = ""
+			sessState.NativeCaptureStartedAt = nil
+		}
 	}
 
 	if opts.Starred {

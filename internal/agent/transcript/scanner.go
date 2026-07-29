@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"bufio"
+	"context"
 	"io"
 )
 
@@ -31,12 +32,16 @@ type boundedLineReader struct {
 	r          *bufio.Reader
 	maxBytes   int
 	maxRecords int // 0 = unlimited; else stop after this many physical records
+	maxTotal   int64
+	totalRead  int64
 	buf        []byte
 	line       []byte
-	consumed   int   // physical records consumed (in-cap or drained-oversized)
-	oversized  int   // count of records skipped for exceeding maxBytes
+	consumed   int // physical records consumed (in-cap or drained-oversized)
+	oversized  int // count of records skipped for exceeding maxBytes
+	truncated  bool
 	err        error // first non-EOF read error, if any
 	done       bool
+	ctx        context.Context
 }
 
 // newBoundedLineReader bounds each record at maxBytes. A non-positive maxBytes is
@@ -63,6 +68,26 @@ func (b *boundedLineReader) limitRecords(n int) *boundedLineReader {
 	return b
 }
 
+// limitTotalBytes bounds total bytes read from the underlying reader. When the
+// limit is reached mid-record, the partial record is discarded and scanning
+// stops with truncated set.
+func (b *boundedLineReader) limitTotalBytes(n int64) *boundedLineReader {
+	if n > 0 {
+		b.maxTotal = n
+	}
+
+	return b
+}
+
+// withContext makes scanning stop promptly between file reads when ctx is
+// canceled. It cannot interrupt an in-flight local file read, but bounds the
+// remaining work after cancellation.
+func (b *boundedLineReader) withContext(ctx context.Context) *boundedLineReader {
+	b.ctx = ctx
+
+	return b
+}
+
 // scan advances to the next in-cap record, retrievable via bytes. It returns
 // false once the input is exhausted, a non-EOF read error occurs, or the
 // physical-record limit (if any) is reached. Over-cap records are skipped (and
@@ -71,6 +96,13 @@ func (b *boundedLineReader) limitRecords(n int) *boundedLineReader {
 func (b *boundedLineReader) scan() bool {
 	for {
 		if b.done {
+			return false
+		}
+
+		if err := b.contextErr(); err != nil {
+			b.err = err
+			b.done = true
+
 			return false
 		}
 
@@ -123,7 +155,22 @@ func (b *boundedLineReader) readRecord() (line []byte, tooLong bool, atEOF bool)
 	b.buf = b.buf[:0]
 
 	for {
+		if err := b.contextErr(); err != nil {
+			b.err = err
+
+			return nil, tooLong, true
+		}
+
 		frag, err := b.r.ReadSlice('\n')
+
+		b.totalRead += int64(len(frag))
+
+		if b.maxTotal > 0 && b.totalRead > b.maxTotal {
+			b.truncated = true
+			b.done = true
+
+			return nil, tooLong, true
+		}
 
 		// A newline terminates the fragment only when ReadSlice returns no error.
 		content := frag
@@ -164,5 +211,18 @@ func (b *boundedLineReader) readRecord() (line []byte, tooLong bool, atEOF bool)
 		}
 
 		return b.buf, false, atEOF
+	}
+}
+
+func (b *boundedLineReader) contextErr() error {
+	if b.ctx == nil {
+		return nil
+	}
+
+	select {
+	case <-b.ctx.Done():
+		return b.ctx.Err()
+	default:
+		return nil
 	}
 }

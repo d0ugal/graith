@@ -698,6 +698,64 @@ type TokenInfo struct {
 	CountedAt string `json:"counted_at,omitempty"`
 }
 
+// SearchMsg requests local full-text search across supported conversation
+// transcripts. The daemon owns transcript resolution; clients provide only
+// session metadata filters, never filesystem paths.
+type SearchMsg struct {
+	Query              string   `json:"query"`
+	SessionID          string   `json:"session_id,omitempty"`
+	IncludeDescendants bool     `json:"include_descendants,omitempty"`
+	Repo               string   `json:"repo,omitempty"`
+	Agent              string   `json:"agent,omitempty"`
+	Kinds              []string `json:"kinds,omitempty"`
+	Since              string   `json:"since,omitempty"` // RFC3339/RFC3339Nano
+	Until              string   `json:"until,omitempty"` // RFC3339/RFC3339Nano
+	State              string   `json:"state,omitempty"` // all | active | stopped
+	IncludeDeleted     bool     `json:"include_deleted,omitempty"`
+	Limit              int      `json:"limit,omitempty"`
+	Cursor             string   `json:"cursor,omitempty"`
+}
+
+// SearchMatchRange is a half-open match range within SearchResult.Snippet,
+// counted in Unicode code points rather than bytes.
+type SearchMatchRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// SearchResult is one matching transcript turn. Locator is opaque to clients:
+// it is stable enough to ask the daemon/client to reopen the owning context,
+// but callers must not parse it.
+type SearchResult struct {
+	SessionID      string             `json:"session_id"`
+	SessionName    string             `json:"session_name"`
+	RepoPath       string             `json:"repo_path,omitempty"`
+	RepoName       string             `json:"repo_name,omitempty"`
+	Agent          string             `json:"agent"`
+	AgentSessionID string             `json:"agent_session_id,omitempty"`
+	Kind           string             `json:"kind"`
+	Timestamp      string             `json:"timestamp,omitempty"`
+	Snippet        string             `json:"snippet"`
+	Matches        []SearchMatchRange `json:"matches"`
+	Locator        string             `json:"locator"`
+}
+
+// SearchUnsupportedAgent reports sessions skipped because v1 has no transcript
+// reader for their agent.
+type SearchUnsupportedAgent struct {
+	Agent string `json:"agent"`
+	Count int    `json:"count"`
+}
+
+// SearchResponseMsg is the daemon response to SearchMsg.
+type SearchResponseMsg struct {
+	Results           []SearchResult           `json:"results"`
+	NextCursor        string                   `json:"next_cursor,omitempty"`
+	Limit             int                      `json:"limit"`
+	Truncated         bool                     `json:"truncated,omitempty"`
+	UnsupportedAgents []SearchUnsupportedAgent `json:"unsupported_agents,omitempty"`
+}
+
 type IncludedRepoInfo struct {
 	RepoName     string `json:"repo_name"`
 	WorktreePath string `json:"worktree_path"`

@@ -438,6 +438,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	prevSummaryTTL := sessState.SummaryTTL
 	prevToken := sessState.Token
 	prevAgentSessionID := sessState.AgentSessionID
+	prevNativeTranscriptRoot := sessState.NativeTranscriptRoot
 	prevNativeStateRoot := sessState.NativeStateRoot
 	prevNativeCaptureStartedAt := sessState.NativeCaptureStartedAt
 	prevFreshStart := sessState.FreshStart
@@ -505,6 +506,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		// FreshStart), so undo it here too — otherwise memory holds the minted id
 		// while disk still has the original, and a later restart re-wedges.
 		sessState.AgentSessionID = prevAgentSessionID
+		sessState.NativeTranscriptRoot = prevNativeTranscriptRoot
 		sessState.NativeStateRoot = prevNativeStateRoot
 		sessState.NativeCaptureStartedAt = prevNativeCaptureStartedAt
 		sessState.FreshStart = prevFreshStart
@@ -574,6 +576,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			// committed the minted id + FreshStart, so restore the originals to keep
 			// rollback meaning "this attempt changed nothing".
 			s.AgentSessionID = prevAgentSessionID
+			s.NativeTranscriptRoot = prevNativeTranscriptRoot
+			s.NativeStateRoot = prevNativeStateRoot
+			s.NativeCaptureStartedAt = prevNativeCaptureStartedAt
 			s.FreshStart = prevFreshStart
 			s.LaunchGeneration = prevLaunchGeneration
 
@@ -1022,11 +1027,20 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		SandboxConfig: sandboxMerged,
 	}
 
-	if scrapesID(sessAgent) && sessAgentSessionID == "" {
-		captureStartedAt := startedAt.UTC()
-		sessState.NativeStateRoot = env["CODEX_HOME"]
-		sessState.NativeCaptureStartedAt = &captureStartedAt
-	} else if sessAgentSessionID != "" {
+	if scrapesID(sessAgent) {
+		root := nativeTranscriptRootForLaunch(sessAgent, sessAgentSessionID, env["CODEX_HOME"], sessState.NativeTranscriptRoot)
+		sessState.NativeTranscriptRoot = root
+
+		if sessAgentSessionID == "" {
+			captureStartedAt := startedAt.UTC()
+			sessState.NativeStateRoot = root
+			sessState.NativeCaptureStartedAt = &captureStartedAt
+		} else {
+			sessState.NativeStateRoot = ""
+			sessState.NativeCaptureStartedAt = nil
+		}
+	} else {
+		sessState.NativeTranscriptRoot = ""
 		sessState.NativeStateRoot = ""
 		sessState.NativeCaptureStartedAt = nil
 	}
@@ -1076,6 +1090,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 		// Roll back the forced-id fresh fallback (minted id + FreshStart).
 		sessState.AgentSessionID = prevAgentSessionID
+		sessState.NativeTranscriptRoot = prevNativeTranscriptRoot
+		sessState.NativeStateRoot = prevNativeStateRoot
+		sessState.NativeCaptureStartedAt = prevNativeCaptureStartedAt
 		sessState.FreshStart = prevFreshStart
 		sessState.LaunchGeneration = prevLaunchGeneration
 

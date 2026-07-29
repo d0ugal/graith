@@ -57,6 +57,9 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 
 	srcAgent := sess.Agent
 	srcAgentSessionID := sess.AgentSessionID
+	srcNativeTranscriptRoot := sessionNativeTranscriptRoot(sess)
+	srcNativeStateRoot := sess.NativeStateRoot
+	srcNativeCaptureStartedAt := sess.NativeCaptureStartedAt
 	srcModel := sess.Model
 	srcCodex := cloneCodexOptions(sess.Codex)
 	srcFreshStart := sess.FreshStart
@@ -107,7 +110,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 
 	// --- Phase 0: read + render the source transcript (fail fast) ---
-	conv, err := transcript.Read(srcAgent, srcAgentSessionID, worktreePath)
+	conv, err := transcript.ReadWithRoot(srcAgent, srcAgentSessionID, worktreePath, srcNativeTranscriptRoot)
 	if err != nil {
 		return SessionState{}, fmt.Errorf("read source transcript: %w", err)
 	}
@@ -213,11 +216,12 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 
 	s.MigratedFrom = &MigrationInfo{
-		Agent:          srcAgent,
-		Model:          srcModel,
-		AgentSessionID: srcAgentSessionID,
-		RenderedPath:   contextPath,
-		At:             time.Now().UTC(),
+		Agent:                srcAgent,
+		Model:                srcModel,
+		AgentSessionID:       srcAgentSessionID,
+		NativeTranscriptRoot: srcNativeTranscriptRoot,
+		RenderedPath:         contextPath,
+		At:                   time.Now().UTC(),
 	}
 	s.Agent = targetAgent
 	s.Model = targetModel
@@ -239,6 +243,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	} else {
 		s.AgentSessionID = ""
 	}
+
+	s.NativeTranscriptRoot = ""
+	s.NativeStateRoot = ""
+	s.NativeCaptureStartedAt = nil
 
 	saveErr := sm.saveState()
 	sm.mu.Unlock()
@@ -290,6 +298,9 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 			s.Model = srcModel
 			s.Codex = srcCodex
 			s.AgentSessionID = srcAgentSessionID
+			s.NativeTranscriptRoot = srcNativeTranscriptRoot
+			s.NativeStateRoot = srcNativeStateRoot
+			s.NativeCaptureStartedAt = srcNativeCaptureStartedAt
 			s.FreshStart = srcFreshStart
 			s.Status = StatusStopped
 			s.PID = 0
@@ -460,6 +471,7 @@ func (sm *SessionManager) captureNativeSessionIDContext(ctx context.Context, id,
 			return
 		default:
 			s.AgentSessionID = sid
+			s.NativeTranscriptRoot = stateRoot
 			s.NativeStateRoot = ""
 			s.NativeCaptureStartedAt = nil
 			_ = sm.saveState()

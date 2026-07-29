@@ -16,6 +16,7 @@ type commandDependencies struct {
 	out         *output.Writer
 	listSession sessionListUseCase
 	agent       agentUseCase
+	search      conversationSearchUseCase
 }
 
 // listConn is retained as a test-only-compatible transport shape while
@@ -58,6 +59,10 @@ func commandDeps(ctx context.Context) commandDependencies {
 			deps.agent = newClientAgentUseCase(cfg, paths, cfgFile)
 		}
 
+		if deps.search == nil {
+			deps.search = newClientConversationSearchUseCase(cfg, paths, cfgFile)
+		}
+
 		return deps
 	}
 
@@ -68,7 +73,8 @@ func commandDeps(ctx context.Context) commandDependencies {
 		listSession: clientSessionListUseCase{connect: func() (listConn, error) {
 			return listConnectFn(cfg, paths, cfgFile)
 		}},
-		agent: newClientAgentUseCase(cfg, paths, cfgFile),
+		agent:  newClientAgentUseCase(cfg, paths, cfgFile),
+		search: newClientConversationSearchUseCase(cfg, paths, cfgFile),
 	}
 }
 
@@ -113,71 +119,79 @@ type agentUseCase interface {
 type clientAgentUseCase struct{ connect func() (listConn, error) }
 
 func (useCase clientAgentUseCase) AgentCatalog() (protocol.AgentCatalogResponseMsg, error) {
-	c, err := useCase.connect()
-	if err != nil {
-		return protocol.AgentCatalogResponseMsg{}, err
-	}
-	defer c.Close()
-
-	if err := c.SendControl("agent_catalog", protocol.AgentCatalogMsg{}); err != nil {
-		return protocol.AgentCatalogResponseMsg{}, err
-	}
-
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		return protocol.AgentCatalogResponseMsg{}, err
-	}
-
-	if resp.Type == "error" {
-		return protocol.AgentCatalogResponseMsg{}, fmt.Errorf("%s", errorMessage(resp))
-	}
-
-	if resp.Type != "agent_catalog_response" {
-		return protocol.AgentCatalogResponseMsg{}, fmt.Errorf("unexpected response %q", resp.Type)
-	}
-
-	var catalog protocol.AgentCatalogResponseMsg
-	if err := protocol.DecodePayload(resp, &catalog); err != nil {
-		return protocol.AgentCatalogResponseMsg{}, err
-	}
-
-	return catalog, nil
+	return controlRequest[protocol.AgentCatalogResponseMsg](
+		useCase.connect,
+		"agent_catalog",
+		protocol.AgentCatalogMsg{},
+		"agent_catalog_response",
+	)
 }
 
 func (useCase clientAgentUseCase) AgentInfo(req protocol.AgentInfoMsg) (protocol.AgentInfoResponseMsg, error) {
-	c, err := useCase.connect()
+	return controlRequest[protocol.AgentInfoResponseMsg](
+		useCase.connect,
+		"agent_info",
+		req,
+		"agent_info_response",
+	)
+}
+
+func controlRequest[T any](connect func() (listConn, error), msgType string, payload any, responseType string) (T, error) {
+	var out T
+
+	c, err := connect()
 	if err != nil {
-		return protocol.AgentInfoResponseMsg{}, err
+		return out, err
 	}
 	defer c.Close()
 
-	if err := c.SendControl("agent_info", req); err != nil {
-		return protocol.AgentInfoResponseMsg{}, err
+	if err := c.SendControl(msgType, payload); err != nil {
+		return out, err
 	}
 
 	resp, err := c.ReadControlResponse()
 	if err != nil {
-		return protocol.AgentInfoResponseMsg{}, err
+		return out, err
 	}
 
 	if resp.Type == "error" {
-		return protocol.AgentInfoResponseMsg{}, fmt.Errorf("%s", errorMessage(resp))
+		return out, fmt.Errorf("%s", errorMessage(resp))
 	}
 
-	if resp.Type != "agent_info_response" {
-		return protocol.AgentInfoResponseMsg{}, fmt.Errorf("unexpected response %q", resp.Type)
+	if resp.Type != responseType {
+		return out, fmt.Errorf("unexpected response %q", resp.Type)
 	}
 
-	var info protocol.AgentInfoResponseMsg
-	if err := protocol.DecodePayload(resp, &info); err != nil {
-		return protocol.AgentInfoResponseMsg{}, err
+	if err := protocol.DecodePayload(resp, &out); err != nil {
+		return out, err
 	}
 
-	return info, nil
+	return out, nil
 }
 
 func newClientAgentUseCase(cfg *config.Config, paths config.Paths, cfgFile string) agentUseCase {
 	return clientAgentUseCase{connect: func() (listConn, error) {
+		return listConnectFn(cfg, paths, cfgFile)
+	}}
+}
+
+type conversationSearchUseCase interface {
+	SearchConversations(req protocol.SearchMsg) (protocol.SearchResponseMsg, error)
+}
+
+type clientConversationSearchUseCase struct{ connect func() (listConn, error) }
+
+func (useCase clientConversationSearchUseCase) SearchConversations(req protocol.SearchMsg) (protocol.SearchResponseMsg, error) {
+	return controlRequest[protocol.SearchResponseMsg](
+		useCase.connect,
+		"search",
+		req,
+		"search_response",
+	)
+}
+
+func newClientConversationSearchUseCase(cfg *config.Config, paths config.Paths, cfgFile string) conversationSearchUseCase {
+	return clientConversationSearchUseCase{connect: func() (listConn, error) {
 		return listConnectFn(cfg, paths, cfgFile)
 	}}
 }

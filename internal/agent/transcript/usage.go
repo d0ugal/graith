@@ -137,7 +137,14 @@ func usageReaderFor(agent string) (usageReader, error) {
 // avoid over-counting unrelated same-cwd sessions in the meantime. The []Source
 // return keeps that a drop-in extension.
 func Locate(agent, agentSessionID, worktreePath string) ([]Source, error) {
-	path, err := locate(agent, agentSessionID, worktreePath)
+	return LocateWithRoot(agent, agentSessionID, worktreePath, "")
+}
+
+// LocateWithRoot is Locate scoped to an explicit native state root when the
+// provider supports one. Today this matters for Codex sessions launched with a
+// per-session CODEX_HOME; providers without such a root ignore stateRoot.
+func LocateWithRoot(agent, agentSessionID, worktreePath, stateRoot string) ([]Source, error) {
+	path, err := locateWithRoot(agent, agentSessionID, worktreePath, stateRoot)
 	if err != nil {
 		return nil, err
 	}

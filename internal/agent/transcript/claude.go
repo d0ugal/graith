@@ -57,6 +57,7 @@ type claudeRecord struct {
 	Type        string          `json:"type"`
 	UUID        string          `json:"uuid"`
 	ParentUUID  string          `json:"parentUuid"`
+	Timestamp   string          `json:"timestamp"`
 	IsSidechain bool            `json:"isSidechain"`
 	Message     json.RawMessage `json:"message"`
 }
@@ -97,10 +98,10 @@ type claudeBlock struct {
 
 type claudeReader struct{}
 
-func (claudeReader) read(path string) ([]Turn, int, error) {
+func (claudeReader) read(path string, opts readOptions) ([]Turn, int, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -110,7 +111,9 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 
 	dropped := 0
 
-	sc := newBoundedLineReader(f, maxLineBytes())
+	sc := newBoundedLineReader(f, maxLineBytes()).
+		withContext(opts.ctx).
+		limitTotalBytes(opts.maxBytesPerSource)
 
 	for sc.scan() {
 		line := bytes.TrimSpace(sc.bytes())
@@ -136,13 +139,16 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 	dropped += sc.oversized // over-cap records skipped, scanning continued
 
 	if sc.err != nil {
+		if opts.contextErr() != nil {
+			return nil, dropped, sc.truncated, sc.err
+		}
 		// A truncated/unreadable tail (e.g. a live file) is tolerated as a drop.
 		dropped++
 	}
 
 	leaf := activeLeaf(byUUID, order)
 	if leaf == "" {
-		return nil, dropped, nil
+		return nil, dropped, sc.truncated, nil
 	}
 
 	chain := walkChain(byUUID, leaf)
@@ -154,7 +160,13 @@ func (claudeReader) read(path string) ([]Turn, int, error) {
 		appendClaudeTurns(rec, &turns, toolIdx)
 	}
 
-	return turns, dropped, nil
+	if opts.maxTurnsPerSource > 0 && len(turns) > opts.maxTurnsPerSource {
+		turns = turns[:opts.maxTurnsPerSource]
+
+		return turns, dropped, true, nil
+	}
+
+	return turns, dropped, sc.truncated, nil
 }
 
 // usage sums token usage across every assistant record in the file — including
@@ -347,11 +359,13 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 		role = RoleAssistant
 	}
 
+	ts := parseTimestamp(rec.Timestamp)
+
 	// Content may be a plain string or an array of blocks.
 	var s string
 	if err := json.Unmarshal(msg.Content, &s); err == nil {
 		if strings.TrimSpace(s) != "" {
-			*turns = append(*turns, Turn{Role: role, Text: s})
+			*turns = append(*turns, Turn{Role: role, Text: s, Timestamp: ts})
 		}
 
 		return
@@ -366,7 +380,7 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 
 	flush := func() {
 		if text.Len() > 0 {
-			*turns = append(*turns, Turn{Role: role, Text: text.String()})
+			*turns = append(*turns, Turn{Role: role, Text: text.String(), Timestamp: ts})
 			text.Reset()
 		}
 	}
@@ -387,8 +401,9 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 			flush()
 
 			*turns = append(*turns, Turn{
-				Role: RoleTool,
-				Tool: &ToolCall{Name: b.Name, Args: compactJSON(b.Input)},
+				Role:      RoleTool,
+				Timestamp: ts,
+				Tool:      &ToolCall{Name: b.Name, Args: compactJSON(b.Input)},
 			})
 			if b.ID != "" {
 				toolIdx[b.ID] = len(*turns) - 1
@@ -401,7 +416,7 @@ func appendClaudeTurns(rec claudeRecord, turns *[]Turn, toolIdx map[string]int) 
 			} else if out != "" {
 				flush()
 
-				*turns = append(*turns, Turn{Role: RoleTool, Tool: &ToolCall{Name: "(result)", Output: out, Failed: b.IsError}})
+				*turns = append(*turns, Turn{Role: RoleTool, Timestamp: ts, Tool: &ToolCall{Name: "(result)", Output: out, Failed: b.IsError}})
 			}
 		}
 	}

@@ -48,9 +48,17 @@ func canonPath(p string) string {
 // rollouts may be zstd-compressed (.jsonl.zst); those are skipped (a live
 // migration source is always an uncompressed .jsonl).
 func locateCodex(agentSessionID, worktreePath string) (string, error) {
-	root, err := codexHome()
-	if err != nil {
-		return "", err
+	return locateCodexInRoot("", agentSessionID, worktreePath)
+}
+
+func locateCodexInRoot(root, agentSessionID, worktreePath string) (string, error) {
+	if root == "" {
+		var err error
+
+		root, err = codexHome()
+		if err != nil {
+			return "", err
+		}
 	}
 
 	sessionsDir := filepath.Join(root, "sessions")
@@ -70,7 +78,7 @@ func locateCodex(agentSessionID, worktreePath string) (string, error) {
 		bestMod int64
 	)
 
-	err = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable subtrees
 		}
@@ -271,8 +279,9 @@ func CodexSessionIDSince(root, worktreePath string, since time.Time) (string, bo
 }
 
 type codexLine struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 type codexSessionMeta struct {
@@ -528,10 +537,10 @@ func codexFallbackTotal(t codexTokenUsage) int64 {
 	return sum
 }
 
-func (codexReader) read(path string) ([]Turn, int, error) {
+func (codexReader) read(path string, opts readOptions) ([]Turn, int, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -540,7 +549,9 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 	toolIdx := make(map[string]int) // call_id -> index into turns
 	dropped := 0
 
-	sc := newBoundedLineReader(f, maxLineBytes())
+	sc := newBoundedLineReader(f, maxLineBytes()).
+		withContext(opts.ctx).
+		limitTotalBytes(opts.maxBytesPerSource)
 
 	for sc.scan() {
 		raw := bytes.TrimSpace(sc.bytes())
@@ -566,19 +577,27 @@ func (codexReader) read(path string) ([]Turn, int, error) {
 			continue
 		}
 
-		appendCodexTurn(item, &turns, toolIdx)
+		appendCodexTurn(item, parseTimestamp(line.Timestamp), &turns, toolIdx)
+
+		if opts.maxTurnsPerSource > 0 && len(turns) >= opts.maxTurnsPerSource {
+			return turns, dropped + sc.oversized, true, nil
+		}
 	}
 
 	dropped += sc.oversized // over-cap records skipped, scanning continued
 
 	if sc.err != nil {
+		if opts.contextErr() != nil {
+			return nil, dropped, sc.truncated, sc.err
+		}
+
 		dropped++
 	}
 
-	return turns, dropped, nil
+	return turns, dropped, sc.truncated, nil
 }
 
-func appendCodexTurn(item codexResponseItem, turns *[]Turn, toolIdx map[string]int) {
+func appendCodexTurn(item codexResponseItem, ts time.Time, turns *[]Turn, toolIdx map[string]int) {
 	switch item.Type {
 	case "message":
 		text := codexContentText(item.Content)
@@ -599,11 +618,12 @@ func appendCodexTurn(item codexResponseItem, turns *[]Turn, toolIdx map[string]i
 			role = RoleContext
 		}
 
-		*turns = append(*turns, Turn{Role: role, Text: text})
+		*turns = append(*turns, Turn{Role: role, Text: text, Timestamp: ts})
 	case "function_call", "custom_tool_call":
 		*turns = append(*turns, Turn{
-			Role: RoleTool,
-			Tool: &ToolCall{Name: item.Name, Args: item.Arguments},
+			Role:      RoleTool,
+			Timestamp: ts,
+			Tool:      &ToolCall{Name: item.Name, Args: item.Arguments},
 		})
 		if item.CallID != "" {
 			toolIdx[item.CallID] = len(*turns) - 1
@@ -613,7 +633,7 @@ func appendCodexTurn(item codexResponseItem, turns *[]Turn, toolIdx map[string]i
 		if idx, ok := toolIdx[item.CallID]; ok {
 			(*turns)[idx].Tool.Output = out
 		} else if out != "" {
-			*turns = append(*turns, Turn{Role: RoleTool, Tool: &ToolCall{Name: "(result)", Output: out}})
+			*turns = append(*turns, Turn{Role: RoleTool, Timestamp: ts, Tool: &ToolCall{Name: "(result)", Output: out}})
 		}
 	}
 }

@@ -406,6 +406,7 @@ func registerCommands() {
 		registerRemoteCmd()
 		registerSandboxCmd()
 		registerScenarioCmd()
+		registerSearchCmd()
 		registerTriggerCmd()
 		registerStatusSummaryCmd()
 		registerStopCmd()

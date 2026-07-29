@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 30
+const CurrentStateVersion = 31
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -135,6 +135,10 @@ type SessionState struct {
 	BaseBranch     string `json:"base_branch"`
 	Agent          string `json:"agent"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
+	// NativeTranscriptRoot is the durable agent-native state root that owns the
+	// current AgentSessionID. Unlike NativeStateRoot, it remains after capture so
+	// transcript readers can resolve captured Codex ids after daemon restart.
+	NativeTranscriptRoot string `json:"native_transcript_root,omitempty"`
 	// NativeStateRoot and NativeCaptureStartedAt make an interrupted
 	// self-minted session-ID capture reconstructible after exec. They are
 	// cleared once AgentSessionID is durably recorded.
@@ -307,11 +311,12 @@ func errSoftDeleted(name string) error {
 // where it records provenance and — via RenderedPath — owns the staged context
 // file so it is cleaned up on delete. Distinguish the two by ParentID.
 type MigrationInfo struct {
-	Agent          string    `json:"agent"`
-	Model          string    `json:"model,omitempty"`
-	AgentSessionID string    `json:"agent_session_id,omitempty"`
-	RenderedPath   string    `json:"rendered_path,omitempty"`
-	At             time.Time `json:"at"`
+	Agent                string    `json:"agent"`
+	Model                string    `json:"model,omitempty"`
+	AgentSessionID       string    `json:"agent_session_id,omitempty"`
+	NativeTranscriptRoot string    `json:"native_transcript_root,omitempty"`
+	RenderedPath         string    `json:"rendered_path,omitempty"`
+	At                   time.Time `json:"at"`
 }
 
 type IncludedRepoState struct {
@@ -916,6 +921,7 @@ var migrations = map[int]func(*State) error{
 	27: migrateV27ToV28,
 	28: migrateV28ToV29,
 	29: migrateV29ToV30,
+	30: migrateV30ToV31,
 }
 
 func generateToken() (string, error) {
@@ -1231,6 +1237,11 @@ func migrateV28ToV29(_ *State) error { return nil }
 // migrateV29ToV30 is additive. Existing scenarios have no interrupted
 // dynamic-add reservations to recover.
 func migrateV29ToV30(_ *State) error { return nil }
+
+// migrateV30ToV31 is additive. New sessions persist native transcript roots for
+// captured Codex ids; existing state has no reliable backfill once the transient
+// capture root has already been cleared.
+func migrateV30ToV31(_ *State) error { return nil }
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state

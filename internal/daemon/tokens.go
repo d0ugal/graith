@@ -71,6 +71,7 @@ type tokenTarget struct {
 	id             string
 	agent          string
 	agentSessionID string
+	stateRoot      string
 	worktreePath   string
 }
 
@@ -163,6 +164,7 @@ func (sm *SessionManager) tokenTargets() ([]tokenTarget, map[string]bool) {
 			id:             id,
 			agent:          s.Agent,
 			agentSessionID: s.AgentSessionID,
+			stateRoot:      sessionNativeTranscriptRoot(s),
 			worktreePath:   s.WorktreePath,
 		})
 	}
@@ -176,7 +178,7 @@ func (sm *SessionManager) tokenTargets() ([]tokenTarget, map[string]bool) {
 // or an unreadable transcript returns false. Runs OFF sm.mu (it touches the
 // filesystem); only the final write-back takes the lock.
 func (sm *SessionManager) pollTokens(t tokenTarget) bool {
-	sources, err := transcript.Locate(t.agent, t.agentSessionID, t.worktreePath)
+	sources, err := transcript.LocateWithRoot(t.agent, t.agentSessionID, t.worktreePath, t.stateRoot)
 	if err != nil || len(sources) == 0 {
 		// No transcript yet (or unreadable): leave any previous stats in place
 		// rather than clearing a known total on a transient miss.
@@ -198,7 +200,7 @@ func (sm *SessionManager) pollTokens(t tokenTarget) bool {
 	// parse may be inconsistent — don't cache it under the (now stale) pre-read
 	// fingerprint, so the next tick re-reads. (Publishing the value is still
 	// safe; it just isn't cached as authoritative.)
-	post, err := transcript.Locate(t.agent, t.agentSessionID, t.worktreePath)
+	post, err := transcript.LocateWithRoot(t.agent, t.agentSessionID, t.worktreePath, t.stateRoot)
 	stable := err == nil && tokenFingerprint(t, post) == fp
 
 	if !u.Found {
@@ -247,7 +249,8 @@ func (sm *SessionManager) setTokenStats(t tokenTarget, stats *TokenStats) {
 		return
 	}
 
-	if s.Agent != t.agent || s.AgentSessionID != t.agentSessionID || s.WorktreePath != t.worktreePath {
+	if s.Agent != t.agent || s.AgentSessionID != t.agentSessionID ||
+		sessionNativeTranscriptRoot(s) != t.stateRoot || s.WorktreePath != t.worktreePath {
 		return // identity changed under us — the parse describes a stale agent
 	}
 
@@ -260,7 +263,7 @@ func (sm *SessionManager) setTokenStats(t tokenTarget, stats *TokenStats) {
 // the new agent, and a grown/rotated/re-pointed file forces a re-read while an
 // untouched one is skipped.
 func tokenFingerprint(t tokenTarget, sources []transcript.Source) string {
-	b := []byte(t.agent + "\x00" + t.agentSessionID + "\x00" + t.worktreePath + "\x00")
+	b := []byte(t.agent + "\x00" + t.agentSessionID + "\x00" + t.stateRoot + "\x00" + t.worktreePath + "\x00")
 	for _, s := range sources {
 		b = append(b, s.Path...)
 		b = append(b, byte(0))

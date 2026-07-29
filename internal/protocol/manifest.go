@@ -168,6 +168,11 @@ var registeredTypes = []any{
 	PRInfo{},
 	CIInfo{},
 	TokenInfo{},
+	SearchMsg{},
+	SearchMatchRange{},
+	SearchResult{},
+	SearchUnsupportedAgent{},
+	SearchResponseMsg{},
 	IncludedRepoInfo{},
 	DetachedMsg{},
 	ErrorMsg{},
@@ -350,14 +355,19 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"PairListMsg":     {SwiftNA, ""},               // paired-device management is CLI-only
 
 	// Session model (daemon -> client).
-	"SessionListMsg":   {SwiftRequired, "SessionListMsg"},
-	"SessionInfo":      {SwiftRequired, "SessionInfo"},
-	"PRInfo":           {SwiftRequired, "PRInfo"},
-	"CIInfo":           {SwiftRequired, "CIInfo"},
-	"IncludedRepoInfo": {SwiftRequired, "IncludedRepoInfo"},
-	"DetachedMsg":      {SwiftRequired, "DetachedMsg"},
-	"ErrorMsg":         {SwiftRequired, "ErrorMsg"},
-	"ReloadedMsg":      {SwiftNA, ""}, // local-only daemon reload response
+	"SessionListMsg":         {SwiftRequired, "SessionListMsg"},
+	"SessionInfo":            {SwiftRequired, "SessionInfo"},
+	"PRInfo":                 {SwiftRequired, "PRInfo"},
+	"CIInfo":                 {SwiftRequired, "CIInfo"},
+	"IncludedRepoInfo":       {SwiftRequired, "IncludedRepoInfo"},
+	"SearchMsg":              {SwiftPlanned, ""},
+	"SearchMatchRange":       {SwiftPlanned, ""},
+	"SearchResult":           {SwiftPlanned, ""},
+	"SearchUnsupportedAgent": {SwiftPlanned, ""},
+	"SearchResponseMsg":      {SwiftPlanned, ""},
+	"DetachedMsg":            {SwiftRequired, "DetachedMsg"},
+	"ErrorMsg":               {SwiftRequired, "ErrorMsg"},
+	"ReloadedMsg":            {SwiftNA, ""}, // local-only daemon reload response
 
 	// Screen peek.
 	"ScreenSnapshotRowMsg":      {SwiftRequired, "ScreenSnapshotRowMsg"},

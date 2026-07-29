@@ -4333,6 +4333,275 @@
       ]
     },
     {
+      "name": "SearchMatchRange",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "start",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "end",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "SearchMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "query",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "include_descendants",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "repo",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "agent",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "kinds",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "since",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "until",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "include_deleted",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "limit",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "cursor",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "SearchResponseMsg",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "results",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "SearchResult"
+            }
+          },
+          "optional": false
+        },
+        {
+          "name": "next_cursor",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "limit",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "truncated",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "unsupported_agents",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "SearchUnsupportedAgent"
+            }
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "SearchResult",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "session_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "repo_path",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "repo_name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "agent",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "agent_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "kind",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "timestamp",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "snippet",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "matches",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "SearchMatchRange"
+            }
+          },
+          "optional": false
+        },
+        {
+          "name": "locator",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "SearchUnsupportedAgent",
+      "swift": "planned",
+      "fields": [
+        {
+          "name": "agent",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "count",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
       "name": "SessionDiagnostic",
       "swift": "required",
       "swift_type": "SessionDiagnostic",
