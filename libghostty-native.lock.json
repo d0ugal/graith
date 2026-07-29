@@ -3,7 +3,7 @@
   "goLibghostty": {
     "repository": "https://tangled.org/mitchellh.com/go-libghostty",
     "renovateRef": "main",
-    "commit": "102a50836ce678a876e5deb1288276eaad1e3bf7",
+    "commit": "ef0f8ce3daa7fff71dbd7ea550a1de81c194d3b8",
     "version": "v0.0.0-20260710165742-102a50836ce6",
     "moduleSum": "h1:IChRpD6xn1EWuRNlSH3RitYjxQiWNg3CQSn2ygJ+y0w=",
     "testedGhosttyCommit": "d4ac93a0395d321b043ee0116dc8a1a384f0fb83",
@@ -37,7 +37,7 @@
   },
   "zig": {
     "repository": "https://codeberg.org/ziglang/zig",
-    "version": "0.15.2",
+    "version": "0.16.0",
     "sourceURL": "https://ziglang.org/download/0.15.2/zig-0.15.2.tar.xz",
     "sourceSHA256": "d9b30c7aa983fcff5eed2084d54ae83eaafe7ff3a84d8fb754d854165a6e521c",
     "linuxX8664URL": "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz",
