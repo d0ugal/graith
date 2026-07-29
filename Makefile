@@ -2,6 +2,7 @@ GOLANGCI_LINT_VERSION := v2.12.2
 GOLANGCI_LINT_DIGEST := sha256:5cceeef04e53efe1470638d4b4b4f5ceefd574955ab3941b2d9a68a8c9ad5240
 GOLANGCI_LINT_IMAGE := golangci/golangci-lint:$(GOLANGCI_LINT_VERSION)@$(GOLANGCI_LINT_DIGEST)
 GOLANGCI_LINT_RUN_ARGS ?=
+GOLANGCI_LINT_REGISTRY_AUTH_FILE ?= $(CURDIR)/scripts/public-registry-auth.json
 GOLANGCI_LINT_CACHE_ARGS := \
 	-v graith-golangci-go-mod:/go/pkg/mod \
 	-v graith-golangci-go-build:/root/.cache/go-build \
@@ -9,7 +10,9 @@ GOLANGCI_LINT_CACHE_ARGS := \
 	-e GOMODCACHE=/go/pkg/mod \
 	-e GOCACHE=/root/.cache/go-build \
 	-e GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint
-GOLANGCI_LINT_DOCKER_BASE := docker run --rm $(GOLANGCI_LINT_CACHE_ARGS) -v $(CURDIR):/app -w /app
+# The linter image is public. Podman honors REGISTRY_AUTH_FILE; use an empty
+# authfile so unrelated host credential helpers cannot break public pulls.
+GOLANGCI_LINT_DOCKER_BASE := REGISTRY_AUTH_FILE=$(GOLANGCI_LINT_REGISTRY_AUTH_FILE) docker run --rm $(GOLANGCI_LINT_CACHE_ARGS) -v $(CURDIR):/app -w /app
 GOLANGCI_LINT_DOCKER := $(GOLANGCI_LINT_DOCKER_BASE) $(GOLANGCI_LINT_IMAGE)
 GOLANGCI_LINT_LIBGHOSTTY_GOARCH ?=
 GOLANGCI_LINT_LIBGHOSTTY_PACKAGES := ./internal/pty ./internal/daemon ./cmd/graith
