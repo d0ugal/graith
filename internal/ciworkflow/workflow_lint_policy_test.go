@@ -482,6 +482,17 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertContains(t, renovate, "packageNameTemplate: 'golang.org/x/vuln'")
 }
 
+func TestRenovateIgnoresNativeGeneratedCommitAuthor(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	renovate := readPolicyFile(t, filepath.Join(repoRoot, "renovate.json5"))
+	workflow := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native-artifacts.yml"))
+
+	generatedAuthor := "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+	assertContains(t, renovate, "gitIgnoredAuthors: ['"+generatedAuthor+"']")
+	assertContains(t, workflow, `git show -s --format=%an "$GENERATED_SHA")" != "github-actions[bot]"`)
+	assertContains(t, workflow, `git show -s --format=%ae "$GENERATED_SHA")" != "41898282+github-actions[bot]@users.noreply.github.com"`)
+}
+
 func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 	t.Helper()
 
