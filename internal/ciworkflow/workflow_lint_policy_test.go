@@ -551,11 +551,14 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertRegexp(t, pins, `(?m)^HUGO_VERSION=\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^K6_IMAGE=grafana/k6:\d+\.\d+\.\d+-with-browser@sha256:[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^GOVULNCHECK_VERSION=v\d+\.\d+\.\d+$`)
+	assertRegexp(t, pins, `(?m)^GORELEASER_VERSION=v\d+\.\d+\.\d+$`)
 
 	for _, workflowPath := range []string{
 		".github/workflows/ci.yml",
 		".github/workflows/docs.yml",
 		".github/workflows/docs-preview.yml",
+		".github/workflows/dev-release.yml",
+		".github/workflows/goreleaser.yml",
 	} {
 		path := filepath.Join(repoRoot, workflowPath)
 		workflow := readPolicyFile(t, path)
@@ -569,6 +572,41 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertContains(t, renovate, "GOVULNCHECK_VERSION=(?<currentValue>v[\\\\d.]+)")
 	assertContains(t, renovate, "depNameTemplate: 'golang.org/x/vuln/cmd/govulncheck'")
 	assertContains(t, renovate, "packageNameTemplate: 'golang.org/x/vuln'")
+	assertContains(t, renovate, "GORELEASER_VERSION=(?<currentValue>v[\\\\d.]+)")
+	assertContains(t, renovate, "depNameTemplate: 'goreleaser/goreleaser'")
+
+	for _, workflowPath := range []string{
+		".github/workflows/dev-release.yml",
+		".github/workflows/goreleaser.yml",
+	} {
+		workflow := readPolicyFile(t, filepath.Join(repoRoot, workflowPath))
+		assertNotContains(t, workflow, "~> v2")
+		assertNotContains(t, workflow, "goreleaser/goreleaser-action")
+		assertContains(t, workflow, "all_count=\"$(grep -Ec '^GORELEASER_VERSION=' \"$pin_file\" || :)\"")
+		assertContains(t, workflow, "valid_count=\"$(grep -Ec '^GORELEASER_VERSION=v[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z.-]+)?$' \"$pin_file\" || :)\"")
+		assertContains(t, workflow, "scripts/install-goreleaser.sh \"$GORELEASER_VERSION\"")
+		assertContains(t, workflow, "goreleaser release")
+	}
+}
+
+func TestGoReleaserInstallFailsClosedOnMissingChecksum(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	script := readPolicyFile(t, filepath.Join(repoRoot, "scripts/install-goreleaser.sh"))
+
+	assertContains(t, script, `^v[0-9]+\.[0-9]+\.[0-9]+`)
+	assertContains(t, script, `curl_args=(`)
+	assertContains(t, script, `--proto '=https'`)
+	assertContains(t, script, `--tlsv1.2`)
+	assertContains(t, script, `--fail`)
+	assertContains(t, script, `--retry 4`)
+	assertContains(t, script, `--retry-max-time 120`)
+	assertContains(t, script, `curl "${curl_args[@]}"`)
+	assertContains(t, script, `"${base_url}/checksums.txt" --output "$checksums"`)
+	assertContains(t, script, `checksums.txt does not contain exactly one checksum`)
+	assertContains(t, script, `shasum -a 256 -c -`)
+	assertContains(t, script, `sha256sum -c -`)
+	assertContains(t, script, `tar -xzf "$archive" -C "$extract_dir" goreleaser`)
+	assertContains(t, script, `"${dest}/goreleaser" --version | grep -F "${version#v}"`)
 }
 
 func TestRenovateIgnoresNativeGeneratedCommitAuthor(t *testing.T) {
@@ -606,9 +644,7 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 
 			if firstConsumerIndex == -1 &&
 				step.Name != "Load CI tool versions" &&
-				(strings.Contains(step.Run, "HUGO_VERSION") ||
-					strings.Contains(step.Run, "K6_IMAGE") ||
-					strings.Contains(step.Run, "GOVULNCHECK_VERSION")) {
+				stepConsumesCIToolVersion(step) {
 				firstConsumerIndex = index
 			}
 		}
@@ -633,6 +669,22 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 			t.Fatalf("%s job %s loads CI tool versions after first consumer", workflowPath, jobID)
 		}
 	}
+}
+
+func stepConsumesCIToolVersion(step P11WorkflowStep) bool {
+	for _, name := range []string{"HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION"} {
+		if strings.Contains(step.Run, name) {
+			return true
+		}
+
+		for _, value := range step.With {
+			if strings.Contains(value, name) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func TestGolangciLintBuildTagCoverage(t *testing.T) {

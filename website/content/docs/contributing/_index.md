@@ -206,7 +206,7 @@ update fixture locally with:
 scripts/verify-renovate-libghostty.sh
 ```
 
-Hugo, k6, and govulncheck CI versions live in
+Hugo, k6, govulncheck, and GoReleaser CI versions live in
 `.github/ci-tool-versions.env`. Workflows load that file instead of inlining
 tool versions, and Renovate manages those pins with narrowly scoped regex
 managers. k6 keeps its tag and digest in one value so Renovate updates the image

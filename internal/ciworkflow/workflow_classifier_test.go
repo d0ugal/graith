@@ -538,7 +538,7 @@ var (
 
 	legacyLibghosttyNativeMatcher = regexp.MustCompile(`^\.goreleaser-dev\.yaml$|^\.github/workflows/(dev-release|libghostty-native)\.yml$|^gui/shared/Package\.swift$|^gui/shared/Sources/CGhosttyVT/include/|^go\.(mod|sum)$|^internal/(cli|daemon|integration|libghosttydeps|pty|release)/|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-version|libghostty-native)\.sh$|^THIRD_PARTY_NOTICES\.libghostty\.md$`)
 
-	legacyDevReleaseMatcher = regexp.MustCompile(`^\.github/workflows/dev-release\.yml$|^\.goreleaser-dev\.yaml$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-base-tag|dev-release-version|libghostty-native)\.sh$|^cmd/ciclassify/|^internal/(ciworkflow|daemonservice)/|^macos/(notifier|service)/`)
+	legacyDevReleaseMatcher = regexp.MustCompile(`^\.github/(ci-tool-versions\.env|workflows/dev-release\.yml)$|^\.goreleaser-dev\.yaml$|^THIRD_PARTY_NOTICES\.libghostty\.md$|^libghostty-native\.(lock|spdx)\.json$|^scripts/(dev-release-base-tag|dev-release-version|libghostty-native)\.sh$|^cmd/ciclassify/|^internal/(ciworkflow|daemonservice)/|^macos/(notifier|service)/`)
 
 	legacyCIWorkflowMatcher = regexp.MustCompile(`^\.github/(actions|workflows)/|^cmd/ciclassify/|^internal/ciworkflow/`)
 

@@ -229,10 +229,24 @@ jobs:
             echo "GRAITH_SIGNED_SNAPSHOT=false"
           } >> "$GITHUB_ENV"
 
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
-        with:
-          version: "~> v2"
-          args: release --snapshot --skip=publish --clean -f .goreleaser-dev.yaml
+      - name: Load CI tool versions
+        run: |
+          set -euo pipefail
+          pin_file=.github/ci-tool-versions.env
+          test -f "$pin_file"
+          all_count="$(grep -Ec '^GORELEASER_VERSION=' "$pin_file" || :)"
+          valid_count="$(grep -Ec '^GORELEASER_VERSION=v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' "$pin_file" || :)"
+          if [ "$all_count" != 1 ] || [ "$valid_count" != 1 ]; then
+            echo "::error::Expected exactly one exact GORELEASER_VERSION=vX.Y.Z pin in $pin_file"
+            exit 1
+          fi
+          grep -E '^GORELEASER_VERSION=v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' "$pin_file" >> "$GITHUB_ENV"
+
+      - name: Install checksum-verified GoReleaser
+        run: scripts/install-goreleaser.sh "$GORELEASER_VERSION" "$RUNNER_TEMP/goreleaser/bin"
+
+      - name: Run GoReleaser
+        run: goreleaser release --snapshot --skip=publish --clean -f .goreleaser-dev.yaml
 
       - name: Verify Darwin dev archives
         shell: bash

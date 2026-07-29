@@ -26,8 +26,8 @@ informed: (TBD)
 
 graith ships as a single Go binary (`gr`, module `github.com/d0ugal/graith`).
 Releases are cut by pushing a `v*` tag, which triggers
-`.github/workflows/goreleaser.yml`. GoReleaser (`~> v2`, config in
-`.goreleaser.yaml`) builds `linux`/`darwin` × `amd64`/`arm64`, publishes
+`.github/workflows/goreleaser.yml`. GoReleaser (exact CI-managed version,
+config in `.goreleaser.yaml`) builds `linux`/`darwin` × `amd64`/`arm64`, publishes
 `.tar.gz` archives plus a `checksums.txt` to the GitHub Release, and pushes a
 Homebrew formula to `d0ugal/homebrew-tap` (using `RELEASE_TOKEN`, a PAT with
 `contents:write` on the tap, because the default `GITHUB_TOKEN` can't push

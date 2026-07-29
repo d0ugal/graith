@@ -79,6 +79,16 @@ func TestRenovateRetryPolicy(t *testing.T) {
 				stderr: "CI tool managers did not retain expected datasource or integrity metadata",
 			},
 		},
+		"goreleaser update skipped": {
+			responses: []renovateFakeResponse{
+				{log: renovateSuccessLogWithSkippedGoReleaser(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "CI tool managers did not retain expected datasource or integrity metadata",
+			},
+		},
 		"zig update missing": {
 			responses: []renovateFakeResponse{
 				{log: renovateSuccessLogWithoutZigUpdate(t), status: 0},
@@ -306,6 +316,16 @@ func renovateSuccessLog(t *testing.T) string {
 				map[string]any{"branchName": "renovate/golang.org-x-vuln-cmd-govulncheck-1.x"},
 			},
 		},
+		map[string]any{
+			"depName":       "goreleaser/goreleaser",
+			"packageName":   "goreleaser/goreleaser",
+			"datasource":    "github-releases",
+			"currentValue":  "v2.17.1",
+			"replaceString": "GORELEASER_VERSION=v2.17.1",
+			"updates": []any{
+				map[string]any{"branchName": "renovate/goreleaser-goreleaser-2.x"},
+			},
+		},
 	}
 
 	sandboxDeps := []any{
@@ -426,6 +446,28 @@ func renovateSuccessLogWithoutK6ReplacementMetadata(t *testing.T) string {
 	return log
 }
 
+func renovateSuccessLogWithSkippedGoReleaser(t *testing.T) string {
+	t.Helper()
+
+	var lines []string
+
+	for _, line := range strings.Split(renovateSuccessLog(t), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+
+		if record["msg"] == "packageFiles with updates" {
+			skipGoReleaserUpdate(t, record)
+			line = renovateJSONLine(t, record)
+		}
+
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func renovateSuccessLogWithoutZigUpdate(t *testing.T) string {
 	t.Helper()
 
@@ -530,6 +572,46 @@ func clearZigUpdate(t *testing.T, record map[string]any) {
 	}
 
 	t.Fatal("Renovate log missing Zig dependency")
+}
+
+func skipGoReleaserUpdate(t *testing.T, record map[string]any) {
+	t.Helper()
+
+	config, ok := record["config"].(map[string]any)
+	if !ok {
+		t.Fatal("Renovate log missing config object")
+	}
+
+	regexManagers, ok := config["regex"].([]any)
+	if !ok {
+		t.Fatal("Renovate log missing regex managers")
+	}
+
+	for _, managerAny := range regexManagers {
+		manager, ok := managerAny.(map[string]any)
+		if !ok {
+			t.Fatal("Renovate regex manager was not an object")
+		}
+
+		deps, ok := manager["deps"].([]any)
+		if !ok {
+			continue
+		}
+
+		for _, depAny := range deps {
+			dep, ok := depAny.(map[string]any)
+			if !ok {
+				t.Fatal("Renovate dependency was not an object")
+			}
+
+			if dep["depName"] == "goreleaser/goreleaser" {
+				dep["skipReason"] = "invalid-version"
+				return
+			}
+		}
+	}
+
+	t.Fatal("Renovate log missing GoReleaser dependency")
 }
 
 func removeSafehouseDep(t *testing.T, record map[string]any) {

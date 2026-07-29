@@ -696,20 +696,14 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		}
 	}
 
-	var (
-		goreleaserUses string
-		goreleaserWith map[string]string
-	)
-
-	for _, step := range darwinJob.Steps {
-		if strings.Contains(step.Uses, "goreleaser/goreleaser-action") {
-			goreleaserUses = step.Uses
-			goreleaserWith = step.With
-		}
+	goreleaser := workflowStep(darwinJob, "Run GoReleaser")
+	if !strings.Contains(goreleaser.Run, "goreleaser release --snapshot --skip=publish --clean -f .goreleaser-dev.yaml") {
+		t.Fatalf("Darwin job does not run the dev GoReleaser config: %q", goreleaser.Run)
 	}
 
-	if goreleaserUses == "" || !strings.Contains(goreleaserWith["args"], "-f .goreleaser-dev.yaml") {
-		t.Fatalf("Darwin job does not run the dev GoReleaser config: %q %#v", goreleaserUses, goreleaserWith)
+	installGoReleaser := workflowStep(darwinJob, "Install checksum-verified GoReleaser")
+	if !strings.Contains(installGoReleaser.Run, `scripts/install-goreleaser.sh "$GORELEASER_VERSION"`) {
+		t.Fatalf("Darwin job does not install the managed GoReleaser pin: %q", installGoReleaser.Run)
 	}
 
 	darwinVerify := workflowStep(darwinJob, "Verify Darwin dev archives").Run

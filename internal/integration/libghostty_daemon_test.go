@@ -27,16 +27,17 @@ import (
 )
 
 const (
-	nativeBinaryEnv      = "GRAITH_LIBGHOSTTY_DAEMON_BINARY"
-	nativeUpgradeFromEnv = "GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY"
-	nativeSoakCyclesEnv  = "GRAITH_LIBGHOSTTY_SOAK_CYCLES"
-	nativeSoakTimeoutEnv = "GRAITH_LIBGHOSTTY_SOAK_TIMEOUT"
-	nativeLongSoakEnv    = "GRAITH_LIBGHOSTTY_LONG_SOAK"
-	nativeProfile        = "native-validation"
-	nativeReadyText      = "braw-ready"
-	nativeResumeText     = "canny-resumed"
-	nativeOpTimeout      = 8 * time.Second
-	nativeUpgradeTimeout = protocol.UpgradeReadinessTimeout
+	nativeBinaryEnv           = "GRAITH_LIBGHOSTTY_DAEMON_BINARY"
+	nativeUpgradeFromEnv      = "GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY"
+	nativeSoakCyclesEnv       = "GRAITH_LIBGHOSTTY_SOAK_CYCLES"
+	nativeSoakTimeoutEnv      = "GRAITH_LIBGHOSTTY_SOAK_TIMEOUT"
+	nativeLongSoakEnv         = "GRAITH_LIBGHOSTTY_LONG_SOAK"
+	nativeUpgradeFromProtocol = "2"
+	nativeProfile             = "native-validation"
+	nativeReadyText           = "braw-ready"
+	nativeResumeText          = "canny-resumed"
+	nativeOpTimeout           = 8 * time.Second
+	nativeUpgradeTimeout      = protocol.UpgradeReadinessTimeout
 )
 
 const nativeDiagnosticTailBytes = 8 * 1024
@@ -389,6 +390,11 @@ func TestLibghosttyHistoricalPreRemovalUpgrade(t *testing.T) {
 	charmBinary := os.Getenv(nativeUpgradeFromEnv)
 	if charmBinary == "" {
 		t.Skip("historical pre-removal upgrade fixture is not configured")
+	}
+
+	currentProtocol, _, ok := strings.Cut(protocol.Version, ".")
+	if !ok || currentProtocol != nativeUpgradeFromProtocol {
+		t.Skipf("historical pre-removal upgrade fixture is protocol %s; current protocol %s uses clean protocol-boundary restart", nativeUpgradeFromProtocol, protocol.Version)
 	}
 
 	nativeBinary := requiredNativeBinary(t)
