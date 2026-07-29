@@ -114,6 +114,10 @@ type SessionManager struct {
 	// scenarioAddInterrupt is a deterministic test seam for crash-recovery
 	// windows in AddToScenario. Production leaves it nil.
 	scenarioAddInterrupt func(scenarioAddInterruptPoint) error
+	// afterMigrationSwap is a deterministic test seam after Migrate has
+	// persisted the target agent swap and FreshStart marker, before it launches.
+	// Production leaves it nil.
+	afterMigrationSwap func()
 	// adoptSession is a private startup test seam. Production uses
 	// pty.AdoptSession. Every adoption starts in raw-drain mode so derived-screen
 	// construction cannot consume or multiply the batch's absolute deadline.

@@ -31,7 +31,16 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 	}
 	defer sm.endLifecycleOperation()
 
+	unlockLaunch := sm.lockSessionLaunch(id)
+	defer unlockLaunch()
+
+	// Migrate owns the launch gate until the target has started or rollback has
+	// finished; launch calls below must use the ...Locked helper variants.
+
 	// --- snapshot + validate ---
+	// The launch gate may have waited behind a retry, resume, or restart. Read
+	// the session fields migration uses for source capture, target launch, and
+	// rollback only after acquiring it so they describe the current generation.
 	sm.mu.RLock()
 
 	sess, ok := sm.state.Sessions[id]
@@ -242,9 +251,13 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("persist migration swap: %w", saveErr)
 	}
 
+	if hook := sm.afterMigrationSwap; hook != nil {
+		hook()
+	}
+
 	// --- start the target agent in the same worktree, seeded ---
 	seed := transcript.BuildSeedPrompt(srcAgent, contextPath)
-	res, startErr := sm.resumeWithSummaryAndPrompt(id, rows, cols, "Migrated from "+srcAgent, seed)
+	res, startErr := sm.resumeWithSummaryAndPromptLocked(context.Background(), id, rows, cols, "Migrated from "+srcAgent, seed)
 
 	// Post-start health check: a PTY that spawns but exits immediately (bad
 	// auth/config — the likely outage case) is not a healthy start.
@@ -285,7 +298,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		}
 		sm.mu.Unlock()
 
-		if _, rerr := sm.resumeWithSummary(id, rows, cols, "Restored after failed migrate to "+targetAgent); rerr != nil {
+		if _, rerr := sm.resumeWithSummaryAndPromptLocked(context.Background(), id, rows, cols, "Restored after failed migrate to "+targetAgent, ""); rerr != nil {
 			// Both agents failed: leave the session Stopped with the original
 			// fields, retaining MigratedFrom + the rendered context for recovery.
 			return SessionState{}, fmt.Errorf(
@@ -305,7 +318,7 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("migrate to %q failed: %w (original %q agent restored)", targetAgent, startErr, srcAgent)
 	}
 
-	// Native session-id capture is handled inside resumeWithSummaryAndPrompt
+	// Native session-id capture is handled inside resumeWithSummaryAndPromptLocked
 	// (called above), which uses the session's effective CODEX_HOME and the
 	// real post-spawn timestamp. A second capture here would be redundant and
 	// would scrape the daemon's default root instead.
