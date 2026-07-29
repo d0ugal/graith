@@ -449,10 +449,51 @@ jobs:
             "$GRAITH_LIBGHOSTTY_WORK/pkgconfig/libghostty-vt-static.pc" \
             | sed "1i prefix=\${pcfiledir}/.." \
             > "$RUNNER_TEMP/bundle/pkgconfig/libghostty-vt-static.pc"
-          test "$(PKG_CONFIG_PATH="$RUNNER_TEMP/bundle/pkgconfig" pkg-config --cflags libghostty-vt-static)" = \
-            "-I$RUNNER_TEMP/bundle/pkgconfig/../include -DGHOSTTY_STATIC"
-          test "$(PKG_CONFIG_PATH="$RUNNER_TEMP/bundle/pkgconfig" pkg-config --libs libghostty-vt-static)" = \
-            "-L$RUNNER_TEMP/bundle/pkgconfig/.. -lghostty-vt"
+          verify_relocatable_pkg_config() {
+            local pkgconfig="$RUNNER_TEMP/bundle/pkgconfig"
+            local pc="$pkgconfig/libghostty-vt-static.pc"
+            local cflags libs include_flag include_path expected_include lib_flag lib_path expected_lib
+            local -a cflag_tokens lib_tokens
+            if ! grep -Fqx "prefix=\${pcfiledir}/.." "$pc"; then
+              echo "::error::Linux artifact pkg-config prefix is not relocatable."
+              return 1
+            fi
+            if ! cflags="$(env -u CGO_CFLAGS -u CGO_CPPFLAGS -u CPATH -u C_INCLUDE_PATH \
+              -u CPLUS_INCLUDE_PATH PKG_CONFIG_PATH="$pkgconfig" pkg-config --cflags libghostty-vt-static)"; then
+              echo "::error::Linux artifact pkg-config cflags query failed."
+              return 1
+            fi
+            read -r -a cflag_tokens <<< "$cflags"
+            include_flag="${cflag_tokens[0]:-}"
+            include_path="${include_flag#-I}"
+            expected_include="$RUNNER_TEMP/bundle/include"
+            if [[ "${#cflag_tokens[@]}" -ne 2 || "$include_flag" != -I* ||
+              "${cflag_tokens[1]:-}" != "-DGHOSTTY_STATIC" ]] ||
+              ! include_path="$(realpath "$include_path")" ||
+              ! expected_include="$(realpath "$expected_include")" ||
+              [[ "$include_path" != "$expected_include" ]]; then
+              echo "::error::Linux artifact pkg-config cflags use unexpected flags: $cflags"
+              return 1
+            fi
+            if ! libs="$(env -u CGO_CFLAGS -u CGO_CPPFLAGS -u CPATH -u C_INCLUDE_PATH \
+              -u CPLUS_INCLUDE_PATH PKG_CONFIG_PATH="$pkgconfig" pkg-config --libs libghostty-vt-static)"; then
+              echo "::error::Linux artifact pkg-config libs query failed."
+              return 1
+            fi
+            read -r -a lib_tokens <<< "$libs"
+            lib_flag="${lib_tokens[0]:-}"
+            lib_path="${lib_flag#-L}"
+            expected_lib="$RUNNER_TEMP/bundle"
+            if [[ "${#lib_tokens[@]}" -ne 2 || "$lib_flag" != -L* ||
+              "${lib_tokens[1]:-}" != "-lghostty-vt" ]] ||
+              ! lib_path="$(realpath "$lib_path")" ||
+              ! expected_lib="$(realpath "$expected_lib")" ||
+              [[ "$lib_path" != "$expected_lib" ]]; then
+              echo "::error::Linux artifact pkg-config libs use unexpected flags: $libs"
+              return 1
+            fi
+          }
+          verify_relocatable_pkg_config
           cp libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md "$RUNNER_TEMP/bundle/"
           jq -n --arg target "$TARGET" --arg arch "$GOARCH" --arg commit "$(jq -er '.ghostty.commit' libghostty-native.lock.json)" \
             '{schemaVersion:1,target:$target,architecture:$arch,ghosttyCommit:$commit}' > "$RUNNER_TEMP/bundle/manifest.json"
