@@ -125,6 +125,13 @@ Attach to a session. If no name is given, opens the session picker overlay.
 | `-y, --yes` | Skip the convert-to-interactive confirmation when attaching to a headless session |
 | `--read-only` | Observe without sending input: stream output but block the keyboard |
 
+Attached output is bounded per client. Raw attach and `gr logs -f` keep exact
+bytes, coalesce adjacent queued chunks, and buffer until a slow client's queue
+reaches 1 MiB or 16,384 chunks. The daemon disconnects a client whose queue
+overflows or whose queued write cannot complete within 2 seconds, while the
+session keeps draining output. Experimental terminal-owned attach coalesces live
+output into repaint hints and refreshes from screen snapshots.
+
 ### Read-only attach
 
 `gr attach --read-only <name>` observes with a persistent `🔒 READ-ONLY`
