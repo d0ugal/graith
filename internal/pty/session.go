@@ -143,10 +143,14 @@ type SessionOpts struct {
 	// Logger routes this session's PTY/scrollback diagnostics to the daemon's
 	// logger. Nil falls back to slog.Default(). See the Session.log field.
 	Logger *slog.Logger
+	// TerminalHistoryRows caps formatted terminal-aware history retained by the
+	// screen backend for experimental attach. Non-positive uses the package
+	// default; the backend may clamp further by viewport width.
+	TerminalHistoryRows int
 }
 
 func NewSession(opts SessionOpts) (*Session, error) {
-	return newSessionWithTerminalFactory(opts, newTerminal)
+	return newSessionWithTerminalFactory(opts, nil)
 }
 
 // NewSessionWithTerminalFactory creates a PTY session with an explicitly
@@ -165,7 +169,7 @@ func newSessionWithTerminalFactory(
 	factory func(cols, rows int) (Terminal, error),
 ) (*Session, error) {
 	if factory == nil {
-		factory = newTerminal
+		factory = terminalFactoryWithHistory(opts.TerminalHistoryRows)
 	}
 
 	cmd := exec.Command(opts.Command, opts.Args...)
@@ -283,6 +287,10 @@ type AdoptOpts struct {
 	// screenFactory is a deterministic package-test seam. Production leaves it
 	// nil and always selects the build-tagged terminal backend.
 	screenFactory func(cols, rows int) (Terminal, error)
+	// TerminalHistoryRows caps formatted terminal-aware history retained by the
+	// screen backend for experimental attach. Non-positive uses the package
+	// default; the backend may clamp further by viewport width.
+	TerminalHistoryRows int
 }
 
 func AdoptSession(opts AdoptOpts) (*Session, error) {
@@ -352,7 +360,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 
 	factory := opts.screenFactory
 	if factory == nil {
-		factory = newTerminal
+		factory = terminalFactoryWithHistory(opts.TerminalHistoryRows)
 	}
 
 	if stErr != nil {
@@ -1019,7 +1027,7 @@ func (s *Session) replaceScreenAtSizeLocked(cols, rows int, explicitResize bool)
 
 	factory := s.screenFactory
 	if factory == nil {
-		factory = newTerminal
+		factory = terminalFactoryWithHistory(0)
 	}
 
 	replacement, err := factory(cols, rows)
@@ -1219,7 +1227,7 @@ func (s *Session) recoverTerminalAfterUpgradeAttempt(ctx context.Context) error 
 
 	factory := s.screenFactory
 	if factory == nil {
-		factory = newTerminal
+		factory = terminalFactoryWithHistory(0)
 	}
 
 	hydrationBytes := s.screenHydrationBytes

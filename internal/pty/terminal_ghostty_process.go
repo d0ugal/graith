@@ -52,6 +52,8 @@ const (
 	ghosttyStatusInvalid  = 1
 	ghosttyStatusNative   = 2
 	ghosttyStatusProtocol = 3
+
+	ghosttySnapshotRequestHistory = 1
 )
 
 var (
@@ -66,6 +68,8 @@ var (
 
 var ghosttyRequestMagic = [4]byte{'G', 'V', 'T', 'Q'}
 var ghosttyReplyMagic = [4]byte{'G', 'V', 'T', 'R'}
+var ghosttySnapshotHistoryMagic = [4]byte{'H', 'S', 'T', '1'}
+var ghosttySnapshotHistoryPayload = []byte{ghosttySnapshotRequestHistory}
 
 type ghosttyProcessLimiter struct {
 	slots chan struct{}
@@ -194,6 +198,7 @@ type ghosttyProcessConfig struct {
 	limiter            *ghosttyProcessLimiter
 	onExecutablePinned func()
 	onStart            func(*exec.Cmd)
+	historyRows        int
 }
 
 type ghosttyPinnedImage struct {
@@ -336,10 +341,22 @@ type ghosttyProcessTerminal struct {
 
 var _ Terminal = (*ghosttyProcessTerminal)(nil)
 var _ terminalSnapshotter = (*ghosttyProcessTerminal)(nil)
+var _ terminalHistorySnapshotter = (*ghosttyProcessTerminal)(nil)
 
 func newGhosttyProcessTerminal(cols, rows int) (*ghosttyProcessTerminal, error) {
 	return newGhosttyProcessTerminalWithConfig(cols, rows, ghosttyProcessConfig{
 		limiter: ghosttyHelperLimiter,
+	})
+}
+
+func newGhosttyProcessTerminalWithHistory(cols, rows, historyRows int) (*ghosttyProcessTerminal, error) {
+	if historyRows <= 0 {
+		historyRows = defaultTerminalHistoryRows
+	}
+
+	return newGhosttyProcessTerminalWithConfig(cols, rows, ghosttyProcessConfig{
+		limiter:     ghosttyHelperLimiter,
+		historyRows: historyRows,
 	})
 }
 
@@ -553,11 +570,7 @@ func newGhosttyProcessTerminalWithConfig(
 		close(terminal.waitDone)
 	}()
 
-	payload := make([]byte, 4)
-	binary.BigEndian.PutUint16(payload[0:2], cols16)
-	binary.BigEndian.PutUint16(payload[2:4], rows16)
-
-	if _, err := terminal.exchange(ghosttyOpCreate, payload); err != nil {
+	if _, err := terminal.exchange(ghosttyOpCreate, ghosttyCreatePayload(cols16, rows16, cols, config.historyRows)); err != nil {
 		terminal.stop(true)
 
 		return nil, fmt.Errorf("initialize libghostty helper: %w", err)
@@ -569,6 +582,23 @@ func newGhosttyProcessTerminalWithConfig(
 	}
 
 	return terminal, nil
+}
+
+func ghosttyCreatePayload(cols16, rows16 uint16, cols, historyRows int) []byte {
+	payloadLen := 4
+	if historyRows > 0 {
+		payloadLen = 6
+	}
+
+	payload := make([]byte, payloadLen)
+	binary.BigEndian.PutUint16(payload[0:2], cols16)
+	binary.BigEndian.PutUint16(payload[2:4], rows16)
+
+	if historyRows > 0 {
+		binary.BigEndian.PutUint16(payload[4:6], uint16(resolveTerminalHistoryRows(historyRows, cols))) //nolint:gosec // G115: resolver clamps below uint16.
+	}
+
+	return payload
 }
 
 func ghosttySocketpair() ([2]int, error) {
@@ -672,7 +702,7 @@ func (gt *ghosttyProcessTerminal) Cursor() (int, int, bool) {
 	gt.opMu.Lock()
 	defer gt.opMu.Unlock()
 
-	snapshot, err := gt.snapshotLocked()
+	snapshot, err := gt.snapshotLocked(false)
 	if err != nil {
 		return 0, 0, false
 	}
@@ -688,7 +718,7 @@ func (gt *ghosttyProcessTerminal) Cell(x, y int) Cell {
 		return Cell{Content: " "}
 	}
 
-	snapshot, err := gt.snapshotLocked()
+	snapshot, err := gt.snapshotLocked(false)
 	if err != nil {
 		return Cell{Content: " "}
 	}
@@ -700,19 +730,31 @@ func (gt *ghosttyProcessTerminal) Snapshot() (TerminalSnapshot, error) {
 	gt.opMu.Lock()
 	defer gt.opMu.Unlock()
 
-	return gt.snapshotLocked()
+	return gt.snapshotLocked(false)
 }
 
-func (gt *ghosttyProcessTerminal) snapshotLocked() (TerminalSnapshot, error) {
+func (gt *ghosttyProcessTerminal) SnapshotWithHistory() (TerminalSnapshot, error) {
+	gt.opMu.Lock()
+	defer gt.opMu.Unlock()
+
+	return gt.snapshotLocked(true)
+}
+
+func (gt *ghosttyProcessTerminal) snapshotLocked(includeHistory bool) (TerminalSnapshot, error) {
 	if err := gt.currentError(); err != nil {
 		return TerminalSnapshot{}, err
 	}
 
-	if !gt.dirty {
+	if !includeHistory && !gt.dirty {
 		return gt.cache, nil
 	}
 
-	payload, err := gt.exchangeLocked(ghosttyOpSnapshot, nil)
+	var requestPayload []byte
+	if includeHistory {
+		requestPayload = ghosttySnapshotHistoryPayload
+	}
+
+	payload, err := gt.exchangeLocked(ghosttyOpSnapshot, requestPayload)
 	if err != nil {
 		return TerminalSnapshot{}, err
 	}
@@ -733,6 +775,7 @@ func (gt *ghosttyProcessTerminal) snapshotLocked() (TerminalSnapshot, error) {
 	}
 
 	gt.cache = snapshot
+	gt.cache.History = TerminalHistory{}
 	gt.dirty = false
 
 	return snapshot, nil
@@ -950,13 +993,21 @@ func validateGhosttyRequest(op byte, length int) error {
 	}
 
 	switch op {
-	case ghosttyOpCreate, ghosttyOpResize:
+	case ghosttyOpCreate:
+		if length != 4 && length != 6 {
+			return errGhosttyHelperProtocol
+		}
+	case ghosttyOpResize:
 		if length != 4 {
 			return errGhosttyHelperProtocol
 		}
 	case ghosttyOpWrite:
 		// Zero-length writes are harmless and keep the wire grammar simple.
-	case ghosttyOpSnapshot, ghosttyOpClose, ghosttyOpPinProbe:
+	case ghosttyOpSnapshot:
+		if length != 0 && length != 1 {
+			return errGhosttyHelperProtocol
+		}
+	case ghosttyOpClose, ghosttyOpPinProbe:
 		if length != 0 {
 			return errGhosttyHelperProtocol
 		}
@@ -989,12 +1040,7 @@ func validateGhosttyReply(op, status byte, length, cols, rows int) error {
 		cells := cols * rows
 		minimum := 13 + cells*16
 
-		maximum := 13 + cells*(16+ghosttyMaxCellContentBytes)
-		if maximum > ghosttyMaxReplyBytes {
-			maximum = ghosttyMaxReplyBytes
-		}
-
-		if length < minimum || length > maximum {
+		if length < minimum {
 			return errGhosttyHelperProtocol
 		}
 	case ghosttyOpPinProbe:
@@ -1039,10 +1085,14 @@ func serveGhosttyHelperFD() error {
 }
 
 func serveGhosttyHelper(conn net.Conn) error {
-	var terminal *ghosttyTerminal
+	var terminal, historyTerminal *ghosttyTerminal
 	defer func() {
 		if terminal != nil {
 			_ = terminal.Close()
+		}
+
+		if historyTerminal != nil {
+			_ = historyTerminal.Close()
 		}
 	}()
 
@@ -1058,7 +1108,7 @@ func serveGhosttyHelper(conn net.Conn) error {
 
 		switch op {
 		case ghosttyOpCreate:
-			if terminal != nil || len(payload) != 4 {
+			if terminal != nil || (len(payload) != 4 && len(payload) != 6) {
 				status = ghosttyStatusInvalid
 				break
 			}
@@ -1066,7 +1116,16 @@ func serveGhosttyHelper(conn net.Conn) error {
 			cols := int(binary.BigEndian.Uint16(payload[0:2]))
 			rows := int(binary.BigEndian.Uint16(payload[2:4]))
 
+			historyRows := 0
+			if len(payload) == 6 {
+				historyRows = int(binary.BigEndian.Uint16(payload[4:6]))
+			}
+
 			terminal, err = newGhosttyTerminal(cols, rows)
+			if err == nil && historyRows > 0 {
+				historyTerminal, _ = newGhosttyTerminalWithHistory(cols, rows, historyRows)
+			}
+
 			if err != nil {
 				status = ghosttyStatusNative
 			}
@@ -1080,6 +1139,15 @@ func serveGhosttyHelper(conn net.Conn) error {
 				status = ghosttyStatusNative
 			} else {
 				reply = terminal.DrainPtyReplies()
+
+				if historyTerminal != nil {
+					if _, historyErr := historyTerminal.Write(payload); historyErr != nil {
+						_ = historyTerminal.Close()
+						historyTerminal = nil
+					} else {
+						_ = historyTerminal.DrainPtyReplies()
+					}
+				}
 			}
 		case ghosttyOpResize:
 			if terminal == nil || len(payload) != 4 {
@@ -1092,18 +1160,42 @@ func serveGhosttyHelper(conn net.Conn) error {
 			rows := int(binary.BigEndian.Uint16(payload[2:4]))
 			if err = terminal.Resize(cols, rows); err != nil {
 				status = ghosttyStatusNative
+			} else if historyTerminal != nil {
+				historyRows := resolveTerminalHistoryRows(historyTerminal.historyRows, cols)
+				if historyRows != historyTerminal.historyRows {
+					_ = historyTerminal.Close()
+					historyTerminal, _ = newGhosttyTerminalWithHistory(cols, rows, historyRows)
+				} else if historyErr := historyTerminal.Resize(cols, rows); historyErr != nil {
+					_ = historyTerminal.Close()
+					historyTerminal = nil
+				}
 			}
 		case ghosttyOpSnapshot:
-			if terminal == nil || len(payload) != 0 {
+			if terminal == nil || len(payload) > 1 {
 				status = ghosttyStatusInvalid
 				break
 			}
 
+			includeHistory := false
+
+			if len(payload) == 1 {
+				if payload[0] != ghosttySnapshotRequestHistory {
+					status = ghosttyStatusInvalid
+					break
+				}
+
+				includeHistory = true
+			}
+
 			snapshot, snapshotErr := terminal.Snapshot()
+			if snapshotErr == nil && includeHistory && historyTerminal != nil {
+				snapshot.History, snapshotErr = historyTerminal.HistorySnapshot(historyTerminal.historyRows)
+			}
+
 			if snapshotErr != nil {
 				status = ghosttyStatusNative
 			} else {
-				reply, err = encodeGhosttySnapshot(snapshot)
+				reply, err = encodeGhosttySnapshotForReply(snapshot)
 				if err != nil {
 					status = ghosttyStatusProtocol
 				}
@@ -1116,6 +1208,11 @@ func serveGhosttyHelper(conn net.Conn) error {
 
 			err = terminal.Close()
 			terminal = nil
+
+			if historyTerminal != nil {
+				_ = historyTerminal.Close()
+				historyTerminal = nil
+			}
 
 			if err != nil {
 				status = ghosttyStatusNative
@@ -1251,6 +1348,59 @@ func writeAll(w io.Writer, p []byte) error {
 	return nil
 }
 
+func encodeGhosttySnapshotForReply(snapshot TerminalSnapshot) ([]byte, error) {
+	trimmed, err := trimGhosttySnapshotHistoryForReply(snapshot)
+	if err != nil {
+		return nil, err
+	}
+
+	return encodeGhosttySnapshot(trimmed)
+}
+
+func trimGhosttySnapshotHistoryForReply(snapshot TerminalSnapshot) (TerminalSnapshot, error) {
+	history, present, err := validatedGhosttySnapshotHistory(snapshot.History)
+	if err != nil || !present {
+		return snapshot, err
+	}
+
+	base := snapshot
+	base.History = TerminalHistory{}
+
+	basePayload, err := encodeGhosttySnapshot(base)
+	if err != nil {
+		return snapshot, err
+	}
+
+	if len(basePayload) > ghosttyMaxReplyBytes-14 {
+		snapshot.History = TerminalHistory{}
+
+		return snapshot, nil
+	}
+
+	budget := ghosttyMaxReplyBytes - len(basePayload)
+
+	historyBytes := 14
+	for _, line := range history.Lines {
+		historyBytes += 7 + len(line.Frame)
+	}
+
+	for historyBytes > budget && len(history.Lines) > 0 {
+		historyBytes -= 7 + len(history.Lines[0].Frame)
+		history.Lines = history.Lines[1:]
+		history.Truncated = true
+	}
+
+	if historyBytes > budget {
+		snapshot.History = TerminalHistory{}
+
+		return snapshot, nil
+	}
+
+	snapshot.History = history
+
+	return snapshot, nil
+}
+
 func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 	if snapshot.Cols < 1 || snapshot.Rows < 1 ||
 		snapshot.Cols > int(^uint16(0)) || snapshot.Rows > int(^uint16(0)) ||
@@ -1269,6 +1419,26 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 		}
 
 		total += 16 + len(cell.Content)
+	}
+
+	history, historyPresent, err := validatedGhosttySnapshotHistory(snapshot.History)
+	if err != nil {
+		return nil, err
+	}
+
+	if historyPresent {
+		if total > ghosttyMaxReplyBytes-14 {
+			return nil, errGhosttyHelperProtocol
+		}
+
+		total += 14
+		for _, line := range history.Lines {
+			if total > ghosttyMaxReplyBytes-7-len(line.Frame) {
+				return nil, errGhosttyHelperProtocol
+			}
+
+			total += 7 + len(line.Frame)
+		}
 	}
 
 	var buf bytes.Buffer
@@ -1302,6 +1472,38 @@ func encodeGhosttySnapshot(snapshot TerminalSnapshot) ([]byte, error) {
 	modeBits := make([]byte, ghosttySnapshotInputModeBytes)
 	binary.BigEndian.PutUint32(modeBits, encodeGhosttySnapshotInputModes(snapshot.InputModes))
 	_, _ = buf.Write(modeBits)
+
+	if historyPresent {
+		_, _ = buf.Write(ghosttySnapshotHistoryMagic[:])
+
+		fixed := make([]byte, 10)
+
+		fixed[0] = encodeGhosttyActiveScreen(history.ActiveScreen)
+		if history.Truncated {
+			fixed[1] = 1
+		}
+
+		binary.BigEndian.PutUint32(fixed[2:6], uint32(history.MaxLines))    //nolint:gosec // G115: history validation caps the value.
+		binary.BigEndian.PutUint32(fixed[6:10], uint32(len(history.Lines))) //nolint:gosec // G115: history validation caps the value.
+		_, _ = buf.Write(fixed)
+
+		for _, line := range history.Lines {
+			record := make([]byte, 7)
+			binary.BigEndian.PutUint16(record[0:2], uint16(line.Width)) //nolint:gosec // G115: history validation caps the value.
+
+			if line.Wrapped {
+				record[2] |= 1
+			}
+
+			if line.WrapContinuation {
+				record[2] |= 2
+			}
+
+			binary.BigEndian.PutUint32(record[3:7], uint32(len(line.Frame))) //nolint:gosec // G115: frame size is bounded by reply cap.
+			_, _ = buf.Write(record)
+			_, _ = buf.WriteString(line.Frame)
+		}
+	}
 
 	return buf.Bytes(), nil
 }
@@ -1371,11 +1573,77 @@ func decodeGhosttySnapshot(payload []byte) (TerminalSnapshot, error) {
 			MouseTracking: TerminalMouseTrackingNone,
 			MouseFormat:   TerminalMouseFormatX10,
 		}
-	case ghosttySnapshotInputModeBytes:
-		snapshot.InputModes = decodeGhosttySnapshotInputModes(binary.BigEndian.Uint32(payload))
 	default:
+		if len(payload) < ghosttySnapshotInputModeBytes {
+			return TerminalSnapshot{}, errGhosttyHelperProtocol
+		}
+
+		snapshot.InputModes = decodeGhosttySnapshotInputModes(binary.BigEndian.Uint32(payload[:ghosttySnapshotInputModeBytes]))
+		payload = payload[ghosttySnapshotInputModeBytes:]
+	}
+
+	if len(payload) == 0 {
+		return snapshot, nil
+	}
+
+	if len(payload) < 14 || !bytes.Equal(payload[:4], ghosttySnapshotHistoryMagic[:]) {
 		return TerminalSnapshot{}, errGhosttyHelperProtocol
 	}
+
+	activeScreen, ok := decodeGhosttyActiveScreen(payload[4])
+	if !ok || payload[5] > 1 {
+		return TerminalSnapshot{}, errGhosttyHelperProtocol
+	}
+
+	truncated := payload[5] == 1
+	maxLines := int(binary.BigEndian.Uint32(payload[6:10]))
+
+	historyCount := int(binary.BigEndian.Uint32(payload[10:14]))
+	if maxLines > maxTerminalHistoryRows ||
+		historyCount > maxTerminalHistoryRows ||
+		(maxLines > 0 && historyCount > maxLines) ||
+		historyCount > (len(payload)-14)/7 {
+		return TerminalSnapshot{}, errGhosttyHelperProtocol
+	}
+
+	payload = payload[14:]
+
+	history := TerminalHistory{
+		Lines:        make([]TerminalHistoryLine, historyCount),
+		MaxLines:     maxLines,
+		Truncated:    truncated,
+		ActiveScreen: activeScreen,
+	}
+
+	for i := range history.Lines {
+		if len(payload) < 7 {
+			return TerminalSnapshot{}, errGhosttyHelperProtocol
+		}
+
+		width := int(binary.BigEndian.Uint16(payload[0:2]))
+		flags := payload[2]
+
+		frameLen := int(binary.BigEndian.Uint32(payload[3:7]))
+		if flags&^byte(0x03) != 0 || frameLen > len(payload)-7 ||
+			frameLen > ghosttyMaxReplyBytes || !utf8.Valid(payload[7:7+frameLen]) {
+			return TerminalSnapshot{}, errGhosttyHelperProtocol
+		}
+
+		history.Lines[i] = TerminalHistoryLine{
+			Frame:            string(payload[7 : 7+frameLen]),
+			Width:            width,
+			Wrapped:          flags&1 != 0,
+			WrapContinuation: flags&2 != 0,
+		}
+
+		payload = payload[7+frameLen:]
+	}
+
+	if len(payload) != 0 {
+		return TerminalSnapshot{}, errGhosttyHelperProtocol
+	}
+
+	snapshot.History = history
 
 	return snapshot, nil
 }
@@ -1495,6 +1763,55 @@ func decodeGhosttySnapshotInputModes(bits uint32) TerminalInputModes {
 	modes.AlternateScroll = bits&ghosttySnapshotAltScrollBit != 0
 
 	return modes
+}
+
+func validatedGhosttySnapshotHistory(history TerminalHistory) (TerminalHistory, bool, error) {
+	present := history.ActiveScreen != "" || history.MaxLines != 0 || history.Truncated || len(history.Lines) != 0
+	if !present {
+		return TerminalHistory{}, false, nil
+	}
+
+	if history.ActiveScreen == "" {
+		history.ActiveScreen = TerminalScreenPrimary
+	}
+
+	if encodeGhosttyActiveScreen(history.ActiveScreen) == 0 ||
+		history.MaxLines < 0 || history.MaxLines > maxTerminalHistoryRows ||
+		len(history.Lines) > maxTerminalHistoryRows ||
+		(history.MaxLines > 0 && len(history.Lines) > history.MaxLines) {
+		return TerminalHistory{}, false, errGhosttyHelperProtocol
+	}
+
+	for _, line := range history.Lines {
+		if line.Width < 0 || line.Width > int(^uint16(0)) ||
+			len(line.Frame) > ghosttyMaxReplyBytes || !utf8.ValidString(line.Frame) {
+			return TerminalHistory{}, false, errGhosttyHelperProtocol
+		}
+	}
+
+	return history, true, nil
+}
+
+func encodeGhosttyActiveScreen(screen string) byte {
+	switch screen {
+	case TerminalScreenPrimary:
+		return 1
+	case TerminalScreenAlternate:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func decodeGhosttyActiveScreen(screen byte) (string, bool) {
+	switch screen {
+	case 1:
+		return TerminalScreenPrimary, true
+	case 2:
+		return TerminalScreenAlternate, true
+	default:
+		return "", false
+	}
 }
 
 func validGhosttyColor(color Color) bool {

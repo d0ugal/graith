@@ -44,6 +44,8 @@ type attachLoop struct {
 
 	experimentalAttach bool
 	terminalOwnedPass  bool
+	terminalHistory    protocol.TerminalHistoryMsg
+	hasTerminalHistory bool
 
 	// opts is handed (by value) to RunPassthrough each iteration; opts.Info
 	// always points at info, so decoding into &info updates what RunPassthrough
@@ -95,8 +97,10 @@ func runAttachByIDWithOptions(c attachConn, sessionID string, initialCollapsed m
 		SessionID:        sessionID,
 		Info:             &l.info,
 		ReadOnly:         attachReadOnly,
-		ExperimentalSeed: seed,
+		OnTerminalOutput: l.clearTerminalHistory,
 	}
+	l.setExperimentalSeed(seed)
+
 	if cfg.StatusBar.Enabled {
 		l.opts.StatusBar = &client.StatusBarCfg{
 			Position: cfg.StatusBar.Position,
@@ -107,6 +111,29 @@ func runAttachByIDWithOptions(c attachConn, sessionID string, initialCollapsed m
 	l.opts.DragArrowThreshold = cfg.Input.DragArrowThreshold
 
 	return l.run()
+}
+
+func (l *attachLoop) setExperimentalSeed(seed *protocol.ExperimentalAttachSeedMsg) {
+	l.opts.ExperimentalSeed = seed
+
+	if seed == nil {
+		l.hasTerminalHistory = false
+		l.terminalHistory = protocol.TerminalHistoryMsg{}
+
+		return
+	}
+
+	l.terminalHistory = seed.History
+	l.hasTerminalHistory = terminalHistoryPresent(seed.History)
+}
+
+func (l *attachLoop) clearTerminalHistory() {
+	l.hasTerminalHistory = false
+	l.terminalHistory = protocol.TerminalHistoryMsg{}
+}
+
+func terminalHistoryPresent(history protocol.TerminalHistoryMsg) bool {
+	return len(history.Lines) > 0 || history.MaxLines > 0 || history.Truncated || history.ActiveScreen != ""
 }
 
 func (l *attachLoop) run() error {
@@ -181,7 +208,7 @@ func (l *attachLoop) adoptCurrent(nc attachConn) bool {
 	if err != nil {
 		out.Printf("Attach failed: %s\n", err)
 
-		l.opts.ExperimentalSeed = nil
+		l.setExperimentalSeed(nil)
 		l.c = nc
 
 		return false
@@ -189,7 +216,7 @@ func (l *attachLoop) adoptCurrent(nc attachConn) bool {
 
 	l.opts.SessionID = l.sessionID
 	l.opts.Info = &l.info
-	l.opts.ExperimentalSeed = seed
+	l.setExperimentalSeed(seed)
 	l.c = nc
 
 	return true
@@ -231,7 +258,7 @@ func (l *attachLoop) switchTo(nc attachConn, newID string, experimentalAttach bo
 	l.experimentalAttach = experimentalAttach
 	l.opts.SessionID = newID
 	l.opts.Info = &l.info
-	l.opts.ExperimentalSeed = seed
+	l.setExperimentalSeed(seed)
 	l.c = nc
 
 	if experimentalAttach && seed == nil {
@@ -317,11 +344,12 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 	}
 
 	if createResp.Type == "error" {
-		nc2, _, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Create", createResp, &l.opts, &l.info)
+		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Create", createResp, &l.opts, &l.info)
 		if err != nil {
 			return false, err
 		}
 
+		l.setExperimentalSeed(seed)
 		l.c = nc2
 
 		return false, nil
@@ -375,7 +403,7 @@ func (l *attachLoop) overlaySwitch(nc attachConn, targetID string, experimentalA
 	l.experimentalAttach = experimentalAttach
 	l.opts.SessionID = targetID
 	l.opts.Info = &l.info
-	l.opts.ExperimentalSeed = seed
+	l.setExperimentalSeed(seed)
 	l.c = nc
 
 	if experimentalAttach && seed == nil {
@@ -489,7 +517,7 @@ func (l *attachLoop) onDisconnected() (bool, error) {
 
 	l.opts.SessionID = l.sessionID
 	l.opts.Info = &l.info
-	l.opts.ExperimentalSeed = seed
+	l.setExperimentalSeed(seed)
 	l.c = nc
 
 	return false, nil
@@ -571,11 +599,12 @@ func (l *attachLoop) onNewSession() (bool, error) {
 	}
 
 	if createResp.Type == "error" {
-		nc2, _, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Create", createResp, &l.opts, &l.info)
+		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Create", createResp, &l.opts, &l.info)
 		if err != nil {
 			return false, err
 		}
 
+		l.setExperimentalSeed(seed)
 		l.c = nc2
 
 		return false, nil
@@ -619,11 +648,12 @@ func (l *attachLoop) onForkSession() (bool, error) {
 	}
 
 	if createResp.Type == "error" {
-		nc2, _, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Fork", createResp, &l.opts, &l.info)
+		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Fork", createResp, &l.opts, &l.info)
 		if err != nil {
 			return false, err
 		}
 
+		l.setExperimentalSeed(seed)
 		l.c = nc2
 
 		return false, nil
@@ -729,7 +759,18 @@ func (l *attachLoop) onRenameSession() (bool, error) {
 }
 
 func (l *attachLoop) onScrollMode() (bool, error) {
-	scrollback := fetchScrollback(cfg, paths, cfgFile, l.sessionID, 0)
+	scrollback := ""
+
+	if l.hasTerminalHistory {
+		if formatted := client.FormatTerminalHistory(l.terminalHistory); formatted != "" {
+			scrollback = formatted
+		}
+	}
+
+	if scrollback == "" {
+		scrollback = fetchScrollback(cfg, paths, cfgFile, l.sessionID, 0)
+	}
+
 	runScrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
 
 	nc, err := freshClient()

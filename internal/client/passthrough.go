@@ -232,6 +232,7 @@ type PassthroughOpts struct {
 	StatusBar            *StatusBarCfg
 	ExperimentalSeed     *protocol.ExperimentalAttachSeedMsg
 	TerminalOwned        bool
+	OnTerminalOutput     func()
 	experimentalChrome   *experimentalAttachChrome
 	experimentalViewport *experimentalAttachViewport
 	experimentalInput    *experimentalInputRouter
@@ -600,6 +601,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 				return
 			case data := <-demux.dataCh:
 				if opts.TerminalOwned {
+					if opts.OnTerminalOutput != nil {
+						opts.OnTerminalOutput()
+					}
+
 					requestSnapshot(false)
 				} else {
 					_, _ = stdout.Write(data)

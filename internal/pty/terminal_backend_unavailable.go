@@ -11,6 +11,8 @@ var errNativeTerminalRequired = errors.New("native libghostty terminal backend i
 // native helper explicitly.
 func newTerminal(_, _ int) (Terminal, error) { return nil, errNativeTerminalRequired }
 
+func newTerminalWithHistory(_, _, _ int) (Terminal, error) { return nil, errNativeTerminalRequired }
+
 func TerminalBackend() string { return TerminalBackendUnavailable }
 
 func TerminalAdoptionCapacity() (int, bool) { return 0, false }

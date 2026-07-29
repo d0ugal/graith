@@ -122,6 +122,13 @@ func TestTerminalOwnedDataTriggersSnapshotRepaint(t *testing.T) {
 	opts := testOpts
 	opts.SessionID = "braw"
 	opts.TerminalOwned = true
+	terminalOutput := make(chan struct{}, 1)
+	opts.OnTerminalOutput = func() {
+		select {
+		case terminalOutput <- struct{}{}:
+		default:
+		}
+	}
 
 	done := make(chan PassthroughResult, 1)
 	go func() {
@@ -160,6 +167,12 @@ func TestTerminalOwnedDataTriggersSnapshotRepaint(t *testing.T) {
 
 	if req.SessionID != "braw" {
 		t.Fatalf("snapshot request session = %q, want braw", req.SessionID)
+	}
+
+	select {
+	case <-terminalOutput:
+	default:
+		t.Fatal("terminal-owned data did not notify terminal output callback")
 	}
 
 	resp, err := protocol.EncodeControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{

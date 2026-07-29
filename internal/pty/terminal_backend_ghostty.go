@@ -8,7 +8,11 @@ import "context"
 // libghostty+cgo build. Initialization failures are returned to the caller;
 // this path never silently substitutes another emulator.
 func newTerminal(cols, rows int) (Terminal, error) {
-	return newGhosttyProcessTerminal(cols, rows)
+	return newTerminalWithHistory(cols, rows, defaultTerminalHistoryRows)
+}
+
+func newTerminalWithHistory(cols, rows, historyRows int) (Terminal, error) {
+	return newGhosttyProcessTerminalWithHistory(cols, rows, historyRows)
 }
 
 // TerminalBackend reports the terminal-screen backend selected by this build.

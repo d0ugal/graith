@@ -1232,6 +1232,14 @@
             "ref": "ScreenSnapshotResponseMsg"
           },
           "optional": false
+        },
+        {
+          "name": "history",
+          "type": {
+            "kind": "object",
+            "ref": "TerminalHistoryMsg"
+          },
+          "optional": true
         }
       ]
     },
@@ -5166,6 +5174,78 @@
             }
           },
           "optional": false
+        }
+      ]
+    },
+    {
+      "name": "TerminalHistoryLineMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "frame",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "width",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "wrapped",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "wrap_continuation",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "TerminalHistoryMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "lines",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "TerminalHistoryLineMsg"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "max_lines",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "truncated",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "active_screen",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         }
       ]
     },

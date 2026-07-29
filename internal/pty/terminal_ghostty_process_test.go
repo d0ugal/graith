@@ -51,6 +51,15 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 			AlternateScreen:       true,
 			AlternateScroll:       true,
 		},
+		History: TerminalHistory{
+			MaxLines:     17,
+			Truncated:    true,
+			ActiveScreen: TerminalScreenPrimary,
+			Lines: []TerminalHistoryLine{
+				{Frame: "\x1b[31mbraw\x1b[0m", Width: 2, Wrapped: true},
+				{Frame: "canny\x1b[0m", Width: 2, WrapContinuation: true},
+			},
+		},
 	}
 
 	payload, err := encodeGhosttySnapshot(want)
@@ -80,6 +89,19 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 	for i := range want.Cells {
 		if got.Cells[i] != want.Cells[i] {
 			t.Errorf("cell %d = %+v, want %+v", i, got.Cells[i], want.Cells[i])
+		}
+	}
+
+	if got.History.MaxLines != want.History.MaxLines ||
+		got.History.Truncated != want.History.Truncated ||
+		got.History.ActiveScreen != want.History.ActiveScreen ||
+		len(got.History.Lines) != len(want.History.Lines) {
+		t.Fatalf("history = %+v, want %+v", got.History, want.History)
+	}
+
+	for i := range want.History.Lines {
+		if got.History.Lines[i] != want.History.Lines[i] {
+			t.Errorf("history line %d = %+v, want %+v", i, got.History.Lines[i], want.History.Lines[i])
 		}
 	}
 }
@@ -398,6 +420,10 @@ func TestGhosttyRequestProtocolRejectsMalformedFramesBeforeAllocation(t *testing
 		"reserved byte":     append([]byte(nil), valid...),
 		"unknown operation": append([]byte(nil), valid...),
 		"wrong resize size": ghosttyTestRequest(ghosttyOpResize, []byte{1}),
+		"wrong snapshot size": ghosttyTestRequest(ghosttyOpSnapshot, []byte{
+			ghosttySnapshotRequestHistory,
+			ghosttySnapshotRequestHistory,
+		}),
 		"truncated payload": valid[:len(valid)-1],
 		"oversized payload": ghosttyTestRequestHeader(ghosttyOpWrite, ghosttyMaxRequestBytes+1),
 	}
@@ -410,6 +436,47 @@ func TestGhosttyRequestProtocolRejectsMalformedFramesBeforeAllocation(t *testing
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := readGhosttyRequest(bytes.NewReader(frame)); err == nil {
 				t.Fatal("malformed request returned nil error")
+			}
+		})
+	}
+}
+
+func TestGhosttyRequestProtocolAcceptsCreateHistoryRowsAndSnapshotHistoryFlag(t *testing.T) {
+	tests := map[string]struct {
+		frame       []byte
+		wantOp      byte
+		wantPayload []byte
+	}{
+		"legacy create": {
+			frame:       ghosttyTestRequest(ghosttyOpCreate, []byte{0, 12, 0, 3}),
+			wantOp:      ghosttyOpCreate,
+			wantPayload: []byte{0, 12, 0, 3},
+		},
+		"create with history rows": {
+			frame:       ghosttyTestRequest(ghosttyOpCreate, []byte{0, 12, 0, 3, 0, 17}),
+			wantOp:      ghosttyOpCreate,
+			wantPayload: []byte{0, 12, 0, 3, 0, 17},
+		},
+		"snapshot with history flag": {
+			frame:       ghosttyTestRequest(ghosttyOpSnapshot, ghosttySnapshotHistoryPayload),
+			wantOp:      ghosttyOpSnapshot,
+			wantPayload: ghosttySnapshotHistoryPayload,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			op, payload, err := readGhosttyRequest(bytes.NewReader(test.frame))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if op != test.wantOp {
+				t.Fatalf("operation = %d, want %d", op, test.wantOp)
+			}
+
+			if !bytes.Equal(payload, test.wantPayload) {
+				t.Fatalf("payload = %v, want %v", payload, test.wantPayload)
 			}
 		})
 	}
@@ -475,6 +542,9 @@ func TestGhosttyExchangeRejectsMalformedReplies(t *testing.T) {
 func TestGhosttyWriteReplyPayloadIsDrained(t *testing.T) {
 	reply := []byte("\x1b[?62;1c")
 	parent, child := net.Pipe()
+
+	t.Cleanup(func() { _ = parent.Close() })
+
 	terminal := &ghosttyProcessTerminal{
 		conn:            parent,
 		cols:            1,
@@ -483,8 +553,6 @@ func TestGhosttyWriteReplyPayloadIsDrained(t *testing.T) {
 		shutdownTimeout: 10 * time.Millisecond,
 		reapTimeout:     10 * time.Millisecond,
 	}
-
-	t.Cleanup(func() { _ = parent.Close() })
 
 	serverDone := make(chan error, 1)
 
@@ -524,6 +592,135 @@ func TestGhosttyWriteReplyPayloadIsDrained(t *testing.T) {
 
 	if err := <-serverDone; err != nil {
 		t.Fatalf("scripted helper: %v", err)
+	}
+}
+
+func TestGhosttyProcessSnapshotWithHistoryRequestsHistoryFlag(t *testing.T) {
+	parent, child := net.Pipe()
+
+	t.Cleanup(func() { _ = parent.Close() })
+
+	terminal := &ghosttyProcessTerminal{
+		conn:            parent,
+		cols:            1,
+		rows:            1,
+		dirty:           true,
+		rpcTimeout:      time.Second,
+		shutdownTimeout: 10 * time.Millisecond,
+		reapTimeout:     10 * time.Millisecond,
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		defer func() { _ = child.Close() }()
+
+		op, payload, err := readGhosttyRequest(child)
+		if err != nil {
+			done <- err
+
+			return
+		}
+
+		if op != ghosttyOpSnapshot || !bytes.Equal(payload, ghosttySnapshotHistoryPayload) {
+			done <- fmt.Errorf("request = (%d, %v), want snapshot history", op, payload)
+
+			return
+		}
+
+		reply, err := encodeGhosttySnapshot(TerminalSnapshot{
+			Cells:         []Cell{{Content: " "}},
+			CursorVisible: true,
+			Cols:          1,
+			Rows:          1,
+			History: TerminalHistory{
+				MaxLines:     17,
+				ActiveScreen: TerminalScreenPrimary,
+				Lines: []TerminalHistoryLine{
+					{Frame: "braw\x1b[0m", Width: 1},
+				},
+			},
+		})
+		if err != nil {
+			done <- err
+
+			return
+		}
+
+		if _, err := child.Write(ghosttyTestReply(ghosttyOpSnapshot, ghosttyStatusOK, reply)); err != nil {
+			done <- err
+
+			return
+		}
+
+		done <- nil
+	}()
+
+	snapshot, err := terminal.SnapshotWithHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	if len(snapshot.History.Lines) != 1 || snapshot.History.Lines[0].Frame != "braw\x1b[0m" {
+		t.Fatalf("history = %+v, want one braw line", snapshot.History)
+	}
+}
+
+func TestEncodeGhosttySnapshotForReplyTrimsOversizedHistory(t *testing.T) {
+	const lineCount = maxTerminalHistoryRows
+
+	snapshot := TerminalSnapshot{
+		Cells:         []Cell{{Content: " "}},
+		CursorVisible: true,
+		Cols:          1,
+		Rows:          1,
+		History: TerminalHistory{
+			MaxLines:     lineCount,
+			ActiveScreen: TerminalScreenPrimary,
+			Lines:        make([]TerminalHistoryLine, lineCount),
+		},
+	}
+
+	for i := range snapshot.History.Lines {
+		snapshot.History.Lines[i] = TerminalHistoryLine{
+			Frame: fmt.Sprintf("line-%04d-%s", i, strings.Repeat("braw", 5*1024)),
+			Width: 1,
+		}
+	}
+
+	payload, err := encodeGhosttySnapshotForReply(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(payload) > ghosttyMaxReplyBytes {
+		t.Fatalf("reply payload = %d bytes, want at most %d", len(payload), ghosttyMaxReplyBytes)
+	}
+
+	decoded, err := decodeGhosttySnapshot(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !decoded.History.Truncated {
+		t.Fatal("trimmed history did not mark truncated")
+	}
+
+	if got := len(decoded.History.Lines); got == 0 || got >= lineCount {
+		t.Fatalf("history lines after trim = %d, want some but fewer than %d", got, lineCount)
+	}
+
+	if first := decoded.History.Lines[0].Frame; strings.Contains(first, "line-0000") {
+		t.Fatalf("oldest history was not trimmed: %q", first[:min(len(first), 32)])
+	}
+
+	last := decoded.History.Lines[len(decoded.History.Lines)-1].Frame
+	if !strings.Contains(last, fmt.Sprintf("line-%04d", lineCount-1)) {
+		t.Fatalf("newest history line = %q, want final line retained", last[:min(len(last), 32)])
 	}
 }
 
@@ -1652,25 +1849,56 @@ func TestGhosttyPeakRSSConcurrentClose(t *testing.T) {
 	readers.Wait()
 }
 
+func TestGhosttyCreatePayloadOmitsHistoryWhenDisabled(t *testing.T) {
+	tests := map[string]struct {
+		historyRows int
+		want        []byte
+	}{
+		"braw no history": {
+			historyRows: 0,
+			want:        []byte{0, 12, 0, 3},
+		},
+		"canny explicit history": {
+			historyRows: 17,
+			want:        []byte{0, 12, 0, 3, 0, 17},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := ghosttyCreatePayload(12, 3, 12, test.historyRows)
+			if !bytes.Equal(got, test.want) {
+				t.Fatalf("create payload = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 // TestGhosttySustainedScrollDoesNotRetainHistory guards WithMaxScrollback(0)
-// across native dependency updates. Accepted measurements put both workloads
-// below 17 MiB with less than 1 MiB growth; these wider bounds tolerate runner
-// and allocator variation while still detecting material row retention.
+// across native dependency updates. Static-link baselines vary by platform and
+// referenced native symbols, so the guard compares scroll workloads against an
+// idle helper and then verifies doubling scroll input does not materially grow
+// peak RSS.
 func TestGhosttySustainedScrollDoesNotRetainHistory(t *testing.T) {
 	const (
-		maxHelperPeak   = 64 * 1024 * 1024
-		maxHelperGrowth = 16 * 1024 * 1024
+		maxScrollOverhead = 64 * 1024 * 1024
+		maxHelperGrowth   = 16 * 1024 * 1024
 	)
 
+	idle := ghosttyIdlePeakRSS(t)
 	baseline := ghosttySustainedScrollPeakRSS(t, 12_000)
-
 	extended := ghosttySustainedScrollPeakRSS(t, 24_000)
-	if baseline > maxHelperPeak || extended > maxHelperPeak {
+
+	baselineOverhead := max(baseline-idle, 0)
+
+	extendedOverhead := max(extended-idle, 0)
+	if baselineOverhead > maxScrollOverhead || extendedOverhead > maxScrollOverhead {
 		t.Fatalf(
-			"helper peak RSS = (%d,%d) bytes for 12k/24k lines; want each <= %d",
-			baseline,
-			extended,
-			maxHelperPeak,
+			"helper scroll RSS overhead = (%d,%d) bytes over idle %d for 12k/24k lines; want each <= %d",
+			baselineOverhead,
+			extendedOverhead,
+			idle,
+			maxScrollOverhead,
 		)
 	}
 
@@ -1684,7 +1912,33 @@ func TestGhosttySustainedScrollDoesNotRetainHistory(t *testing.T) {
 		)
 	}
 
-	t.Logf("helper peak RSS for 12k/24k lines = %d/%d bytes", baseline, extended)
+	t.Logf("helper peak RSS idle/12k/24k lines = %d/%d/%d bytes", idle, baseline, extended)
+}
+
+func ghosttyIdlePeakRSS(t testing.TB) int64 {
+	t.Helper()
+
+	terminal, err := newGhosttyProcessTerminal(240, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := snapshotTerminal(terminal); err != nil {
+		_ = terminal.Close()
+
+		t.Fatal(err)
+	}
+
+	if err := terminal.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	peak := terminal.PeakRSSBytes()
+	if peak <= 0 {
+		t.Fatal("helper peak RSS is unavailable")
+	}
+
+	return peak
 }
 
 func ghosttySustainedScrollPeakRSS(t testing.TB, lines int) int64 {

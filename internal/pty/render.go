@@ -31,6 +31,7 @@ type ScreenCapture struct {
 	Cols          int
 	Rows          int
 	InputModes    TerminalInputModes
+	History       TerminalHistory
 }
 
 func (s *Session) ScreenSnapshot() ScreenCapture {
@@ -73,7 +74,7 @@ func (s *Session) AttachWithScreenSnapshot(w io.Writer) ScreenCapture {
 		return ScreenCapture{}
 	}
 
-	snap := s.screenSnapshotLocked()
+	snap := s.screenSnapshotWithHistoryLocked()
 	s.writers = append(s.writers, w)
 	s.mu.Unlock()
 
@@ -85,14 +86,22 @@ func (s *Session) screenSnapshotLocked() ScreenCapture {
 }
 
 func (s *Session) screenSnapshotDeltaLocked(deltaFrom uint64) ScreenCapture {
-	snapshot, err := snapshotTerminal(s.screen)
+	return s.screenSnapshotWithSnapshotterLocked(deltaFrom, snapshotTerminal)
+}
+
+func (s *Session) screenSnapshotWithHistoryLocked() ScreenCapture {
+	return s.screenSnapshotWithSnapshotterLocked(0, snapshotTerminalWithHistory)
+}
+
+func (s *Session) screenSnapshotWithSnapshotterLocked(deltaFrom uint64, snapshotter func(Terminal) (TerminalSnapshot, error)) ScreenCapture {
+	snapshot, err := snapshotter(s.screen)
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
 		s.log.Warn("terminal snapshot failed; screen reconstructed",
 			"session", s.ID, "error", err, "recovery_error", recoveryErr)
 
 		if recoveryErr == nil {
-			snapshot, _ = snapshotTerminal(s.screen)
+			snapshot, _ = snapshotter(s.screen)
 		}
 	}
 
@@ -162,6 +171,7 @@ func cloneTerminalSnapshot(snapshot TerminalSnapshot) TerminalSnapshot {
 	cells := make([]Cell, len(snapshot.Cells))
 	copy(cells, snapshot.Cells)
 	snapshot.Cells = cells
+	snapshot.History = TerminalHistory{}
 
 	return snapshot
 }
@@ -223,10 +233,7 @@ func renderSnapshotFrame(snapshot TerminalSnapshot) ScreenCapture {
 			buf.WriteString("\r\n")
 		}
 
-		for x := 0; x < cols; x++ {
-			cell := snapshot.Cells[y*cols+x]
-			writeStyledCell(&buf, cell, &prevStyle)
-		}
+		writeStyledCells(&buf, snapshot.Cells[y*cols:(y+1)*cols], &prevStyle)
 	}
 
 	buf.WriteString("\x1b[0m")
@@ -239,6 +246,7 @@ func renderSnapshotFrame(snapshot TerminalSnapshot) ScreenCapture {
 		Cols:          cols,
 		Rows:          rows,
 		InputModes:    snapshot.InputModes.normalized(),
+		History:       snapshot.History,
 	}
 }
 
@@ -279,29 +287,28 @@ func renderSnapshotRow(snapshot TerminalSnapshot, y int) string {
 	rowStart := y * snapshot.Cols
 	rowEnd := rowStart + snapshot.Cols
 
-	for _, cell := range snapshot.Cells[rowStart:rowEnd] {
-		writeStyledCell(&buf, cell, &prevStyle)
-	}
-
+	writeStyledCells(&buf, snapshot.Cells[rowStart:rowEnd], &prevStyle)
 	buf.WriteString("\x1b[0m")
 
 	return buf.String()
 }
 
-func writeStyledCell(buf *strings.Builder, cell Cell, prevStyle *CellStyle) {
-	if cell.Style != *prevStyle {
-		writeSGR(buf, cell.Style)
-		*prevStyle = cell.Style
-	}
+func writeStyledCells(buf *strings.Builder, cells []Cell, prevStyle *CellStyle) {
+	for _, cell := range cells {
+		if cell.Style != *prevStyle {
+			writeSGR(buf, cell.Style)
+			*prevStyle = cell.Style
+		}
 
-	// An empty Content is the trailing column of a wide grapheme; the wide
-	// character in the preceding column already fills the space, so emit nothing
-	// here.
-	if cell.Content == "" {
-		return
-	}
+		// An empty Content is the trailing column of a wide grapheme; the
+		// wide character in the preceding column already fills the space, so
+		// emit nothing here.
+		if cell.Content == "" {
+			continue
+		}
 
-	buf.WriteString(cell.Content)
+		buf.WriteString(cell.Content)
+	}
 }
 
 func writeSGR(buf *strings.Builder, style CellStyle) {

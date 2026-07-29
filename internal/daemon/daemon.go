@@ -1080,6 +1080,7 @@ func (sm *SessionManager) adoptSessions(
 			Logger:               sm.log,
 			DegradedScreen:       true,
 			DeferWait:            true,
+			TerminalHistoryRows:  sm.Config().Limits.LogLinesOrDefault(),
 		})
 		if adoptErr != nil {
 			cleaned, cleanupErr := terminateFailedUpgradeSession(us)

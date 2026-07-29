@@ -117,6 +117,8 @@ var registeredTypes = []any{
 	AttachMsg{},
 	ExperimentalAttachSeedMsg{},
 	TerminalInputModes{},
+	TerminalHistoryMsg{},
+	TerminalHistoryLineMsg{},
 	AttachConvertMsg{},
 	ConvertRequiredMsg{},
 	DeleteMsg{},
@@ -314,6 +316,8 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"AttachMsg":                 {SwiftRequired, "AttachMsg"},
 	"ExperimentalAttachSeedMsg": {SwiftNA, ""}, // CLI-only experimental attach seed
 	"TerminalInputModes":        {SwiftRequired, "TerminalInputModes"},
+	"TerminalHistoryMsg":        {SwiftNA, ""}, // nested in CLI-only experimental attach seed
+	"TerminalHistoryLineMsg":    {SwiftNA, ""}, // nested in CLI-only experimental attach seed
 	"UpdateMsg":                 {SwiftRequired, "UpdateMsg"},
 	"UpdateResultMsg":           {SwiftRequired, "UpdateResultMsg"},
 	"SetStatusMsg":              {SwiftRequired, "SetStatusMsg"},

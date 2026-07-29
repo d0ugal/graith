@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // scrollbackRowBreakRE matches escape sequences that reposition the cursor to a
@@ -52,6 +53,24 @@ func cleanScrollback(raw string) string {
 	}
 
 	return strings.Join(out, "\n")
+}
+
+func FormatTerminalHistory(history protocol.TerminalHistoryMsg) string {
+	if len(history.Lines) == 0 {
+		return ""
+	}
+
+	var out strings.Builder
+
+	for i, line := range history.Lines {
+		if i > 0 && !history.Lines[i-1].Wrapped && !line.WrapContinuation {
+			out.WriteByte('\n')
+		}
+
+		out.WriteString(line.Frame)
+	}
+
+	return out.String()
 }
 
 // scrollViewModel is a read-only pager over a session's scrollback history. It

@@ -248,19 +248,21 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		"workdir", opts.WorktreeDir)
 
 	lc := sm.Config().Lifecycle
+	historyRows := sm.Config().Limits.LogLinesOrDefault()
 
 	ptySess, err := newPTYSession(grpty.SessionOpts{
-		ID:         id,
-		Command:    command,
-		Args:       finalArgs,
-		Dir:        scratchDir,
-		Env:        env,
-		Rows:       lc.DefaultRowsOrDefault(),
-		Cols:       lc.DefaultColsOrDefault(),
-		LogPath:    logPath,
-		MaxLogSize: lc.MaxLogBytesOrDefault(),
-		InputDelay: lc.InputDelayDuration(),
-		Logger:     sm.log,
+		ID:                  id,
+		Command:             command,
+		Args:                finalArgs,
+		Dir:                 scratchDir,
+		Env:                 env,
+		Rows:                lc.DefaultRowsOrDefault(),
+		Cols:                lc.DefaultColsOrDefault(),
+		LogPath:             logPath,
+		MaxLogSize:          lc.MaxLogBytesOrDefault(),
+		InputDelay:          lc.InputDelayDuration(),
+		Logger:              sm.log,
+		TerminalHistoryRows: historyRows,
 	})
 	if err != nil {
 		sm.rollbackOrchestratorCreate(id)

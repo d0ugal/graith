@@ -183,6 +183,65 @@ func TestAttachWithScreenSnapshotCapturesAndAttaches(t *testing.T) {
 	}
 }
 
+func TestTerminalSnapshotCarriesPrimaryHistory(t *testing.T) {
+	vt := newRenderTestTerm(t, 12, 2)
+
+	write(t, vt, "界\r\n\x1b[31mbraw\x1b[0m\r\ncanny\r\ndreich")
+
+	snap, err := snapshotTerminalWithHistory(vt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if snap.History.ActiveScreen != TerminalScreenPrimary {
+		t.Fatalf("history active screen = %q, want primary", snap.History.ActiveScreen)
+	}
+
+	frames := terminalHistoryFrames(snap.History)
+	if !strings.Contains(frames, "界") {
+		t.Fatalf("history frames = %q, want wide grapheme", frames)
+	}
+
+	if !strings.Contains(frames, "braw") || !strings.Contains(frames, ";31m") {
+		t.Fatalf("history frames = %q, want styled braw line", frames)
+	}
+
+	if snap.History.MaxLines <= 0 || len(snap.History.Lines) == 0 {
+		t.Fatalf("history metadata = %+v, want bounded retained rows", snap.History)
+	}
+}
+
+func TestTerminalSnapshotExcludesHistoryInAlternateScreen(t *testing.T) {
+	vt := newRenderTestTerm(t, 12, 2)
+
+	write(t, vt, "braw\r\ncanny\r\ndreich")
+	write(t, vt, "\x1b[?1049halt")
+
+	snap, err := snapshotTerminalWithHistory(vt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if snap.History.ActiveScreen != TerminalScreenAlternate {
+		t.Fatalf("history active screen = %q, want alternate", snap.History.ActiveScreen)
+	}
+
+	if len(snap.History.Lines) != 0 {
+		t.Fatalf("alternate-screen history lines = %+v, want none", snap.History.Lines)
+	}
+}
+
+func terminalHistoryFrames(history TerminalHistory) string {
+	var out strings.Builder
+
+	for _, line := range history.Lines {
+		out.WriteString(line.Frame)
+		out.WriteByte('\n')
+	}
+
+	return out.String()
+}
+
 func TestScreenPreviewUsesLock(t *testing.T) {
 	logPath := strings.Join([]string{t.TempDir(), "test.log"}, "/")
 

@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func updateScrollModel(m scrollViewModel, msg tea.Msg) scrollViewModel {
@@ -68,6 +69,28 @@ func TestCleanScrollback(t *testing.T) {
 				t.Errorf("cleanScrollback(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFormatTerminalHistoryPreservesSoftWraps(t *testing.T) {
+	history := protocol.TerminalHistoryMsg{
+		Lines: []protocol.TerminalHistoryLineMsg{
+			{Frame: "braw", Wrapped: true},
+			{Frame: "canny"},
+			{Frame: "dreich"},
+			{Frame: " thrawn", WrapContinuation: true},
+		},
+	}
+
+	got := FormatTerminalHistory(history)
+	if got != "brawcanny\ndreich thrawn" {
+		t.Fatalf("formatted history = %q, want soft-wrapped first two rows", got)
+	}
+}
+
+func TestFormatTerminalHistoryEmpty(t *testing.T) {
+	if got := FormatTerminalHistory(protocol.TerminalHistoryMsg{}); got != "" {
+		t.Fatalf("empty history formatted as %q, want empty", got)
 	}
 }
 
