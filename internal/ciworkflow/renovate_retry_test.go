@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -86,6 +87,26 @@ func TestRenovateRetryPolicy(t *testing.T) {
 				status: 1,
 				count:  1,
 				stderr: "Zig stopped resolving updates",
+			},
+		},
+		"safehouse dependency missing": {
+			responses: []renovateFakeResponse{
+				{log: renovateSuccessLogWithoutSafehouseDep(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "Renovate sandbox workflow dependencies",
+			},
+		},
+		"safehouse review gate missing": {
+			responses: []renovateFakeResponse{
+				{log: renovateSuccessLogWithoutSafehousePackageRule(t), status: 0},
+			},
+			want: renovateVerifierResult{
+				status: 1,
+				count:  1,
+				stderr: "Safehouse review gate",
 			},
 		},
 		"deterministic second attempt": {
@@ -287,6 +308,22 @@ func renovateSuccessLog(t *testing.T) string {
 		},
 	}
 
+	sandboxDeps := []any{
+		map[string]any{
+			"depName":      "eugene1g/agent-safehouse",
+			"depType":      "ci-safehouse",
+			"datasource":   "github-releases",
+			"currentValue": "0.11.1",
+			"updates":      []any{},
+		},
+		map[string]any{
+			"depName":      "nolabs-ai/nono",
+			"datasource":   "github-releases",
+			"currentValue": "0.70.0",
+			"updates":      []any{},
+		},
+	}
+
 	nativeDeps := []any{
 		map[string]any{
 			"depName":       "Ghostty",
@@ -329,6 +366,7 @@ func renovateSuccessLog(t *testing.T) string {
 			"config": map[string]any{
 				"regex": []any{
 					map[string]any{"packageFile": ".github/ci-tool-versions.env", "deps": ciToolDeps},
+					map[string]any{"packageFile": ".github/workflows/sandbox.yml", "deps": sandboxDeps},
 					map[string]any{"deps": nativeDeps},
 				},
 			},
@@ -338,6 +376,14 @@ func renovateSuccessLog(t *testing.T) string {
 			"msg":   "Repository config",
 			"config": map[string]any{
 				"packageRules": []any{
+					map[string]any{
+						"matchDepTypes":               []string{"ci-safehouse"},
+						"automerge":                   false,
+						"dependencyDashboardApproval": true,
+						"prBodyNotes": []string{
+							"Review the Safehouse release and update SAFEHOUSE_SHA256 before merge.",
+						},
+					},
 					map[string]any{
 						"matchDepTypes":    []string{"libghostty-native"},
 						"groupSlug":        "libghostty-native",
@@ -402,6 +448,50 @@ func renovateSuccessLogWithoutZigUpdate(t *testing.T) string {
 	return strings.Join(lines, "\n")
 }
 
+func renovateSuccessLogWithoutSafehouseDep(t *testing.T) string {
+	t.Helper()
+
+	var lines []string
+
+	for _, line := range strings.Split(renovateSuccessLog(t), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+
+		if record["msg"] == "packageFiles with updates" {
+			removeSafehouseDep(t, record)
+			line = renovateJSONLine(t, record)
+		}
+
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func renovateSuccessLogWithoutSafehousePackageRule(t *testing.T) string {
+	t.Helper()
+
+	var lines []string
+
+	for _, line := range strings.Split(renovateSuccessLog(t), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+
+		if record["msg"] == "Repository config" {
+			removeSafehousePackageRule(t, record)
+			line = renovateJSONLine(t, record)
+		}
+
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func clearZigUpdate(t *testing.T, record map[string]any) {
 	t.Helper()
 
@@ -440,6 +530,100 @@ func clearZigUpdate(t *testing.T, record map[string]any) {
 	}
 
 	t.Fatal("Renovate log missing Zig dependency")
+}
+
+func removeSafehouseDep(t *testing.T, record map[string]any) {
+	t.Helper()
+
+	config, ok := record["config"].(map[string]any)
+	if !ok {
+		t.Fatal("Renovate log missing config object")
+	}
+
+	regexManagers, ok := config["regex"].([]any)
+	if !ok {
+		t.Fatal("Renovate log missing regex managers")
+	}
+
+	for _, managerAny := range regexManagers {
+		manager, ok := managerAny.(map[string]any)
+		if !ok {
+			t.Fatal("Renovate regex manager was not an object")
+		}
+
+		if manager["packageFile"] != ".github/workflows/sandbox.yml" {
+			continue
+		}
+
+		deps, ok := manager["deps"].([]any)
+		if !ok {
+			t.Fatal("Renovate sandbox manager missing deps")
+		}
+
+		filtered := make([]any, 0, len(deps))
+		removed := false
+
+		for _, depAny := range deps {
+			dep, ok := depAny.(map[string]any)
+			if !ok {
+				t.Fatal("Renovate dependency was not an object")
+			}
+
+			if dep["depName"] == "eugene1g/agent-safehouse" {
+				removed = true
+				continue
+			}
+
+			filtered = append(filtered, depAny)
+		}
+
+		if !removed {
+			t.Fatal("Renovate log missing Safehouse dependency")
+		}
+
+		manager["deps"] = filtered
+
+		return
+	}
+
+	t.Fatal("Renovate log missing sandbox workflow manager")
+}
+
+func removeSafehousePackageRule(t *testing.T, record map[string]any) {
+	t.Helper()
+
+	config, ok := record["config"].(map[string]any)
+	if !ok {
+		t.Fatal("Renovate log missing config object")
+	}
+
+	rules, ok := config["packageRules"].([]any)
+	if !ok {
+		t.Fatal("Renovate config missing packageRules")
+	}
+
+	filtered := make([]any, 0, len(rules))
+	removed := false
+
+	for _, ruleAny := range rules {
+		rule, ok := ruleAny.(map[string]any)
+		if !ok {
+			t.Fatal("Renovate package rule was not an object")
+		}
+
+		if reflect.DeepEqual(rule["matchDepTypes"], []any{"ci-safehouse"}) {
+			removed = true
+			continue
+		}
+
+		filtered = append(filtered, ruleAny)
+	}
+
+	if !removed {
+		t.Fatal("Renovate config missing Safehouse package rule")
+	}
+
+	config["packageRules"] = filtered
 }
 
 func renovateJSONLine(t *testing.T, value any) string {
