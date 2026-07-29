@@ -279,6 +279,34 @@ func (d *emptySnapshotAttachDriver) AttachWithScreenSnapshot(w io.Writer) grpty.
 	return grpty.ScreenCapture{}
 }
 
+type deltaSnapshotDriver struct {
+	emptySnapshotAttachDriver
+
+	full          grpty.ScreenCapture
+	delta         grpty.ScreenCapture
+	lastDeltaFrom uint64
+}
+
+func (d *deltaSnapshotDriver) ScreenSnapshot() grpty.ScreenCapture {
+	return d.full
+}
+
+func (d *deltaSnapshotDriver) ScreenSnapshotDelta(deltaFrom uint64) grpty.ScreenCapture {
+	d.lastDeltaFrom = deltaFrom
+
+	return d.delta
+}
+
+type fullSnapshotDriver struct {
+	emptySnapshotAttachDriver
+
+	full grpty.ScreenCapture
+}
+
+func (d *fullSnapshotDriver) ScreenSnapshot() grpty.ScreenCapture {
+	return d.full
+}
+
 func TestHandshake(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -1300,6 +1328,110 @@ func TestScreenSnapshot(t *testing.T) {
 
 	if resp.Cols == 0 || resp.Rows == 0 {
 		t.Error("expected non-zero cols/rows")
+	}
+}
+
+func TestScreenSnapshotDelta(t *testing.T) {
+	h := newTestHarness(t)
+
+	driver := &deltaSnapshotDriver{
+		full: grpty.ScreenCapture{
+			Frame:      "full-braw",
+			SnapshotID: 6,
+			Cols:       80,
+			Rows:       24,
+		},
+		delta: grpty.ScreenCapture{
+			Delta:         true,
+			DeltaFrom:     6,
+			SnapshotID:    7,
+			CursorX:       3,
+			CursorY:       2,
+			CursorVisible: true,
+			Cols:          80,
+			Rows:          24,
+			RowDeltas: []grpty.ScreenRow{
+				{Y: 2, Frame: "delta-braw\x1b[0m"},
+			},
+		},
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["canny-delta"] = &SessionState{
+		ID:        "canny-delta",
+		Name:      "canny-delta",
+		Agent:     "codex",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["canny-delta"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "canny-delta", DeltaFrom: 6})
+
+	env := h.expectType(t, "screen_snapshot_response")
+
+	var resp protocol.ScreenSnapshotResponseMsg
+	if err := protocol.DecodePayload(env, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if driver.lastDeltaFrom != 6 {
+		t.Fatalf("driver delta_from = %d, want 6", driver.lastDeltaFrom)
+	}
+
+	if !resp.Delta || resp.DeltaFrom != 6 || resp.SnapshotID != 7 {
+		t.Fatalf("delta response metadata = %+v, want delta from 6 snapshot 7", resp)
+	}
+
+	if len(resp.RowDeltas) != 1 || resp.RowDeltas[0].Y != 2 || resp.RowDeltas[0].Frame != "delta-braw\x1b[0m" {
+		t.Fatalf("delta rows = %+v, want row 2 delta-braw", resp.RowDeltas)
+	}
+
+	if resp.Frame != "" {
+		t.Fatalf("delta response frame = %q, want empty", resp.Frame)
+	}
+}
+
+func TestScreenSnapshotDeltaRequestFallsBackToFull(t *testing.T) {
+	h := newTestHarness(t)
+
+	driver := &fullSnapshotDriver{
+		full: grpty.ScreenCapture{
+			Frame:         "full-croft",
+			SnapshotID:    3,
+			CursorVisible: true,
+			Cols:          80,
+			Rows:          24,
+		},
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["croft-full"] = &SessionState{
+		ID:        "croft-full",
+		Name:      "croft-full",
+		Agent:     "codex",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["croft-full"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: "croft-full", DeltaFrom: 2})
+
+	env := h.expectType(t, "screen_snapshot_response")
+
+	var resp protocol.ScreenSnapshotResponseMsg
+	if err := protocol.DecodePayload(env, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Delta || len(resp.RowDeltas) != 0 {
+		t.Fatalf("fallback response = %+v, want full snapshot", resp)
+	}
+
+	if resp.Frame != "full-croft" || resp.SnapshotID != 3 {
+		t.Fatalf("fallback response = %+v, want full-croft snapshot 3", resp)
 	}
 }
 

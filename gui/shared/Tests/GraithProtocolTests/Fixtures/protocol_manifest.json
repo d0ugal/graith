@@ -4085,6 +4085,13 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "delta_from",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
         }
       ]
     },
@@ -4106,6 +4113,38 @@
             "kind": "string"
           },
           "optional": false
+        },
+        {
+          "name": "row_deltas",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "ScreenSnapshotRowMsg"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "delta",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "delta_from",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "snapshot_id",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
         },
         {
           "name": "cursor_x",
@@ -4139,6 +4178,27 @@
           "name": "rows",
           "type": {
             "kind": "int"
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "ScreenSnapshotRowMsg",
+      "swift": "required",
+      "swift_type": "ScreenSnapshotRowMsg",
+      "fields": [
+        {
+          "name": "y",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "frame",
+          "type": {
+            "kind": "string"
           },
           "optional": false
         }

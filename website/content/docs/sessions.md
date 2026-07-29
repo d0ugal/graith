@@ -99,12 +99,14 @@ current-screen seed before live output resumes, and the client owns the outer
 alternate screen for that attach. Sessions created without the flag keep the
 default raw passthrough behavior.
 
-While experimental, this mode repaints daemon snapshots instead of forwarding
-all child terminal control traffic directly to your emulator. Expect incomplete
+While experimental, this mode renders from daemon-maintained screen snapshots
+instead of forwarding all child terminal control traffic directly to your
+emulator. The initial attach uses a full-screen seed; later refreshes use
+dirty-row updates when the client and daemon share a compatible snapshot base,
+falling back to full snapshots or raw attach when needed. Expect incomplete
 support for child-driven mouse/focus/bracketed-paste modes, OSC features such as
 clipboard/window-title/hyperlinks, and terminal query responses. Host-terminal
-scrollback is not the history surface in this mode, and heavy output may repaint
-in full-screen bursts until dirty-row rendering lands. The Graith status bar is
+scrollback is not the history surface in this mode. The Graith status bar is
 composed inside the owned frame, with read-only attach still replacing it with
 the persistent read-only indicator.
 

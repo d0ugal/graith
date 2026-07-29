@@ -49,8 +49,8 @@ daemon-side terminal model instead of being forwarded directly to the host
 emulator, so child-driven mouse/focus/bracketed-paste modes, OSC clipboard/title
 and hyperlink features, and terminal query responses are incomplete. The Graith
 status bar is composed inside the owned frame, host scrollback is not the
-primary history surface, and high-volume output repaints from full snapshots
-until the renderer grows dirty-row updates.
+primary history surface, and refreshes fall back to full snapshots when the
+client and daemon cannot compute dirty-row updates from a shared snapshot base.
 
 When an existing session creates a child session, omitted labels inherit from
 the parent by default. Supplying `--label` sets the child's complete label set

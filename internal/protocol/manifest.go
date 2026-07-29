@@ -172,6 +172,7 @@ var registeredTypes = []any{
 	ScreenPreviewMsg{},
 	ScreenPreviewResponseMsg{},
 	ScreenSnapshotMsg{},
+	ScreenSnapshotRowMsg{},
 	ScreenSnapshotResponseMsg{},
 	StatusRequestMsg{},
 	ConfigMsg{},
@@ -351,6 +352,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ReloadedMsg":      {SwiftNA, ""}, // local-only daemon reload response
 
 	// Screen peek.
+	"ScreenSnapshotRowMsg":      {SwiftRequired, "ScreenSnapshotRowMsg"},
 	"ScreenPreviewResponseMsg":  {SwiftRequired, "ScreenPreviewResponseMsg"},
 	"ScreenSnapshotResponseMsg": {SwiftRequired, "ScreenSnapshotResponseMsg"},
 

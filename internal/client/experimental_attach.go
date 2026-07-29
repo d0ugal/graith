@@ -47,7 +47,9 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 	}
 
 	refreshCh := make(chan struct{}, 1)
-	c.sendExperimentalResize(fd, chrome, refreshCh)
+	viewport := &experimentalAttachViewport{}
+
+	c.sendExperimentalResize(fd, chrome, refreshCh, viewport)
 
 	resizeCtx, stopResize := context.WithCancel(ctx)
 	defer stopResize()
@@ -63,23 +65,26 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 			case <-resizeCtx.Done():
 				return
 			case <-sigCh:
-				c.sendExperimentalResize(fd, chrome, refreshCh)
+				c.sendExperimentalResize(fd, chrome, refreshCh, viewport)
 			}
 		}
 	}()
 
 	writeExperimentalAttachSeedWithChrome(stdout, opts.ExperimentalSeed, chrome)
+	seedSnapshotID := opts.ExperimentalSeed.Snapshot.SnapshotID
 
 	opts.StatusBar = nil
 	opts.ExperimentalSeed = nil
 	opts.TerminalOwned = true
 	opts.experimentalChrome = chrome
 	opts.terminalRefresh = refreshCh
+	opts.experimentalSnapshotID = seedSnapshotID
+	opts.experimentalViewport = viewport
 
 	return c.runPassthroughLoop(ctx, opts, os.Stdin, stdout, nil)
 }
 
-func (c *Client) sendExperimentalResize(fd int, chrome *experimentalAttachChrome, refreshCh chan<- struct{}) {
+func (c *Client) sendExperimentalResize(fd int, chrome *experimentalAttachChrome, refreshCh chan<- struct{}, viewport *experimentalAttachViewport) {
 	w, h, err := term.GetSize(fd)
 	if err != nil {
 		return
@@ -92,6 +97,10 @@ func (c *Client) sendExperimentalResize(fd int, chrome *experimentalAttachChrome
 		if rows > 1 {
 			rows--
 		}
+	}
+
+	if viewport != nil {
+		viewport.update(w, rows)
 	}
 
 	_ = c.SendControl("resize", protocol.ResizeMsg{
@@ -146,14 +155,13 @@ func writeExperimentalScreenSnapshot(w io.Writer, snap *protocol.ScreenSnapshotR
 }
 
 func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg, chrome *experimentalAttachChrome) {
-	if snap == nil || snap.Frame == "" {
+	if snap == nil || (snap.Frame == "" && !snap.Delta) {
 		return
 	}
 
 	var buf strings.Builder
 	buf.WriteString("\x1b[?2026h")
 	buf.WriteString("\x1b[?25l")
-	buf.WriteString("\x1b[H\x1b[2J")
 
 	cursorYOffset := 0
 
@@ -161,13 +169,19 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 		chrome.updateChildCursor(snap)
 
 		cursorYOffset = chrome.childRowOffset()
+	}
+
+	if snap.Delta {
+		writeExperimentalScreenRows(&buf, snap.RowDeltas, snap.Rows, cursorYOffset)
+	} else {
+		buf.WriteString("\x1b[H\x1b[2J")
 
 		if cursorYOffset > 0 {
 			fmt.Fprintf(&buf, "\x1b[%d;1H", cursorYOffset+1)
 		}
-	}
 
-	buf.WriteString(snap.Frame)
+		buf.WriteString(snap.Frame)
+	}
 
 	if chrome != nil {
 		chrome.render(&buf)
@@ -178,6 +192,41 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 	buf.WriteString("\x1b[?2026l")
 
 	_, _ = w.Write([]byte(buf.String()))
+}
+
+func writeExperimentalScreenRows(buf *strings.Builder, rows []protocol.ScreenSnapshotRowMsg, screenRows int, cursorYOffset int) {
+	for _, row := range rows {
+		if row.Y < 0 || row.Y >= screenRows {
+			continue
+		}
+
+		fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m\x1b[2K%s", row.Y+1+cursorYOffset, row.Frame)
+	}
+}
+
+type experimentalAttachViewport struct {
+	mu   sync.Mutex
+	cols int
+	rows int
+}
+
+func (v *experimentalAttachViewport) update(cols, rows int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	v.cols = cols
+	v.rows = rows
+}
+
+func (v *experimentalAttachViewport) size() (int, int, bool) {
+	if v == nil {
+		return 0, 0, false
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	return v.cols, v.rows, v.cols > 0 && v.rows > 0
 }
 
 type experimentalAttachChrome struct {

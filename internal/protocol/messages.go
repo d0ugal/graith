@@ -688,16 +688,29 @@ type ScreenPreviewResponseMsg struct {
 
 type ScreenSnapshotMsg struct {
 	SessionID string `json:"session_id"`
+	// DeltaFrom asks the daemon to return row_deltas relative to a previously
+	// returned snapshot_id. Daemons that do not support deltas ignore this
+	// optional field and return a full frame.
+	DeltaFrom uint64 `json:"delta_from,omitempty"`
+}
+
+type ScreenSnapshotRowMsg struct {
+	Y     int    `json:"y"`
+	Frame string `json:"frame"`
 }
 
 type ScreenSnapshotResponseMsg struct {
-	SessionID     string `json:"session_id"`
-	Frame         string `json:"frame"`
-	CursorX       int    `json:"cursor_x"`
-	CursorY       int    `json:"cursor_y"`
-	CursorVisible bool   `json:"cursor_visible"`
-	Cols          int    `json:"cols"`
-	Rows          int    `json:"rows"`
+	SessionID     string                 `json:"session_id"`
+	Frame         string                 `json:"frame"`
+	RowDeltas     []ScreenSnapshotRowMsg `json:"row_deltas,omitempty"`
+	Delta         bool                   `json:"delta,omitempty"`
+	DeltaFrom     uint64                 `json:"delta_from,omitempty"`
+	SnapshotID    uint64                 `json:"snapshot_id,omitempty"`
+	CursorX       int                    `json:"cursor_x"`
+	CursorY       int                    `json:"cursor_y"`
+	CursorVisible bool                   `json:"cursor_visible"`
+	Cols          int                    `json:"cols"`
+	Rows          int                    `json:"rows"`
 }
 
 type StatusRequestMsg struct {
