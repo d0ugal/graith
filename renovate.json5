@@ -17,6 +17,17 @@
       automerge: false,
     },
     {
+      // Safehouse version bumps must be paired with a reviewed release-asset
+      // digest in sandbox.yml. Keep those PRs visible and manual so the global
+      // automerge default cannot merge a new sandbox executable without review.
+      matchDepTypes: ['ci-safehouse'],
+      automerge: false,
+      dependencyDashboardApproval: true,
+      prBodyNotes: [
+        'Safehouse CI installs are checksum-verified. Review the upstream release notes, update SAFEHOUSE_SHA256 from the reviewed safehouse.sh asset digest, and run the macOS sandbox enforcement job before merge.',
+      ],
+    },
+    {
       matchDepTypes: ['libghostty-native'],
       groupName: 'libghostty native dependency unit',
       groupSlug: 'libghostty-native',
@@ -214,6 +225,20 @@
       managerFilePatterns: ['/^\\.github/workflows/sandbox\\.yml$/'],
       matchStrings: ['NONO_VERSION:\\s*"(?<currentValue>[\\d.]+)"'],
       depNameTemplate: 'nolabs-ai/nono',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+    {
+      // Keep the Safehouse version CI tests against visible in the dependency
+      // workflow. The sandbox workflow verifies the release asset against the
+      // reviewed SHA-256 before installing, so maintainers must update
+      // SAFEHOUSE_SHA256 after inspecting a version bump.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/sandbox\\.yml$/'],
+      matchStrings: ['SAFEHOUSE_VERSION:\\s*"(?<currentValue>[\\d.]+)"'],
+      depNameTemplate: 'eugene1g/agent-safehouse',
+      depTypeTemplate: 'ci-safehouse',
       datasourceTemplate: 'github-releases',
       extractVersionTemplate: '^v(?<version>.+)$',
       versioningTemplate: 'semver',

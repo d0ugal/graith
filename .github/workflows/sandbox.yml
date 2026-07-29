@@ -351,8 +351,8 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # macOS / safehouse — Seatbelt is always present; check the binary installs
-  # and run the same hard-gated tagged enforcement-test step.
+  # macOS / safehouse — Seatbelt is always present; install reviewed Safehouse
+  # release bytes and run the same hard-gated tagged enforcement-test step.
   # ---------------------------------------------------------------------------
   macos-safehouse:
     name: macOS (safehouse / Seatbelt)
@@ -379,30 +379,60 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install safehouse (Homebrew)
-        # Tap eugene1g/safehouse (repo eugene1g/homebrew-safehouse), formula
-        # agent-safehouse, which installs the `safehouse` binary.
-        # Upstream: https://github.com/eugene1g/agent-safehouse
+      - name: Install checksum-verified safehouse
+        # Pinned, checksum-verified install (no mutable Homebrew tap head).
+        # Upstream publishes safehouse.sh as a universal macOS shell artifact.
+        # CI installs that reviewed release asset directly to
+        # $HOME/.local/bin/safehouse, then the following steps consume only that
+        # path. A retagged or replaced GitHub release asset fails closed because
+        # the repository-owned SHA-256 must match before the file is installed.
+        #
+        # SAFEHOUSE_VERSION is Renovate-managed. When it bumps, inspect the
+        # release notes and update SAFEHOUSE_SHA256 from the reviewed asset
+        # digest before merging. Roll back by restoring the previous version and
+        # digest pair; the enforcement tests below exercise the resulting bytes.
+        env:
+          SAFEHOUSE_VERSION: "0.11.1"
+          SAFEHOUSE_SHA256: "dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
         run: |
           set -euo pipefail
-          brew install eugene1g/safehouse/agent-safehouse
+          asset="safehouse.sh"
+          url="https://github.com/eugene1g/agent-safehouse/releases/download/v${SAFEHOUSE_VERSION}/${asset}"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$tmp/$asset"
+          actual_sha="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"
+          if [ "$actual_sha" != "$SAFEHOUSE_SHA256" ]; then
+            echo "::error title=safehouse checksum mismatch::Downloaded safehouse ${SAFEHOUSE_VERSION} SHA-256 $actual_sha did not match reviewed SHA-256 $SAFEHOUSE_SHA256"
+            exit 1
+          fi
+
+          dest="$HOME/.local/bin"
+          mkdir -p "$dest"
+          install -m 0755 "$tmp/$asset" "$dest/safehouse"
+          echo "$dest" >> "$GITHUB_PATH"
+          export PATH="$dest:$PATH"
+
+          installed_sha="$(shasum -a 256 "$(command -v safehouse)" | awk '{print $1}')"
+          if [ "$installed_sha" != "$SAFEHOUSE_SHA256" ]; then
+            echo "::error title=safehouse install mismatch::Installed safehouse SHA-256 $installed_sha did not match reviewed SHA-256 $SAFEHOUSE_SHA256"
+            exit 1
+          fi
+
+          version_output="$(safehouse --version)"
+          if [ "$version_output" != "Agent Safehouse ${SAFEHOUSE_VERSION}" ]; then
+            echo "::error title=safehouse version mismatch::safehouse --version returned '$version_output', expected 'Agent Safehouse ${SAFEHOUSE_VERSION}'"
+            exit 1
+          fi
+
           {
             echo "## safehouse install (macOS)"
             echo
-            if command -v safehouse >/dev/null 2>&1; then
-              echo "Installed \`safehouse\` from tap \`eugene1g/safehouse\` (formula \`agent-safehouse\`)."
-            else
-              echo "brew install succeeded but no \`safehouse\` on PATH."
-            fi
+            echo "Installed \`safehouse\` ${SAFEHOUSE_VERSION} to \`$dest/safehouse\`."
+            echo "Source: \`$url\`"
+            echo "SHA-256: \`$SAFEHOUSE_SHA256\`"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          # Fail closed: the enforcement suite is the whole point of this job.
-          # If safehouse isn't actually on PATH, the tagged tests would t.Skip()
-          # and the job would go green enforcing nothing — the exact false-green
-          # this suite exists to prevent.
-          command -v safehouse >/dev/null 2>&1 || {
-            echo "::error title=safehouse missing::brew install did not put 'safehouse' on PATH"
-            exit 1
-          }
 
       - name: Check safehouse availability
         run: |
@@ -413,7 +443,9 @@ jobs:
             safehouse --version 2>&1 || echo "<safehouse --version failed>"
             echo "Seatbelt (macOS sandbox-exec) is always present on macOS runners."
           else
-            # Fatal, not a warning: skipping the enforcement suite is a false green.
+            # Fatal, not a warning: if safehouse is missing from this fresh
+            # shell, the tagged tests would t.Skip() and go green while proving
+            # nothing at the kernel level.
             echo "::error title=safehouse unavailable::No 'safehouse' binary on PATH; enforcement tests would silently skip."
             exit 1
           fi

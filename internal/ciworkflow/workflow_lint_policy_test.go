@@ -168,6 +168,61 @@ func TestWorkflowToolInstallSupplyChainPolicy(t *testing.T) {
 	}
 }
 
+func TestSandboxSafehouseInstallPinsReviewedBytes(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	workflowText := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/sandbox.yml"))
+	renovate := readPolicyFile(t, filepath.Join(repoRoot, "renovate.json5"))
+
+	workflow, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/sandbox.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := p11WorkflowJob(t, workflow, "macos-safehouse")
+	step := p11WorkflowStep(t, job, "Install checksum-verified safehouse")
+
+	assertRegexp(t, step.Env["SAFEHOUSE_VERSION"], `^\d+\.\d+\.\d+$`)
+	assertRegexp(t, step.Env["SAFEHOUSE_SHA256"], `^[a-f0-9]{64}$`)
+
+	code := workflowExecutableLines(step.Run)
+	assertContains(t, code, "set -euo pipefail")
+	assertContains(t, code, "https://github.com/eugene1g/agent-safehouse/releases/download/v${SAFEHOUSE_VERSION}/${asset}")
+	assertContains(t, code, "curl -fsSL --proto '=https' --tlsv1.2")
+	assertContains(t, code, `actual_sha="$(shasum -a 256 "$tmp/$asset" | awk '{print $1}')"`)
+	assertContains(t, code, `if [ "$actual_sha" != "$SAFEHOUSE_SHA256" ]; then`)
+	assertContains(t, code, `install -m 0755 "$tmp/$asset" "$dest/safehouse"`)
+	assertContains(t, code, `installed_sha="$(shasum -a 256 "$(command -v safehouse)" | awk '{print $1}')"`)
+	assertContains(t, code, `if [ "$installed_sha" != "$SAFEHOUSE_SHA256" ]; then`)
+	assertContains(t, code, `version_output="$(safehouse --version)"`)
+	assertContains(t, code, `"$version_output" != "Agent Safehouse ${SAFEHOUSE_VERSION}"`)
+
+	checksumAt := strings.Index(code, `actual_sha="$(shasum -a 256 "$tmp/$asset"`)
+	checksumGateAt := strings.Index(code, `if [ "$actual_sha" != "$SAFEHOUSE_SHA256" ]; then`)
+
+	installAt := strings.Index(code, `install -m 0755 "$tmp/$asset" "$dest/safehouse"`)
+	if checksumAt == -1 || checksumGateAt == -1 || installAt == -1 ||
+		checksumAt > checksumGateAt || checksumGateAt > installAt {
+		t.Fatalf("safehouse install must verify the downloaded SHA-256 before installing:\n%s", code)
+	}
+
+	installedChecksumAt := strings.Index(code, `installed_sha="$(shasum -a 256 "$(command -v safehouse)"`)
+	installedChecksumGateAt := strings.Index(code, `if [ "$installed_sha" != "$SAFEHOUSE_SHA256" ]; then`)
+
+	versionAt := strings.Index(code, `version_output="$(safehouse --version)"`)
+	if installedChecksumAt == -1 || installedChecksumGateAt == -1 || versionAt == -1 ||
+		installedChecksumAt > installedChecksumGateAt || installedChecksumGateAt > versionAt {
+		t.Fatalf("safehouse install must verify the installed SHA-256 before executing safehouse:\n%s", code)
+	}
+
+	assertNotContains(t, workflowText, "brew install eugene1g/safehouse/agent-safehouse")
+	assertNotContains(t, workflowText, "brew tap eugene1g/safehouse")
+
+	assertContains(t, renovate, `SAFEHOUSE_VERSION:\\s*"(?<currentValue>[\\d.]+)"`)
+	assertContains(t, renovate, "depNameTemplate: 'eugene1g/agent-safehouse'")
+	assertRegexp(t, renovate, `(?s)SAFEHOUSE_VERSION.*depNameTemplate: 'eugene1g/agent-safehouse'.*depTypeTemplate: 'ci-safehouse'.*datasourceTemplate: 'github-releases'`)
+	assertRegexp(t, renovate, `(?s)matchDepTypes: \['ci-safehouse'\].*automerge: false.*dependencyDashboardApproval: true`)
+}
+
 func TestWorkflowAttestationVerifyCommandsBindSignerWorkflow(t *testing.T) {
 	repoRoot := p11RepoRoot()
 

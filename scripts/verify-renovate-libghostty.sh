@@ -29,12 +29,13 @@ trap cleanup EXIT
 cp "$REPO_DIR/renovate.json5" "$fixture/renovate.json5"
 cp "$REPO_DIR/internal/libghosttydeps/testdata/renovate/libghostty-native.lock.json" \
     "$fixture/libghostty-native.lock.json"
-mkdir -p "$fixture/.github"
+mkdir -p "$fixture/.github/workflows"
 cp "$REPO_DIR/.github/ci-tool-versions.env" "$fixture/.github/ci-tool-versions.env"
+cp "$REPO_DIR/.github/workflows/sandbox.yml" "$fixture/.github/workflows/sandbox.yml"
 git -C "$fixture" init -q
 git -C "$fixture" config user.name "Renovate fixture"
 git -C "$fixture" config user.email "renovate-fixture@example.invalid"
-git -C "$fixture" add renovate.json5 libghostty-native.lock.json .github/ci-tool-versions.env
+git -C "$fixture" add renovate.json5 libghostty-native.lock.json .github/ci-tool-versions.env .github/workflows/sandbox.yml
 git -C "$fixture" commit -qm "test: add dreich dependency fixture"
 
 is_transient_tangled_tls_failure() {
@@ -125,6 +126,42 @@ if ! jq -se '
     exit 1
 fi
 
+sandbox_expected='["eugene1g/agent-safehouse","nolabs-ai/nono"]'
+sandbox_actual="$(jq -sc '
+    [
+        .[] |
+        select(.msg == "packageFiles with updates") |
+        .config.regex[]? |
+        select(.packageFile == ".github/workflows/sandbox.yml") |
+        .deps[]? |
+        .depName
+    ] | unique | sort
+    ' "$log")"
+if [[ "$sandbox_actual" != "$sandbox_expected" ]]; then
+    echo "error: Renovate sandbox workflow dependencies = $sandbox_actual; want $sandbox_expected" >&2
+    exit 1
+fi
+
+if ! jq -se '
+    [
+        .[] |
+        select(.msg == "packageFiles with updates") |
+        .config.regex[]? |
+        select(.packageFile == ".github/workflows/sandbox.yml") |
+        .deps[]?
+    ] as $deps |
+    any($deps[];
+        .depName == "eugene1g/agent-safehouse" and
+        .depType == "ci-safehouse" and
+        .datasource == "github-releases") and
+    any($deps[];
+        .depName == "nolabs-ai/nono" and
+        .datasource == "github-releases")
+    ' "$log" >/dev/null; then
+    echo "error: sandbox workflow managers did not retain expected datasources" >&2
+    exit 1
+fi
+
 expected='["Ghostty","Highway","SPDX tools-java","Zig","go-libghostty","simdutf","uucode"]'
 actual="$(jq -sc '
     [
@@ -176,6 +213,11 @@ fi
 if ! jq -se '
     first(.[] | select(.msg == "Repository config") | .config) as $config |
     any($config.packageRules[];
+        .matchDepTypes == ["ci-safehouse"] and
+        .automerge == false and
+        .dependencyDashboardApproval == true and
+        ((.prBodyNotes // []) | length) > 0) and
+    any($config.packageRules[];
         .matchDepTypes == ["libghostty-native"] and
         .groupSlug == "libghostty-native" and
         .automerge == false and
@@ -194,7 +236,7 @@ if ! jq -se '
         .enabled == false and
         .automerge == false)
     ' "$log" >/dev/null; then
-    echo "error: native grouping or go-libghostty automerge protection is missing" >&2
+    echo "error: Safehouse review gate, native grouping, or go-libghostty automerge protection is missing" >&2
     exit 1
 fi
 
@@ -210,4 +252,4 @@ if jq -se '
     exit 1
 fi
 
-echo "Renovate recognized CI tool pins, suppressed the unsupported Ghostty/Highway proposal, and retained unrelated native dependency updates."
+echo "Renovate recognized CI and sandbox tool pins, suppressed the unsupported Ghostty/Highway proposal, and retained unrelated native dependency updates."

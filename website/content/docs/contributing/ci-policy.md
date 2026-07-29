@@ -80,6 +80,40 @@ GitHub branch protection, check freshness, repository ruleset binding, or live
 artifact provenance. Current mergeability still comes from repository-owned
 workflows and GitHub required checks.
 
+## Sandbox Tool Pinning
+
+The macOS sandbox job in `.github/workflows/sandbox.yml` installs Safehouse from
+the reviewed upstream release asset:
+
+```text
+https://github.com/eugene1g/agent-safehouse/releases/download/v${SAFEHOUSE_VERSION}/safehouse.sh
+```
+
+CI verifies `SAFEHOUSE_SHA256` before installing anything, copies the script to
+`$HOME/.local/bin/safehouse`, then re-checks the installed file hash and
+`safehouse --version`. The only consumers are the later Safehouse availability
+probe and the `safehouse_enforce` tagged sandbox tests in the same job.
+
+Renovate tracks `SAFEHOUSE_VERSION` in `sandbox.yml`, but Safehouse does not
+publish GitHub build attestations for this asset. Safehouse update PRs are
+manual-review only: a version-only Renovate bump should fail the macOS sandbox
+job until a maintainer updates `SAFEHOUSE_SHA256`.
+
+To update Safehouse, inspect the upstream release notes, then read the GitHub
+asset digest:
+
+```bash
+gh api repos/eugene1g/agent-safehouse/releases/tags/vX.Y.Z \
+  --jq '.assets[] | select(.name == "safehouse.sh") | .digest'
+```
+
+Strip the `sha256:` prefix for `SAFEHOUSE_SHA256`, or download
+`safehouse.sh` and verify the same value with `shasum -a 256`. Let the macOS
+enforcement job prove the reviewed bytes before merge. To roll back, restore the
+previous `SAFEHOUSE_VERSION` and `SAFEHOUSE_SHA256` pair in `sandbox.yml`; the
+install step fails closed if the release asset no longer matches the reviewed
+digest.
+
 ## Artifact boundary
 
 Native and release artifact boundaries remain enforced by the current workflow
