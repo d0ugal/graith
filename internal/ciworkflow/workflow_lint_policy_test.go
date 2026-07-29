@@ -445,6 +445,8 @@ func TestGolangciLintDockerImageIsDigestPinned(t *testing.T) {
 	assertRegexp(t, makefile, `(?m)^GOLANGCI_LINT_VERSION := v\d+\.\d+\.\d+$`)
 	assertRegexp(t, makefile, `(?m)^GOLANGCI_LINT_DIGEST := sha256:[0-9a-f]{64}$`)
 	assertContains(t, makefile, "GOLANGCI_LINT_IMAGE := golangci/golangci-lint:$(GOLANGCI_LINT_VERSION)@$(GOLANGCI_LINT_DIGEST)")
+	assertContains(t, makefile, "GOLANGCI_LINT_REGISTRY_AUTH_FILE ?= $(CURDIR)/scripts/public-registry-auth.json")
+	assertContains(t, makefile, "GOLANGCI_LINT_DOCKER_BASE := REGISTRY_AUTH_FILE=$(GOLANGCI_LINT_REGISTRY_AUTH_FILE) docker run --rm")
 
 	if got := strings.Count(makefile, "golangci/golangci-lint:"); got != 1 {
 		t.Fatalf("Makefile golangci-lint image coordinate count = %d, want 1", got)
