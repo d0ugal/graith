@@ -176,6 +176,7 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ErrorMsg": probe(ErrorMsg.self),
 
     // Screen peek.
+    "ScreenSnapshotRowMsg": probe(ScreenSnapshotRowMsg.self),
     "ScreenPreviewResponseMsg": probe(ScreenPreviewResponseMsg.self),
     "ScreenSnapshotResponseMsg": probe(ScreenSnapshotResponseMsg.self),
 

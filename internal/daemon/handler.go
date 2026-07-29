@@ -1268,12 +1268,32 @@ func screenSnapshotResponse(sessionID string, snap grpty.ScreenCapture) protocol
 	return protocol.ScreenSnapshotResponseMsg{
 		SessionID:     sessionID,
 		Frame:         snap.Frame,
+		RowDeltas:     screenSnapshotRows(snap.RowDeltas),
+		Delta:         snap.Delta,
+		DeltaFrom:     snap.DeltaFrom,
+		SnapshotID:    snap.SnapshotID,
 		CursorX:       snap.CursorX,
 		CursorY:       snap.CursorY,
 		CursorVisible: snap.CursorVisible,
 		Cols:          snap.Cols,
 		Rows:          snap.Rows,
 	}
+}
+
+func screenSnapshotRows(rows []grpty.ScreenRow) []protocol.ScreenSnapshotRowMsg {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	out := make([]protocol.ScreenSnapshotRowMsg, len(rows))
+	for i, row := range rows {
+		out[i] = protocol.ScreenSnapshotRowMsg{
+			Y:     row.Y,
+			Frame: row.Frame,
+		}
+	}
+
+	return out
 }
 
 func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.SessionInfo {

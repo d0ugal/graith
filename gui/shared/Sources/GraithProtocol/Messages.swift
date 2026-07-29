@@ -500,22 +500,42 @@ public struct ScreenPreviewResponseMsg: Codable, Sendable {
     }
 }
 
+public struct ScreenSnapshotRowMsg: Codable, Sendable {
+    public var y: Int
+    public var frame: String
+    public init(y: Int, frame: String) {
+        self.y = y
+        self.frame = frame
+    }
+}
+
 public struct ScreenSnapshotResponseMsg: Codable, Sendable {
     public var sessionID: String
     public var frame: String
+    public var rowDeltas: [ScreenSnapshotRowMsg]?
+    public var delta: Bool?
+    public var deltaFrom: UInt64?
+    public var snapshotID: UInt64?
     public var cursorX: Int
     public var cursorY: Int
     public var cursorVisible: Bool
     public var cols: Int
     public var rows: Int
     public init(sessionID: String, frame: String, cursorX: Int = 0, cursorY: Int = 0,
-                cursorVisible: Bool = false, cols: Int = 0, rows: Int = 0) {
-        self.sessionID = sessionID; self.frame = frame; self.cursorX = cursorX
+                cursorVisible: Bool = false, cols: Int = 0, rows: Int = 0,
+                rowDeltas: [ScreenSnapshotRowMsg]? = nil, delta: Bool? = nil,
+                deltaFrom: UInt64? = nil, snapshotID: UInt64? = nil) {
+        self.sessionID = sessionID; self.frame = frame; self.rowDeltas = rowDeltas
+        self.delta = delta; self.deltaFrom = deltaFrom; self.snapshotID = snapshotID; self.cursorX = cursorX
         self.cursorY = cursorY; self.cursorVisible = cursorVisible; self.cols = cols; self.rows = rows
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case frame
+        case rowDeltas = "row_deltas"
+        case delta
+        case deltaFrom = "delta_from"
+        case snapshotID = "snapshot_id"
         case cursorX = "cursor_x"
         case cursorY = "cursor_y"
         case cursorVisible = "cursor_visible"

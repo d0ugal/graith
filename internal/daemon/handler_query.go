@@ -283,16 +283,15 @@ func handleScreenSnapshot(sm *SessionManager, auth authContext, send func(string
 		return
 	}
 
-	snap := output.ScreenSnapshot()
-	send("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
-		SessionID:     ss.SessionID,
-		Frame:         snap.Frame,
-		CursorX:       snap.CursorX,
-		CursorY:       snap.CursorY,
-		CursorVisible: snap.CursorVisible,
-		Cols:          snap.Cols,
-		Rows:          snap.Rows,
-	})
+	if ss.DeltaFrom != 0 {
+		if deltaOutput, ok := output.(screenDeltaOutput); ok {
+			send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, deltaOutput.ScreenSnapshotDelta(ss.DeltaFrom)))
+
+			return
+		}
+	}
+
+	send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, output.ScreenSnapshot()))
 }
 
 // handlePairApprove approves a pending device pairing (local human only). A

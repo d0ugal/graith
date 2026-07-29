@@ -1219,6 +1219,82 @@ func TestExperimentalStatusChromeRefreshBeforeSnapshotDoesNotTouchCursor(t *test
 	}
 }
 
+func TestWriteExperimentalScreenSnapshotAppliesRowDeltas(t *testing.T) {
+	var buf bytes.Buffer
+
+	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+		SessionID: "canny",
+		Delta:     true,
+		RowDeltas: []protocol.ScreenSnapshotRowMsg{
+			{Y: -1, Frame: "dreich low\x1b[0m"},
+			{Y: 1, Frame: "changed bothy\x1b[0m"},
+			{Y: 24, Frame: "dreich high\x1b[0m"},
+		},
+		CursorX:       4,
+		CursorY:       1,
+		CursorVisible: true,
+		Cols:          80,
+		Rows:          24,
+	}, nil)
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[?2026h") || !strings.Contains(out, "\x1b[?2026l") {
+		t.Fatalf("row delta should use synchronized update, got %q", out)
+	}
+
+	if strings.Contains(out, "\x1b[2J") {
+		t.Fatalf("row delta should not clear the full screen, got %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[2;1H\x1b[0m\x1b[2Kchanged bothy") {
+		t.Fatalf("row delta did not repaint addressed row: %q", out)
+	}
+
+	if strings.Contains(out, "dreich low") || strings.Contains(out, "dreich high") {
+		t.Fatalf("row delta rendered out-of-bounds rows: %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[2;5H") || !strings.Contains(out, "\x1b[?25h") {
+		t.Fatalf("row delta did not restore cursor: %q", out)
+	}
+}
+
+func TestWriteExperimentalScreenSnapshotOffsetsRowDeltasBelowTopChrome(t *testing.T) {
+	var buf bytes.Buffer
+
+	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+		Name:   "top-delta",
+		Agent:  "codex",
+		Status: "running",
+	}, false, "top", 24, 80)
+
+	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+		SessionID: "canny",
+		Delta:     true,
+		RowDeltas: []protocol.ScreenSnapshotRowMsg{
+			{Y: 0, Frame: "delta row\x1b[0m"},
+		},
+		CursorX:       2,
+		CursorY:       0,
+		CursorVisible: true,
+		Cols:          80,
+		Rows:          23,
+	}, chrome)
+
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[2;1H\x1b[0m\x1b[2Kdelta row") {
+		t.Fatalf("top chrome did not offset child delta row: %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[1;1H") || !strings.Contains(out, "top-delta") {
+		t.Fatalf("top chrome missing from row delta output: %q", out)
+	}
+
+	if !strings.Contains(out, "\x1b[2;3H") {
+		t.Fatalf("top chrome did not offset cursor in row delta output: %q", out)
+	}
+}
+
 // withStubDaemonStart makes the daemon unreachable: it points at a dead socket
 // and stubs the daemon-spawn to fail, so any Connect-based helper fails fast.
 func withStubDaemonStart(t *testing.T) (config.Paths, *config.Config) {

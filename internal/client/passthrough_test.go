@@ -203,6 +203,261 @@ func TestTerminalOwnedDataTriggersSnapshotRepaint(t *testing.T) {
 	}
 }
 
+func TestTerminalOwnedSnapshotRequestsUseDeltaBase(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+
+	opts := testOpts
+	opts.SessionID = "braw"
+	opts.TerminalOwned = true
+	opts.experimentalSnapshotID = 41
+
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(context.Background(), opts, stdinR, io.Discard, nil)
+	}()
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	daemonWriter := protocol.NewFrameWriter(daemonConn)
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+
+	req := readSnapshotRequest(t, daemonReader)
+	if req.DeltaFrom != 41 {
+		t.Fatalf("first delta_from = %d, want 41", req.DeltaFrom)
+	}
+
+	resp, err := protocol.EncodeControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "braw",
+		Delta:         true,
+		SnapshotID:    42,
+		CursorVisible: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("second")); err != nil {
+		t.Fatal(err)
+	}
+
+	req = readSnapshotRequest(t, daemonReader)
+	if req.DeltaFrom != 42 {
+		t.Fatalf("second delta_from = %d, want 42", req.DeltaFrom)
+	}
+
+	detached, err := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, detached); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result != ResultDetached {
+			t.Fatalf("result = %d, want detached", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return")
+	}
+}
+
+func TestTerminalOwnedSnapshotRefreshForcesFullResync(t *testing.T) {
+	oldRefreshInterval := refreshInterval
+	refreshInterval = 50 * time.Millisecond
+
+	t.Cleanup(func() { refreshInterval = oldRefreshInterval })
+
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+
+	opts := testOpts
+	opts.SessionID = "braw"
+	opts.TerminalOwned = true
+	opts.experimentalSnapshotID = 41
+
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(context.Background(), opts, stdinR, io.Discard, nil)
+	}()
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	daemonWriter := protocol.NewFrameWriter(daemonConn)
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+
+	req := readSnapshotRequest(t, daemonReader)
+	if req.DeltaFrom != 41 {
+		t.Fatalf("first delta_from = %d, want 41", req.DeltaFrom)
+	}
+
+	resp, err := protocol.EncodeControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
+		SessionID:     "braw",
+		Delta:         true,
+		SnapshotID:    42,
+		CursorVisible: true,
+		Cols:          80,
+		Rows:          24,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, resp); err != nil {
+		t.Fatal(err)
+	}
+
+	req = readSnapshotRequest(t, daemonReader)
+	if req.DeltaFrom != 0 {
+		t.Fatalf("refresh delta_from = %d, want 0 for periodic full resync", req.DeltaFrom)
+	}
+
+	detached, err := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, detached); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result != ResultDetached {
+			t.Fatalf("result = %d, want detached", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return")
+	}
+}
+
+func TestTerminalOwnedSnapshotGeometryMismatchReassertsResize(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+
+	stdout := &lockedWriter{}
+	viewport := &experimentalAttachViewport{}
+	viewport.update(80, 24)
+
+	opts := testOpts
+	opts.SessionID = "braw"
+	opts.TerminalOwned = true
+	opts.experimentalSnapshotID = 41
+	opts.experimentalViewport = viewport
+
+	done := make(chan PassthroughResult, 1)
+	go func() {
+		done <- c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
+	}()
+
+	daemonReader := protocol.NewFrameReader(daemonConn)
+	daemonWriter := protocol.NewFrameWriter(daemonConn)
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelData, []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+
+	req := readSnapshotRequest(t, daemonReader)
+	if req.DeltaFrom != 41 {
+		t.Fatalf("first delta_from = %d, want 41", req.DeltaFrom)
+	}
+
+	resp, err := protocol.EncodeControl("screen_snapshot_response", protocol.ScreenSnapshotResponseMsg{
+		SessionID: "braw",
+		Delta:     true,
+		RowDeltas: []protocol.ScreenSnapshotRowMsg{
+			{Y: 0, Frame: "wrong-geometry\x1b[0m"},
+		},
+		SnapshotID:    42,
+		CursorVisible: true,
+		Cols:          120,
+		Rows:          40,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, resp); err != nil {
+		t.Fatal(err)
+	}
+
+	frame, err := daemonReader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl || env.Type != "resize" {
+		t.Fatalf("mismatch client frame = (%d, %q), want resize control", frame.Channel, env.Type)
+	}
+
+	var resize protocol.ResizeMsg
+	if err := protocol.DecodePayload(env, &resize); err != nil {
+		t.Fatal(err)
+	}
+
+	if resize.Cols != 80 || resize.Rows != 24 {
+		t.Fatalf("mismatch resize = %+v, want 80x24", resize)
+	}
+
+	req = readSnapshotRequest(t, daemonReader)
+	if req.DeltaFrom != 0 {
+		t.Fatalf("mismatch follow-up delta_from = %d, want 0", req.DeltaFrom)
+	}
+
+	if got := stdout.String(); strings.Contains(got, "wrong-geometry") {
+		t.Fatalf("mismatched snapshot was painted: %q", got)
+	}
+
+	detached, err := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := daemonWriter.WriteFrame(protocol.ChannelControl, detached); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result != ResultDetached {
+			t.Fatalf("result = %d, want detached", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runPassthroughLoop did not return")
+	}
+}
+
 func TestTerminalOwnedSnapshotRequestsCoalesceWhilePending(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()
@@ -318,6 +573,35 @@ func TestTerminalOwnedSnapshotRequestsCoalesceWhilePending(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("runPassthroughLoop did not return")
 	}
+}
+
+func readSnapshotRequest(t *testing.T, reader *protocol.FrameReader) protocol.ScreenSnapshotMsg {
+	t.Helper()
+
+	frame, err := reader.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if frame.Channel != protocol.ChannelControl {
+		t.Fatalf("client frame channel = %d, want control", frame.Channel)
+	}
+
+	env, err := protocol.DecodeControl(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if env.Type != "screen_snapshot" {
+		t.Fatalf("client control = %q, want screen_snapshot", env.Type)
+	}
+
+	var req protocol.ScreenSnapshotMsg
+	if err := protocol.DecodePayload(env, &req); err != nil {
+		t.Fatal(err)
+	}
+
+	return req
 }
 
 func TestTerminalOwnedStatusChromeRefreshes(t *testing.T) {

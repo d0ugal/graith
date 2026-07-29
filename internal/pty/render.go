@@ -3,11 +3,28 @@ package pty
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 )
 
+type ScreenRow struct {
+	Y     int
+	Frame string
+}
+
+const screenSnapshotCacheLimit = 8
+
+type screenSnapshotCacheEntry struct {
+	id       uint64
+	snapshot TerminalSnapshot
+}
+
 type ScreenCapture struct {
 	Frame         string
+	RowDeltas     []ScreenRow
+	Delta         bool
+	DeltaFrom     uint64
+	SnapshotID    uint64
 	CursorX       int
 	CursorY       int
 	CursorVisible bool
@@ -24,6 +41,20 @@ func (s *Session) ScreenSnapshot() ScreenCapture {
 	}
 
 	snap := s.screenSnapshotLocked()
+	s.mu.Unlock()
+
+	return snap
+}
+
+func (s *Session) ScreenSnapshotDelta(deltaFrom uint64) ScreenCapture {
+	s.mu.Lock()
+	if s.closed || s.screenInitializing {
+		s.mu.Unlock()
+
+		return ScreenCapture{}
+	}
+
+	snap := s.screenSnapshotDeltaLocked(deltaFrom)
 	s.mu.Unlock()
 
 	return snap
@@ -49,18 +80,89 @@ func (s *Session) AttachWithScreenSnapshot(w io.Writer) ScreenCapture {
 }
 
 func (s *Session) screenSnapshotLocked() ScreenCapture {
-	snap, err := renderFrameErr(s.screen)
+	return s.screenSnapshotDeltaLocked(0)
+}
+
+func (s *Session) screenSnapshotDeltaLocked(deltaFrom uint64) ScreenCapture {
+	snapshot, err := snapshotTerminal(s.screen)
 	if err != nil {
 		recoveryErr := s.replaceScreenLocked()
 		s.log.Warn("terminal snapshot failed; screen reconstructed",
 			"session", s.ID, "error", err, "recovery_error", recoveryErr)
 
 		if recoveryErr == nil {
-			snap, _ = renderFrameErr(s.screen)
+			snapshot, _ = snapshotTerminal(s.screen)
 		}
 	}
 
-	return snap
+	if len(snapshot.Cells) == 0 || snapshot.Cols <= 0 || snapshot.Rows <= 0 {
+		return ScreenCapture{}
+	}
+
+	return s.screenCaptureFromSnapshotLocked(snapshot, deltaFrom)
+}
+
+func (s *Session) screenCaptureFromSnapshotLocked(snapshot TerminalSnapshot, deltaFrom uint64) ScreenCapture {
+	s.screenSnapshotSeq++
+	snapshotID := s.screenSnapshotSeq
+
+	var (
+		base    TerminalSnapshot
+		hasBase bool
+	)
+	if deltaFrom != 0 {
+		base, hasBase = s.lookupScreenSnapshotLocked(deltaFrom)
+		hasBase = hasBase && sameSnapshotGeometry(snapshot, base)
+	}
+
+	stored := cloneTerminalSnapshot(snapshot)
+	s.storeScreenSnapshotLocked(snapshotID, stored)
+
+	var capture ScreenCapture
+	if hasBase {
+		capture = renderSnapshotDelta(snapshot, base)
+		capture.DeltaFrom = deltaFrom
+	} else {
+		capture = renderSnapshotFrame(snapshot)
+	}
+
+	capture.SnapshotID = snapshotID
+
+	return capture
+}
+
+func (s *Session) lookupScreenSnapshotLocked(id uint64) (TerminalSnapshot, bool) {
+	for _, entry := range s.screenSnapshotCache {
+		if entry.id == id {
+			return entry.snapshot, true
+		}
+	}
+
+	return TerminalSnapshot{}, false
+}
+
+func (s *Session) storeScreenSnapshotLocked(id uint64, snapshot TerminalSnapshot) {
+	s.screenSnapshotCache = append(s.screenSnapshotCache, screenSnapshotCacheEntry{
+		id:       id,
+		snapshot: snapshot,
+	})
+	if len(s.screenSnapshotCache) > screenSnapshotCacheLimit {
+		copy(s.screenSnapshotCache, s.screenSnapshotCache[len(s.screenSnapshotCache)-screenSnapshotCacheLimit:])
+		s.screenSnapshotCache = s.screenSnapshotCache[:screenSnapshotCacheLimit]
+	}
+}
+
+func sameSnapshotGeometry(a, b TerminalSnapshot) bool {
+	return a.Cols == b.Cols && a.Rows == b.Rows &&
+		len(a.Cells) == a.Cols*a.Rows && len(b.Cells) == b.Cols*b.Rows
+}
+
+func cloneTerminalSnapshot(snapshot TerminalSnapshot) TerminalSnapshot {
+	cells := make([]Cell, len(snapshot.Cells))
+	copy(cells, snapshot.Cells)
+	snapshot.Cells = cells
+
+	return snapshot
 }
 
 func (s *Session) ScreenPreview() string {
@@ -104,6 +206,10 @@ func renderFrameErr(vt Terminal) (ScreenCapture, error) {
 		return ScreenCapture{}, err
 	}
 
+	return renderSnapshotFrame(snapshot), nil
+}
+
+func renderSnapshotFrame(snapshot TerminalSnapshot) ScreenCapture {
 	cols, rows := snapshot.Cols, snapshot.Rows
 
 	var buf strings.Builder
@@ -118,19 +224,7 @@ func renderFrameErr(vt Terminal) (ScreenCapture, error) {
 
 		for x := 0; x < cols; x++ {
 			cell := snapshot.Cells[y*cols+x]
-			if cell.Style != prevStyle {
-				writeSGR(&buf, cell.Style)
-				prevStyle = cell.Style
-			}
-
-			// An empty Content is the trailing column of a wide grapheme; the
-			// wide character in the preceding column already fills the space, so
-			// emit nothing here.
-			if cell.Content == "" {
-				continue
-			}
-
-			buf.WriteString(cell.Content)
+			writeStyledCell(&buf, cell, &prevStyle)
 		}
 	}
 
@@ -143,7 +237,68 @@ func renderFrameErr(vt Terminal) (ScreenCapture, error) {
 		CursorVisible: snapshot.CursorVisible,
 		Cols:          cols,
 		Rows:          rows,
-	}, nil
+	}
+}
+
+func renderSnapshotDelta(snapshot, base TerminalSnapshot) ScreenCapture {
+	capture := ScreenCapture{
+		Delta:         true,
+		CursorX:       snapshot.CursorX,
+		CursorY:       snapshot.CursorY,
+		CursorVisible: snapshot.CursorVisible,
+		Cols:          snapshot.Cols,
+		Rows:          snapshot.Rows,
+	}
+
+	for y := 0; y < snapshot.Rows; y++ {
+		rowStart := y * snapshot.Cols
+		rowEnd := rowStart + snapshot.Cols
+
+		if slices.Equal(snapshot.Cells[rowStart:rowEnd], base.Cells[rowStart:rowEnd]) {
+			continue
+		}
+
+		capture.RowDeltas = append(capture.RowDeltas, ScreenRow{
+			Y:     y,
+			Frame: renderSnapshotRow(snapshot, y),
+		})
+	}
+
+	return capture
+}
+
+func renderSnapshotRow(snapshot TerminalSnapshot, y int) string {
+	var buf strings.Builder
+	buf.Grow(snapshot.Cols * 8)
+
+	var prevStyle CellStyle
+
+	rowStart := y * snapshot.Cols
+	rowEnd := rowStart + snapshot.Cols
+
+	for _, cell := range snapshot.Cells[rowStart:rowEnd] {
+		writeStyledCell(&buf, cell, &prevStyle)
+	}
+
+	buf.WriteString("\x1b[0m")
+
+	return buf.String()
+}
+
+func writeStyledCell(buf *strings.Builder, cell Cell, prevStyle *CellStyle) {
+	if cell.Style != *prevStyle {
+		writeSGR(buf, cell.Style)
+		*prevStyle = cell.Style
+	}
+
+	// An empty Content is the trailing column of a wide grapheme; the wide
+	// character in the preceding column already fills the space, so emit nothing
+	// here.
+	if cell.Content == "" {
+		return
+	}
+
+	buf.WriteString(cell.Content)
 }
 
 func writeSGR(buf *strings.Builder, style CellStyle) {

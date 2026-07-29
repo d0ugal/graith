@@ -56,6 +56,11 @@ type Session struct {
 	// readLoop appends authoritative bytes without starting a competing helper;
 	// the completed helper is hydrated from that exact tail before publication.
 	screenInitializing bool
+	// screenSnapshotCache keeps a short history of coherent viewport snapshots so
+	// an experimental attach client can ask for row deltas from a known base. It
+	// is derived state only; raw scrollback remains authoritative.
+	screenSnapshotSeq   uint64
+	screenSnapshotCache []screenSnapshotCacheEntry
 	// scrollbackErr records that a PTY chunk could not be durably appended. A
 	// preserve upgrade must refuse at the reader safe point rather than claim a
 	// lossless handoff after raw output has diverged from the authoritative log.

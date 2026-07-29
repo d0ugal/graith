@@ -57,6 +57,10 @@ type atomicAttachOutput interface {
 	AttachWithScreenSnapshot(w io.Writer) grpty.ScreenCapture
 }
 
+type screenDeltaOutput interface {
+	ScreenSnapshotDelta(deltaFrom uint64) grpty.ScreenCapture
+}
+
 // sessionDriver is the minimal contract needed by the daemon's common
 // lifecycle, input, and output consumers.
 type sessionDriver interface {
