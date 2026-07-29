@@ -3159,6 +3159,10 @@ func TestView_RendersSessionList(t *testing.T) {
 	om := asOverlay(updated)
 	view := om.View().Content
 
+	if !strings.Contains(view, sessionNavigatorTitle) {
+		t.Errorf("view should contain the navigator title %q", sessionNavigatorTitle)
+	}
+
 	if !strings.Contains(view, "All") {
 		t.Error("view should contain the view name 'All'")
 	}
@@ -3166,6 +3170,127 @@ func TestView_RendersSessionList(t *testing.T) {
 	for _, name := range []string{"canny-tests", "braw-fix", "bonnie-feature"} {
 		if !strings.Contains(view, name) {
 			t.Errorf("view should contain session name %q", name)
+		}
+	}
+}
+
+func TestView_SessionNavigatorContextAtCompactAndWideSizes(t *testing.T) {
+	tests := map[string]struct {
+		width  int
+		height int
+	}{
+		"compact 80x24": {width: 80, height: 24},
+		"wide 160x40":   {width: 160, height: 40},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "s1", nil, nil, nil, nil)
+			updated, _ := sendWindowSize(m, test.width, test.height)
+			view := ansi.Strip(asOverlay(updated).View().Content)
+
+			for _, want := range []string{
+				sessionNavigatorTitle,
+				"3 sessions",
+				"Selected: graith/braw-fix",
+				"attached",
+				"status: running",
+			} {
+				if !strings.Contains(view, want) {
+					t.Errorf("navigator view should contain %q at %s:\n%s", want, name, view)
+				}
+			}
+		})
+	}
+}
+
+func TestView_SessionNavigatorCompactRichDetailsKeepHelpVisible(t *testing.T) {
+	sessions := make([]protocol.SessionInfo, 18)
+	for i := range sessions {
+		sessions[i] = protocol.SessionInfo{
+			ID:        fmt.Sprintf("session-%02d", i),
+			Name:      fmt.Sprintf("strath-%02d", i),
+			RepoName:  "graith",
+			Branch:    fmt.Sprintf("d0ugal/graith/strath-%02d", i),
+			Agent:     "codex",
+			Status:    "running",
+			CreatedAt: time.Now().Add(-time.Duration(i+1) * time.Hour).Format(time.RFC3339),
+		}
+	}
+
+	sessions[0].ID = "selected-rich"
+	sessions[0].Name = "braw-rich"
+	sessions[0].BaseBranch = "main"
+	sessions[0].ConfigStale = true
+	sessions[0].WorktreePath = "/tmp/graith/strath/braw-rich"
+	sessions[0].PullRequest = &protocol.PRInfo{Number: 7, State: "open"}
+	sessions[0].CI = &protocol.CIInfo{State: "pending", Passed: 16, Total: 22}
+
+	m := newOverlayModel(sessions, "selected-rich", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 80, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{
+		"Selected: graith/braw-rich",
+		"config stale",
+		"PR #7 open",
+		"enter attach",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("compact rich-detail navigator should contain %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_SessionNavigatorCompactTitleKeepsActiveView(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.profile = "oncall"
+	m.view = viewDeleted
+	m.rebuildForView()
+
+	updated, _ := sendWindowSize(m, 80, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{
+		sessionNavigatorTitle,
+		"view: Deleted",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("compact title should contain %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_SessionNavigatorTitleCountsUniqueSessionsInLabelsView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "s1", Name: "braw", RepoName: "croft", Status: "running", Labels: []string{"alpha", "beta"}},
+	}
+	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
+	m.view = viewLabels
+	m.rebuildForView()
+
+	updated, _ := sendWindowSize(m, 120, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if !strings.Contains(view, "1 session") {
+		t.Fatalf("labels title should count unique sessions:\n%s", view)
+	}
+
+	if strings.Contains(view, "2 sessions") {
+		t.Fatalf("labels title should not count repeated label rows as sessions:\n%s", view)
+	}
+}
+
+func TestView_SelectedContextAddsRepoInGroupedView(t *testing.T) {
+	m := sizedModel(t, overlayTestSessions(), "s1")
+	m.view = viewRepo
+	m.rebuildForView()
+	m.selectSessionByID("s1")
+
+	view := ansi.Strip(m.View().Content)
+	for _, want := range []string{"Selected: braw-fix", "repo: graith", "status: running"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("grouped selected context should contain %q:\n%s", want, view)
 		}
 	}
 }
@@ -3479,6 +3604,26 @@ func TestView_FilterModeShowsInput(t *testing.T) {
 	listView := asOverlay(updated2).View().Content
 	if strings.Contains(listView, "Filter:") {
 		t.Error("list mode should not show filter prompt")
+	}
+}
+
+func TestView_FilterModeKeepsLongQueryVisibleAtCompactWidth(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 80, 24)
+	updated, _ = sendKey(asOverlay(updated), "/")
+
+	query := "abcdefghijklmnopqrstuvwxy0123456789ABCDEFGHIJKLMNOPQRSTUVWX"
+	for _, ch := range query {
+		updated, _ = sendKey(asOverlay(updated), string(ch))
+	}
+
+	view := ansi.Strip(asOverlay(updated).View().Content)
+	if !strings.Contains(view, "Filter: ") {
+		t.Fatalf("filter mode should show filter prompt:\n%s", view)
+	}
+
+	if !strings.Contains(view, "OPQRSTUVWX") {
+		t.Fatalf("compact filter mode should keep the query tail visible:\n%s", view)
 	}
 }
 

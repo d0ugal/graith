@@ -64,7 +64,7 @@ func passthroughKeysFromConfig() client.PassthroughKeys {
 	}
 }
 
-// overlayKeysFromConfig builds the session-picker keybindings from the
+// overlayKeysFromConfig builds the Session Navigator keybindings from the
 // [keybindings] config table.
 func overlayKeysFromConfig() client.OverlayKeys {
 	return client.OverlayKeys{

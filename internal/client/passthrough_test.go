@@ -1660,7 +1660,7 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 	})
 
 	got := buf.String()
-	for _, want := range []string{"Q detach", "Z sessions", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "R restart"} {
+	for _, want := range []string{"Q detach", "Z navigator", "V shell", "O orch", "L last", "N/P next/prev", "C new", "F fork", "M rename", "B scroll", "G messages", "R restart"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("help bar missing %q; got %q", want, got)
 		}

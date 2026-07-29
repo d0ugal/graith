@@ -1,7 +1,7 @@
 ---
 weight: 350
 title: "TUI & input"
-description: "Keybindings, the session picker overlay, and input handling."
+description: "Keybindings, the Session Navigator, and input handling."
 icon: "keyboard"
 toc: true
 draft: false
@@ -14,15 +14,15 @@ draft: false
 prefix               = "ctrl+b"  # prefix key
 new_session          = "c"       # create a session
 fork_session         = "f"       # fork the current session
-delete_session       = "x"       # delete a session in the picker
+delete_session       = "x"       # delete a session in the Session Navigator
 detach               = "d"       # detach without stopping the agent
-session_list         = "w"       # open the session picker overlay
+session_list         = "w"       # open the Session Navigator
 next_session         = "n"       # next session
 prev_session         = "p"       # previous session
 last_session         = "l"       # last (most recently attached) session
-resume_session       = "R"       # open the restart menu for a session in the picker
+resume_session       = "R"       # open the Session Navigator restart menu
 rename_session       = ","       # rename the current session
-search               = "/"       # filter sessions in the picker
+search               = "/"       # filter sessions in the Session Navigator
 scroll_mode          = "["       # open a scrollable pager over the session history
 shell                = "s"       # open a shell in the worktree
 orchestrator_session = "o"       # switch to the orchestrator session
@@ -30,7 +30,7 @@ messages             = "m"       # open the message viewer for the current sessi
 restart_session      = "r"       # restart (resume) the current session
 ```
 
-The prefix key accepts values like `ctrl+b`, `ctrl+x`, or a single character; the rest are single characters pressed after the prefix (or, for `delete_session`/`resume_session`/`search`, inside the session picker). graith handles both raw control bytes and Kitty keyboard protocol sequences, so it works in extended-protocol terminals like Ghostty.
+The prefix key accepts values like `ctrl+b`, `ctrl+x`, or a single character; the rest are single characters pressed after the prefix (or, for `delete_session`/`resume_session`/`search`, inside the Session Navigator). graith handles both raw control bytes and Kitty keyboard protocol sequences, so it works in extended-protocol terminals like Ghostty.
 
 If two prefix commands share a key, graith warns at load time and starts anyway (only the first command in passthrough order fires).
 
@@ -64,10 +64,10 @@ See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybin
 
 ```toml
 [overlay]
-shortcut_keys = "1234567890"  # keys that jump straight to the Nth session in the picker
+shortcut_keys = "1234567890"  # keys that jump straight to the Nth session in the Navigator
 ```
 
-In the session picker (`ctrl+b w`), each key jumps straight to its session — the 1st key selects session 1, and so on.
+In the Session Navigator (`ctrl+b w`), each key jumps straight to its session — the 1st key selects session 1, and so on.
 
 ## Input
 
@@ -83,15 +83,15 @@ drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key pre
 
 ```toml
 [terminal]
-refresh_interval = "2s"  # how often the picker/status bar/message viewer re-poll
-summary_width    = 40    # max visible width of a `gr status` summary in the picker
+refresh_interval = "2s"  # how often the Navigator/status bar/message viewer re-poll
+summary_width    = 40    # max visible width of a `gr status` summary in the Navigator
 ```
 
 The `[terminal]` block holds the interactive client's presentation preferences that were previously fixed.
 
-**`refresh_interval`** is the cadence at which the session picker (`ctrl+b w`), an attached status bar, and the in-picker message viewer (`m`) re-poll the daemon for session state. A shorter interval feels more live but polls more; a non-positive value falls back to the default (zero would busy-loop).
+**`refresh_interval`** is the cadence at which the Session Navigator (`ctrl+b w`), an attached status bar, and the message viewer (`m`) re-poll the daemon for session state. A shorter interval feels more live but polls more; a non-positive value falls back to the default (zero would busy-loop).
 
-**`summary_width`** is the widest a `gr status` summary renders in the picker
+**`summary_width`** is the widest a `gr status` summary renders in the Navigator
 and human-readable `gr list` output before an ellipsis truncates it. It's a
 **display-cell** budget, not bytes or runes: wide characters (CJK, emoji) count
 as two cells, zero-width and combining marks as none, and ANSI styling is
@@ -101,7 +101,7 @@ always valid UTF-8. (This differs from `[limits]` byte caps such as
 
 The fallback terminal geometry (used when graith can't read the real size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback follows the same `[lifecycle]` defaults, for a single source of truth.
 
-Only genuine preferences are configurable here. Layout invariants — the picker's column-width arithmetic, wrap widths, the minimum name column, and the GUI's 60 fps redraw rate — stay as fixed constants matching the render logic.
+Only genuine preferences are configurable here. Layout invariants — the Navigator's column-width arithmetic, wrap widths, the minimum name column, and the GUI's 60 fps redraw rate — stay as fixed constants matching the render logic.
 
 ## iOS terminal gesture physics
 

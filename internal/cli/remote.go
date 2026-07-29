@@ -247,7 +247,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 			out.Printf("Connection lost. Reconnecting to %s...\n", rh.Host)
 			continue
 		default:
-			out.Printf("(overlay and session switching are not yet supported over a remote attach — detaching)\n")
+			out.Printf("(Session Navigator and session switching are not yet supported over a remote attach — detaching)\n")
 			return nil
 		}
 	}
