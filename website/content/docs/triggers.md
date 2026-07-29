@@ -144,7 +144,7 @@ type    = "command"
 command = "go test ./..."
 
 [trigger.action.deliver]
-topic = "ci-reports"
+topic = "ci/graith-tests/{session_name}/result"
 ```
 
 If `review-a` and `review-b` are both running in `~/Code/graith`, status shows
@@ -503,7 +503,7 @@ instruction automatically.
 ```toml
 [trigger.action.deliver]
 inbox = "orchestrator"          # a session name, "orchestrator", or {session_name}
-topic = "ci-reports"            # a pub/sub topic
+topic = "ci/{name}/{session_name}/result" # a pub/sub topic
 store = "reports/{date}.md"     # a store doc (prefix "shared:" for the shared store)
 wake  = false                   # resume a stopped non-orchestrator inbox target
 required = false                # fail the action if any route fails
