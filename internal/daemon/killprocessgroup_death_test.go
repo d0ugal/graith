@@ -6,6 +6,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 // startSleeperGroup starts a real process in its own process group and returns
@@ -92,6 +94,44 @@ func TestKillProcessGroupConfirmsDelayedDeath(t *testing.T) {
 
 	if err := killProcessGroup(9999, time.Second); err != nil {
 		t.Fatalf("killProcessGroup = %v, want nil once delayed death is confirmed", err)
+	}
+}
+
+func TestKillVerifiedProcessTreatsPIDIdentityMismatchAsAlreadyGone(t *testing.T) {
+	sm := newTestSessionManager(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	current, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupSignals int32
+
+	withProcKill(t, func(target int, sig syscall.Signal) error {
+		if target == -pid && sig != 0 {
+			atomic.AddInt32(&groupSignals, 1)
+		}
+
+		return syscall.Kill(target, sig)
+	})
+
+	killed, err := sm.killVerifiedProcess(pid, current-1)
+	if err != nil {
+		t.Fatalf("killVerifiedProcess identity mismatch: %v", err)
+	}
+
+	if killed {
+		t.Fatal("killVerifiedProcess reported killing a mismatched PID generation")
+	}
+
+	if groupSignals != 0 {
+		t.Fatalf("mismatched PID generation was signalled %d time(s)", groupSignals)
+	}
+
+	if !isProcessAlive(pid) {
+		t.Fatal("mismatched live process was killed")
 	}
 }
 

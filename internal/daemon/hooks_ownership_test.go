@@ -854,6 +854,128 @@ func TestConcurrentCursorHooksFailedLaunchReleasesOnlyJoiningOwner(t *testing.T)
 	}
 }
 
+func createCursorWorktreeSession(t *testing.T, sm *SessionManager, id, name, repoDir string) SessionState {
+	t.Helper()
+
+	created, err := sm.Create(CreateOpts{
+		ID: id, Name: name, AgentName: "cursor", RepoPath: repoDir,
+		AgentHooks: true, SkipModelValidation: true, Rows: 24, Cols: 80,
+	})
+	if err != nil {
+		t.Fatalf("Create(%s): %v", name, err)
+	}
+
+	return created
+}
+
+func TestCursorWorktreeDeleteReleasesHookMarkerAfterWorktreeTeardown(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := initTempGitRepo(t)
+	sm := newCursorHooksLifecycleManager(t, repoDir, t.TempDir(), "sh")
+	session := createCursorWorktreeSession(t, sm, "c0ffee07", "strath", repoDir)
+
+	if err := sm.Stop(session.ID); err != nil {
+		t.Fatalf("Stop(%s): %v", session.ID, err)
+	}
+
+	waitForStatus(t, sm, session.ID, StatusStopped)
+
+	markerPath := sm.cursorHooksOwnershipPath(session.ID)
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("cursor ownership marker missing before delete: %v", err)
+	}
+
+	if _, err := os.Stat(testCursorHooksPath(session.WorktreePath)); err != nil {
+		t.Fatalf("generated hooks missing before delete: %v", err)
+	}
+
+	if err := sm.Delete(session.ID); err != nil {
+		t.Fatalf("Delete(%s): %v", session.ID, err)
+	}
+
+	if _, ok := sm.Get(session.ID); ok {
+		t.Fatal("session remained in state after delete")
+	}
+
+	if _, err := os.Stat(session.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree after delete: %v, want missing", err)
+	}
+
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("cursor ownership marker after delete: %v, want missing", err)
+	}
+
+	if tombstoneExists(t, sm, session.ID) {
+		t.Fatal("delete left tombstone after cursor hook cleanup")
+	}
+}
+
+func TestCleanupHooksForDeleteReleasesCursorMarkerWhenWorktreeGone(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+	sessionID := "gone-bothy"
+
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
+		t.Fatalf("injectCursorHooks(): %v", err)
+	}
+
+	markerPath := sm.cursorHooksOwnershipPath(sessionID)
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("cursor ownership marker missing before cleanup: %v", err)
+	}
+
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatalf("remove worktree: %v", err)
+	}
+
+	if err := sm.cleanupHooksForDelete(sessionID, "cursor", worktree); err != nil {
+		t.Fatalf("cleanupHooksForDelete(): %v", err)
+	}
+
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("cursor ownership marker after cleanup: %v, want missing", err)
+	}
+}
+
+func TestCleanupHooksForDeleteMatchesGoneSymlinkedWorktree(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	realRoot := t.TempDir()
+
+	linkRoot := filepath.Join(t.TempDir(), "strath-link")
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	worktree := filepath.Join(linkRoot, "bothy")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	sessionID := "gone-strath"
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
+		t.Fatalf("injectCursorHooks(): %v", err)
+	}
+
+	markerPath := sm.cursorHooksOwnershipPath(sessionID)
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("cursor ownership marker missing before cleanup: %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(realRoot, "bothy")); err != nil {
+		t.Fatalf("remove worktree: %v", err)
+	}
+
+	if err := sm.cleanupHooksForDelete(sessionID, "cursor", worktree); err != nil {
+		t.Fatalf("cleanupHooksForDelete(): %v", err)
+	}
+
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("cursor ownership marker after cleanup: %v, want missing", err)
+	}
+}
+
 func TestCursorHooksCleanupRacePreservesReplacement(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

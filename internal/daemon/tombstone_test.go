@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+
+	grpty "github.com/d0ugal/graith/internal/pty"
 )
 
 func TestWriteRemoveTombstoneRoundTrip(t *testing.T) {
@@ -14,6 +17,7 @@ func TestWriteRemoveTombstoneRoundTrip(t *testing.T) {
 	tomb := tombstone{
 		teardownSpec: teardownSpec{ID: "braw1", WorktreePath: "/some/bothy", Branch: "b"},
 		Name:         "braw",
+		Agent:        "cursor",
 		CreatedAt:    time.Now(),
 	}
 
@@ -33,7 +37,7 @@ func TestWriteRemoveTombstoneRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal tombstone: %v", err)
 	}
 
-	if got.ID != "braw1" || got.WorktreePath != "/some/bothy" || got.Name != "braw" {
+	if got.ID != "braw1" || got.WorktreePath != "/some/bothy" || got.Name != "braw" || got.Agent != "cursor" {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 
@@ -43,6 +47,146 @@ func TestWriteRemoveTombstoneRoundTrip(t *testing.T) {
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("tombstone still present after remove (err=%v)", err)
+	}
+}
+
+func TestResumeTombstonesKeepsStateOnOrphanReapFailure(t *testing.T) {
+	sm := newTestSessionManager(t)
+	cmd := startSleeperGroup(t)
+	pid := cmd.Process.Pid
+
+	start, err := grpty.ProcessStartTime(pid)
+	if err != nil {
+		t.Skipf("ProcessStartTime unsupported on this platform: %v", err)
+	}
+
+	var groupCalls int
+
+	withProcKill(t, func(target int, signal syscall.Signal) error {
+		if target == -pid {
+			groupCalls++
+
+			return syscall.EPERM
+		}
+
+		return syscall.Kill(target, signal)
+	})
+
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "hash", "bairn1")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+
+	sm.state.Sessions["bairn1"] = &SessionState{
+		ID: "bairn1", Name: "bairn", WorktreePath: worktree,
+		Status: StatusDeleting,
+	}
+
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: "bairn1", WorktreePath: worktree},
+		Name:         "bairn",
+		PID:          pid,
+		PIDStartTime: start,
+		CreatedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("writeTombstone: %v", err)
+	}
+
+	sm.resumeTombstones()
+
+	if groupCalls == 0 {
+		t.Fatal("resume did not attempt the recorded process group")
+	}
+
+	if !isProcessAlive(pid) {
+		t.Fatal("resume killed a process whose death could not be confirmed")
+	}
+
+	if _, ok := sm.state.Sessions["bairn1"]; !ok {
+		t.Fatal("session state was removed after orphan reap failure")
+	}
+
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("worktree was removed after orphan reap failure: %v", err)
+	}
+
+	if _, err := os.Stat(sm.tombstonePath("bairn1")); err != nil {
+		t.Fatalf("tombstone was removed after orphan reap failure: %v", err)
+	}
+}
+
+func TestResumeTombstonesKeepsStateOnArtifactTeardownFailure(t *testing.T) {
+	sm := newTestSessionManager(t)
+
+	worktree := filepath.Join(sm.paths.DataDir, "worktrees", "croft", "hash", "dreich1")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+
+	sm.state.Sessions["dreich1"] = &SessionState{
+		ID: "dreich1", Name: "dreich", WorktreePath: worktree,
+		RepoPath: filepath.Join(sm.paths.DataDir, "missing-repo"),
+		Branch:   "graith/dreich",
+		Status:   StatusDeleting,
+	}
+
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{
+			ID: "dreich1", RepoPath: sm.state.Sessions["dreich1"].RepoPath,
+			WorktreePath: worktree, Branch: "graith/dreich",
+		},
+		Name:      "dreich",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("writeTombstone: %v", err)
+	}
+
+	sm.resumeTombstones()
+
+	if _, ok := sm.state.Sessions["dreich1"]; !ok {
+		t.Fatal("session state was removed after artifact teardown failure")
+	}
+
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("worktree was removed after artifact teardown failure: %v", err)
+	}
+
+	if _, err := os.Stat(sm.tombstonePath("dreich1")); err != nil {
+		t.Fatalf("tombstone was removed after artifact teardown failure: %v", err)
+	}
+}
+
+func TestResumeTombstonesCleansInPlaceCursorHooksAfterStateRemoval(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	sm := newTestSessionManagerWithDataDir(t)
+	worktree := t.TempDir()
+	sessionID := "cursor-bothy"
+
+	if _, _, err := sm.injectCursorHooks(sessionID, worktree); err != nil {
+		t.Fatalf("injectCursorHooks: %v", err)
+	}
+
+	if err := sm.writeTombstone(tombstone{
+		teardownSpec: teardownSpec{ID: sessionID, WorktreePath: worktree, InPlace: true},
+		Name:         "cursor-bothy",
+		Agent:        "cursor",
+		CreatedAt:    time.Now(),
+	}); err != nil {
+		t.Fatalf("writeTombstone: %v", err)
+	}
+
+	sm.resumeTombstones()
+
+	if _, err := os.Stat(testCursorHooksPath(worktree)); !os.IsNotExist(err) {
+		t.Fatalf("cursor hooks still exist after resume cleanup: %v", err)
+	}
+
+	if _, err := os.Stat(sm.cursorHooksOwnershipPath(sessionID)); !os.IsNotExist(err) {
+		t.Fatalf("cursor ownership marker still exists after resume cleanup: %v", err)
+	}
+
+	if _, err := os.Stat(sm.tombstonePath(sessionID)); !os.IsNotExist(err) {
+		t.Fatalf("tombstone still exists after successful hook cleanup: %v", err)
 	}
 }
 

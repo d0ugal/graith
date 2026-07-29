@@ -36,7 +36,8 @@ type teardownSpec struct {
 type tombstone struct {
 	teardownSpec
 
-	Name string `json:"name,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Agent string `json:"agent,omitempty"`
 	// PID/PIDStartTime record the agent process that was being killed when the
 	// delete started, so resume can reap a leftover orphan verified by identity.
 	PID          int       `json:"pid,omitempty"`
@@ -167,10 +168,10 @@ func syncTombstoneDir(dir string) error {
 // resumeTombstones finishes any deletions that were interrupted mid-flight. It
 // runs once on daemon startup after LoadState/Reconcile: for each leftover
 // tombstone it reaps a verified orphan process, tears down the worktree, drops
-// the session from state, and removes the tombstone. Teardown errors are
-// logged but not fatal — a leftover tombstone means the session was already
-// committed to deletion, so a stubborn worktree is reported for manual cleanup
-// (or the next `gr gc`) rather than resurrecting the session.
+// the session from state, cleans generated hook artifacts, and removes the
+// tombstone. Any process-death, artifact-teardown, state-save, or hook-cleanup
+// uncertainty keeps both the durable tombstone and any remaining session state
+// so a later startup can retry from the exact same teardown specification.
 func (sm *SessionManager) resumeTombstones() {
 	entries, err := os.ReadDir(sm.tombstoneDir())
 	if err != nil {
@@ -208,8 +209,6 @@ func (sm *SessionManager) resumeTombstones() {
 			sm.mu.RLock()
 			stateSession := sm.state.Sessions[t.ID]
 			removedHookCleanupPending := stateSession != nil && stateSession.RemovedHookCleanupPending
-			processStillRecorded := stateSession == nil ||
-				(stateSession.PID == t.PID && stateSession.PIDStartTime == t.PIDStartTime)
 
 			sm.mu.RUnlock()
 
@@ -231,6 +230,7 @@ func (sm *SessionManager) resumeTombstones() {
 
 			type missingChildTombstone struct {
 				name         string
+				agent        string
 				spec         teardownSpec
 				pid          int
 				pidStartTime int64
@@ -244,7 +244,8 @@ func (sm *SessionManager) resumeTombstones() {
 
 					if child.Status == StatusDeleting {
 						missing = append(missing, missingChildTombstone{
-							name: child.Name,
+							name:  child.Name,
+							agent: child.Agent,
 							spec: teardownSpec{
 								ID:             child.ID,
 								RepoPath:       child.RepoPath,
@@ -266,7 +267,7 @@ func (sm *SessionManager) resumeTombstones() {
 			sm.mu.RUnlock()
 
 			for _, child := range missing {
-				if err := sm.tombstoneBeforeBulkTeardown(child.spec, child.name, child.pid, child.pidStartTime); err != nil {
+				if err := sm.tombstoneBeforeBulkTeardown(child.spec, child.name, child.agent, child.pid, child.pidStartTime); err != nil {
 					sm.log.Warn("failed to synthesize child delete tombstone during recovery", "name", child.name, "err", err)
 				} else {
 					sm.log.Info("synthesized missing child delete tombstone during recovery", "name", child.name)
@@ -282,16 +283,20 @@ func (sm *SessionManager) resumeTombstones() {
 
 			// Reap a leftover orphan process (verified by start time) before removing
 			// the worktree it may still be running in.
-			if t.PID > 0 && processStillRecorded {
+			if t.PID > 0 {
 				if _, err := sm.killVerifiedProcess(t.PID, t.PIDStartTime); err != nil {
 					sm.log.Warn("could not reap orphan during delete-resume",
 						"id", t.ID, "pid", t.PID, "err", err)
+
+					continue
 				}
 			}
 
 			if err := sm.teardownArtifacts(t.teardownSpec); err != nil {
-				sm.log.Error("teardown failed during delete-resume (leaving for gr gc)",
+				sm.log.Error("teardown failed during delete-resume; keeping tombstone for retry",
 					"id", t.ID, "err", err)
+
+				continue
 			}
 
 			// Persist the state removal BEFORE unlinking the tombstone: the state
@@ -318,10 +323,24 @@ func (sm *SessionManager) resumeTombstones() {
 				continue
 			}
 
+			if err := sm.cleanupHooksForDelete(t.ID, t.Agent, t.WorktreePath); err != nil {
+				sm.log.Error("hook cleanup failed during delete-resume; keeping tombstone for retry",
+					"id", t.ID, "err", err)
+
+				continue
+			}
+
 			_ = os.Remove(filepath.Join(sm.paths.LogDir, t.ID+".log"))
 			_ = os.Remove(sm.nonoProfilePath(t.ID))
 			_ = os.Remove(sm.safehouseFragmentPath(t.ID))
-			_ = os.Remove(path)
+
+			if err := sm.removeTombstone(t.ID); err != nil {
+				sm.log.Error("failed to remove delete tombstone after resume; keeping for retry",
+					"id", t.ID, "err", err)
+
+				continue
+			}
+
 			madeProgress = true
 		}
 

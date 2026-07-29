@@ -136,6 +136,7 @@ func (sm *SessionManager) Delete(id string) error {
 	if err := sm.writeTombstone(tombstone{
 		teardownSpec: spec,
 		Name:         name,
+		Agent:        agentName,
 		PID:          orphanPID,
 		PIDStartTime: orphanStartTime,
 		CreatedAt:    time.Now(),
@@ -357,19 +358,23 @@ func (sm *SessionManager) Delete(id string) error {
 	err := sm.saveState()
 	sm.mu.Unlock()
 
-	// The removal-from-state save is the durable commit point. Only drop the
-	// tombstone once it succeeds; if it failed, keep the tombstone so startup
-	// finishes the delete (state.json may still list this now-torn-down session).
-	// Best-effort: the session is already gone from state, so a lingering marker
-	// only re-runs a harmless resume of an already-completed delete.
 	if err == nil {
-		_ = sm.removeTombstone(id)
+		err = sm.cleanupHooksForDelete(id, agentName, worktreePath)
 	}
 
-	_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
-	_ = os.Remove(sm.nonoProfilePath(id))
-	_ = os.Remove(sm.safehouseFragmentPath(id))
-	sm.cleanupHooks(id, agentName, worktreePath)
+	// The removal-from-state save is the durable commit point. Only drop the
+	// tombstone once it and hook cleanup succeed; if either failed, keep the
+	// tombstone so startup finishes the delete (state.json may still list this
+	// now-torn-down session, or generated in-place hooks may need retry cleanup).
+	if err == nil {
+		err = sm.removeTombstone(id)
+	}
+
+	if err == nil {
+		_ = os.Remove(filepath.Join(sm.paths.LogDir, id+".log"))
+		_ = os.Remove(sm.nonoProfilePath(id))
+		_ = os.Remove(sm.safehouseFragmentPath(id))
+	}
 
 	if hasClient {
 		ac.kick()
@@ -520,10 +525,11 @@ func (s bulkDeleteSnapshot) teardownSpec() teardownSpec {
 // resume the delete (issue #1326). On write failure it leaves the process
 // identity in state and returns an error so the caller keeps the session for
 // retry without killing it. It must be called before teardownBulkDeleteDriver.
-func (sm *SessionManager) tombstoneBeforeBulkTeardown(spec teardownSpec, name string, pid int, pidStartTime int64) error {
+func (sm *SessionManager) tombstoneBeforeBulkTeardown(spec teardownSpec, name, agent string, pid int, pidStartTime int64) error {
 	if err := sm.writeTombstone(tombstone{
 		teardownSpec: spec,
 		Name:         name,
+		Agent:        agent,
 		PID:          pid,
 		PIDStartTime: pidStartTime,
 		CreatedAt:    time.Now(),
@@ -856,7 +862,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 	// signalled. A session whose marker can't be written is kept for retry with
 	// its process untouched.
 	for _, s := range snaps {
-		if err := sm.tombstoneBeforeBulkTeardown(s.teardownSpec(), s.name, s.pid, s.pidStartTime); err != nil {
+		if err := sm.tombstoneBeforeBulkTeardown(s.teardownSpec(), s.name, s.agent, s.pid, s.pidStartTime); err != nil {
 			sm.log.Error("failed to write delete tombstone; keeping session for retry", "id", s.id, "err", err)
 			teardownErrs = append(teardownErrs, err)
 
@@ -996,7 +1002,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 		for _, s := range lateSnaps {
 			// Tombstone-before-teardown for late descendants too, or a crash between
 			// discovery and teardown would forget the process (issue #1326).
-			if err := sm.tombstoneBeforeBulkTeardown(s.teardownSpec(), s.name, s.pid, s.pidStartTime); err != nil {
+			if err := sm.tombstoneBeforeBulkTeardown(s.teardownSpec(), s.name, s.agent, s.pid, s.pidStartTime); err != nil {
 				sm.log.Error("failed to write delete tombstone for late descendant; keeping session for retry", "id", s.id, "err", err)
 				teardownErrs = append(teardownErrs, err)
 
@@ -1128,17 +1134,21 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 	for _, s := range snaps {
 		if succeeded[s.id] {
 			// Only drop the tombstone once the removal-from-state save is durable;
-			// if it failed, keep the tombstone so startup finishes the delete.
-			// Best-effort: the session is already gone from state, so a lingering
-			// marker only re-runs a harmless resume of an already-completed delete.
+			// if it failed, keep the tombstone so startup finishes the delete. Hook
+			// cleanup is also part of the durable delete boundary for in-place
+			// sessions: a crash after state removal but before cleanup must leave a
+			// retry owner for generated Cursor hook artifacts (issue #1326).
 			if stateErr == nil {
-				_ = sm.removeTombstone(s.id)
+				if cleanupErr := sm.cleanupHooksForDelete(s.id, s.agent, s.worktreePath); cleanupErr != nil {
+					teardownErrs = append(teardownErrs, fmt.Errorf("session %s: cleanup hooks: %w", s.id, cleanupErr))
+				} else if rmErr := sm.removeTombstone(s.id); rmErr != nil {
+					teardownErrs = append(teardownErrs, fmt.Errorf("session %s: remove tombstone: %w", s.id, rmErr))
+				} else {
+					_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
+					_ = os.Remove(sm.nonoProfilePath(s.id))
+					_ = os.Remove(sm.safehouseFragmentPath(s.id))
+				}
 			}
-
-			_ = os.Remove(filepath.Join(sm.paths.LogDir, s.id+".log"))
-			_ = os.Remove(sm.nonoProfilePath(s.id))
-			_ = os.Remove(sm.safehouseFragmentPath(s.id))
-			sm.cleanupHooks(s.id, s.agent, s.worktreePath)
 		} else if teardownFailed[s.id] && stateErr == nil {
 			// The reverted retry-state is now durable, so the (already carried-out)
 			// git-teardown failure can safely drop its marker; a save or durable-
@@ -1361,7 +1371,7 @@ func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed 
 	}
 
 	if current != startTime {
-		return false, fmt.Errorf("PID %d identity mismatch (recorded=%d, current=%d)", pid, startTime, current)
+		return false, nil
 	}
 
 	err = killProcessGroup(pid, sm.Config().Lifecycle.ProcessKillGraceDuration())
