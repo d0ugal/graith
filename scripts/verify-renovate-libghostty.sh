@@ -82,7 +82,7 @@ if ! run_renovate_lookup; then
     exit 1
 fi
 
-ci_expected='["gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","grafana/k6"]'
+ci_expected='["gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6"]'
 ci_actual="$(jq -sc '
     [
         .[] |
@@ -118,6 +118,13 @@ if ! jq -se '
         .depName == "golang.org/x/vuln/cmd/govulncheck" and
         .packageName == "golang.org/x/vuln" and
         .datasource == "go") and
+    any($deps[];
+        .depName == "goreleaser/goreleaser" and
+        .packageName == "goreleaser/goreleaser" and
+        .datasource == "github-releases" and
+        ((.skipReason // "") == "" or (.skipReason // "") == "github-token-required") and
+        (.currentValue | test("^v[0-9]+[.][0-9]+[.][0-9]+$")) and
+        (.replaceString | test("^GORELEASER_VERSION=v[0-9]+[.][0-9]+[.][0-9]+$"))) and
     any($deps[];
         .depName == "gohugoio/hugo" and
         .datasource == "github-releases")

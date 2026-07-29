@@ -126,6 +126,14 @@
       versioningTemplate: 'semver',
     },
     {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['GORELEASER_VERSION=(?<currentValue>v[\\d.]+)'],
+      depNameTemplate: 'goreleaser/goreleaser',
+      datasourceTemplate: 'github-releases',
+      versioningTemplate: 'semver',
+    },
+    {
       // Commit-only repositories follow the selected branch digest. The update
       // command resolves go-libghostty's digest to its Go pseudo-version.
       customType: 'regex',

@@ -209,8 +209,14 @@ func TestStableWorkflowFailsClosedWithoutSigningAndNotaryInputs(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(workflow, "release --clean") || strings.Count(workflow, "goreleaser/goreleaser-action") != 2 {
+	if strings.Contains(workflow, "release --clean") || strings.Count(workflow, "Install checksum-verified GoReleaser") != 2 {
 		t.Fatal("stable workflow must build without publishing in exactly two platform builders")
+	}
+
+	if strings.Contains(workflow, "~> v2") ||
+		strings.Contains(workflow, "goreleaser/goreleaser-action") ||
+		strings.Count(workflow, `scripts/install-goreleaser.sh "$GORELEASER_VERSION"`) != 2 {
+		t.Fatal("stable workflow must use the managed exact GoReleaser CI tool pin in both platform builders")
 	}
 
 	if !strings.Contains(workflow, "macos/service/verify-release-archive.sh") {

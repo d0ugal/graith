@@ -88,6 +88,7 @@ var (
 
 	devReleaseRules = workflowPathRule{
 		Paths: []string{
+			".github/ci-tool-versions.env",
 			".github/workflows/dev-release.yml",
 			".goreleaser-dev.yaml",
 			"THIRD_PARTY_NOTICES.libghostty.md",
@@ -133,6 +134,7 @@ var (
 
 	stableReleaseRules = workflowPathRule{
 		Paths: []string{
+			".github/ci-tool-versions.env",
 			".github/workflows/goreleaser.yml",
 			".github/workflows/release-please.yml",
 			".goreleaser-linux.yaml",

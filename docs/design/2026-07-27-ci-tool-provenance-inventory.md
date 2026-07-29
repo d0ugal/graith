@@ -141,7 +141,7 @@ disposition of each tool family.
 | `actionlint` release tarball | `workflow-lint.yml` actionlint job | Immutable/provenance-verified | Version `1.7.12`; tarball is verified with GitHub attestation bound to `rhysd/actionlint/.github/workflows/release.yaml`. | No change. |
 | `zizmor` release tarball | `workflow-lint.yml` zizmor job | Immutable/provenance-verified | Version `1.28.0`; tarball is verified with GitHub attestation bound to `zizmorcore/zizmor/.github/workflows/release-binaries.yml`. | No change. |
 | `govulncheck` | `ci.yml` Vulnerability Check | Checksum-only | `go install golang.org/x/vuln/cmd/govulncheck@v1.3.0` builds from a Go module version checked by the Go module checksum database. | Version-management follow-up belongs to #1764; do not duplicate here. |
-| GoReleaser binary selected by `goreleaser-action` | `goreleaser.yml`, `dev-release.yml` build jobs | Mutable | Action source is pinned, but `with.version: "~> v2"` allows the downloaded GoReleaser executable to float within v2. | New release-critical follow-up: pin the GoReleaser binary to an exact reviewed version and add managed update coverage; if the action does not provide integrity/provenance for that exact version, replace only the binary install path with a checksum/provenance-verified install. |
+| GoReleaser binary | `goreleaser.yml`, `dev-release.yml` build jobs | Checksum-only | Workflows require exactly one exact `GORELEASER_VERSION` in `.github/ci-tool-versions.env`, then `scripts/install-goreleaser.sh` downloads the matching archive and `checksums.txt`, fails closed if either download fails or the selected asset checksum is missing/mismatched, and only then adds `goreleaser` to `PATH`. Renovate manages the exact version pin. | Release-critical mutable range closed. Future Sigstore/provenance hardening can be a separate small PR if it fails closed without broad permission or publication-path changes. |
 | Hugo extended `.deb` | `docs.yml`, `docs-preview.yml` docs jobs | Mutable | `HUGO_VERSION=0.154.5` selects a GitHub release asset downloaded with `wget`, with no checksum or attestation verification before `dpkg -i`. | Owned by #1764 for authoritative version/update management; any integrity pin should be grouped there. |
 | Hugo modules | `docs.yml`, `docs-preview.yml` docs jobs | Checksum-only | `website/hugo.toml` imports Hugo modules and `website/go.mod` / `website/go.sum` pin module versions and checksums; there is no vendored module directory, so Hugo fetches them during the docs build. | Accept for now because Go module checksums bind content; if #1764 centralizes docs tooling, keep this row in that authority. |
 | Dart Sass snap | `docs.yml`, `docs-preview.yml` docs jobs | Mutable | `sudo snap install dart-sass` uses the default snap channel with no repository-owned version or digest. | New docs-tooling follow-up: pin or otherwise verify Dart Sass, preferably in the same small PR that evaluates Hugo integrity so the docs build has one toolchain authority. |
@@ -161,25 +161,21 @@ disposition of each tool family.
 
 #### Follow-Up PR Queue
 
-1. GoReleaser exact binary pin for `goreleaser.yml` and `dev-release.yml`.
-   Priority: release-critical. Acceptance should prove the same workflows use
-   one exact GoReleaser version, updates are managed, and install failure stops
-   before any artifact publication.
-2. Action-internal security and required-check tools: TruffleHog first, then
+1. Action-internal security and required-check tools: TruffleHog first, then
    Gitleaks, Scorecard, and Commitsar. Priority: required and security-adjacent
    CI. Keep each PR small; pin executable bytes or prove the replacement path has
    stronger integrity without broad workflow permission changes.
-3. Dart Sass pin or integrity verification for `docs.yml` and
+2. Dart Sass pin or integrity verification for `docs.yml` and
    `docs-preview.yml`. Priority: non-required docs tooling. Prefer grouping
    with the Hugo integrity work if #1764 already introduces a shared docs
    toolchain declaration.
-4. Hugo/k6/govulncheck version and digest management in #1764. Do not create
+3. Hugo/k6/govulncheck version and digest management in #1764. Do not create
    competing managers in this issue.
-5. Safehouse immutable install and verification in #1763. Do not change the
+4. Safehouse immutable install and verification in #1763. Do not change the
    sandbox jobs in this issue.
-6. Optional native dependency provenance hardening for Zig and SPDX tools-java.
-   Treat this as lower priority than GoReleaser because the current lock stores
-   checksums in-repository and release jobs fail closed before execution.
+5. Optional native dependency provenance hardening for Zig and SPDX tools-java.
+   Treat this as lower priority because the current lock stores checksums
+   in-repository and release jobs fail closed before execution.
 
 ### Proposal 2: Replace Every Platform-Managed Tool
 

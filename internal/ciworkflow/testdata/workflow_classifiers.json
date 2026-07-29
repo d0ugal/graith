@@ -353,10 +353,12 @@
       }
     },
     {
-      "name": "docs tool versions",
+      "name": "shared CI tool versions",
       "event": "pull_request",
       "files": [".github/ci-tool-versions.env"],
       "want": {
+        "dev_release": true,
+        "stable_release": true,
         "docs_preview_trigger": true,
         "docs_preview_build": true
       }
