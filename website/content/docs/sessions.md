@@ -121,6 +121,13 @@ clipboard/window-title/hyperlinks, and terminal query responses. Host-terminal
 scrollback is not the history surface in this mode. The Graith status bar is
 composed inside the owned frame, with read-only attach still replacing it with
 the persistent read-only indicator.
+When the status bar or read-only indicator is visible and the terminal has at
+least two rows, Graith reserves one top or bottom row according to
+`[status_bar].position` and resizes the child PTY to the remaining rows. The
+reserved row is not part of the child screen snapshot or host-terminal
+scrollback; cursor and mouse cell coordinates that reach the child are
+translated into the child viewport. If the terminal is only one row tall, Graith
+suppresses the chrome row so the child keeps a usable line.
 
 ## Detachment
 
