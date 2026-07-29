@@ -246,17 +246,22 @@ func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
 	})
 
 	t.Run("info commands expose default provider probes", func(t *testing.T) {
-		want := map[string]map[string][]string{
-			"claude": {"version": {"--version"}},
-			"codex":  {"version": {"--version"}},
+		want := map[string]map[string]AgentInfoCommand{
+			"claude": {"version": {Args: []string{"--version"}}},
+			"codex":  {"version": {Args: []string{"--version"}}},
 			"cursor": {
-				"model":   {"--list-models"},
-				"version": {"-v"},
+				"model":   {Args: []string{"--list-models"}, Format: AgentInfoFormatModelList},
+				"version": {Args: []string{"-v"}},
 			},
 		}
 
 		for agentName, wantInfo := range want {
-			if got := d.Agents[agentName].Info; !reflect.DeepEqual(got, wantInfo) {
+			got, err := d.Agents[agentName].Info.Commands()
+			if err != nil {
+				t.Fatalf("agent %q: Info.Commands(): %v", agentName, err)
+			}
+
+			if !reflect.DeepEqual(got, wantInfo) {
 				t.Errorf("agent %q: Info = %v, want %v", agentName, got, wantInfo)
 			}
 		}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"text/tabwriter"
@@ -80,10 +81,20 @@ func renderAgentCatalog(deps commandDependencies, catalog protocol.AgentCatalogR
 func runAgentInfo(cmd *cobra.Command, args []string) error {
 	deps := commandDeps(cmd.Context())
 
+	refresh := boolFlagValue(cmd, "refresh")
+	noCache := boolFlagValue(cmd, "no-cache")
+
+	if refresh && noCache {
+		return errors.New("--refresh and --no-cache cannot be used together")
+	}
+
 	req := protocol.AgentInfoMsg{Agent: args[0]}
 	if len(args) > 1 {
 		req.Key = args[1]
 	}
+
+	req.Refresh = refresh
+	req.NoCache = noCache
 
 	resp, err := deps.agent.AgentInfo(req)
 	if err != nil {
@@ -147,6 +158,10 @@ func renderAgentInfoOutput(deps commandDependencies, result protocol.AgentInfoRe
 	if result.StderrTruncated {
 		deps.out.Printf("[stderr truncated]\n")
 	}
+
+	for _, warning := range result.Warnings {
+		deps.out.Printf("warning: %s\n", warning)
+	}
 }
 
 func agentInfoResponseError(resp protocol.AgentInfoResponseMsg) error {
@@ -173,7 +188,29 @@ func agentInfoResponseError(resp protocol.AgentInfoResponseMsg) error {
 
 // registerAgentCmd registers this command on rootCmd. Called from registerCommands.
 func registerAgentCmd() {
+	if agentInfoCmd.Flags().Lookup("refresh") == nil {
+		agentInfoCmd.Flags().Bool("refresh", false, "refresh the cached provider info result before returning")
+	}
+
+	if agentInfoCmd.Flags().Lookup("no-cache") == nil {
+		agentInfoCmd.Flags().Bool("no-cache", false, "bypass provider info cache and do not store the result")
+	}
+
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentInfoCmd)
 	rootCmd.AddCommand(agentCmd)
+}
+
+func boolFlagValue(cmd *cobra.Command, name string) bool {
+	flag := cmd.Flags().Lookup(name)
+	if flag == nil {
+		return false
+	}
+
+	value, err := cmd.Flags().GetBool(name)
+	if err != nil {
+		return false
+	}
+
+	return value
 }

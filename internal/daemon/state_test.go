@@ -76,6 +76,44 @@ func TestStatePreservesExplicitEmptyNonInteractiveArgs(t *testing.T) {
 	}
 }
 
+func TestStateOmitsAgentInfoFromCreationConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	state := &State{Sessions: map[string]*SessionState{
+		"canny": {
+			ID: "canny", Name: "canny", Agent: "custom", Status: StatusStopped,
+			CreationCfg: &CreationConfig{Agent: config.Agent{
+				Command: "canny-agent",
+				Info: config.AgentInfoCommands{
+					"model": config.AgentInfoCommand{Args: []string{"--models"}, Format: config.AgentInfoFormatModelList},
+				},
+			}},
+		},
+	}}
+	if err := SaveState(path, state); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Contains(data, []byte(`"info"`)) || bytes.Contains(data, []byte(`model_list`)) {
+		t.Fatalf("saved creation config leaked info commands:\n%s", data)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info := loaded.Sessions["canny"].CreationCfg.Agent.Info
+	if info != nil {
+		t.Fatalf("loaded creation info = %#v, want nil", info)
+	}
+}
+
 func TestLoadStateV0Migration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	// Write a v0 state file (no version field)

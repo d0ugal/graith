@@ -221,6 +221,8 @@ runs only that key, for example:
 ```bash
 gr agent info cursor model
 gr agent info cursor --json
+gr agent info cursor --refresh --json
+gr agent info cursor --no-cache
 ```
 
 The daemon runs the configured agent `command` with the selected `info` argv in
@@ -229,9 +231,20 @@ does not require the calling shell to have the provider CLI available. Normal
 session launch args, prompt injection, hooks, and included-repo flags are not
 applied.
 
+Successful results are cached in daemon memory for one hour by default, keyed by
+agent, info key, and effective command configuration. Configure the default with
+`[agent_info].cache_ttl`; set it to `"0"` to disable caching. When global caching
+is enabled, rich info-command tables can override one key with `cache_ttl`. The
+cache is empty after daemon restart. `--refresh` bypasses the read side and
+updates the cache on a successful provider command; `--no-cache` bypasses both
+cache reads and writes. The two flags are mutually exclusive. Expired entries
+are not returned. If a provider command fails after expiry, the failure is
+returned instead of stale output. Concurrent misses or refreshes for the same
+agent/key share one provider command where possible.
+
 The human-readable single-key form prints the provider stdout directly. With
-`--json`, stdout, stderr, exit code, truncation flags, and per-result errors are
-separate fields:
+`--json`, stdout, stderr, cache metadata, exit code, truncation flags, warnings,
+structured fields, and per-result errors are separate fields:
 
 ```json
 {
@@ -241,7 +254,20 @@ separate fields:
       "key": "model",
       "command": "agent",
       "args": ["--list-models"],
+      "format": "model_list",
       "stdout": "auto - Auto\n",
+      "models": [
+        {
+          "id": "auto",
+          "description": "Auto"
+        }
+      ],
+      "cache": {
+        "enabled": true,
+        "hit": false,
+        "fetched_at": "2026-07-29T12:00:00Z",
+        "expires_at": "2026-07-29T13:00:00Z"
+      },
       "exit_code": 0
     }
   ]
@@ -255,7 +281,9 @@ result, then the CLI exits non-zero after printing the human or JSON output.
 Configuration and lookup errors are returned before running probes. Each info
 command has a 30 second daemon timeout. Captured stdout and stderr are capped at
 1 MiB each; JSON results set `stdout_truncated` or `stderr_truncated` when a
-stream exceeds that cap, and human output prints a truncation marker.
+stream exceeds that cap, and human output prints a truncation marker. Cleanup
+diagnostics that do not invalidate successful provider output are returned as
+`warnings`.
 
 ## Other commands
 

@@ -39,6 +39,7 @@ type Config struct {
 	Todo             TodoConfig          `toml:"todo"`
 	Sandbox          SandboxConfig       `toml:"sandbox"`
 	Status           StatusConfig        `toml:"status"`
+	AgentInfo        AgentInfoConfig     `toml:"agent_info"`
 	GitPull          GitPullConfig       `toml:"git_pull"`
 	Launch           LaunchConfig        `toml:"launch"`
 	PRWatch          PRWatchConfig       `toml:"pr_watch"`
@@ -3115,6 +3116,33 @@ func (s StatusConfig) TTLDuration() time.Duration {
 	return d
 }
 
+const AgentInfoCacheTTLDefault = time.Hour
+
+// AgentInfoConfig is the daemon-wide provider-info policy. Results are cached
+// only in daemon memory, so a daemon restart intentionally starts with an empty
+// agent-info cache.
+type AgentInfoConfig struct {
+	// CacheTTL controls how long a successful `gr agent info` result remains
+	// fresh. Empty uses AgentInfoCacheTTLDefault. "0" disables caching.
+	CacheTTL string `toml:"cache_ttl"`
+}
+
+// CacheTTLDuration returns the configured provider-info cache TTL. Empty uses
+// the default; an explicit zero disables caching. Invalid values fall back to
+// the default here, while Validate rejects them during config load/reload.
+func (a AgentInfoConfig) CacheTTLDuration() time.Duration {
+	if strings.TrimSpace(a.CacheTTL) == "" {
+		return AgentInfoCacheTTLDefault
+	}
+
+	d, err := ParseDurationWithDays(a.CacheTTL)
+	if err != nil {
+		return AgentInfoCacheTTLDefault
+	}
+
+	return d
+}
+
 type Agent struct {
 	Command      string            `json:"command"                 toml:"command"`
 	Args         []string          `json:"args,omitempty"          toml:"args"`
@@ -3177,11 +3205,12 @@ type Agent struct {
 	// / search flags) into config so custom agents can define their own
 	// conditional flags (issue #1236).
 	OptionArgs []AgentOptionArg `json:"option_args,omitempty" toml:"option_args"`
-	// Info maps provider-neutral info keys to agent-native argv fragments. Graith
-	// runs these as `<command> <info[key]...>` in a daemon-owned provider context
+	// Info maps provider-neutral info keys to agent-native commands. Graith runs
+	// these as `<command> <info[key].args...>` in a daemon-owned provider context
 	// with the agent's sandbox settings, so callers do not need the provider CLI on
-	// their own PATH.
-	Info map[string][]string `json:"info,omitempty" toml:"info"`
+	// their own PATH. The TOML parser accepts both the legacy argv array and the
+	// richer table form with args/format/cache_ttl.
+	Info AgentInfoCommands `json:"info,omitempty" toml:"info"`
 }
 
 // AgentOptionArg is one conditional argv group for an agent (see Agent.OptionArgs).
@@ -3193,6 +3222,157 @@ type AgentOptionArg struct {
 	// Args are the argv templates emitted when the gate passes. They are expanded
 	// with the same TemplateVars as the base args plus the option variables.
 	Args []string `json:"args" toml:"args"`
+}
+
+const (
+	AgentInfoFormatRaw       = "raw"
+	AgentInfoFormatLines     = "lines"
+	AgentInfoFormatModelList = "model_list"
+)
+
+// AgentInfoCommand is one configured provider-info command. The legacy TOML
+// form `version = ["--version"]` decodes as Args only; the table form supports
+// `args`, `format`, and an optional per-key cache_ttl override.
+type AgentInfoCommand struct {
+	Args     []string `json:"args"                toml:"args"`
+	Format   string   `json:"format,omitempty"    toml:"format"`
+	CacheTTL string   `json:"cache_ttl,omitempty" toml:"cache_ttl"`
+}
+
+func (c AgentInfoCommand) FormatOrDefault() string {
+	format := strings.TrimSpace(c.Format)
+	if format == "" {
+		return AgentInfoFormatRaw
+	}
+
+	return format
+}
+
+func (c AgentInfoCommand) CacheTTLDuration(defaultTTL time.Duration) time.Duration {
+	if strings.TrimSpace(c.CacheTTL) == "" {
+		return defaultTTL
+	}
+
+	d, err := ParseDurationWithDays(c.CacheTTL)
+	if err != nil {
+		return defaultTTL
+	}
+
+	return d
+}
+
+// AgentInfoCommands accepts both the legacy TOML argv-array form and the rich
+// table form:
+//
+//	[agents.cursor.info]
+//	model = ["--list-models"]
+//
+//	[agents.cursor.info.model]
+//	args = ["--list-models"]
+//	format = "model_list"
+type AgentInfoCommands map[string]any
+
+func (info AgentInfoCommands) Command(key string) (AgentInfoCommand, bool, error) {
+	raw, ok := info[key]
+	if !ok {
+		return AgentInfoCommand{}, false, nil
+	}
+
+	command, err := agentInfoCommandFromValue(raw)
+	if err != nil {
+		return AgentInfoCommand{}, true, fmt.Errorf("decode info command %q: %w", key, err)
+	}
+
+	return command, true, nil
+}
+
+func (info AgentInfoCommands) Commands() (map[string]AgentInfoCommand, error) {
+	commands := make(map[string]AgentInfoCommand, len(info))
+	for key := range info {
+		command, _, err := info.Command(key)
+		if err != nil {
+			return nil, err
+		}
+
+		commands[key] = command
+	}
+
+	return commands, nil
+}
+
+func agentInfoCommandFromValue(raw any) (AgentInfoCommand, error) {
+	switch v := raw.(type) {
+	case AgentInfoCommand:
+		return v, nil
+	case []string:
+		return AgentInfoCommand{Args: append([]string(nil), v...)}, nil
+	case []any:
+		args, err := stringSliceFromAny(v)
+		if err != nil {
+			return AgentInfoCommand{}, err
+		}
+
+		return AgentInfoCommand{Args: args}, nil
+	case map[string]any:
+		return agentInfoCommandFromMap(v)
+	default:
+		return AgentInfoCommand{}, fmt.Errorf("unsupported value type %T", raw)
+	}
+}
+
+func agentInfoCommandFromMap(raw map[string]any) (AgentInfoCommand, error) {
+	var command AgentInfoCommand
+
+	for key, value := range raw {
+		switch key {
+		case "args":
+			switch v := value.(type) {
+			case []string:
+				command.Args = append([]string(nil), v...)
+			case []any:
+				args, err := stringSliceFromAny(v)
+				if err != nil {
+					return AgentInfoCommand{}, fmt.Errorf("args: %w", err)
+				}
+
+				command.Args = args
+			default:
+				return AgentInfoCommand{}, fmt.Errorf("args has unsupported value type %T", value)
+			}
+		case "format":
+			s, ok := value.(string)
+			if !ok {
+				return AgentInfoCommand{}, fmt.Errorf("format has unsupported value type %T", value)
+			}
+
+			command.Format = s
+		case "cache_ttl":
+			s, ok := value.(string)
+			if !ok {
+				return AgentInfoCommand{}, fmt.Errorf("cache_ttl has unsupported value type %T", value)
+			}
+
+			command.CacheTTL = s
+		default:
+			return AgentInfoCommand{}, fmt.Errorf("unknown field %q", key)
+		}
+	}
+
+	return command, nil
+}
+
+func stringSliceFromAny(values []any) ([]string, error) {
+	out := make([]string, 0, len(values))
+	for i, value := range values {
+		s, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("item %d has unsupported value type %T", i, value)
+		}
+
+		out = append(out, s)
+	}
+
+	return out, nil
 }
 
 // AddDirArgsFor builds the add-directory flags granting the agent access to each
@@ -3820,6 +4000,12 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
+	if s := strings.TrimSpace(c.AgentInfo.CacheTTL); s != "" {
+		if _, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("agent_info.cache_ttl %q: %w", s, err))
+		}
+	}
+
 	// Validate the [remote] block statically (fail-closed when enabled). Runtime
 	// listener provisioning (tailnet IP, TLS cert) is deferred to the daemon.
 	if err := c.Remote.Validate(); err != nil {
@@ -3848,7 +4034,7 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		for key, args := range agent.Info {
+		for key, info := range agent.Info {
 			if strings.TrimSpace(key) == "" {
 				errs = append(errs, fmt.Errorf("agents.%s.info: key must not be empty", agentName))
 			}
@@ -3857,8 +4043,27 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("agents.%s.info[%q]: key must not have leading or trailing whitespace", agentName, key))
 			}
 
-			if len(args) == 0 {
+			command, err := agentInfoCommandFromValue(info)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("agents.%s.info[%q]: %w", agentName, key, err))
+				continue
+			}
+
+			if len(command.Args) == 0 {
 				errs = append(errs, fmt.Errorf("agents.%s.info[%q]: args must not be empty", agentName, key))
+			}
+
+			switch command.FormatOrDefault() {
+			case AgentInfoFormatRaw, AgentInfoFormatLines, AgentInfoFormatModelList:
+			default:
+				errs = append(errs, fmt.Errorf("agents.%s.info[%q].format %q: must be one of %q, %q, %q", agentName, key, command.Format,
+					AgentInfoFormatRaw, AgentInfoFormatLines, AgentInfoFormatModelList))
+			}
+
+			if s := strings.TrimSpace(command.CacheTTL); s != "" {
+				if _, err := ParseDurationWithDays(s); err != nil {
+					errs = append(errs, fmt.Errorf("agents.%s.info[%q].cache_ttl %q: %w", agentName, key, s, err))
+				}
 			}
 		}
 	}

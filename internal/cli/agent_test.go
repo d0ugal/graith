@@ -141,6 +141,73 @@ func TestRunAgentInfoRequestsKeyAndPrintsSingleOutput(t *testing.T) {
 	}
 }
 
+func TestRunAgentInfoRefreshAndNoCacheFlags(t *testing.T) {
+	tests := map[string]struct {
+		refresh bool
+		noCache bool
+		want    protocol.AgentInfoMsg
+		wantErr string
+	}{
+		"refresh sends refresh request": {
+			refresh: true,
+			want:    protocol.AgentInfoMsg{Agent: "cursor", Key: "model", Refresh: true},
+		},
+		"no-cache sends no-cache request": {
+			noCache: true,
+			want:    protocol.AgentInfoMsg{Agent: "cursor", Key: "model", NoCache: true},
+		},
+		"mutually exclusive": {
+			refresh: true,
+			noCache: true,
+			wantErr: "--refresh and --no-cache cannot be used together",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			fake := &fakeAgentUseCase{info: protocol.AgentInfoResponseMsg{
+				Agent:   "cursor",
+				Results: []protocol.AgentInfoResult{{Key: "model", Stdout: "braw\n"}},
+			}}
+
+			var buf bytes.Buffer
+
+			cmd := agentTestCommand(t, false, &buf, fake)
+			cmd.Flags().Bool("refresh", false, "")
+			cmd.Flags().Bool("no-cache", false, "")
+
+			if test.refresh {
+				if err := cmd.Flags().Set("refresh", "true"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if test.noCache {
+				if err := cmd.Flags().Set("no-cache", "true"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			err := runAgentInfo(cmd, []string{"cursor", "model"})
+			if test.wantErr != "" {
+				if err == nil || err.Error() != test.wantErr {
+					t.Fatalf("runAgentInfo error = %v, want %q", err, test.wantErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("runAgentInfo: %v", err)
+			}
+
+			if !reflect.DeepEqual(fake.infoRequests, []protocol.AgentInfoMsg{test.want}) {
+				t.Fatalf("requests = %+v, want %+v", fake.infoRequests, test.want)
+			}
+		})
+	}
+}
+
 func TestRunAgentInfoJSON(t *testing.T) {
 	fake := &fakeAgentUseCase{info: protocol.AgentInfoResponseMsg{
 		Agent: "cursor",
@@ -217,6 +284,7 @@ func TestRunAgentInfoPrintsTruncationMarkers(t *testing.T) {
 			Stderr:          "stderr",
 			StdoutTruncated: true,
 			StderrTruncated: true,
+			Warnings:        []string{"cleanup failed: thrawn"},
 		}},
 	}}
 
@@ -229,7 +297,7 @@ func TestRunAgentInfoPrintsTruncationMarkers(t *testing.T) {
 	}
 
 	got := buf.String()
-	for _, want := range []string{"stdout\n[stdout truncated]", "stderr:\nstderr\n[stderr truncated]"} {
+	for _, want := range []string{"stdout\n[stdout truncated]", "stderr:\nstderr\n[stderr truncated]", "warning: cleanup failed: thrawn"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("info output = %q, want substring %q", got, want)
 		}

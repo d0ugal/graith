@@ -430,6 +430,11 @@ position = "bottom"  # where to render it: "top" or "bottom"
 [status]
 ttl = "5m"  # how long a `gr status` value stays current before it expires
 
+# Provider info probes (`gr agent info`) cache successful results in daemon
+# memory. "0" disables caching; daemon restart starts with an empty cache.
+[agent_info]
+cache_ttl = "1h"
+
 # Desktop notifications for agent status changes and for
 # proactive `gr notify` push notifications sent by the orchestrator or triggers.
 [notifications]
@@ -781,8 +786,11 @@ pre_trust_workspace = true            # pre-trust the worktree so the agent skip
 add_dir_args        = ["--add-dir", "{dir}"]  # grant an included repo's worktree
 
 [agents.cursor.info]
-model = ["--list-models"]  # model catalog, run by the daemon in Cursor's provider environment
-version = ["-v"]           # provider CLI version
+version = ["-v"]  # provider CLI version
+
+[agents.cursor.info.model]
+args = ["--list-models"]  # model catalog, run by the daemon in Cursor's provider environment
+format = "model_list"     # parse "id - description" lines into JSON records
 
 [agents.cursor.sandbox]
 read_dirs = ["~/.cursor"]

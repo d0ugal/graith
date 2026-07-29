@@ -51,6 +51,12 @@ func (e *StateMigrationBackupError) Unwrap() error {
 	return e.Err
 }
 
+type creationConfigWire struct {
+	Agent         config.Agent         `json:"agent"`
+	SandboxConfig config.SandboxConfig `json:"sandbox_config"`
+	CommandPolicy json.RawMessage      `json:"command_policy,omitempty"`
+}
+
 type SessionStatus string
 
 const (
@@ -70,21 +76,29 @@ type CreationConfig struct {
 	removedCommandPolicyEnabled bool
 }
 
+// MarshalJSON omits Agent.Info from durable creation snapshots. Info commands
+// are provider probes, not launch configuration for the running session, and the
+// rich info table shape is unnecessary state churn for older snapshots.
+func (c CreationConfig) MarshalJSON() ([]byte, error) {
+	agent := c.Agent
+	agent.Info = nil
+
+	return json.Marshal(creationConfigWire{
+		Agent:         agent,
+		SandboxConfig: c.SandboxConfig,
+	})
+}
+
 // UnmarshalJSON recognizes the removed command_policy creation snapshot only
 // long enough for the state migration to establish a clean process boundary.
 // The removed field is never written by this binary.
 func (c *CreationConfig) UnmarshalJSON(data []byte) error {
-	type creationConfigWire struct {
-		Agent         config.Agent         `json:"agent"`
-		SandboxConfig config.SandboxConfig `json:"sandbox_config"`
-		CommandPolicy json.RawMessage      `json:"command_policy"`
-	}
-
 	var wire creationConfigWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 
+	wire.Agent.Info = nil
 	c.Agent = wire.Agent
 	c.SandboxConfig = wire.SandboxConfig
 	c.removedCommandPolicyEnabled = false

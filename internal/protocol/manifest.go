@@ -181,6 +181,8 @@ var registeredTypes = []any{
 	AgentCatalogEntry{},
 	AgentCatalogResponseMsg{},
 	AgentInfoMsg{},
+	AgentInfoCacheMetadata{},
+	AgentInfoModel{},
 	AgentInfoResult{},
 	AgentInfoResponseMsg{},
 	DiagnosticsMsg{},
@@ -411,7 +413,9 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"ConfigResponseMsg":       {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
 	"AgentCatalogEntry":       {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
 	"AgentCatalogResponseMsg": {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)
+	"AgentInfoCacheMetadata":  {SwiftNA, ""},                              // CLI provider introspection
 	"AgentInfoMsg":            {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoModel":          {SwiftNA, ""},                              // CLI provider introspection
 	"AgentInfoResult":         {SwiftNA, ""},                              // CLI provider introspection
 	"AgentInfoResponseMsg":    {SwiftNA, ""},                              // CLI provider introspection
 	"StatusResponseMsg":       {SwiftPlanned, ""},
