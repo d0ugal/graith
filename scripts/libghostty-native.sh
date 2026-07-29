@@ -1678,7 +1678,7 @@ test_source_archive_policy() {
             libghostty-vt-static_zcu.o)
                 printf '%s\n' \
                     'void *ghostty_terminal_new(void) { return 0; }' \
-                    'const char graith_zig_version[] = "zig 0.15.2";' >"$source"
+                    "const char graith_zig_version[] = \"zig $REQUIRED_ZIG\";" >"$source"
                 ;;
             simdutf.o)
                 printf '%s\n' \
