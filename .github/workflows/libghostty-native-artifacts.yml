@@ -120,6 +120,15 @@ jobs:
           GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: scripts/libghostty-native.sh prepare-artifact-lock
 
+      - name: Upload materialized artifact lock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: libghostty-native-lock-${{ github.run_id }}
+          path: libghostty-native.lock.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 2
+
       - name: Check for existing Apple artifact
         id: apple-cache
         env:
@@ -210,19 +219,21 @@ jobs:
       contents: write
       pull-requests: read
     steps:
+      - name: Download materialized artifact lock
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: libghostty-native-lock-${{ github.run_id }}
+          path: ${{ runner.temp }}/artifact-lock
+
       - name: Check for existing Apple artifact
         id: apple-cache
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           echo "exists=false" >> "$GITHUB_OUTPUT"
-          lock="$RUNNER_TEMP/libghostty-native.lock.json"
-          gh api -H "Accept: application/vnd.github.raw" \
-            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
-            > "$lock"
+          lock="$RUNNER_TEMP/artifact-lock/libghostty-native.lock.json"
           asset="libghostty-vt.xcframework.zip"
           ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
           go_libghostty_commit="$(jq -er '.goLibghostty.commit' "$lock")"
@@ -268,13 +279,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          lock="$RUNNER_TEMP/libghostty-native.lock.json"
-          gh api -H "Accept: application/vnd.github.raw" \
-            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
-            > "$lock"
+          lock="$RUNNER_TEMP/artifact-lock/libghostty-native.lock.json"
           asset="libghostty-vt.xcframework.zip"
           archive="$RUNNER_TEMP/apple/$asset"
           ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
@@ -462,7 +469,7 @@ jobs:
 
   linux-publish:
     name: Publish Linux libghostty artifact (${{ matrix.goarch }})
-    needs: [authorize, linux-build]
+    needs: [authorize, apple-build, linux-build]
     if: needs.authorize.outputs.should_publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -476,20 +483,22 @@ jobs:
           - goarch: amd64
           - goarch: arm64
     steps:
+      - name: Download materialized artifact lock
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: libghostty-native-lock-${{ github.run_id }}
+          path: ${{ runner.temp }}/artifact-lock
+
       - name: Check for existing Linux artifact
         id: linux-cache
         env:
           GH_TOKEN: ${{ github.token }}
           GOARCH: ${{ matrix.goarch }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           echo "exists=false" >> "$GITHUB_OUTPUT"
-          lock="$RUNNER_TEMP/libghostty-native.lock.json"
-          gh api -H "Accept: application/vnd.github.raw" \
-            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
-            > "$lock"
+          lock="$RUNNER_TEMP/artifact-lock/libghostty-native.lock.json"
           asset="libghostty-vt-linux-$GOARCH.tar.gz"
           ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"
           go_libghostty_commit="$(jq -er '.goLibghostty.commit' "$lock")"
@@ -534,13 +543,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          lock="$RUNNER_TEMP/libghostty-native.lock.json"
-          gh api -H "Accept: application/vnd.github.raw" \
-            "repos/$REPOSITORY/contents/libghostty-native.lock.json?ref=$SOURCE_SHA" \
-            > "$lock"
+          lock="$RUNNER_TEMP/artifact-lock/libghostty-native.lock.json"
           asset="libghostty-vt-linux-$GOARCH.tar.gz"
           archive="$RUNNER_TEMP/linux/$asset"
           ghostty_commit="$(jq -er '.ghostty.commit' "$lock")"

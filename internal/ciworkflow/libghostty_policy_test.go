@@ -359,6 +359,10 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 	generate := p11WorkflowJob(t, workflow, "generate")
 	push := p11WorkflowJob(t, workflow, "push")
 
+	assertStringsEqual(t, "apple-publish needs", applePublishJob.Needs, []string{"authorize", "apple-build"})
+	assertStringsEqual(t, "linux-build needs", linuxBuildJob.Needs, []string{"authorize", "apple-publish"})
+	assertStringsEqual(t, "linux-publish needs", linuxPublishJob.Needs, []string{"authorize", "apple-build", "linux-build"})
+
 	if p11JobUsesAction(authorize, "actions/checkout") || p11JobRunsRepositoryControlledCode(authorize) {
 		t.Fatal("artifact authorization job must not check out or run repository-controlled code")
 	}
@@ -448,7 +452,52 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 	}
 
 	assertContains(t, appleBuild.Run, "swift package compute-checksum")
+	appleLockUpload := p11WorkflowStep(t, appleBuildJob, "Upload materialized artifact lock")
+	assertContains(t, appleLockUpload.Uses, "actions/upload-artifact")
+
+	if appleLockUpload.If != "" {
+		t.Fatalf("materialized lock upload must be unconditional, got if %q", appleLockUpload.If)
+	}
+
+	if got := appleLockUpload.With["name"]; got != "libghostty-native-lock-${{ github.run_id }}" {
+		t.Fatalf("materialized lock artifact name = %q", got)
+	}
+
+	if got := appleLockUpload.With["path"]; got != "libghostty-native.lock.json" {
+		t.Fatalf("materialized lock artifact path = %q", got)
+	}
+
+	if got := appleLockUpload.With["if-no-files-found"]; got != "error" {
+		t.Fatalf("materialized lock if-no-files-found = %q", got)
+	}
+
+	if got := appleLockUpload.With["overwrite"]; got != "true" {
+		t.Fatalf("materialized lock overwrite = %q, want retry-safe upload", got)
+	}
+
+	if got := appleLockUpload.With["retention-days"]; got != "2" {
+		t.Fatalf("materialized lock retention-days = %q", got)
+	}
+
+	materializeIndex := p11WorkflowStepIndex(t, appleBuildJob, "Materialize artifact lock")
+
+	uploadLockIndex := p11WorkflowStepIndex(t, appleBuildJob, "Upload materialized artifact lock")
+	if uploadLockIndex <= materializeIndex {
+		t.Fatalf("materialized lock upload step index = %d, want after materialization index %d", uploadLockIndex, materializeIndex)
+	}
+
 	assertContains(t, p11WorkflowStep(t, appleBuildJob, "Upload built Apple artifact").Uses, "actions/upload-artifact")
+
+	appleLockDownload := p11WorkflowStep(t, applePublishJob, "Download materialized artifact lock")
+	assertContains(t, appleLockDownload.Uses, "actions/download-artifact")
+
+	if got := appleLockDownload.With["name"]; got != "libghostty-native-lock-${{ github.run_id }}" {
+		t.Fatalf("Apple publisher materialized lock artifact name = %q", got)
+	}
+
+	if got := appleLockDownload.With["path"]; got != "${{ runner.temp }}/artifact-lock" {
+		t.Fatalf("Apple publisher materialized lock path = %q", got)
+	}
 
 	applePublish := p11WorkflowStep(t, applePublishJob, "Publish Apple artifact")
 	assertContains(t, applePublish.Run, "gh release upload")
@@ -460,9 +509,35 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 	assertContains(t, linuxBuild.Run, `"$RUNNER_TEMP/libghosttyarchive" pack`)
 	assertContains(t, p11WorkflowStep(t, linuxBuildJob, "Check for existing Linux artifact").Run, "verified immutable Linux artifact already published")
 	assertContains(t, p11WorkflowStep(t, linuxBuildJob, "Upload built Linux artifact").Uses, "actions/upload-artifact")
+	linuxLockDownload := p11WorkflowStep(t, linuxPublishJob, "Download materialized artifact lock")
+	assertContains(t, linuxLockDownload.Uses, "actions/download-artifact")
+
+	if got := linuxLockDownload.With["name"]; got != "libghostty-native-lock-${{ github.run_id }}" {
+		t.Fatalf("Linux publisher materialized lock artifact name = %q", got)
+	}
+
+	if got := linuxLockDownload.With["path"]; got != "${{ runner.temp }}/artifact-lock" {
+		t.Fatalf("Linux publisher materialized lock path = %q", got)
+	}
+
 	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Download built Linux artifact").Uses, "actions/download-artifact")
 	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset").Run, "gh release upload")
 	assertContains(t, p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset").Run, "Published Linux artifact digest")
+
+	for name, step := range map[string]P11WorkflowStep{
+		"apple publish cache": p11WorkflowStep(t, applePublishJob, "Check for existing Apple artifact"),
+		"apple publish":       applePublish,
+		"linux publish cache": p11WorkflowStep(t, linuxPublishJob, "Check for existing Linux artifact"),
+		"linux publish":       p11WorkflowStep(t, linuxPublishJob, "Publish only absent immutable Linux asset"),
+	} {
+		assertContains(t, step.Run, "$RUNNER_TEMP/artifact-lock/libghostty-native.lock.json")
+		assertNotContains(t, step.Run, "contents/libghostty-native.lock.json")
+		assertNotContains(t, step.Run, "application/vnd.github.raw")
+
+		if _, ok := step.Env["SOURCE_SHA"]; ok {
+			t.Fatalf("%s step must not fetch the raw PR lock after materialization", name)
+		}
+	}
 
 	for name, step := range map[string]P11WorkflowStep{
 		"apple build cache":   appleCache,
@@ -508,6 +583,20 @@ func assertGhReleaseCommandsUseExplicitRepo(t *testing.T, stepName, run string) 
 			t.Fatalf("%s release command %q must pass --repo \"$REPOSITORY\"", stepName, line)
 		}
 	}
+}
+
+func p11WorkflowStepIndex(t *testing.T, job P11WorkflowJob, name string) int {
+	t.Helper()
+
+	for index, step := range job.Steps {
+		if step.Name == name {
+			return index
+		}
+	}
+
+	t.Fatalf("step %q not found", name)
+
+	return -1
 }
 
 func TestLibghosttyNativeGeneratedCommitBundleRoundTrips(t *testing.T) {
