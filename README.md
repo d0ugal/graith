@@ -39,10 +39,3 @@ brew install d0ugal/tap/graith
 ```
 
 For apt, dnf, prebuilt binaries, Go, and source installs, see the [installation guide](https://d0ugal.github.io/graith/docs/installation/). Then follow the [getting started guide](https://d0ugal.github.io/graith/docs/getting-started/) to create your first session.
-
-Session metadata changes share one update command and can be combined:
-
-```bash
-gr update important-session --starred --name release-watch
-gr update release-watch --starred=false
-```
