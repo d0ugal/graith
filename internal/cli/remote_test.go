@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/output"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 // writeRemoteHosts seeds a remote-hosts.json in a fresh data dir and points the
@@ -231,6 +233,111 @@ func TestRunRemoteAttachRejectedInsideGraith(t *testing.T) {
 	err := runRemoteAttach(&client.RemoteHost{Host: "ben.tailnet.ts.net"}, nil, "braw")
 	if err == nil || !strings.Contains(err.Error(), "cannot attach from inside") {
 		t.Fatalf("err = %v, want inside-graith rejection", err)
+	}
+}
+
+func TestRunRemoteAttachUsesTerminalOwnedSeed(t *testing.T) {
+	setOutBufForRemote(t, false)
+
+	origCfg := cfg
+	origConnect := connectRemoteForCLI
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		connectRemoteForCLI = origConnect
+	})
+
+	cfg = config.Default()
+
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{
+			Sessions: []protocol.SessionInfo{{ID: "session-braw", Name: "braw"}},
+		})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "session-braw", Name: "braw"})),
+	}}
+	connectRemoteForCLI = func(gotPaths config.Paths, rh *client.RemoteHost, signer ed25519.PrivateKey, cols, rows uint16) (remoteAttachConn, error) {
+		if rh.Host != "ben.tailnet.ts.net" {
+			t.Fatalf("remote host = %q, want ben.tailnet.ts.net", rh.Host)
+		}
+
+		if cols == 0 || rows == 0 {
+			t.Fatalf("geometry = %dx%d, want non-zero fallback or terminal size", cols, rows)
+		}
+
+		return fake, nil
+	}
+
+	err := runRemoteAttach(&client.RemoteHost{Host: "ben.tailnet.ts.net"}, nil, "braw")
+	if err != nil {
+		t.Fatalf("runRemoteAttach: %v", err)
+	}
+
+	if got, want := fake.sentTypes(), []string{"list", "attach"}; !equalStrings(got, want) {
+		t.Fatalf("sent = %v, want %v", got, want)
+	}
+
+	msg, ok := fake.sends[1].Payload.(protocol.AttachMsg)
+	if !ok || !msg.TerminalOwned {
+		t.Fatalf("remote attach payload = %#v, want terminal-owned attach", fake.sends[1].Payload)
+	}
+
+	if len(fake.passthroughOpts) != 1 {
+		t.Fatalf("passthrough calls = %d, want 1", len(fake.passthroughOpts))
+	}
+
+	opts := fake.passthroughOpts[0]
+	if opts.TerminalOwnedSeed == nil {
+		t.Fatal("remote attach entered passthrough without terminal-owned seed")
+	}
+
+	if opts.SessionID != "session-braw" || opts.Info == nil || opts.Info.ID != "session-braw" {
+		t.Fatalf("passthrough session = %q info=%+v, want session-braw", opts.SessionID, opts.Info)
+	}
+}
+
+func TestRunRemoteAttachRejectsRawAttachResponse(t *testing.T) {
+	setOutBufForRemote(t, false)
+
+	origCfg := cfg
+	origConnect := connectRemoteForCLI
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		connectRemoteForCLI = origConnect
+	})
+
+	cfg = config.Default()
+
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{
+			Sessions: []protocol.SessionInfo{{ID: "session-braw", Name: "braw"}},
+		})),
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "session-braw", Name: "braw"})),
+	}}
+	connectRemoteForCLI = func(config.Paths, *client.RemoteHost, ed25519.PrivateKey, uint16, uint16) (remoteAttachConn, error) {
+		return fake, nil
+	}
+
+	err := runRemoteAttach(&client.RemoteHost{Host: "ben.tailnet.ts.net"}, nil, "braw")
+	if err == nil || err.Error() != protocol.TerminalOwnedAttachRawResponseMessage {
+		t.Fatalf("runRemoteAttach() err = %v, want raw attached rejection", err)
+	}
+
+	if got, want := fake.sentTypes(), []string{"list", "attach"}; !equalStrings(got, want) {
+		t.Fatalf("sent = %v, want %v", got, want)
+	}
+
+	msg, ok := fake.sends[1].Payload.(protocol.AttachMsg)
+	if !ok || !msg.TerminalOwned {
+		t.Fatalf("remote attach payload = %#v, want terminal-owned attach", fake.sends[1].Payload)
+	}
+
+	if fake.closed != 1 {
+		t.Fatalf("connection closed %d times, want 1", fake.closed)
+	}
+
+	if len(fake.passthroughOpts) != 0 {
+		t.Fatalf("passthrough calls = %d, want none", len(fake.passthroughOpts))
 	}
 }
 

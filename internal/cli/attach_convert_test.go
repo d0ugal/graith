@@ -14,10 +14,10 @@ func TestAttachWithConvertPlainAttach(t *testing.T) {
 	withDiscardOutput(t)
 
 	c := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", Name: "bonnie"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw", Name: "bonnie"})),
 	}}
 
-	info, attached, err := attachWithConvert(c, "braw")
+	info, _, attached, err := attachWithConvertSeed(c, "braw")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -35,14 +35,13 @@ func TestAttachWithConvertPlainAttach(t *testing.T) {
 	}
 }
 
-func TestAttachWithConvertExperimentalAttach(t *testing.T) {
+func TestAttachWithConvertTerminalOwnedAttach(t *testing.T) {
 	withDiscardOutput(t)
 
-	seed := protocol.ExperimentalAttachSeedMsg{
+	seed := protocol.TerminalOwnedAttachSeedMsg{
 		Session: protocol.SessionInfo{
-			ID:                 "braw",
-			Name:               "bonnie",
-			ExperimentalAttach: true,
+			ID:   "braw",
+			Name: "bonnie",
 		},
 		Snapshot: protocol.ScreenSnapshotResponseMsg{
 			SessionID: "braw",
@@ -50,10 +49,10 @@ func TestAttachWithConvertExperimentalAttach(t *testing.T) {
 		},
 	}
 	c := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("experimental_attached", seed)),
+		okResp(payloadEnv("terminal_owned_attached", seed)),
 	}}
 
-	info, gotSeed, attached, err := attachWithConvertOptions(c, "braw", attachRequestOptions{ExperimentalAttach: true})
+	info, gotSeed, attached, err := attachWithConvertSeed(c, "braw")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -62,8 +61,8 @@ func TestAttachWithConvertExperimentalAttach(t *testing.T) {
 		t.Fatal("expected attached=true")
 	}
 
-	if info.ID != "braw" || info.Name != "bonnie" || !info.ExperimentalAttach {
-		t.Errorf("info = %+v, want experimental braw/bonnie", info)
+	if info.ID != "braw" || info.Name != "bonnie" {
+		t.Errorf("info = %+v, want braw/bonnie", info)
 	}
 
 	if gotSeed == nil || gotSeed.Snapshot.Frame != "braw frame" {
@@ -75,33 +74,21 @@ func TestAttachWithConvertExperimentalAttach(t *testing.T) {
 	}
 
 	msg, ok := c.sends[0].Payload.(protocol.AttachMsg)
-	if !ok || !msg.ExperimentalAttach {
-		t.Fatalf("attach payload = %#v, want ExperimentalAttach=true", c.sends[0].Payload)
+	if !ok || !msg.TerminalOwned {
+		t.Fatalf("attach payload = %#v, want terminal-owned request", c.sends[0].Payload)
 	}
 }
 
-func TestAttachWithConvertExperimentalRawFallback(t *testing.T) {
+func TestAttachWithConvertRejectsRawAttachResponse(t *testing.T) {
 	withDiscardOutput(t)
 
 	c := &scriptedConn{responses: []scriptedResp{
 		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", Name: "bonnie"})),
 	}}
 
-	info, seed, attached, err := attachWithConvertOptions(c, "braw", attachRequestOptions{ExperimentalAttach: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !attached {
-		t.Fatal("expected attached=true")
-	}
-
-	if seed != nil {
-		t.Fatalf("seed = %+v, want nil raw fallback", seed)
-	}
-
-	if info.ID != "braw" || info.Name != "bonnie" {
-		t.Errorf("info = %+v, want braw/bonnie", info)
+	info, seed, attached, err := attachWithConvertSeed(c, "braw")
+	if attached || err == nil || err.Error() != "terminal-owned attach returned raw attached response" {
+		t.Fatalf("attachWithConvertSeed() = (%+v, %+v, %v, %v), want raw attached error", info, seed, attached, err)
 	}
 
 	if len(c.sends) != 1 {
@@ -109,8 +96,8 @@ func TestAttachWithConvertExperimentalRawFallback(t *testing.T) {
 	}
 
 	msg, ok := c.sends[0].Payload.(protocol.AttachMsg)
-	if !ok || !msg.ExperimentalAttach {
-		t.Fatalf("attach payload = %#v, want ExperimentalAttach=true", c.sends[0].Payload)
+	if !ok || !msg.TerminalOwned {
+		t.Fatalf("attach payload = %#v, want terminal-owned request", c.sends[0].Payload)
 	}
 }
 
@@ -122,7 +109,7 @@ func TestAttachWithConvertReadError(t *testing.T) {
 	sentinel := errors.New("socket gone")
 	c := &scriptedConn{responses: []scriptedResp{errResp(sentinel)}}
 
-	_, attached, err := attachWithConvert(c, "braw")
+	_, _, attached, err := attachWithConvertSeed(c, "braw")
 	if attached || !errors.Is(err, sentinel) {
 		t.Fatalf("attached=%v err=%v, want attached=false err=%v", attached, err, sentinel)
 	}
@@ -134,7 +121,7 @@ func TestAttachWithConvertDaemonError(t *testing.T) {
 
 	c := &scriptedConn{responses: []scriptedResp{okResp(errEnv("session fashed"))}}
 
-	_, attached, err := attachWithConvert(c, "braw")
+	_, _, attached, err := attachWithConvertSeed(c, "braw")
 	if attached || err == nil || !strings.Contains(err.Error(), "session fashed") {
 		t.Fatalf("attached=%v err=%v, want error containing \"session fashed\"", attached, err)
 	}
@@ -160,7 +147,7 @@ func TestAttachWithConvertDeclined(t *testing.T) {
 	)
 
 	withStdinPipe(t, "n\n", func() {
-		_, attached, err = attachWithConvert(c, "haar")
+		_, _, attached, err = attachWithConvertSeed(c, "haar")
 	})
 
 	if attached || err != nil {
@@ -185,10 +172,10 @@ func TestAttachWithConvertConfirmed(t *testing.T) {
 	c := &scriptedConn{responses: []scriptedResp{
 		okResp(payloadEnv("convert_required", protocol.ConvertRequiredMsg{Name: "haar"})),
 		okResp(typeEnv("converted")),
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "haar", Name: "cleared"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "haar", Name: "cleared"})),
 	}}
 
-	info, attached, err := attachWithConvert(c, "haar")
+	info, _, attached, err := attachWithConvertSeed(c, "haar")
 	if err != nil || !attached {
 		t.Fatalf("attached=%v err=%v, want attached=true err=nil", attached, err)
 	}
@@ -219,7 +206,7 @@ func TestAttachWithConvertStillHeadless(t *testing.T) {
 		okResp(payloadEnv("convert_required", protocol.ConvertRequiredMsg{Name: "haar"})),
 	}}
 
-	_, attached, err := attachWithConvert(c, "haar")
+	_, _, attached, err := attachWithConvertSeed(c, "haar")
 	if attached || err == nil || !strings.Contains(err.Error(), "still headless after convert") {
 		t.Fatalf("attached=%v err=%v, want \"still headless after convert\"", attached, err)
 	}
@@ -240,7 +227,7 @@ func TestAttachWithConvertConvertError(t *testing.T) {
 		okResp(errEnv("relaunch failed")),
 	}}
 
-	_, attached, err := attachWithConvert(c, "haar")
+	_, _, attached, err := attachWithConvertSeed(c, "haar")
 	if attached || err == nil || !strings.Contains(err.Error(), "convert failed: relaunch failed") {
 		t.Fatalf("attached=%v err=%v, want \"convert failed: relaunch failed\"", attached, err)
 	}
@@ -261,7 +248,7 @@ func TestAttachWithConvertUnexpectedConvertReply(t *testing.T) {
 		okResp(typeEnv("whit")),
 	}}
 
-	_, attached, err := attachWithConvert(c, "haar")
+	_, _, attached, err := attachWithConvertSeed(c, "haar")
 	if attached || err == nil || !strings.Contains(err.Error(), "unexpected response to attach_convert") {
 		t.Fatalf("attached=%v err=%v, want unexpected-attach_convert error", attached, err)
 	}
@@ -283,7 +270,7 @@ func TestAttachWithConvertConvertReadError(t *testing.T) {
 		errResp(sentinel),
 	}}
 
-	_, attached, err := attachWithConvert(c, "haar")
+	_, _, attached, err := attachWithConvertSeed(c, "haar")
 	if attached || !errors.Is(err, sentinel) {
 		t.Fatalf("attached=%v err=%v, want %v", attached, err, sentinel)
 	}
@@ -295,22 +282,22 @@ func TestAttachWithConvertUnexpectedType(t *testing.T) {
 
 	c := &scriptedConn{responses: []scriptedResp{okResp(typeEnv("blether"))}}
 
-	_, attached, err := attachWithConvert(c, "braw")
+	_, _, attached, err := attachWithConvertSeed(c, "braw")
 	if attached || err == nil || !strings.Contains(err.Error(), "unexpected response to attach") {
 		t.Fatalf("attached=%v err=%v, want unexpected-attach error", attached, err)
 	}
 }
 
-// TestAttachWithConvertAttachedDecodeError: an "attached" reply with no payload
-// surfaces a decode error rather than a bogus success.
-func TestAttachWithConvertAttachedDecodeError(t *testing.T) {
+// TestAttachWithConvertAttachedResponseError: a raw "attached" reply is rejected
+// after the CLI requested terminal-owned attach.
+func TestAttachWithConvertAttachedResponseError(t *testing.T) {
 	withDiscardOutput(t)
 
 	c := &scriptedConn{responses: []scriptedResp{okResp(typeEnv("attached"))}}
 
-	_, attached, err := attachWithConvert(c, "braw")
-	if attached || err == nil || !strings.Contains(err.Error(), "decode attach response") {
-		t.Fatalf("attached=%v err=%v, want decode error", attached, err)
+	_, _, attached, err := attachWithConvertSeed(c, "braw")
+	if attached || err == nil || err.Error() != "terminal-owned attach returned raw attached response" {
+		t.Fatalf("attached=%v err=%v, want raw attached error", attached, err)
 	}
 }
 

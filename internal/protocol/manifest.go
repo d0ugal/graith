@@ -115,7 +115,7 @@ var registeredTypes = []any{
 	ForkMsg{},
 	MigrateMsg{},
 	AttachMsg{},
-	ExperimentalAttachSeedMsg{},
+	TerminalOwnedAttachSeedMsg{},
 	TerminalInputModes{},
 	TerminalHistoryMsg{},
 	TerminalHistoryLineMsg{},
@@ -309,21 +309,21 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"HandshakeErrMsg": {SwiftRequired, "HandshakeErrMsg"},
 
 	// Lifecycle / control (client -> daemon).
-	"CreateMsg":                 {SwiftRequired, "CreateMsg"},
-	"CodexOptions":              {SwiftPlanned, ""}, // remote create does not expose typed Codex options yet
-	"ForkMsg":                   {SwiftRequired, "ForkMsg"},
-	"MigrateMsg":                {SwiftRequired, "MigrateMsg"},
-	"AttachMsg":                 {SwiftRequired, "AttachMsg"},
-	"ExperimentalAttachSeedMsg": {SwiftNA, ""}, // CLI-only experimental attach seed
-	"TerminalInputModes":        {SwiftRequired, "TerminalInputModes"},
-	"TerminalHistoryMsg":        {SwiftNA, ""}, // nested in CLI-only experimental attach seed
-	"TerminalHistoryLineMsg":    {SwiftNA, ""}, // nested in CLI-only experimental attach seed
-	"UpdateMsg":                 {SwiftRequired, "UpdateMsg"},
-	"UpdateResultMsg":           {SwiftRequired, "UpdateResultMsg"},
-	"SetStatusMsg":              {SwiftRequired, "SetStatusMsg"},
-	"TypeMsg":                   {SwiftNA, ""}, // standalone remote typing is CLI-only
-	"ResizeMsg":                 {SwiftRequired, "ResizeMsg"},
-	"LogsMsg":                   {SwiftRequired, "LogsMsg"},
+	"CreateMsg":                  {SwiftRequired, "CreateMsg"},
+	"CodexOptions":               {SwiftPlanned, ""}, // remote create does not expose typed Codex options yet
+	"ForkMsg":                    {SwiftRequired, "ForkMsg"},
+	"MigrateMsg":                 {SwiftRequired, "MigrateMsg"},
+	"AttachMsg":                  {SwiftRequired, "AttachMsg"},
+	"TerminalOwnedAttachSeedMsg": {SwiftNA, ""}, // CLI-only terminal-owned attach seed
+	"TerminalInputModes":         {SwiftRequired, "TerminalInputModes"},
+	"TerminalHistoryMsg":         {SwiftNA, ""}, // nested in CLI-only terminal-owned attach seed
+	"TerminalHistoryLineMsg":     {SwiftNA, ""}, // nested in CLI-only terminal-owned attach seed
+	"UpdateMsg":                  {SwiftRequired, "UpdateMsg"},
+	"UpdateResultMsg":            {SwiftRequired, "UpdateResultMsg"},
+	"SetStatusMsg":               {SwiftRequired, "SetStatusMsg"},
+	"TypeMsg":                    {SwiftNA, ""}, // standalone remote typing is CLI-only
+	"ResizeMsg":                  {SwiftRequired, "ResizeMsg"},
+	"LogsMsg":                    {SwiftRequired, "LogsMsg"},
 
 	// stop/delete/restart/restore share Swift's SessionScopeMsg (session_id +
 	// children + exclude_root + purge). DeleteMsg's `purge` is now settable in

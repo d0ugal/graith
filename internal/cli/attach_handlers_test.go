@@ -11,10 +11,9 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// withLoopSeams points freshClient at the given fake and records restoreScreen
-// calls, restoring both on cleanup. Output is discarded. Returns a pointer to
-// the slice of session IDs restoreScreen was called with, in order.
-func withLoopSeams(t *testing.T, fake *scriptedConn) *[]string {
+// withLoopSeams points freshClient at the given fake, restores it on cleanup,
+// and discards output.
+func withLoopSeams(t *testing.T, fake *scriptedConn) {
 	t.Helper()
 
 	withDiscardOutput(t)
@@ -22,16 +21,9 @@ func withLoopSeams(t *testing.T, fake *scriptedConn) *[]string {
 	origFresh := freshClient
 	freshClient = func() (attachConn, error) { return fake, nil }
 
-	restored := []string{}
-	origRestore := restoreScreen
-	restoreScreen = func(id string) { restored = append(restored, id) }
-
 	t.Cleanup(func() {
 		freshClient = origFresh
-		restoreScreen = origRestore
 	})
-
-	return &restored
 }
 
 // newLoop builds an attachLoop with opts.Info aliased to its info field, the
@@ -56,14 +48,16 @@ func assertAliased(t *testing.T, l *attachLoop) {
 // --- state-transition helpers ----------------------------------------------
 
 func TestAdoptCurrent(t *testing.T) {
-	restored := withLoopSeams(t, nil)
+	withLoopSeams(t, nil)
 
 	l := newLoop("braw", "")
 	nc := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", Name: "bonnie"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw", Name: "bonnie"})),
 	}}
 
-	l.adoptCurrent(nc)
+	if err := l.adoptCurrent(nc); err != nil {
+		t.Fatalf("adoptCurrent: %v", err)
+	}
 
 	if l.c != nc {
 		t.Error("adoptCurrent did not install nc as the live connection")
@@ -75,37 +69,26 @@ func TestAdoptCurrent(t *testing.T) {
 
 	assertAliased(t, l)
 
-	if len(*restored) != 0 {
-		t.Errorf("adoptCurrent must not restore the screen, got %v", *restored)
-	}
-
 	if got := nc.sentTypes(); len(got) != 1 || got[0] != "attach" {
 		t.Errorf("sent = %v, want [attach]", got)
 	}
 }
 
-func TestAdoptCurrentKeepsExperimentalRequestOnSeedlessAttach(t *testing.T) {
-	restored := withLoopSeams(t, nil)
+func TestAdoptCurrentInstallsTerminalOwnedSeed(t *testing.T) {
+	withLoopSeams(t, nil)
 
 	l := newLoop("braw", "")
-	l.experimentalAttach = true
 
 	nc := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", Name: "bonnie", ExperimentalAttach: true})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw", Name: "bonnie"})),
 	}}
 
-	l.adoptCurrent(nc)
-
-	if !l.experimentalAttach {
-		t.Fatal("adoptCurrent cleared the experimental attach opt-in after seedless attach")
+	if err := l.adoptCurrent(nc); err != nil {
+		t.Fatalf("adoptCurrent: %v", err)
 	}
 
-	if l.opts.ExperimentalSeed != nil {
-		t.Fatal("seedless attach unexpectedly installed an experimental seed")
-	}
-
-	if len(*restored) != 0 {
-		t.Errorf("adoptCurrent must not restore the screen, got %v", *restored)
+	if l.opts.TerminalOwnedSeed == nil {
+		t.Fatal("adoptCurrent did not install a terminal-owned seed")
 	}
 
 	if len(nc.sends) != 1 {
@@ -113,55 +96,49 @@ func TestAdoptCurrentKeepsExperimentalRequestOnSeedlessAttach(t *testing.T) {
 	}
 
 	msg, ok := nc.sends[0].Payload.(protocol.AttachMsg)
-	if !ok || !msg.ExperimentalAttach {
-		t.Fatalf("attach payload = %#v, want experimental attach request", nc.sends[0].Payload)
+	if !ok || !msg.TerminalOwned {
+		t.Fatalf("attach payload = %#v, want terminal-owned request", nc.sends[0].Payload)
 	}
 }
 
-func TestRestoreAndAdopt(t *testing.T) {
-	restored := withLoopSeams(t, nil)
+func TestAdoptCurrentRejectsRawAttachResponse(t *testing.T) {
+	withLoopSeams(t, nil)
 
 	l := newLoop("braw", "")
-	nc := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"}))}}
+	old := &scriptedConn{}
+	l.c = old
 
-	l.restoreAndAdopt(nc)
-
-	if len(*restored) != 1 || (*restored)[0] != "braw" {
-		t.Errorf("restoreScreen calls = %v, want [braw]", *restored)
-	}
-
-	if l.c != nc {
-		t.Error("restoreAndAdopt did not install nc")
-	}
-}
-
-func TestRestoreAndAdoptRepaintsSeedlessExperimentalFallback(t *testing.T) {
-	restored := withLoopSeams(t, nil)
-
-	l := newLoop("braw", "")
-	l.experimentalAttach = true
 	nc := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", ExperimentalAttach: true})),
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
 	}}
 
-	l.restoreAndAdopt(nc)
-
-	if l.opts.ExperimentalSeed != nil {
-		t.Fatal("seedless experimental fallback unexpectedly installed a seed")
+	err := l.adoptCurrent(nc)
+	if err == nil || !strings.Contains(err.Error(), "raw attached response") {
+		t.Fatalf("adoptCurrent() error = %v, want raw attached rejection", err)
 	}
 
-	if len(*restored) != 1 || (*restored)[0] != "braw" {
-		t.Errorf("restoreScreen calls = %v, want [braw]", *restored)
+	if l.c != old {
+		t.Fatal("adoptCurrent installed the raw attach connection after seed failure")
+	}
+
+	if nc.closed != 1 {
+		t.Fatalf("raw attach connection closed %d times, want 1", nc.closed)
+	}
+
+	if l.opts.TerminalOwnedSeed != nil {
+		t.Fatal("terminal-owned seed was populated after raw attach rejection")
 	}
 }
 
 func TestSwitchTo(t *testing.T) {
-	restored := withLoopSeams(t, nil)
+	withLoopSeams(t, nil)
 
 	l := newLoop("auld", "older")
-	nc := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "new", Name: "bonnie"}))}}
+	nc := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "new", Name: "bonnie"}))}}
 
-	l.switchTo(nc, "new", false)
+	if err := l.switchTo(nc, "new"); err != nil {
+		t.Fatalf("switchTo: %v", err)
+	}
 
 	if l.sessionID != "new" {
 		t.Errorf("sessionID = %q, want new", l.sessionID)
@@ -176,45 +153,45 @@ func TestSwitchTo(t *testing.T) {
 	}
 
 	assertAliased(t, l)
-
-	if len(*restored) != 1 || (*restored)[0] != "new" {
-		t.Errorf("restoreScreen calls = %v, want [new] (repaint the target)", *restored)
-	}
 }
 
-func TestSwitchToExperimentalSeedlessFallbackRestoresTarget(t *testing.T) {
-	restored := withLoopSeams(t, nil)
+func TestSwitchToTerminalOwnedSeedSkipsRestore(t *testing.T) {
+	withLoopSeams(t, nil)
 
 	l := newLoop("auld", "older")
+	seed := protocol.TerminalOwnedAttachSeedMsg{
+		Session:  protocol.SessionInfo{ID: "new", Name: "bonnie"},
+		Snapshot: protocol.ScreenSnapshotResponseMsg{SessionID: "new", Frame: "braw frame"},
+	}
 	nc := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "new", Name: "bonnie", ExperimentalAttach: true})),
+		okResp(payloadEnv("terminal_owned_attached", seed)),
 	}}
 
-	l.switchTo(nc, "new", true)
+	if err := l.switchTo(nc, "new"); err != nil {
+		t.Fatalf("switchTo: %v", err)
+	}
 
 	if l.sessionID != "new" || l.prevSessionID != "auld" {
 		t.Errorf("session/prev = %q/%q, want new/auld", l.sessionID, l.prevSessionID)
 	}
 
-	if !l.experimentalAttach || l.opts.ExperimentalSeed != nil {
-		t.Fatalf("experimentalAttach=%v seed=%+v, want experimental raw fallback", l.experimentalAttach, l.opts.ExperimentalSeed)
-	}
-
-	if len(*restored) != 1 || (*restored)[0] != "new" {
-		t.Errorf("restoreScreen calls = %v, want [new]", *restored)
+	if l.opts.TerminalOwnedSeed == nil {
+		t.Fatal("terminal-owned attach did not install a seed")
 	}
 }
 
 func TestSwitchToAttachErrorKeepsCurrentSession(t *testing.T) {
-	restored := withLoopSeams(t, nil)
+	withLoopSeams(t, nil)
 
 	l := newLoop("auld", "")
 	nc := &scriptedConn{responses: []scriptedResp{
 		okResp(errEnv("nae such session")),
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "auld", Name: "still-here"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "auld", Name: "still-here"})),
 	}}
 
-	l.switchTo(nc, "new", true)
+	if err := l.switchTo(nc, "new"); err != nil {
+		t.Fatalf("switchTo: %v", err)
+	}
 
 	if l.sessionID != "auld" {
 		t.Errorf("sessionID = %q, want unchanged auld", l.sessionID)
@@ -222,10 +199,6 @@ func TestSwitchToAttachErrorKeepsCurrentSession(t *testing.T) {
 
 	if l.opts.SessionID != "auld" || l.info.Name != "still-here" {
 		t.Errorf("opts.SessionID=%q info.Name=%q, want auld/still-here", l.opts.SessionID, l.info.Name)
-	}
-
-	if len(*restored) != 1 || (*restored)[0] != "auld" {
-		t.Errorf("restoreScreen calls = %v, want [auld]", *restored)
 	}
 
 	if got := nc.sentTypes(); !reflect.DeepEqual(got, []string{"attach", "attach"}) {
@@ -239,8 +212,8 @@ func TestSwitchToAttachErrorKeepsCurrentSession(t *testing.T) {
 // literal or a client-side snapshot of [limits].log_lines across daemon reloads.
 func TestOnScrollModeUsesDaemonDefaultOnEveryReconnect(t *testing.T) {
 	fake := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 	}}
 	withLoopSeams(t, fake)
 
@@ -290,7 +263,7 @@ func TestOnScrollModeUsesDaemonDefaultOnEveryReconnect(t *testing.T) {
 
 func TestOnScrollModePrefersTerminalHistory(t *testing.T) {
 	fake := &scriptedConn{responses: []scriptedResp{
-		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 	}}
 	withLoopSeams(t, fake)
 
@@ -335,11 +308,11 @@ func TestOnScrollModePrefersTerminalHistory(t *testing.T) {
 	}
 }
 
-// --- handlers reachable via the freshClient / restoreScreen seams ----------
+// --- handlers reachable via the freshClient seam ---------------------------
 
 func TestOnLastSession(t *testing.T) {
 	t.Run("swaps when a previous session exists", func(t *testing.T) {
-		fake := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "auld"}))}}
+		fake := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "auld"}))}}
 		withLoopSeams(t, fake)
 
 		l := newLoop("braw", "auld")
@@ -355,7 +328,7 @@ func TestOnLastSession(t *testing.T) {
 	})
 
 	t.Run("no previous session keeps current", func(t *testing.T) {
-		fake := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"}))}}
+		fake := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"}))}}
 		withLoopSeams(t, fake)
 
 		l := newLoop("braw", "")
@@ -381,7 +354,7 @@ func TestOnCycleSession(t *testing.T) {
 	t.Run("forward moves to the next session and records prev", func(t *testing.T) {
 		fake := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", list)),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "id-c"})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "id-c"})),
 		}}
 		withLoopSeams(t, fake)
 
@@ -399,7 +372,7 @@ func TestOnCycleSession(t *testing.T) {
 	t.Run("backward wraps to the last session", func(t *testing.T) {
 		fake := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", list)),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "id-c"})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "id-c"})),
 		}}
 		withLoopSeams(t, fake)
 
@@ -439,7 +412,7 @@ func TestOnRestart(t *testing.T) {
 	t.Run("resume success reattaches", func(t *testing.T) {
 		fake := &scriptedConn{responses: []scriptedResp{
 			okResp(typeEnv("ok")),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 		}}
 		withLoopSeams(t, fake)
 
@@ -458,7 +431,7 @@ func TestOnRestart(t *testing.T) {
 	t.Run("resume error is reported but still reattaches", func(t *testing.T) {
 		fake := &scriptedConn{responses: []scriptedResp{
 			okResp(errEnv("cannae resume")),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 		}}
 
 		withLoopSeams(t, fake)
@@ -498,69 +471,51 @@ func TestOnOrchestratorSession(t *testing.T) {
 	}}
 	noOrch := protocol.SessionListMsg{Sessions: []protocol.SessionInfo{{ID: "braw", Status: "running"}}}
 
-	t.Run("not enabled keeps current session", func(t *testing.T) {
-		fake := &scriptedConn{responses: []scriptedResp{
-			okResp(payloadEnv("session_list", noOrch)),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
-		}}
-		restored := withLoopSeams(t, fake)
+	runOrchestrator := func(t *testing.T, current, prev string, responses []scriptedResp) *attachLoop {
+		t.Helper()
 
-		l := newLoop("braw", "")
+		fake := &scriptedConn{responses: responses}
+		withLoopSeams(t, fake)
+
+		l := newLoop(current, prev)
 
 		if _, err := l.onOrchestratorSession(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
+		return l
+	}
+
+	t.Run("not enabled keeps current session", func(t *testing.T) {
+		l := runOrchestrator(t, "braw", "", []scriptedResp{
+			okResp(payloadEnv("session_list", noOrch)),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+		})
 
 		if l.sessionID != "braw" {
 			t.Errorf("sessionID = %q, want unchanged braw", l.sessionID)
 		}
-
-		if len(*restored) != 1 || (*restored)[0] != "braw" {
-			t.Errorf("restoreScreen = %v, want [braw]", *restored)
-		}
 	})
 
 	t.Run("running orchestrator switches to it", func(t *testing.T) {
-		fake := &scriptedConn{responses: []scriptedResp{
+		l := runOrchestrator(t, "braw", "", []scriptedResp{
 			okResp(payloadEnv("session_list", orchRunning)),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "orch"})),
-		}}
-		restored := withLoopSeams(t, fake)
-
-		l := newLoop("braw", "")
-
-		if _, err := l.onOrchestratorSession(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "orch"})),
+		})
 
 		if l.sessionID != "orch" || l.prevSessionID != "braw" {
 			t.Errorf("session/prev = %q/%q, want orch/braw", l.sessionID, l.prevSessionID)
 		}
-
-		if len(*restored) != 1 || (*restored)[0] != "orch" {
-			t.Errorf("restoreScreen = %v, want [orch] (switchTo repaints target)", *restored)
-		}
 	})
 
 	t.Run("already on orchestrator with prev swaps back without repaint", func(t *testing.T) {
-		fake := &scriptedConn{responses: []scriptedResp{
+		l := runOrchestrator(t, "orch", "braw", []scriptedResp{
 			okResp(payloadEnv("session_list", orchRunning)),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
-		}}
-		restored := withLoopSeams(t, fake)
-
-		l := newLoop("orch", "braw")
-
-		if _, err := l.onOrchestratorSession(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+		})
 
 		if l.sessionID != "braw" || l.prevSessionID != "orch" {
 			t.Errorf("session/prev = %q/%q, want braw/orch (swapped)", l.sessionID, l.prevSessionID)
-		}
-
-		if len(*restored) != 0 {
-			t.Errorf("swap-back must not repaint, got restoreScreen %v", *restored)
 		}
 	})
 
@@ -568,7 +523,7 @@ func TestOnOrchestratorSession(t *testing.T) {
 		fake := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", orchStopped)),
 			okResp(typeEnv("ok")), // resume
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "orch"})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "orch"})),
 		}}
 		withLoopSeams(t, fake)
 
@@ -592,7 +547,7 @@ func TestOnOrchestratorSession(t *testing.T) {
 		fake := &scriptedConn{responses: []scriptedResp{
 			okResp(payloadEnv("session_list", orchStopped)),
 			okResp(errEnv("resume fashed")),
-			okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"})),
+			okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 		}}
 		withLoopSeams(t, fake)
 
@@ -609,21 +564,21 @@ func TestOnOrchestratorSession(t *testing.T) {
 }
 
 func TestReattachAfterOverlayFailure(t *testing.T) {
-	nc2 := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"}))}}
-	restored := withLoopSeams(t, nc2)
+	nc2 := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"}))}}
+	withLoopSeams(t, nc2)
 
 	// The connection the failed create was issued on; it must be closed.
 	failed := &scriptedConn{}
 
 	l := newLoop("braw", "")
 
-	got, seed, err := reattachAfterOverlayFailure(failed, "braw", false, "Create", errEnv("name taken"), &l.opts, &l.info)
+	got, seed, err := reattachAfterOverlayFailure(failed, "braw", "Create", errEnv("name taken"), &l.opts, &l.info)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if seed != nil {
-		t.Fatalf("seed = %+v, want nil for raw reattach", seed)
+	if seed == nil {
+		t.Fatal("seed = nil, want terminal-owned seed")
 	}
 
 	if got != nc2 {
@@ -632,10 +587,6 @@ func TestReattachAfterOverlayFailure(t *testing.T) {
 
 	if failed.closed != 1 {
 		t.Errorf("failed connection closed %d times, want 1", failed.closed)
-	}
-
-	if len(*restored) != 1 || (*restored)[0] != "braw" {
-		t.Errorf("restoreScreen = %v, want [braw]", *restored)
 	}
 
 	if l.opts.SessionID != "braw" || l.opts.Info != &l.info {

@@ -19,14 +19,14 @@ host terminal answer the same query or apply unsafe OSC/image side effects.
 
 PTY sessions already fan child output to three places: persistent scrollback,
 the daemon's terminal model for previews/snapshots/reconstruction, and attached
-clients. Experimental terminal-owned attach added a second presentation path
+clients. Terminal-owned attach added a second presentation path
 where the client repaints daemon snapshots rather than streaming raw child
 control traffic directly to the host terminal.
 
 Before this slice, the terminal model drained native query responses so writes
 would not deadlock, while ordinary raw attach could still forward the query to a
 host terminal. Detached sessions therefore did not get the same child-facing
-answers as attached sessions, and experimental attach risked evolving toward a
+answers as attached sessions, and terminal-owned attach risked evolving toward a
 split-brain model where both the daemon and an attached client might answer.
 
 ## Problem
@@ -72,7 +72,7 @@ behavior.
 
 Leaving query replies to whichever terminal happens to be attached keeps raw
 attach behavior familiar, but detached sessions still lack consistent answers
-and experimental attach remains vulnerable to duplicate replies as it grows more
+and terminal-owned attach remains vulnerable to duplicate replies as it grows more
 terminal-aware.
 
 ### Proposal 1: Daemon-Owned Replies with Attach Filtering (Recommended)
@@ -109,7 +109,7 @@ daemon is the only owner present while detached.
 The daemon could answer only when detached, leaving attached host terminals to
 answer while a client is present. This keeps historical raw attach closer to a
 plain terminal, but reconnect timing and read-only attach state would change the
-child-visible terminal identity. It also makes experimental attach depend on
+child-visible terminal identity. It also makes terminal-owned attach depend on
 client-specific terminal emulation, which is the split authority this issue is
 intended to remove.
 

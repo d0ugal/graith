@@ -111,17 +111,6 @@ func reconnectLoop(
 	sleep func(time.Duration),
 	timeout, interval time.Duration,
 ) (reconnectConn, protocol.Envelope, error) {
-	return reconnectLoopWithOptions(sessionID, attachRequestOptions{}, dial, now, sleep, timeout, interval)
-}
-
-func reconnectLoopWithOptions(
-	sessionID string,
-	opts attachRequestOptions,
-	dial func() (reconnectConn, error),
-	now func() time.Time,
-	sleep func(time.Duration),
-	timeout, interval time.Duration,
-) (reconnectConn, protocol.Envelope, error) {
 	deadline := now().Add(timeout)
 	for {
 		// Cap the pre-dial sleep to the remaining budget so a reconnect_interval
@@ -154,7 +143,7 @@ func reconnectLoopWithOptions(
 			continue
 		}
 
-		_ = c.SendControl("attach", attachMsgWithOptions(sessionID, opts))
+		_ = c.SendControl("attach", attachMsg(sessionID))
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -163,9 +152,15 @@ func reconnectLoopWithOptions(
 		}
 
 		if resp.Type == "error" {
+			message := errorMessage(resp)
+
 			c.Close()
 
-			return nil, protocol.Envelope{}, fmt.Errorf("session unavailable: %s", errorMessage(resp))
+			if message == protocol.TerminalOwnedAttachSeedNotReadyMessage {
+				continue
+			}
+
+			return nil, protocol.Envelope{}, fmt.Errorf("session unavailable: %s", message)
 		}
 
 		return c, resp, nil
@@ -174,10 +169,9 @@ func reconnectLoopWithOptions(
 	return nil, protocol.Envelope{}, fmt.Errorf("timed out after %s", timeout)
 }
 
-func reconnectToSessionWithOptions(sessionID string, opts attachRequestOptions) (*client.Client, protocol.Envelope, error) {
-	c, resp, err := reconnectLoopWithOptions(
+func reconnectToSession(sessionID string) (*client.Client, protocol.Envelope, error) {
+	c, resp, err := reconnectLoop(
 		sessionID,
-		opts,
 		func() (reconnectConn, error) { return freshClient() },
 		time.Now,
 		time.Sleep,

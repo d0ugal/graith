@@ -14,7 +14,7 @@ import (
 	"golang.org/x/term"
 )
 
-func (c *Client) runExperimentalPassthrough(ctx context.Context, opts PassthroughOpts) PassthroughResult {
+func (c *Client) runTerminalOwnedPassthrough(ctx context.Context, opts PassthroughOpts) PassthroughResult {
 	fd := int(os.Stdin.Fd())
 
 	oldState, err := term.MakeRaw(fd)
@@ -25,9 +25,9 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 
 	stdout := &syncWriter{w: os.Stdout}
 
-	_, _ = stdout.Write([]byte(experimentalAttachEnterSequence()))
+	_, _ = stdout.Write([]byte(terminalOwnedAttachEnterSequence()))
 	defer func() {
-		_, _ = stdout.Write([]byte(experimentalAttachExitSequence()))
+		_, _ = stdout.Write([]byte(terminalOwnedAttachExitSequence()))
 	}()
 
 	cols, rows := int(fallbackCols), int(fallbackRows)
@@ -35,7 +35,7 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 		cols, rows = w, h
 	}
 
-	var chrome *experimentalAttachChrome
+	var chrome *terminalOwnedAttachChrome
 
 	if (opts.StatusBar != nil || opts.ReadOnly) && opts.Info != nil {
 		position := "bottom"
@@ -43,17 +43,17 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 			position = opts.StatusBar.Position
 		}
 
-		chrome = newExperimentalAttachChrome(*opts.Info, opts.ReadOnly, position, rows, cols)
+		chrome = newTerminalOwnedAttachChrome(*opts.Info, opts.ReadOnly, position, rows, cols)
 	}
 
-	modeMirror := newExperimentalTerminalModeMirror(stdout)
-	inputRouter := newExperimentalInputRouter(chrome, modeMirror, opts.LocalHistoryScroll)
+	modeMirror := newTerminalOwnedTerminalModeMirror(stdout)
+	inputRouter := newTerminalOwnedInputRouter(chrome, modeMirror, opts.LocalHistoryScroll)
 	inputRouter.readOnly = opts.ReadOnly
 
 	refreshCh := make(chan struct{}, 1)
-	viewport := &experimentalAttachViewport{}
+	viewport := &terminalOwnedAttachViewport{}
 
-	c.sendExperimentalResize(fd, chrome, refreshCh, viewport)
+	c.sendTerminalOwnedResize(fd, chrome, refreshCh, viewport)
 
 	resizeCtx, stopResize := context.WithCancel(ctx)
 	defer stopResize()
@@ -69,31 +69,31 @@ func (c *Client) runExperimentalPassthrough(ctx context.Context, opts Passthroug
 			case <-resizeCtx.Done():
 				return
 			case <-sigCh:
-				c.sendExperimentalResize(fd, chrome, refreshCh, viewport)
+				c.sendTerminalOwnedResize(fd, chrome, refreshCh, viewport)
 			}
 		}
 	}()
 
-	writeExperimentalAttachSeedWithChrome(stdout, opts.ExperimentalSeed, chrome)
-	seedSnapshotID := opts.ExperimentalSeed.Snapshot.SnapshotID
+	writeTerminalOwnedAttachSeedWithChrome(stdout, opts.TerminalOwnedSeed, chrome)
+	seedSnapshotID := opts.TerminalOwnedSeed.Snapshot.SnapshotID
 
-	if opts.ExperimentalSeed != nil {
-		inputRouter.updateSnapshot(&opts.ExperimentalSeed.Snapshot)
+	if opts.TerminalOwnedSeed != nil {
+		inputRouter.updateSnapshot(&opts.TerminalOwnedSeed.Snapshot)
 	}
 
 	opts.StatusBar = nil
-	opts.ExperimentalSeed = nil
+	opts.TerminalOwnedSeed = nil
 	opts.TerminalOwned = true
-	opts.experimentalChrome = chrome
-	opts.experimentalInput = inputRouter
+	opts.terminalOwnedChrome = chrome
+	opts.terminalOwnedInput = inputRouter
 	opts.terminalRefresh = refreshCh
-	opts.experimentalSnapshotID = seedSnapshotID
-	opts.experimentalViewport = viewport
+	opts.terminalOwnedSnapshotID = seedSnapshotID
+	opts.terminalOwnedViewport = viewport
 
 	return c.runPassthroughLoop(ctx, opts, os.Stdin, stdout, nil)
 }
 
-func (c *Client) sendExperimentalResize(fd int, chrome *experimentalAttachChrome, refreshCh chan<- struct{}, viewport *experimentalAttachViewport) {
+func (c *Client) sendTerminalOwnedResize(fd int, chrome *terminalOwnedAttachChrome, refreshCh chan<- struct{}, viewport *terminalOwnedAttachViewport) {
 	w, h, err := term.GetSize(fd)
 	if err != nil {
 		return
@@ -114,17 +114,17 @@ func (c *Client) sendExperimentalResize(fd int, chrome *experimentalAttachChrome
 		Rows: uint16(rows), //nolint:gosec // G115: terminal height from term.GetSize is a small non-negative int
 	})
 
-	signalExperimentalRefresh(refreshCh)
+	signalTerminalOwnedRefresh(refreshCh)
 }
 
-func signalExperimentalRefresh(ch chan<- struct{}) {
+func signalTerminalOwnedRefresh(ch chan<- struct{}) {
 	select {
 	case ch <- struct{}{}:
 	default:
 	}
 }
 
-func experimentalAttachEnterSequence() string {
+func terminalOwnedAttachEnterSequence() string {
 	return "" +
 		"\x1b[?1049h" + // enter alternate screen buffer
 		"\x1b[r" + // reset any inherited scroll region before repainting
@@ -133,7 +133,7 @@ func experimentalAttachEnterSequence() string {
 		"\x1b[H\x1b[2J" // clear screen, cursor home
 }
 
-func experimentalAttachExitSequence() string {
+func terminalOwnedAttachExitSequence() string {
 	return "" +
 		"\x1b[r" + // reset scroll region
 		"\x1b[?1049l" + // leave alternate screen buffer
@@ -146,23 +146,23 @@ func experimentalAttachExitSequence() string {
 		"\x1b[?25h" // show cursor
 }
 
-func writeExperimentalAttachSeed(w io.Writer, seed *protocol.ExperimentalAttachSeedMsg) {
-	writeExperimentalAttachSeedWithChrome(w, seed, nil)
+func writeTerminalOwnedAttachSeed(w io.Writer, seed *protocol.TerminalOwnedAttachSeedMsg) {
+	writeTerminalOwnedAttachSeedWithChrome(w, seed, nil)
 }
 
-func writeExperimentalAttachSeedWithChrome(w io.Writer, seed *protocol.ExperimentalAttachSeedMsg, chrome *experimentalAttachChrome) {
+func writeTerminalOwnedAttachSeedWithChrome(w io.Writer, seed *protocol.TerminalOwnedAttachSeedMsg, chrome *terminalOwnedAttachChrome) {
 	if seed == nil {
 		return
 	}
 
-	writeExperimentalScreenSnapshotWithChrome(w, &seed.Snapshot, chrome)
+	writeTerminalOwnedScreenSnapshotWithChrome(w, &seed.Snapshot, chrome)
 }
 
-func writeExperimentalScreenSnapshot(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg) {
-	writeExperimentalScreenSnapshotWithChrome(w, snap, nil)
+func writeTerminalOwnedScreenSnapshot(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg) {
+	writeTerminalOwnedScreenSnapshotWithChrome(w, snap, nil)
 }
 
-func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg, chrome *experimentalAttachChrome) {
+func writeTerminalOwnedScreenSnapshotWithChrome(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg, chrome *terminalOwnedAttachChrome) {
 	if snap == nil || (snap.Frame == "" && !snap.Delta) {
 		return
 	}
@@ -176,7 +176,7 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 	var (
 		chromeInfo     statusBarInfo
 		chromeReadOnly bool
-		frame          experimentalChromeFrame
+		frame          terminalOwnedChromeFrame
 		hasChrome      bool
 	)
 
@@ -203,7 +203,7 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 			buf.WriteString("\x1b[?7l")
 		}
 
-		writeExperimentalScreenRows(&buf, snap.RowDeltas, screenRows, cursorYOffset)
+		writeTerminalOwnedScreenRows(&buf, snap.RowDeltas, screenRows, cursorYOffset)
 
 		if hasChrome {
 			buf.WriteString("\x1b[?7h")
@@ -230,7 +230,7 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 	}
 
 	if hasChrome {
-		renderExperimentalChromeLine(&buf, chromeInfo, chromeReadOnly, frame)
+		renderTerminalOwnedChromeLine(&buf, chromeInfo, chromeReadOnly, frame)
 	}
 
 	cursorRow, cursorCol := snap.CursorY+1, snap.CursorX+1
@@ -249,7 +249,7 @@ func writeExperimentalScreenSnapshotWithChrome(w io.Writer, snap *protocol.Scree
 	_, _ = w.Write([]byte(buf.String()))
 }
 
-func writeExperimentalScreenRows(buf *strings.Builder, rows []protocol.ScreenSnapshotRowMsg, screenRows int, cursorYOffset int) {
+func writeTerminalOwnedScreenRows(buf *strings.Builder, rows []protocol.ScreenSnapshotRowMsg, screenRows int, cursorYOffset int) {
 	for _, row := range rows {
 		if row.Y < 0 || row.Y >= screenRows {
 			continue
@@ -259,13 +259,13 @@ func writeExperimentalScreenRows(buf *strings.Builder, rows []protocol.ScreenSna
 	}
 }
 
-type experimentalAttachViewport struct {
+type terminalOwnedAttachViewport struct {
 	mu   sync.Mutex
 	cols int
 	rows int
 }
 
-func (v *experimentalAttachViewport) update(cols, rows int) {
+func (v *terminalOwnedAttachViewport) update(cols, rows int) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -273,7 +273,7 @@ func (v *experimentalAttachViewport) update(cols, rows int) {
 	v.rows = rows
 }
 
-func (v *experimentalAttachViewport) size() (int, int, bool) {
+func (v *terminalOwnedAttachViewport) size() (int, int, bool) {
 	if v == nil {
 		return 0, 0, false
 	}
@@ -284,45 +284,45 @@ func (v *experimentalAttachViewport) size() (int, int, bool) {
 	return v.cols, v.rows, v.cols > 0 && v.rows > 0
 }
 
-type experimentalAttachChrome struct {
+type terminalOwnedAttachChrome struct {
 	mu         sync.Mutex
 	readOnly   bool
 	info       statusBarInfo
-	frame      experimentalChromeFrame
-	cursor     experimentalAttachCursor
-	mouseState experimentalChromeMouseState
+	frame      terminalOwnedChromeFrame
+	cursor     terminalOwnedAttachCursor
+	mouseState terminalOwnedChromeMouseState
 }
 
-type experimentalAttachCursor struct {
+type terminalOwnedAttachCursor struct {
 	x       int
 	y       int
 	visible bool
 	known   bool
 }
 
-func newExperimentalAttachChrome(info protocol.SessionInfo, readOnly bool, position string, rows, cols int) *experimentalAttachChrome {
-	return &experimentalAttachChrome{
+func newTerminalOwnedAttachChrome(info protocol.SessionInfo, readOnly bool, position string, rows, cols int) *terminalOwnedAttachChrome {
+	return &terminalOwnedAttachChrome{
 		readOnly: readOnly,
 		info:     newStatusBarInfo(info, 0, protocol.FleetSummary{}),
-		frame:    newExperimentalChromeFrame(rows, cols, position, true),
+		frame:    newTerminalOwnedChromeFrame(rows, cols, position, true),
 	}
 }
 
-func (ch *experimentalAttachChrome) updateSize(rows, cols int) {
+func (ch *terminalOwnedAttachChrome) updateSize(rows, cols int) {
 	ch.mu.Lock()
 	ch.frame = ch.frame.resize(rows, cols)
 	ch.mu.Unlock()
 }
 
-func (ch *experimentalAttachChrome) updateInfo(info statusBarInfo) {
+func (ch *terminalOwnedAttachChrome) updateInfo(info statusBarInfo) {
 	ch.mu.Lock()
 	ch.info = info
 	ch.mu.Unlock()
 }
 
-func (ch *experimentalAttachChrome) updateChildCursor(snap *protocol.ScreenSnapshotResponseMsg) {
+func (ch *terminalOwnedAttachChrome) updateChildCursor(snap *protocol.ScreenSnapshotResponseMsg) {
 	ch.mu.Lock()
-	ch.cursor = experimentalAttachCursor{
+	ch.cursor = terminalOwnedAttachCursor{
 		x:       snap.CursorX,
 		y:       snap.CursorY,
 		visible: snap.CursorVisible,
@@ -331,7 +331,7 @@ func (ch *experimentalAttachChrome) updateChildCursor(snap *protocol.ScreenSnaps
 	ch.mu.Unlock()
 }
 
-func (ch *experimentalAttachChrome) childSize() (int, int) {
+func (ch *terminalOwnedAttachChrome) childSize() (int, int) {
 	ch.mu.Lock()
 	frame := ch.frame
 	ch.mu.Unlock()
@@ -339,14 +339,14 @@ func (ch *experimentalAttachChrome) childSize() (int, int) {
 	return frame.childSize()
 }
 
-func (ch *experimentalAttachChrome) snapshot() (statusBarInfo, bool, experimentalChromeFrame) {
+func (ch *terminalOwnedAttachChrome) snapshot() (statusBarInfo, bool, terminalOwnedChromeFrame) {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 
 	return ch.info, ch.readOnly, ch.frame
 }
 
-func (ch *experimentalAttachChrome) renderTo(w io.Writer) {
+func (ch *terminalOwnedAttachChrome) renderTo(w io.Writer) {
 	var buf strings.Builder
 
 	ch.renderStatusRefresh(&buf)
@@ -354,18 +354,18 @@ func (ch *experimentalAttachChrome) renderTo(w io.Writer) {
 	_, _ = w.Write([]byte(buf.String()))
 }
 
-func (ch *experimentalAttachChrome) translateMouseInput(input []byte) []byte {
+func (ch *terminalOwnedAttachChrome) translateMouseInput(input []byte) []byte {
 	ch.mu.Lock()
 	frame := ch.frame
 	mouseState := ch.mouseState
-	out, mouseState := translateSGRMouseForExperimentalFrameWithState(input, frame, mouseState)
+	out, mouseState := translateSGRMouseForTerminalOwnedFrameWithState(input, frame, mouseState)
 	ch.mouseState = mouseState
 	ch.mu.Unlock()
 
 	return out
 }
 
-func (ch *experimentalAttachChrome) renderStatusRefresh(buf *strings.Builder) {
+func (ch *terminalOwnedAttachChrome) renderStatusRefresh(buf *strings.Builder) {
 	ch.mu.Lock()
 	readOnly := ch.readOnly
 	info := ch.info
@@ -384,16 +384,16 @@ func (ch *experimentalAttachChrome) renderStatusRefresh(buf *strings.Builder) {
 		buf.WriteString("\x1b[?25l")
 	}
 
-	renderExperimentalChromeLine(buf, info, readOnly, frame)
+	renderTerminalOwnedChromeLine(buf, info, readOnly, frame)
 
 	if cursor.known {
 		cursorRow, cursorCol := frame.childCursorPosition(cursor.y, cursor.x)
-		writeExperimentalAttachCursorRestore(buf, cursorRow, cursorCol, cursor.visible)
+		writeTerminalOwnedAttachCursorRestore(buf, cursorRow, cursorCol, cursor.visible)
 		buf.WriteString("\x1b[?2026l")
 	}
 }
 
-func renderExperimentalChromeLine(buf *strings.Builder, info statusBarInfo, readOnly bool, frame experimentalChromeFrame) {
+func renderTerminalOwnedChromeLine(buf *strings.Builder, info statusBarInfo, readOnly bool, frame terminalOwnedChromeFrame) {
 	row, ok := frame.chromeLineRow()
 	if !ok {
 		return
@@ -407,27 +407,27 @@ func renderExperimentalChromeLine(buf *strings.Builder, info statusBarInfo, read
 	fmt.Fprintf(buf, "\x1b[%d;1H%s", row, line)
 }
 
-type experimentalChromePlacement int
+type terminalOwnedChromePlacement int
 
 const (
-	experimentalChromeBottom experimentalChromePlacement = iota
-	experimentalChromeTop
+	terminalOwnedChromeBottom terminalOwnedChromePlacement = iota
+	terminalOwnedChromeTop
 )
 
-type experimentalChromeFrame struct {
+type terminalOwnedChromeFrame struct {
 	rows          int
 	cols          int
-	placement     experimentalChromePlacement
+	placement     terminalOwnedChromePlacement
 	chromeEnabled bool
 }
 
-func newExperimentalChromeFrame(rows, cols int, position string, chromeEnabled bool) experimentalChromeFrame {
-	placement := experimentalChromeBottom
+func newTerminalOwnedChromeFrame(rows, cols int, position string, chromeEnabled bool) terminalOwnedChromeFrame {
+	placement := terminalOwnedChromeBottom
 	if position == "top" {
-		placement = experimentalChromeTop
+		placement = terminalOwnedChromeTop
 	}
 
-	return experimentalChromeFrame{
+	return terminalOwnedChromeFrame{
 		rows:          max(rows, 0),
 		cols:          max(cols, 0),
 		placement:     placement,
@@ -435,14 +435,14 @@ func newExperimentalChromeFrame(rows, cols int, position string, chromeEnabled b
 	}
 }
 
-func (f experimentalChromeFrame) resize(rows, cols int) experimentalChromeFrame {
+func (f terminalOwnedChromeFrame) resize(rows, cols int) terminalOwnedChromeFrame {
 	f.rows = max(rows, 0)
 	f.cols = max(cols, 0)
 
 	return f
 }
 
-func (f experimentalChromeFrame) reservedRows() int {
+func (f terminalOwnedChromeFrame) reservedRows() int {
 	if !f.chromeEnabled || f.rows <= 1 || f.cols < 1 {
 		return 0
 	}
@@ -450,19 +450,19 @@ func (f experimentalChromeFrame) reservedRows() int {
 	return 1
 }
 
-func (f experimentalChromeFrame) topRows() int {
-	if f.placement == experimentalChromeTop {
+func (f terminalOwnedChromeFrame) topRows() int {
+	if f.placement == terminalOwnedChromeTop {
 		return f.reservedRows()
 	}
 
 	return 0
 }
 
-func (f experimentalChromeFrame) childSize() (int, int) {
+func (f terminalOwnedChromeFrame) childSize() (int, int) {
 	return f.cols, max(f.rows-f.reservedRows(), 0)
 }
 
-func (f experimentalChromeFrame) childOriginSequence() string {
+func (f terminalOwnedChromeFrame) childOriginSequence() string {
 	if top := f.topRows(); top > 0 {
 		return fmt.Sprintf("\x1b[%d;1H", top+1)
 	}
@@ -470,7 +470,7 @@ func (f experimentalChromeFrame) childOriginSequence() string {
 	return ""
 }
 
-func (f experimentalChromeFrame) childCursorPosition(childY, childX int) (int, int) {
+func (f terminalOwnedChromeFrame) childCursorPosition(childY, childX int) (int, int) {
 	childCols, childRows := f.childSize()
 	y := max(childY, 0)
 	x := max(childX, 0)
@@ -486,19 +486,19 @@ func (f experimentalChromeFrame) childCursorPosition(childY, childX int) (int, i
 	return y + 1 + f.topRows(), x + 1
 }
 
-func (f experimentalChromeFrame) chromeLineRow() (int, bool) {
+func (f terminalOwnedChromeFrame) chromeLineRow() (int, bool) {
 	if f.reservedRows() == 0 || f.cols < 1 {
 		return 0, false
 	}
 
-	if f.placement == experimentalChromeTop {
+	if f.placement == terminalOwnedChromeTop {
 		return 1, true
 	}
 
 	return f.rows, true
 }
 
-func (f experimentalChromeFrame) outerToChildCell(col, row int) (int, int, bool) {
+func (f terminalOwnedChromeFrame) outerToChildCell(col, row int) (int, int, bool) {
 	if col < 1 || row < 1 || col > f.cols || row > f.rows {
 		return 0, 0, false
 	}
@@ -513,7 +513,7 @@ func (f experimentalChromeFrame) outerToChildCell(col, row int) (int, int, bool)
 	return col, row - top, true
 }
 
-func (f experimentalChromeFrame) translateMouseEvent(ev sgrMouseEvent, allowChromeRelease bool) (sgrMouseEvent, bool) {
+func (f terminalOwnedChromeFrame) translateMouseEvent(ev sgrMouseEvent, allowChromeRelease bool) (sgrMouseEvent, bool) {
 	col, row, ok := f.outerToChildCell(ev.col, ev.row)
 	if !ok && ev.release && allowChromeRelease {
 		col, row, ok = f.chromeReleaseCell(ev.col, ev.row)
@@ -529,7 +529,7 @@ func (f experimentalChromeFrame) translateMouseEvent(ev sgrMouseEvent, allowChro
 	return ev, true
 }
 
-func (f experimentalChromeFrame) chromeReleaseCell(col, row int) (int, int, bool) {
+func (f terminalOwnedChromeFrame) chromeReleaseCell(col, row int) (int, int, bool) {
 	if col < 1 || row < 1 || col > f.cols || row > f.rows {
 		return 0, 0, false
 	}
@@ -551,7 +551,7 @@ func (f experimentalChromeFrame) chromeReleaseCell(col, row int) (int, int, bool
 	}
 }
 
-func (f experimentalChromeFrame) clipChildFrame(frame string) string {
+func (f terminalOwnedChromeFrame) clipChildFrame(frame string) string {
 	if f.reservedRows() == 0 {
 		return frame
 	}
@@ -579,13 +579,13 @@ func (f experimentalChromeFrame) clipChildFrame(frame string) string {
 	return frame
 }
 
-func translateSGRMouseForExperimentalFrame(input []byte, frame experimentalChromeFrame) []byte {
-	out, _ := translateSGRMouseForExperimentalFrameWithState(input, frame, experimentalChromeMouseState{})
+func translateSGRMouseForTerminalOwnedFrame(input []byte, frame terminalOwnedChromeFrame) []byte {
+	out, _ := translateSGRMouseForTerminalOwnedFrameWithState(input, frame, terminalOwnedChromeMouseState{})
 
 	return out
 }
 
-func translateSGRMouseForExperimentalFrameWithState(input []byte, frame experimentalChromeFrame, mouseState experimentalChromeMouseState) ([]byte, experimentalChromeMouseState) {
+func translateSGRMouseForTerminalOwnedFrameWithState(input []byte, frame terminalOwnedChromeFrame, mouseState terminalOwnedChromeMouseState) ([]byte, terminalOwnedChromeMouseState) {
 	var out []byte
 
 	copied := 0
@@ -637,15 +637,15 @@ func formatSGRMouse(ev sgrMouseEvent) []byte {
 	return fmt.Appendf(nil, "\x1b[<%d;%d;%d%c", ev.button, ev.col, ev.row, term)
 }
 
-type experimentalChromeMouseState struct {
+type terminalOwnedChromeMouseState struct {
 	buttonDownInChild bool
 }
 
-func (s experimentalChromeMouseState) allowChromeRelease() bool {
+func (s terminalOwnedChromeMouseState) allowChromeRelease() bool {
 	return s.buttonDownInChild
 }
 
-func (s experimentalChromeMouseState) update(ev sgrMouseEvent, inChild bool) experimentalChromeMouseState {
+func (s terminalOwnedChromeMouseState) update(ev sgrMouseEvent, inChild bool) terminalOwnedChromeMouseState {
 	if isMouseButtonPress(ev) {
 		s.buttonDownInChild = inChild
 	}
@@ -661,7 +661,7 @@ func isMouseButtonPress(ev sgrMouseEvent) bool {
 	return !ev.release && ev.button&mouseMotionBit == 0 && ev.button&mouseWheelBit == 0
 }
 
-func writeExperimentalAttachCursorRestore(buf *strings.Builder, row, col int, visible bool) {
+func writeTerminalOwnedAttachCursorRestore(buf *strings.Builder, row, col int, visible bool) {
 	fmt.Fprintf(buf, "\x1b[%d;%dH", row, col)
 
 	if visible {

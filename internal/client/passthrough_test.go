@@ -228,7 +228,7 @@ func TestTerminalOwnedSnapshotRequestsUseDeltaBase(t *testing.T) {
 	opts := testOpts
 	opts.SessionID = "braw"
 	opts.TerminalOwned = true
-	opts.experimentalSnapshotID = 41
+	opts.terminalOwnedSnapshotID = 41
 
 	done := make(chan PassthroughResult, 1)
 	go func() {
@@ -306,7 +306,7 @@ func TestTerminalOwnedSnapshotRefreshForcesFullResync(t *testing.T) {
 	opts := testOpts
 	opts.SessionID = "braw"
 	opts.TerminalOwned = true
-	opts.experimentalSnapshotID = 41
+	opts.terminalOwnedSnapshotID = 41
 
 	done := make(chan PassthroughResult, 1)
 	go func() {
@@ -375,14 +375,14 @@ func TestTerminalOwnedSnapshotGeometryMismatchReassertsResize(t *testing.T) {
 	defer func() { _ = stdinW.Close() }()
 
 	stdout := &lockedWriter{}
-	viewport := &experimentalAttachViewport{}
+	viewport := &terminalOwnedAttachViewport{}
 	viewport.update(80, 24)
 
 	opts := testOpts
 	opts.SessionID = "braw"
 	opts.TerminalOwned = true
-	opts.experimentalSnapshotID = 41
-	opts.experimentalViewport = viewport
+	opts.terminalOwnedSnapshotID = 41
+	opts.terminalOwnedViewport = viewport
 
 	done := make(chan PassthroughResult, 1)
 	go func() {
@@ -635,7 +635,7 @@ func TestTerminalOwnedStatusChromeRefreshes(t *testing.T) {
 	opts := testOpts
 	opts.SessionID = "canny"
 	opts.TerminalOwned = true
-	opts.experimentalChrome = newExperimentalAttachChrome(protocol.SessionInfo{
+	opts.terminalOwnedChrome = newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		ID:     "canny",
 		Name:   "old-status",
 		Agent:  "codex",
@@ -787,7 +787,7 @@ func assertPrefixKeyResult(t *testing.T, key byte, want PassthroughResult) {
 	}
 }
 
-func BenchmarkExperimentalAttachFullRepaintFrameBytes(b *testing.B) {
+func BenchmarkTerminalOwnedAttachFullRepaintFrameBytes(b *testing.B) {
 	tests := map[string]struct {
 		cols int
 		rows int

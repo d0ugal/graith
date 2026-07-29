@@ -10,7 +10,7 @@ import (
 
 func TestEncodeDecodeControl(t *testing.T) {
 	handshake := HandshakeMsg{
-		Version: "2.0", ClientID: "brig-client",
+		Version: "3.0", ClientID: "brig-client",
 		TerminalSize: [2]uint16{80, 24}, Cwd: "/home/user/croft",
 	}
 
@@ -310,12 +310,12 @@ func TestVersionCompatible(t *testing.T) {
 		want    bool
 	}{
 		{"same version", Version, true},
-		{"same major different minor", "2.99", true},
+		{"same major different minor", "3.99", true},
 		{"different major", "1.0", false},
 		{"no dot", "1", false},
 		{"empty string", "", false},
-		{"major only with dot", "2.", true},
-		{"three part version", "2.2.3", true},
+		{"major only with dot", "3.", true},
+		{"three part version", "3.2.3", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

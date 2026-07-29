@@ -63,9 +63,7 @@ var resumeCmd = &cobra.Command{
 		out.Printf("Session %s resumed\n", info.Name)
 
 		if resumeAttach {
-			return runAttachByIDWithOptions(c, info.ID, nil, attachRunOptions{
-				ExperimentalAttach: info.ExperimentalAttach,
-			})
+			return runAttachByID(c, info.ID, nil)
 		}
 
 		return nil

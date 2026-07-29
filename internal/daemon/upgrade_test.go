@@ -404,21 +404,6 @@ func TestPrepareExecUpgradeUsesRetainedManagedOrigin(t *testing.T) {
 	}
 }
 
-func TestStopDaemonPIDRejectsUnauthenticatedIdentity(t *testing.T) {
-	unexpectedStop := func(int) error {
-		t.Fatal("invalid daemon identity reached stop primitive")
-		return nil
-	}
-
-	if err := stopDaemonPIDWithGuard(1, allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, unexpectedStop); err == nil || !strings.Contains(err.Error(), "invalid pid") {
-		t.Fatalf("StopDaemonPID(1) = %v", err)
-	}
-
-	if err := stopDaemonPIDWithGuard(os.Getpid(), allowDaemonLifecycleMutation, processidentity.IsGraithDaemon, unexpectedStop); err == nil || !strings.Contains(err.Error(), "not a graith daemon") {
-		t.Fatalf("StopDaemonPID(test process) = %v", err)
-	}
-}
-
 func TestReadManifestNonExistent(t *testing.T) {
 	_, err := ReadManifest("/nonexistent/manifest.json")
 	if err == nil {

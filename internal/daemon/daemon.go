@@ -1452,9 +1452,6 @@ type CreateOpts struct {
 	// headless_capable and [headless] experimental is enabled; otherwise Create
 	// fails closed rather than silently downgrading. See resolveDriverKind.
 	Headless bool
-	// ExperimentalAttach persists the opt-in terminal-owned attach path for this
-	// session. Plain sessions keep raw passthrough as the default.
-	ExperimentalAttach bool
 	// ForcePTY disables the soft global headless default for lifecycle owners
 	// that require resumability, such as bounded scenario retries. It is an
 	// internal option and must not be combined with Headless.

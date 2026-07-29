@@ -309,6 +309,12 @@ func (d *emptySnapshotAttachDriver) writerCount() int {
 	return len(d.writers)
 }
 
+type rawOnlyAttachDriver struct {
+	*emptySnapshotAttachDriver
+}
+
+func (*rawOnlyAttachDriver) AttachWithScreenSnapshot(io.Writer) {}
+
 func waitForDriverWriterCount(t *testing.T, driver *emptySnapshotAttachDriver, want int) {
 	t.Helper()
 
@@ -358,6 +364,28 @@ func (d *fullSnapshotDriver) ScreenSnapshot() grpty.ScreenCapture {
 	return d.full
 }
 
+type resizeRecordingAttachDriver struct {
+	emptySnapshotAttachDriver
+
+	resizeCalls int
+}
+
+func (d *resizeRecordingAttachDriver) Fd() uintptr { return 0 }
+
+func (d *resizeRecordingAttachDriver) Resize(uint16, uint16) error {
+	d.resizeCalls++
+
+	return nil
+}
+
+func (d *resizeRecordingAttachDriver) Poke() {}
+
+func (d *resizeRecordingAttachDriver) NotifyUserInput() {}
+
+func (d *resizeRecordingAttachDriver) WaitForUserIdle(time.Duration, time.Duration) bool {
+	return true
+}
+
 func (d *emptySnapshotAttachDriver) attachedWriters() []io.Writer {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -369,7 +397,7 @@ func TestHandshake(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version:      "2.0",
+		Version:      "3.0",
 		ClientID:     "test-client",
 		TerminalSize: [2]uint16{120, 40},
 		Cwd:          "/tmp",
@@ -476,7 +504,7 @@ func TestHandshakeCompatibleMinorVersion(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version:      "2.99",
+		Version:      "3.99",
 		ClientID:     "test-client",
 		TerminalSize: [2]uint16{80, 24},
 		Cwd:          "/tmp",
@@ -724,7 +752,7 @@ func TestResizeWhileAttached(t *testing.T) {
 
 	// Handshake + attach
 	h.sendControl(t, "handshake", protocol.HandshakeMsg{
-		Version: "2.0", ClientID: "c1",
+		Version: "3.0", ClientID: "c1",
 		TerminalSize: [2]uint16{80, 24}, Cwd: "/tmp",
 	})
 	h.readControlMsg(t) // handshake_ok
@@ -775,15 +803,11 @@ func TestAttachAndDetach(t *testing.T) {
 	}
 }
 
-func TestExperimentalAttachSendsSeed(t *testing.T) {
+func TestTerminalOwnedAttachSendsSeed(t *testing.T) {
 	h := newTestHarness(t)
-	h.addPTYSession(t, "braw-exp", "bonnie-exp")
+	h.addPTYSession(t, "braw-term", "bonnie-term")
 
-	h.sm.mu.Lock()
-	h.sm.state.Sessions["braw-exp"].ExperimentalAttach = true
-	h.sm.mu.Unlock()
-
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-exp", ExperimentalAttach: true})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-term", TerminalOwned: true})
 
 	frame, err := h.reader.ReadFrame()
 	if err != nil {
@@ -799,21 +823,21 @@ func TestExperimentalAttachSendsSeed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if env.Type != "experimental_attached" {
-		t.Fatalf("response type = %q, want experimental_attached", env.Type)
+	if env.Type != "terminal_owned_attached" {
+		t.Fatalf("response type = %q, want terminal_owned_attached", env.Type)
 	}
 
-	var seed protocol.ExperimentalAttachSeedMsg
+	var seed protocol.TerminalOwnedAttachSeedMsg
 	if err := protocol.DecodePayload(env, &seed); err != nil {
 		t.Fatal(err)
 	}
 
-	if seed.Session.ID != "braw-exp" || !seed.Session.ExperimentalAttach {
-		t.Fatalf("seed session = %+v, want experimental braw-exp", seed.Session)
+	if seed.Session.ID != "braw-term" {
+		t.Fatalf("seed session = %+v, want braw-term", seed.Session)
 	}
 
-	if seed.Snapshot.SessionID != "braw-exp" || seed.Snapshot.Cols != 80 || seed.Snapshot.Rows != 24 {
-		t.Fatalf("seed snapshot = %+v, want braw-exp 80x24", seed.Snapshot)
+	if seed.Snapshot.SessionID != "braw-term" || seed.Snapshot.Cols != 80 || seed.Snapshot.Rows != 24 {
+		t.Fatalf("seed snapshot = %+v, want braw-term 80x24", seed.Snapshot)
 	}
 
 	if seed.Snapshot.InputModes == nil || seed.Snapshot.InputModes.MouseTracking != protocol.TerminalMouseTrackingNone {
@@ -821,7 +845,7 @@ func TestExperimentalAttachSendsSeed(t *testing.T) {
 	}
 }
 
-func TestExperimentalAttachSeedIncludesTerminalHistory(t *testing.T) {
+func TestTerminalOwnedAttachSeedIncludesTerminalHistory(t *testing.T) {
 	h := newTestHarness(t)
 
 	driver := &emptySnapshotAttachDriver{
@@ -854,22 +878,21 @@ func TestExperimentalAttachSeedIncludesTerminalHistory(t *testing.T) {
 	}
 
 	h.sm.mu.Lock()
-	h.sm.state.Sessions["hist-exp"] = &SessionState{
-		ID:                 "hist-exp",
-		Name:               "hist-exp",
-		Agent:              "claude",
-		Status:             StatusRunning,
-		ExperimentalAttach: true,
-		CreatedAt:          time.Now().UTC(),
+	h.sm.state.Sessions["hist-term"] = &SessionState{
+		ID:        "hist-term",
+		Name:      "hist-term",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
 	}
-	h.sm.sessions["hist-exp"] = driver
+	h.sm.sessions["hist-term"] = driver
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "hist-exp", ExperimentalAttach: true})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "hist-term", TerminalOwned: true})
 
-	env := h.expectType(t, "experimental_attached")
+	env := h.expectType(t, "terminal_owned_attached")
 
-	var seed protocol.ExperimentalAttachSeedMsg
+	var seed protocol.TerminalOwnedAttachSeedMsg
 	if err := protocol.DecodePayload(env, &seed); err != nil {
 		t.Fatal(err)
 	}
@@ -891,16 +914,16 @@ func TestExperimentalAttachSeedIncludesTerminalHistory(t *testing.T) {
 	}
 
 	for _, line := range seed.History.Lines {
-		if strings.Contains(line.Frame, "READ-ONLY") || strings.Contains(line.Frame, "hist-exp") {
+		if strings.Contains(line.Frame, "READ-ONLY") || strings.Contains(line.Frame, "hist-term") {
 			t.Fatalf("history line includes Graith chrome: %+v", line)
 		}
 	}
 }
 
-func TestExperimentalAttachSeedHistoryTrimKeepsControlPayloadBounded(t *testing.T) {
+func TestTerminalOwnedAttachSeedHistoryTrimKeepsControlPayloadBounded(t *testing.T) {
 	const lineCount = 8
 
-	seed := protocol.ExperimentalAttachSeedMsg{
+	seed := protocol.TerminalOwnedAttachSeedMsg{
 		Session: protocol.SessionInfo{ID: "trim-exp", Name: "trim-exp"},
 		Snapshot: protocol.ScreenSnapshotResponseMsg{
 			SessionID:     "trim-exp",
@@ -922,9 +945,9 @@ func TestExperimentalAttachSeedHistoryTrimKeepsControlPayloadBounded(t *testing.
 		}
 	}
 
-	trimExperimentalAttachSeedHistory(&seed)
+	trimTerminalOwnedAttachSeedHistory(&seed)
 
-	data, err := protocol.EncodeControl("experimental_attached", seed)
+	data, err := protocol.EncodeControl("terminal_owned_attached", seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -942,10 +965,10 @@ func TestExperimentalAttachSeedHistoryTrimKeepsControlPayloadBounded(t *testing.
 	}
 }
 
-func TestExperimentalAttachFallsBackWhenSnapshotEmpty(t *testing.T) {
+func TestTerminalOwnedAttachFailsWhenSnapshotEmpty(t *testing.T) {
 	h := newTestHarness(t)
 
-	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-exp.log"), 1024*1024)
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-term.log"), 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -961,51 +984,82 @@ func TestExperimentalAttachFallsBackWhenSnapshotEmpty(t *testing.T) {
 	}
 
 	h.sm.mu.Lock()
-	h.sm.state.Sessions["empty-exp"] = &SessionState{
-		ID:                 "empty-exp",
-		Name:               "empty-exp",
-		Agent:              "claude",
-		Status:             StatusRunning,
-		ExperimentalAttach: true,
-		CreatedAt:          time.Now().UTC(),
+	h.sm.state.Sessions["empty-term"] = &SessionState{
+		ID:        "empty-term",
+		Name:      "empty-term",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
 	}
-	h.sm.sessions["empty-exp"] = driver
+	h.sm.sessions["empty-term"] = driver
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-exp", ExperimentalAttach: true})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-term", TerminalOwned: true})
 
-	frame, err := h.reader.ReadFrame()
+	env := h.expectType(t, "error")
+
+	var errMsg protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &errMsg); err != nil {
+		t.Fatal(err)
+	}
+
+	if errMsg.Message != protocol.TerminalOwnedAttachSeedNotReadyMessage {
+		t.Fatalf("error = %q, want seed-not-ready message", errMsg.Message)
+	}
+
+	waitForDriverWriterCount(t, driver, 0)
+}
+
+func TestTerminalOwnedAttachFailsWhenAtomicOutputUnsupported(t *testing.T) {
+	h := newTestHarness(t)
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "raw-only-term.log"), 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if frame.Channel != protocol.ChannelControl {
-		t.Fatalf("first frame channel = %d, want control fallback", frame.Channel)
-	}
-
-	env, err := protocol.DecodeControl(frame.Payload)
-	if err != nil {
+	if _, err := sb.Write([]byte("tail-canny\n")); err != nil {
 		t.Fatal(err)
 	}
 
-	if env.Type != "attached" {
-		t.Fatalf("response type = %q, want attached fallback", env.Type)
+	driver := &rawOnlyAttachDriver{emptySnapshotAttachDriver: &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: sb,
+		createdAt:  time.Now().UTC(),
+	}}
+	if _, ok := any(driver).(atomicAttachOutput); ok {
+		t.Fatal("raw-only driver unexpectedly implements atomic attach output")
 	}
 
-	frame, err = h.reader.ReadFrame()
-	if err != nil {
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["raw-only-term"] = &SessionState{
+		ID:        "raw-only-term",
+		Name:      "raw-only-term",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["raw-only-term"] = driver
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "raw-only-term", TerminalOwned: true})
+
+	env := h.expectType(t, "error")
+
+	var errMsg protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &errMsg); err != nil {
 		t.Fatal(err)
 	}
 
-	if frame.Channel != protocol.ChannelData || string(frame.Payload) != "tail-braw\n" {
-		t.Fatalf("fallback data frame = (%d, %q), want tail data", frame.Channel, string(frame.Payload))
+	if errMsg.Message != protocol.TerminalOwnedAttachUnsupportedMessage {
+		t.Fatalf("error = %q, want unsupported terminal-owned attach output", errMsg.Message)
 	}
 }
 
-func TestExperimentalAttachFallbackDiscardsGatedWriterAndCleansUpRawAttach(t *testing.T) {
+func TestTerminalOwnedAttachSeedFailureDiscardsGatedWriterAndClearsAttach(t *testing.T) {
 	h := newTestHarness(t)
 
-	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-exp-cleanup.log"), 1024*1024)
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-term-cleanup.log"), 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,25 +1071,24 @@ func TestExperimentalAttachFallbackDiscardsGatedWriterAndCleansUpRawAttach(t *te
 	}
 
 	h.sm.mu.Lock()
-	h.sm.state.Sessions["empty-exp-cleanup"] = &SessionState{
-		ID:                 "empty-exp-cleanup",
-		Name:               "empty-exp-cleanup",
-		Agent:              "claude",
-		Status:             StatusRunning,
-		ExperimentalAttach: true,
-		CreatedAt:          time.Now().UTC(),
+	h.sm.state.Sessions["empty-term-cleanup"] = &SessionState{
+		ID:        "empty-term-cleanup",
+		Name:      "empty-term-cleanup",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
 	}
-	h.sm.sessions["empty-exp-cleanup"] = driver
+	h.sm.sessions["empty-term-cleanup"] = driver
 	h.sm.mu.Unlock()
 
-	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-exp-cleanup", ExperimentalAttach: true})
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-term-cleanup", TerminalOwned: true})
 
 	env := h.readControlMsg(t)
-	if env.Type != "attached" {
-		t.Fatalf("response type = %q, want attached fallback", env.Type)
+	if env.Type != "error" {
+		t.Fatalf("response type = %q, want error", env.Type)
 	}
 
-	waitForDriverWriterCount(t, driver, 1)
+	waitForDriverWriterCount(t, driver, 0)
 
 	_ = h.conn.Close()
 
@@ -1046,7 +1099,125 @@ func TestExperimentalAttachFallbackDiscardsGatedWriterAndCleansUpRawAttach(t *te
 	}
 
 	if got := driver.writerCount(); got != 0 {
-		t.Fatalf("writers after fallback client close = %d, want 0", got)
+		t.Fatalf("writers after seed failure client close = %d, want 0", got)
+	}
+}
+
+func TestTerminalOwnedAttachSeedFailureDoesNotReplaceExistingClient(t *testing.T) {
+	h := newTestHarness(t)
+
+	sb, err := grpty.NewScrollback(filepath.Join(t.TempDir(), "empty-term-existing.log"), 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	driver := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: sb,
+		createdAt:  time.Now().UTC(),
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["empty-term-existing"] = &SessionState{
+		ID:        "empty-term-existing",
+		Name:      "empty-term-existing",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["empty-term-existing"] = driver
+	h.sm.mu.Unlock()
+
+	oldConn, oldPeer := net.Pipe()
+	defer func() { _ = oldConn.Close() }()
+	defer func() { _ = oldPeer.Close() }()
+
+	kicked := false
+
+	h.sm.SetAttachedClient("empty-term-existing", oldConn, func() { kicked = true }, nil)
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-term-existing", TerminalOwned: true})
+
+	env := h.expectType(t, "error")
+
+	var errMsg protocol.ErrorMsg
+	if err := protocol.DecodePayload(env, &errMsg); err != nil {
+		t.Fatal(err)
+	}
+
+	if errMsg.Message != protocol.TerminalOwnedAttachSeedNotReadyMessage {
+		t.Fatalf("error = %q, want seed-not-ready message", errMsg.Message)
+	}
+
+	if kicked {
+		t.Fatal("seed-not-ready attach kicked the previously attached client")
+	}
+
+	if !h.sm.IsAttachedClient("empty-term-existing", oldConn) {
+		t.Fatal("seed-not-ready attach replaced or cleared the previously attached client")
+	}
+
+	h.sm.mu.RLock()
+	lastAttached := h.sm.state.Sessions["empty-term-existing"].LastAttachedAt
+	h.sm.mu.RUnlock()
+
+	if lastAttached != nil {
+		t.Fatalf("LastAttachedAt = %v, want unchanged nil after failed attach", lastAttached)
+	}
+}
+
+func TestAttachFailureAfterPriorAttachClearsConnectionState(t *testing.T) {
+	h := newTestHarness(t)
+
+	first := &resizeRecordingAttachDriver{
+		emptySnapshotAttachDriver: emptySnapshotAttachDriver{
+			done:       make(chan struct{}),
+			scrollback: mustTestScrollback(t),
+			createdAt:  time.Now().UTC(),
+		},
+	}
+	second := &emptySnapshotAttachDriver{
+		done:       make(chan struct{}),
+		scrollback: mustTestScrollback(t),
+		createdAt:  time.Now().UTC(),
+	}
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["braw-stale"] = &SessionState{
+		ID:        "braw-stale",
+		Name:      "braw-stale",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["braw-stale"] = first
+	h.sm.state.Sessions["empty-stale"] = &SessionState{
+		ID:        "empty-stale",
+		Name:      "empty-stale",
+		Agent:     "claude",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().UTC(),
+	}
+	h.sm.sessions["empty-stale"] = second
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "braw-stale"})
+	h.expectType(t, "attached")
+
+	resizesAfterAttach := first.resizeCalls
+	if resizesAfterAttach == 0 {
+		t.Fatal("initial attach did not resize the interactive driver")
+	}
+
+	h.sendControl(t, "attach", protocol.AttachMsg{SessionID: "empty-stale", TerminalOwned: true})
+	h.expectType(t, "error")
+	h.sendControl(t, "resize", protocol.ResizeMsg{Rows: 33, Cols: 111})
+
+	h.sendControl(t, "list", struct{}{})
+	h.expectType(t, "session_list")
+
+	if first.resizeCalls != resizesAfterAttach {
+		t.Fatalf("resize calls after failed reattach = %d, want unchanged %d", first.resizeCalls, resizesAfterAttach)
 	}
 }
 
@@ -3790,7 +3961,7 @@ func TestNullPayloadRejected(t *testing.T) {
 			h := newTestHarness(t)
 
 			h.sendControl(t, "handshake", protocol.HandshakeMsg{
-				Version:      "2.0",
+				Version:      "3.0",
 				ClientID:     "test",
 				TerminalSize: [2]uint16{80, 24},
 				Cwd:          "/tmp",

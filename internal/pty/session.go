@@ -58,7 +58,7 @@ type Session struct {
 	// the completed helper is hydrated from that exact tail before publication.
 	screenInitializing bool
 	// screenSnapshotCache keeps a short history of coherent viewport snapshots so
-	// an experimental attach client can ask for row deltas from a known base. It
+	// a terminal-owned attach client can ask for row deltas from a known base. It
 	// is derived state only; raw scrollback remains authoritative.
 	screenSnapshotSeq   uint64
 	screenSnapshotCache []screenSnapshotCacheEntry
@@ -144,7 +144,7 @@ type SessionOpts struct {
 	// logger. Nil falls back to slog.Default(). See the Session.log field.
 	Logger *slog.Logger
 	// TerminalHistoryRows caps formatted terminal-aware history retained by the
-	// screen backend for experimental attach. Non-positive uses the package
+	// screen backend for terminal-owned attach. Non-positive uses the package
 	// default; the backend may clamp further by viewport width.
 	TerminalHistoryRows int
 }
@@ -288,7 +288,7 @@ type AdoptOpts struct {
 	// nil and always selects the build-tagged terminal backend.
 	screenFactory func(cols, rows int) (Terminal, error)
 	// TerminalHistoryRows caps formatted terminal-aware history retained by the
-	// screen backend for experimental attach. Non-positive uses the package
+	// screen backend for terminal-owned attach. Non-positive uses the package
 	// default; the backend may clamp further by viewport width.
 	TerminalHistoryRows int
 }

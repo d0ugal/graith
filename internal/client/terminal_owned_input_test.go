@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-func TestExperimentalInputTranslatesMouseThroughChrome(t *testing.T) {
+func TestTerminalOwnedInputTranslatesMouseThroughChrome(t *testing.T) {
 	tests := map[string]struct {
 		position string
 		input    string
@@ -48,8 +48,8 @@ func TestExperimentalInputTranslatesMouseThroughChrome(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			chrome := newExperimentalAttachChrome(protocol.SessionInfo{Name: "braw"}, false, test.position, 24, 80)
-			router := newExperimentalInputRouter(chrome, nil, nil)
+			chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{Name: "braw"}, false, test.position, 24, 80)
+			router := newTerminalOwnedInputRouter(chrome, nil, nil)
 			router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 				Cols: 80,
 				Rows: 23,
@@ -66,7 +66,7 @@ func TestExperimentalInputTranslatesMouseThroughChrome(t *testing.T) {
 	}
 }
 
-func TestExperimentalInputRoutesWheelByChildMode(t *testing.T) {
+func TestTerminalOwnedInputRoutesWheelByChildMode(t *testing.T) {
 	tests := map[string]struct {
 		modes     protocol.TerminalInputModes
 		want      string
@@ -113,7 +113,7 @@ func TestExperimentalInputRoutesWheelByChildMode(t *testing.T) {
 				gotCall  bool
 			)
 
-			router := newExperimentalInputRouter(nil, nil, func(delta int) bool {
+			router := newTerminalOwnedInputRouter(nil, nil, func(delta int) bool {
 				gotDelta = delta
 				gotCall = true
 
@@ -146,12 +146,12 @@ func TestExperimentalInputRoutesWheelByChildMode(t *testing.T) {
 	}
 }
 
-func TestExperimentalInputDropsWheelOnChromeRow(t *testing.T) {
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{Name: "braw"}, false, "top", 24, 80)
+func TestTerminalOwnedInputDropsWheelOnChromeRow(t *testing.T) {
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{Name: "braw"}, false, "top", 24, 80)
 
 	var gotDelta int
 
-	router := newExperimentalInputRouter(chrome, nil, func(delta int) bool {
+	router := newTerminalOwnedInputRouter(chrome, nil, func(delta int) bool {
 		gotDelta = delta
 		return true
 	})
@@ -175,8 +175,8 @@ func TestExperimentalInputDropsWheelOnChromeRow(t *testing.T) {
 	}
 }
 
-func TestExperimentalInputDropsUnsupportedSGRPixelsMouse(t *testing.T) {
-	router := newExperimentalInputRouter(nil, nil, nil)
+func TestTerminalOwnedInputDropsUnsupportedSGRPixelsMouse(t *testing.T) {
+	router := newTerminalOwnedInputRouter(nil, nil, nil)
 	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 		Cols: 80,
 		Rows: 24,
@@ -191,7 +191,7 @@ func TestExperimentalInputDropsUnsupportedSGRPixelsMouse(t *testing.T) {
 	}
 }
 
-func TestExperimentalInputFocusAndPasteModes(t *testing.T) {
+func TestTerminalOwnedInputFocusAndPasteModes(t *testing.T) {
 	tests := map[string]struct {
 		modes protocol.TerminalInputModes
 		input string
@@ -219,7 +219,7 @@ func TestExperimentalInputFocusAndPasteModes(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			router := newExperimentalInputRouter(nil, nil, nil)
+			router := newTerminalOwnedInputRouter(nil, nil, nil)
 			router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 				Cols:       80,
 				Rows:       24,
@@ -233,10 +233,10 @@ func TestExperimentalInputFocusAndPasteModes(t *testing.T) {
 	}
 }
 
-func TestExperimentalTerminalModeMirror(t *testing.T) {
+func TestTerminalOwnedTerminalModeMirror(t *testing.T) {
 	var out bytes.Buffer
 
-	mirror := newExperimentalTerminalModeMirror(&out)
+	mirror := newTerminalOwnedTerminalModeMirror(&out)
 
 	mirror.apply(protocol.TerminalInputModes{
 		MouseTracking:         protocol.TerminalMouseTrackingButton,
@@ -292,10 +292,10 @@ func TestExperimentalTerminalModeMirror(t *testing.T) {
 	}
 }
 
-func TestExperimentalReadOnlyDoesNotMirrorTerminalModes(t *testing.T) {
+func TestTerminalOwnedReadOnlyDoesNotMirrorTerminalModes(t *testing.T) {
 	var out bytes.Buffer
 
-	router := newExperimentalInputRouter(nil, newExperimentalTerminalModeMirror(&out), nil)
+	router := newTerminalOwnedInputRouter(nil, newTerminalOwnedTerminalModeMirror(&out), nil)
 	router.readOnly = true
 	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 		Cols: 80,
@@ -313,7 +313,7 @@ func TestExperimentalReadOnlyDoesNotMirrorTerminalModes(t *testing.T) {
 	}
 }
 
-func TestExperimentalReadOnlyDropsRoutedMouseInput(t *testing.T) {
+func TestTerminalOwnedReadOnlyDropsRoutedMouseInput(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()
 
@@ -322,7 +322,7 @@ func TestExperimentalReadOnlyDropsRoutedMouseInput(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdout := &lockedWriter{}
-	router := newExperimentalInputRouter(nil, nil, nil)
+	router := newTerminalOwnedInputRouter(nil, nil, nil)
 	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 		Cols: 80,
 		Rows: 24,
@@ -344,7 +344,7 @@ func TestExperimentalReadOnlyDropsRoutedMouseInput(t *testing.T) {
 
 	opts := testOpts
 	opts.ReadOnly = true
-	opts.experimentalInput = router
+	opts.terminalOwnedInput = router
 
 	result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
 	if result != ResultDetached {
@@ -353,12 +353,12 @@ func TestExperimentalReadOnlyDropsRoutedMouseInput(t *testing.T) {
 
 	select {
 	case data := <-received:
-		t.Fatalf("read-only experimental attach forwarded mouse input: %q", data)
+		t.Fatalf("read-only terminal-owned attach forwarded mouse input: %q", data)
 	case <-time.After(200 * time.Millisecond):
 	}
 }
 
-func TestExperimentalKeyboardLockedDropsChildInputButKeepsPrefixDetach(t *testing.T) {
+func TestTerminalOwnedKeyboardLockedDropsChildInputButKeepsPrefixDetach(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()
 
@@ -366,7 +366,7 @@ func TestExperimentalKeyboardLockedDropsChildInputButKeepsPrefixDetach(t *testin
 	received := captureDaemonDataFrames(daemonConn, 1)
 	stdinR, stdinW := io.Pipe()
 	stdout := &lockedWriter{}
-	router := newExperimentalInputRouter(nil, nil, nil)
+	router := newTerminalOwnedInputRouter(nil, nil, nil)
 	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 		Cols: 80,
 		Rows: 24,
@@ -386,7 +386,7 @@ func TestExperimentalKeyboardLockedDropsChildInputButKeepsPrefixDetach(t *testin
 	}()
 
 	opts := testOpts
-	opts.experimentalInput = router
+	opts.terminalOwnedInput = router
 
 	result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
 	if result != ResultDetached {
@@ -395,12 +395,12 @@ func TestExperimentalKeyboardLockedDropsChildInputButKeepsPrefixDetach(t *testin
 
 	select {
 	case data := <-received:
-		t.Fatalf("keyboard-locked experimental attach forwarded child input: %q", data)
+		t.Fatalf("keyboard-locked terminal-owned attach forwarded child input: %q", data)
 	case <-time.After(200 * time.Millisecond):
 	}
 }
 
-func TestExperimentalBracketedPasteBypassesLocalPrefix(t *testing.T) {
+func TestTerminalOwnedBracketedPasteBypassesLocalPrefix(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()
 
@@ -408,7 +408,7 @@ func TestExperimentalBracketedPasteBypassesLocalPrefix(t *testing.T) {
 	received := captureDaemonDataFrames(daemonConn, 1)
 	stdinR, stdinW := io.Pipe()
 	stdout := &lockedWriter{}
-	router := newExperimentalInputRouter(nil, nil, nil)
+	router := newTerminalOwnedInputRouter(nil, nil, nil)
 	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
 		Cols: 80,
 		Rows: 24,
@@ -426,7 +426,7 @@ func TestExperimentalBracketedPasteBypassesLocalPrefix(t *testing.T) {
 	}()
 
 	opts := testOpts
-	opts.experimentalInput = router
+	opts.terminalOwnedInput = router
 
 	result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
 	if result != ResultDetached {

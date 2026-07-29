@@ -31,19 +31,25 @@ Create a new agent session.
 | `--codex-service-tier <tier>` | Codex only: service tier — `auto`, `default`, `flex`, `priority` |
 | `--codex-web-search` | Codex only: enable live web search (`codex --search`) |
 | `--headless` | Run the agent headless (stream-json) instead of an interactive PTY, for fire-and-forget sessions (experimental; Claude only) |
-| `--experimental-attach` | Persist opt-in use of the experimental terminal-owned attach client for this session |
 | `--no-fetch` | Skip `git fetch origin` and create the worktree from local repo state |
 
 `--no-fetch` overrides `fetch_on_create` for that session. Use it when SSH auth
 is unavailable (e.g. a biometric agent that can't sign non-interactively) or when
 you're offline.
 
-`--experimental-attach` makes future attaches to that session request the
-terminal-owned attach handshake. The daemon seeds the client with a coherent
-current-screen snapshot and bounded terminal-aware primary-screen history before
-live output resumes, and the client owns the outer alternate screen instead of
-injecting chrome into the child PTY stream. This is experimental and
-intentionally opt-in per session.
+Interactive sessions use terminal-owned attach by default. The daemon seeds the
+client with a coherent current-screen snapshot and bounded terminal-aware
+primary-screen history before live output resumes, and the client owns the outer
+alternate screen instead of injecting chrome into the child PTY stream. Sessions
+created by older versions with the former `--experimental-attach` opt-in need no
+manual migration: the persisted opt-in bit is ignored because upgraded clients
+request terminal-owned attach for every interactive session, and the daemon drops
+the obsolete state key the next time it saves state. The control protocol is
+bumped to 3.0 so older clients and daemons do not silently reconnect through the
+removed experimental attach request.
+
+CLI attach requires the daemon to return a terminal-owned seed. If the daemon
+cannot provide one, attach fails with an error.
 
 Graith interprets child terminal mode changes from its daemon-side terminal
 model and mirrors mouse, focus, bracketed-paste, application cursor-key, and
@@ -63,7 +69,7 @@ the screen before falling back to raw logs. Refreshes use dirty-row updates when
 the client and daemon share a compatible snapshot base, falling back to full
 snapshots when needed.
 When the status bar or read-only indicator is visible and the terminal has at
-least two rows, the experimental client reserves one top or bottom row according
+least two rows, the terminal-owned client reserves one top or bottom row according
 to `[status_bar].position` and resizes the child PTY to the remaining viewport.
 The reserved row is Graith chrome, not child terminal content; cursor and mouse
 cell coordinates that reach the child are translated accordingly. One-row
@@ -154,7 +160,7 @@ Attached output is bounded per client. Raw attach and `gr logs -f` keep exact
 bytes, coalesce adjacent queued chunks, and buffer until a slow client's queue
 reaches 1 MiB or 16,384 chunks. The daemon disconnects a client whose queue
 overflows or whose queued write cannot complete within 2 seconds, while the
-session keeps draining output. Experimental terminal-owned attach coalesces live
+session keeps draining output. Terminal-owned attach coalesces live
 output into repaint hints and refreshes from screen snapshots.
 
 ### Read-only attach

@@ -75,9 +75,7 @@ var migrateCmd = &cobra.Command{
 			return nil
 		}
 
-		return runAttachByIDWithOptions(c, info.ID, nil, attachRunOptions{
-			ExperimentalAttach: info.ExperimentalAttach,
-		})
+		return runAttachByID(c, info.ID, nil)
 	},
 }
 

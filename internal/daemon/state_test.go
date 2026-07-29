@@ -50,6 +50,49 @@ func TestStateSaveLoad(t *testing.T) {
 	}
 }
 
+func TestStateLoadDropsRemovedExperimentalAttachOnSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	before := []byte(`{
+  "version": 29,
+  "sessions": {
+    "braw123": {
+      "id": "braw123",
+      "name": "bonnie-fix",
+      "agent": "claude",
+      "status": "running",
+      "experimental_attach": true,
+      "created_at": "2026-07-29T10:00:00Z"
+    }
+  }
+}`)
+
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := loaded.Sessions["braw123"]; !ok {
+		t.Fatal("session with removed experimental_attach field was not loaded")
+	}
+
+	if err := SaveState(path, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Contains(after, []byte("experimental_attach")) {
+		t.Fatalf("saved state retained obsolete experimental_attach key:\n%s", after)
+	}
+}
+
 func TestStatePreservesExplicitEmptyNonInteractiveArgs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 

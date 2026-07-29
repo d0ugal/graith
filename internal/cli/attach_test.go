@@ -463,12 +463,7 @@ func TestAttachMsgCarriesReadOnly(t *testing.T) {
 		t.Errorf("expected SessionID canny, got %q", msg.SessionID)
 	}
 
-	if msg.ExperimentalAttach {
-		t.Error("attachMsg should not opt into experimental attach by default")
-	}
-
-	msg = attachMsgWithOptions("dreich", attachRequestOptions{ExperimentalAttach: true})
-	if !msg.ExperimentalAttach {
-		t.Error("attachMsgWithOptions should carry ExperimentalAttach=true")
+	if !msg.TerminalOwned {
+		t.Error("attachMsg should request terminal-owned attach by default")
 	}
 }

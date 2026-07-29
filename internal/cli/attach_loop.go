@@ -31,9 +31,8 @@ type attachLoop struct {
 
 	// sessionID is the session currently attached; prevSessionID backs the
 	// "last session" toggle.
-	sessionID              string
-	prevSessionID          string
-	prevExperimentalAttach bool
+	sessionID     string
+	prevSessionID string
 
 	// collapsed persists the overlay's collapsed-repo state between openings.
 	collapsed map[string]bool
@@ -42,8 +41,6 @@ type attachLoop struct {
 	// client. Search and other transient overlay modes are not retained.
 	pickerState client.PickerState
 
-	experimentalAttach bool
-	terminalOwnedPass  bool
 	terminalHistory    protocol.TerminalHistoryMsg
 	hasTerminalHistory bool
 
@@ -54,20 +51,12 @@ type attachLoop struct {
 	info protocol.SessionInfo
 }
 
-type attachRunOptions struct {
-	ExperimentalAttach bool
-}
-
 func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]bool, initialPickerState ...client.PickerState) error {
-	return runAttachByIDWithOptions(c, sessionID, initialCollapsed, attachRunOptions{}, initialPickerState...)
-}
-
-func runAttachByIDWithOptions(c attachConn, sessionID string, initialCollapsed map[string]bool, opts attachRunOptions, initialPickerState ...client.PickerState) error {
 	if isInsideGraith() {
 		return errors.New("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
 
-	info, seed, attached, err := attachWithConvertOptions(c, sessionID, attachRequestOptions(opts))
+	info, seed, attached, err := attachWithConvertSeed(c, sessionID)
 	if err != nil {
 		return err
 	}
@@ -83,13 +72,12 @@ func runAttachByIDWithOptions(c attachConn, sessionID string, initialCollapsed m
 	}
 
 	l := &attachLoop{
-		ctx:                context.Background(),
-		c:                  c,
-		sessionID:          sessionID,
-		collapsed:          initialCollapsed,
-		pickerState:        pickerState,
-		experimentalAttach: opts.ExperimentalAttach || info.ExperimentalAttach,
-		info:               info,
+		ctx:         context.Background(),
+		c:           c,
+		sessionID:   sessionID,
+		collapsed:   initialCollapsed,
+		pickerState: pickerState,
+		info:        info,
 	}
 
 	l.opts = client.PassthroughOpts{
@@ -99,7 +87,7 @@ func runAttachByIDWithOptions(c attachConn, sessionID string, initialCollapsed m
 		ReadOnly:         attachReadOnly,
 		OnTerminalOutput: l.clearTerminalHistory,
 	}
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 
 	if cfg.StatusBar.Enabled {
 		l.opts.StatusBar = &client.StatusBarCfg{
@@ -113,8 +101,8 @@ func runAttachByIDWithOptions(c attachConn, sessionID string, initialCollapsed m
 	return l.run()
 }
 
-func (l *attachLoop) setExperimentalSeed(seed *protocol.ExperimentalAttachSeedMsg) {
-	l.opts.ExperimentalSeed = seed
+func (l *attachLoop) setTerminalOwnedSeed(seed *protocol.TerminalOwnedAttachSeedMsg) {
+	l.opts.TerminalOwnedSeed = seed
 
 	if seed == nil {
 		l.hasTerminalHistory = false
@@ -138,9 +126,8 @@ func terminalHistoryPresent(history protocol.TerminalHistoryMsg) bool {
 
 func (l *attachLoop) run() error {
 	for {
-		l.terminalOwnedPass = l.opts.ExperimentalSeed != nil
 		result := l.c.RunPassthrough(l.ctx, l.opts)
-		l.opts.ExperimentalSeed = nil
+		l.opts.TerminalOwnedSeed = nil
 
 		// RunPassthrough closes the connection — l.c is dead after this point.
 		// Every handler must either end the loop or install a fresh client.
@@ -190,10 +177,6 @@ func (l *attachLoop) dispatch(result client.PassthroughResult) (bool, error) {
 	case client.ResultScrollMode:
 		return l.onScrollMode()
 	case client.ResultDetached, client.ResultQuit:
-		if !l.terminalOwnedPass {
-			resetTerminal()
-		}
-
 		return true, nil
 	}
 
@@ -203,67 +186,41 @@ func (l *attachLoop) dispatch(result client.PassthroughResult) (bool, error) {
 // adoptCurrent reattaches nc to the current session and makes it the live
 // connection, without repainting the screen (used where the caller has already
 // reset the terminal, e.g. shell/restart/session-cycle).
-func (l *attachLoop) adoptCurrent(nc attachConn) bool {
-	seed, err := attachDecodeWithOptions(nc, l.sessionID, attachRequestOptions{ExperimentalAttach: l.experimentalAttach}, &l.info)
+func (l *attachLoop) adoptCurrent(nc attachConn) error {
+	seed, err := attachDecodeSeed(nc, l.sessionID, &l.info)
 	if err != nil {
 		out.Printf("Attach failed: %s\n", err)
+		nc.Close()
 
-		l.setExperimentalSeed(nil)
-		l.c = nc
-
-		return false
+		return err
 	}
 
 	l.opts.SessionID = l.sessionID
 	l.opts.Info = &l.info
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 	l.c = nc
 
-	return true
+	return nil
 }
 
-// restoreAndAdopt repaints the current session's screen, then reattaches nc to
-// it. Used when returning from an overlay/prompt that drew over the session.
-func (l *attachLoop) restoreAndAdopt(nc attachConn) {
-	wasExperimental := l.experimentalAttach
-	if !l.experimentalAttach {
-		restoreScreen(l.sessionID)
-	}
-
-	attached := l.adoptCurrent(nc)
-
-	if attached && wasExperimental && l.opts.ExperimentalSeed == nil {
-		restoreScreen(l.sessionID)
-	}
-}
-
-// switchTo repaints and attaches nc to newID, adopting it as the current
-// session and remembering the previous one for the last-session toggle.
-func (l *attachLoop) switchTo(nc attachConn, newID string, experimentalAttach bool) {
-	if !experimentalAttach {
-		restoreScreen(newID)
-	}
-
-	seed, err := attachDecodeWithOptions(nc, newID, attachRequestOptions{ExperimentalAttach: experimentalAttach}, &l.info)
+// switchTo attaches nc to newID, adopting it as the current session and
+// remembering the previous one for the last-session toggle.
+func (l *attachLoop) switchTo(nc attachConn, newID string) error {
+	seed, err := attachDecodeSeed(nc, newID, &l.info)
 	if err != nil {
 		out.Printf("Attach failed: %s\n", err)
-		l.restoreAndAdopt(nc)
 
-		return
+		return l.adoptCurrent(nc)
 	}
 
 	l.prevSessionID = l.sessionID
-	l.prevExperimentalAttach = l.experimentalAttach
 	l.sessionID = newID
-	l.experimentalAttach = experimentalAttach
 	l.opts.SessionID = newID
 	l.opts.Info = &l.info
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 	l.c = nc
 
-	if experimentalAttach && seed == nil {
-		restoreScreen(newID)
-	}
+	return nil
 }
 
 func (l *attachLoop) onOverlay() (bool, error) {
@@ -316,15 +273,14 @@ func (l *attachLoop) onOverlay() (bool, error) {
 	}
 
 	if overlayResult == nil || overlayResult.Action == "" {
-		l.restoreAndAdopt(nc)
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	if overlayResult.Action == "create" {
 		return l.overlayCreate(nc, overlayResult)
 	}
 
-	return l.overlaySwitch(nc, overlayResult.SessionID, sessionExperimentalAttach(list.Sessions, overlayResult.SessionID))
+	return l.overlaySwitch(nc, overlayResult.SessionID)
 }
 
 // overlayCreate handles the overlay's "create" action: create the session, then
@@ -344,12 +300,12 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 	}
 
 	if createResp.Type == "error" {
-		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Create", createResp, &l.opts, &l.info)
+		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, "Create", createResp, &l.opts, &l.info)
 		if err != nil {
 			return false, err
 		}
 
-		l.setExperimentalSeed(seed)
+		l.setTerminalOwnedSeed(seed)
 		l.c = nc2
 
 		return false, nil
@@ -358,9 +314,8 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 	var newInfo protocol.SessionInfo
 
 	_ = protocol.DecodePayload(createResp, &newInfo)
-	l.switchTo(nc, newInfo.ID, newInfo.ExperimentalAttach)
 
-	return false, nil
+	return false, l.switchTo(nc, newInfo.ID)
 }
 
 // overlaySwitch attaches to a session picked in the overlay. Switching to a
@@ -368,14 +323,8 @@ func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayR
 // confirmation we can't safely prompt for mid-loop (the terminal is between
 // raw-mode passthroughs) — so it points the user at `gr attach <name>` and
 // reattaches to the current session.
-func (l *attachLoop) overlaySwitch(nc attachConn, targetID string, experimentalAttach bool) (bool, error) {
-	if !experimentalAttach {
-		restoreScreen(targetID)
-	}
-
-	_ = nc.SendControl("attach", attachMsgWithOptions(targetID, attachRequestOptions{
-		ExperimentalAttach: experimentalAttach,
-	}))
+func (l *attachLoop) overlaySwitch(nc attachConn, targetID string) (bool, error) {
+	_ = nc.SendControl("attach", attachMsg(targetID))
 	attachResp, _ := nc.ReadControlResponse()
 
 	if attachResp.Type == "convert_required" {
@@ -384,31 +333,22 @@ func (l *attachLoop) overlaySwitch(nc attachConn, targetID string, experimentalA
 		_ = protocol.DecodePayload(attachResp, &cr)
 		out.Printf("%q is a headless session — run `gr attach %s` to convert it to interactive.\n", cr.Name, cr.Name)
 
-		l.restoreAndAdopt(nc)
-
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	seed, err := decodeAttachResponse(attachResp, &l.info)
 	if err != nil {
 		out.Printf("Attach failed: %s\n", err)
-		l.restoreAndAdopt(nc)
 
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	l.prevSessionID = l.sessionID
-	l.prevExperimentalAttach = l.experimentalAttach
 	l.sessionID = targetID
-	l.experimentalAttach = experimentalAttach
 	l.opts.SessionID = targetID
 	l.opts.Info = &l.info
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 	l.c = nc
-
-	if experimentalAttach && seed == nil {
-		restoreScreen(targetID)
-	}
 
 	return false, nil
 }
@@ -433,9 +373,7 @@ func (l *attachLoop) onMessageOverlay() (bool, error) {
 
 	client.RunMessageBrowserOverlay(l.sessionID, messageKeysFromConfig(), messageBrowserFetcher(l.sessionID), names)
 
-	l.restoreAndAdopt(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 func (l *attachLoop) onShell() (bool, error) {
@@ -467,9 +405,7 @@ func (l *attachLoop) onShell() (bool, error) {
 		}
 	}
 
-	l.adoptCurrent(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 func (l *attachLoop) onRestart() (bool, error) {
@@ -490,15 +426,13 @@ func (l *attachLoop) onRestart() (bool, error) {
 		out.Printf("Resume failed: %s\n", errorMessage(resumeResp))
 	}
 
-	l.adoptCurrent(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 func (l *attachLoop) onDisconnected() (bool, error) {
 	out.Printf("Connection lost. Reconnecting...\n")
 
-	nc, attachResp, err := reconnectToSessionWithOptions(l.sessionID, attachRequestOptions{ExperimentalAttach: l.experimentalAttach})
+	nc, attachResp, err := reconnectToSession(l.sessionID)
 	if err != nil {
 		out.Printf("Could not reconnect: %s\n", err)
 		resetTerminal()
@@ -517,7 +451,7 @@ func (l *attachLoop) onDisconnected() (bool, error) {
 
 	l.opts.SessionID = l.sessionID
 	l.opts.Info = &l.info
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 	l.c = nc
 
 	return false, nil
@@ -531,12 +465,9 @@ func (l *attachLoop) onLastSession() (bool, error) {
 
 	if l.prevSessionID != "" {
 		l.sessionID, l.prevSessionID = l.prevSessionID, l.sessionID
-		l.experimentalAttach, l.prevExperimentalAttach = l.prevExperimentalAttach, l.experimentalAttach
 	}
 
-	l.adoptCurrent(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 func (l *attachLoop) onCycleSession(forward bool) (bool, error) {
@@ -554,14 +485,10 @@ func (l *attachLoop) onCycleSession(forward bool) (bool, error) {
 	ids := sortedSessionIDs(list.Sessions)
 	if next := adjacentSession(ids, l.sessionID, forward); next != "" {
 		l.prevSessionID = l.sessionID
-		l.prevExperimentalAttach = l.experimentalAttach
 		l.sessionID = next
-		l.experimentalAttach = sessionExperimentalAttach(list.Sessions, next)
 	}
 
-	l.adoptCurrent(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 func (l *attachLoop) onNewSession() (bool, error) {
@@ -581,8 +508,7 @@ func (l *attachLoop) onNewSession() (bool, error) {
 
 	name, repoPath, agent, labels := client.RunCreateInput(l.info.RepoPath, repos, agents, defaultAgent)
 	if name == "" {
-		l.restoreAndAdopt(nc)
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	_ = nc.SendControl("create", protocol.CreateMsg{
@@ -599,12 +525,12 @@ func (l *attachLoop) onNewSession() (bool, error) {
 	}
 
 	if createResp.Type == "error" {
-		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Create", createResp, &l.opts, &l.info)
+		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, "Create", createResp, &l.opts, &l.info)
 		if err != nil {
 			return false, err
 		}
 
-		l.setExperimentalSeed(seed)
+		l.setTerminalOwnedSeed(seed)
 		l.c = nc2
 
 		return false, nil
@@ -613,9 +539,8 @@ func (l *attachLoop) onNewSession() (bool, error) {
 	var newInfo protocol.SessionInfo
 
 	_ = protocol.DecodePayload(createResp, &newInfo)
-	l.switchTo(nc, newInfo.ID, newInfo.ExperimentalAttach)
 
-	return false, nil
+	return false, l.switchTo(nc, newInfo.ID)
 }
 
 func (l *attachLoop) onForkSession() (bool, error) {
@@ -626,9 +551,7 @@ func (l *attachLoop) onForkSession() (bool, error) {
 			return false, err
 		}
 
-		l.restoreAndAdopt(nc)
-
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	nc, err := freshClient()
@@ -648,12 +571,12 @@ func (l *attachLoop) onForkSession() (bool, error) {
 	}
 
 	if createResp.Type == "error" {
-		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, l.experimentalAttach, "Fork", createResp, &l.opts, &l.info)
+		nc2, seed, err := reattachAfterOverlayFailure(nc, l.sessionID, "Fork", createResp, &l.opts, &l.info)
 		if err != nil {
 			return false, err
 		}
 
-		l.setExperimentalSeed(seed)
+		l.setTerminalOwnedSeed(seed)
 		l.c = nc2
 
 		return false, nil
@@ -662,9 +585,8 @@ func (l *attachLoop) onForkSession() (bool, error) {
 	var newInfo protocol.SessionInfo
 
 	_ = protocol.DecodePayload(createResp, &newInfo)
-	l.switchTo(nc, newInfo.ID, newInfo.ExperimentalAttach)
 
-	return false, nil
+	return false, l.switchTo(nc, newInfo.ID)
 }
 
 func (l *attachLoop) onOrchestratorSession() (bool, error) {
@@ -690,23 +612,17 @@ func (l *attachLoop) onOrchestratorSession() (bool, error) {
 
 	if orchID == "" {
 		out.Printf("Orchestrator not enabled — set orchestrator.enabled = true in config.toml\n")
-		l.restoreAndAdopt(nc)
 
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	if orchID == l.sessionID {
 		if l.prevSessionID != "" {
 			l.sessionID, l.prevSessionID = l.prevSessionID, l.sessionID
-			l.experimentalAttach, l.prevExperimentalAttach = l.prevExperimentalAttach, l.experimentalAttach
-			l.adoptCurrent(nc)
-
-			return false, nil
+			return false, l.adoptCurrent(nc)
 		}
 
-		l.restoreAndAdopt(nc)
-
-		return false, nil
+		return false, l.adoptCurrent(nc)
 	}
 
 	var orchStatus string
@@ -729,15 +645,12 @@ func (l *attachLoop) onOrchestratorSession() (bool, error) {
 
 		if resumeResp.Type == "error" {
 			out.Printf("Orchestrator resume failed: %s\n", errorMessage(resumeResp))
-			l.restoreAndAdopt(nc)
 
-			return false, nil
+			return false, l.adoptCurrent(nc)
 		}
 	}
 
-	l.switchTo(nc, orchID, sessionExperimentalAttach(list.Sessions, orchID))
-
-	return false, nil
+	return false, l.switchTo(nc, orchID)
 }
 
 func (l *attachLoop) onRenameSession() (bool, error) {
@@ -753,9 +666,7 @@ func (l *attachLoop) onRenameSession() (bool, error) {
 		return false, err
 	}
 
-	l.restoreAndAdopt(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 func (l *attachLoop) onScrollMode() (bool, error) {
@@ -778,9 +689,7 @@ func (l *attachLoop) onScrollMode() (bool, error) {
 		return false, err
 	}
 
-	l.restoreAndAdopt(nc)
-
-	return false, nil
+	return false, l.adoptCurrent(nc)
 }
 
 // reattachAfterOverlayFailure reports a failed create/fork initiated from the
@@ -788,7 +697,7 @@ func (l *attachLoop) onScrollMode() (bool, error) {
 // updates opts. It returns the reattached client to assign to the loop's live
 // connection. verb is "Create" or "Fork". Shared by the overlay create/fork
 // error-recovery paths.
-func reattachAfterOverlayFailure(nc attachConn, sessionID string, experimentalAttach bool, verb string, resp protocol.Envelope, opts *client.PassthroughOpts, info *protocol.SessionInfo) (attachConn, *protocol.ExperimentalAttachSeedMsg, error) {
+func reattachAfterOverlayFailure(nc attachConn, sessionID string, verb string, resp protocol.Envelope, opts *client.PassthroughOpts, info *protocol.SessionInfo) (attachConn, *protocol.TerminalOwnedAttachSeedMsg, error) {
 	out.Printf("%s failed: %s\n", verb, errorMessage(resp))
 
 	nc2, err := freshClient()
@@ -799,24 +708,16 @@ func reattachAfterOverlayFailure(nc attachConn, sessionID string, experimentalAt
 
 	nc.Close()
 
-	if !experimentalAttach {
-		restoreScreen(sessionID)
-	}
-
-	seed, err := attachDecodeWithOptions(nc2, sessionID, attachRequestOptions{ExperimentalAttach: experimentalAttach}, info)
+	seed, err := attachDecodeSeed(nc2, sessionID, info)
 	if err != nil {
 		nc2.Close()
 
 		return nil, nil, err
 	}
 
-	if experimentalAttach && seed == nil {
-		restoreScreen(sessionID)
-	}
-
 	opts.SessionID = sessionID
 	opts.Info = info
-	opts.ExperimentalSeed = seed
+	opts.TerminalOwnedSeed = seed
 
 	return nc2, seed, nil
 }

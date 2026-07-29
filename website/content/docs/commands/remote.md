@@ -51,4 +51,5 @@ List remote hosts paired by this client — the client-side counterpart to
 
 ### `gr remote attach <host>/<session>`
 
-Attach to a session on a paired remote daemon.
+Attach to a session on a paired remote daemon. Remote CLI attach uses the same
+terminal-owned attach path as local interactive CLI attach.

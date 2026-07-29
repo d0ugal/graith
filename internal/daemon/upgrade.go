@@ -4510,33 +4510,6 @@ func stopDaemonWithGuard(
 	return stop(pid)
 }
 
-// StopDaemonPID stops one previously authenticated daemon peer identity. The
-// caller obtains pid from Unix peer credentials, not from a mutable PID file.
-func StopDaemonPID(pid int) error {
-	return stopDaemonPIDWithGuard(
-		pid,
-		testprocess.RefuseDaemonLifecycleMutation,
-		processidentity.IsGraithDaemon,
-		stopVerifiedDaemonPID,
-	)
-}
-
-func stopDaemonPIDWithGuard(pid int, guard func(string) error, isDaemon func(int) bool, stop func(int) error) error {
-	if err := guard("stop daemon PID"); err != nil {
-		return err
-	}
-
-	if pid <= 1 {
-		return fmt.Errorf("refusing to signal invalid pid %d", pid)
-	}
-
-	if !isDaemon(pid) {
-		return fmt.Errorf("pid %d is not a graith daemon", pid)
-	}
-
-	return stop(pid)
-}
-
 func stopVerifiedDaemonPID(pid int) error {
 	if err := testprocess.RefuseDaemonLifecycleMutation("signal verified daemon PID"); err != nil {
 		return err

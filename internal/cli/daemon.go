@@ -435,7 +435,7 @@ func printDaemonReloadResult(resp protocol.Envelope) error {
 type upgradeExchangeConn interface {
 	SetDeadline(deadline time.Time) error
 	Handshake() error
-	DaemonPID() (int, error)
+	DaemonIdentity() (client.DaemonIdentity, error)
 	SendControl(messageType string, payload any) error
 	ReadControlResponse() (protocol.Envelope, error)
 	Close()
@@ -474,15 +474,15 @@ func (e *preserveRestartRejectedError) Error() string { return e.cause.Error() }
 func (e *preserveRestartRejectedError) Unwrap() error { return e.cause }
 
 // protocolBoundaryRestartError means the running daemon speaks an older,
-// incompatible wire protocol (e.g. a protocol-1 daemon still running after the
-// binary upgraded to protocol 2) and rejected the preserve handshake before any
-// upgrade request could be sent. Sessions are never preserved across this
+// incompatible wire protocol (for example, a protocol-2 daemon still running
+// after the binary upgraded to protocol 3) and rejected the preserve handshake
+// before any upgrade request could be sent. Sessions are never preserved across this
 // protocol security boundary by design, so the restart must fall through to a
 // clean stop/start — mirroring the client connect() path's
 // restartAcrossProtocolBoundary — rather than aborting with a confusing error.
 type protocolBoundaryRestartError struct {
 	serverProtocol string
-	priorPID       int
+	priorIdentity  client.DaemonIdentity
 }
 
 func (e *protocolBoundaryRestartError) Error() string {
@@ -529,7 +529,7 @@ func restartDaemonPreservingSessionsWith(
 			boundary.serverProtocol, protocol.Version,
 		)
 
-		return restartAfterProtocolBoundary(boundary.priorPID, startAfterDeadPreserve)
+		return restartAfterProtocolBoundary(boundary.priorIdentity, startAfterDeadPreserve)
 	}
 
 	var rejected *preserveRestartRejectedError
@@ -662,7 +662,7 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 		return fmt.Errorf("read daemon handshake before upgrade: %w", err)
 	}
 
-	// An older-protocol daemon rejects the protocol-2 handshake with handshake_err
+	// An older-protocol daemon rejects the protocol-3 handshake with handshake_err
 	// before it can report handshake_ok. Recognize that exact rejection (the same
 	// one the client connect() path routes into restartAcrossProtocolBoundary) and
 	// signal a clean, non-preserving restart rather than a generic failure.
@@ -671,14 +671,14 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 
 		_ = protocol.DecodePayload(hsResp, &hsErr)
 		if serverProtocol, ok := client.OlderServerProtocolFromHandshakeError(hsErr.Reason); ok {
-			priorPID, pidErr := c.DaemonPID()
+			priorIdentity, identityErr := c.DaemonIdentity()
 			c.Close()
 
-			if pidErr != nil {
-				return fmt.Errorf("identify incompatible daemon peer: %w", pidErr)
+			if identityErr != nil {
+				return fmt.Errorf("identify incompatible daemon peer: %w", identityErr)
 			}
 
-			return &protocolBoundaryRestartError{serverProtocol: serverProtocol, priorPID: priorPID}
+			return &protocolBoundaryRestartError{serverProtocol: serverProtocol, priorIdentity: priorIdentity}
 		}
 
 		c.Close()
@@ -699,7 +699,7 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 
 	priorInstanceID := hsOk.DaemonInstanceID
 
-	priorPID, err := c.DaemonPID()
+	priorIdentity, err := c.DaemonIdentity()
 	if err != nil {
 		c.Close()
 
@@ -740,7 +740,7 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 		return &preserveRestartUnconfirmedError{
 			cause:           fmt.Errorf("send upgrade request: %w", err),
 			priorInstanceID: priorInstanceID,
-			priorPID:        priorPID,
+			priorPID:        priorIdentity.PID,
 		}
 	}
 
@@ -769,7 +769,7 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 		return &preserveRestartUnconfirmedError{
 			cause:           errors.New(e.Message),
 			priorInstanceID: priorInstanceID,
-			priorPID:        priorPID,
+			priorPID:        priorIdentity.PID,
 		}
 	}
 
@@ -792,14 +792,14 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 			return &preserveRestartUnconfirmedError{
 				cause:           fmt.Errorf("daemon exec'd into %s instead of %s", v, version.Version),
 				priorInstanceID: priorInstanceID,
-				priorPID:        priorPID,
+				priorPID:        priorIdentity.PID,
 			}
 		}
 
 		return &preserveRestartUnconfirmedError{
 			cause:           fmt.Errorf("daemon did not present a new %s generation within the start budget", version.Version),
 			priorInstanceID: priorInstanceID,
-			priorPID:        priorPID,
+			priorPID:        priorIdentity.PID,
 		}
 	}
 
@@ -867,19 +867,20 @@ func probeDaemonIdentityWithDeadline(aggregateDeadline time.Time) (daemonVersion
 }
 
 // restartAfterProtocolBoundary performs the clean stop/start when the running
-// daemon speaks an incompatible older protocol. StopDaemon signals the old PID
-// and waits for it to exit (its graceful StopAll terminates protocol-1 sessions
-// the new daemon cannot adopt); startAfterStop then acquires the freed socket via
-// EnsureDaemon, which owns stale-socket and PID-file reconciliation. A stop error
-// is a warning, not fatal: the old daemon may already be gone, and startAfterStop
-// still fails closed if the socket is not actually free.
-func restartAfterProtocolBoundary(priorPID int, startAfterStop func() error) error {
+// daemon speaks an incompatible older protocol. StopDaemonIdentity signals the
+// authenticated old peer and waits for it to exit (its graceful StopAll
+// terminates sessions the new daemon cannot adopt); startAfterStop then
+// acquires the freed socket via EnsureDaemon, which owns stale-socket and
+// PID-file reconciliation. A stop error is a warning, not fatal: the old daemon
+// may already be gone, and startAfterStop still fails closed if the socket is
+// not actually free.
+func restartAfterProtocolBoundary(identity client.DaemonIdentity, startAfterStop func() error) error {
 	if err := prepareCleanRestart(); err != nil {
 		return fmt.Errorf("reserve managed service before protocol-boundary stop: %w", err)
 	}
 
-	if err := stopDaemonPIDForCLI(priorPID); err != nil {
-		if daemonProcessAlive(priorPID) {
+	if err := stopDaemonIdentityForCLI(identity); err != nil {
+		if daemonProcessAlive(identity.PID) {
 			return fmt.Errorf("stop incompatible daemon peer: %w", err)
 		}
 	}
@@ -913,7 +914,6 @@ func restartClean() error {
 
 var (
 	prepareDaemonCleanRestartForCLI = client.PrepareDaemonCleanRestart
-	stopDaemonPIDForCLI             = daemon.StopDaemonPID
 	stopDaemonIdentityForCLI        = client.StopDaemonIdentity
 	forceStopDaemonIdentityForCLI   = client.StopDaemonIdentityForce
 	waitForDaemonSocketGoneForCLI   = client.WaitForDaemonSocketGone
