@@ -97,7 +97,11 @@ Sessions created with `gr new --experimental-attach` use the experimental
 terminal-owned attach client on future attaches. The daemon sends a coherent
 current-screen seed before live output resumes, and the client owns the outer
 alternate screen for that attach. Sessions created without the flag keep the
-default raw passthrough behavior.
+default raw passthrough behavior. When an attach request asks for the
+experimental handshake but the daemon answers with ordinary attach output (for
+example an older compatible daemon that ignores the experimental flag, or a
+current daemon falling back because the screen seed is empty), the client
+continues with the raw attach path.
 
 While experimental, this mode repaints daemon snapshots instead of forwarding
 all child terminal control traffic directly to your emulator. Expect incomplete

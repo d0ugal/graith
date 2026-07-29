@@ -135,6 +135,26 @@ func TestRestoreAndAdopt(t *testing.T) {
 	}
 }
 
+func TestRestoreAndAdoptRepaintsSeedlessExperimentalFallback(t *testing.T) {
+	restored := withLoopSeams(t, nil)
+
+	l := newLoop("braw", "")
+	l.experimentalAttach = true
+	nc := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw", ExperimentalAttach: true})),
+	}}
+
+	l.restoreAndAdopt(nc)
+
+	if l.opts.ExperimentalSeed != nil {
+		t.Fatal("seedless experimental fallback unexpectedly installed a seed")
+	}
+
+	if len(*restored) != 1 || (*restored)[0] != "braw" {
+		t.Errorf("restoreScreen calls = %v, want [braw]", *restored)
+	}
+}
+
 func TestSwitchTo(t *testing.T) {
 	restored := withLoopSeams(t, nil)
 
@@ -159,6 +179,29 @@ func TestSwitchTo(t *testing.T) {
 
 	if len(*restored) != 1 || (*restored)[0] != "new" {
 		t.Errorf("restoreScreen calls = %v, want [new] (repaint the target)", *restored)
+	}
+}
+
+func TestSwitchToExperimentalSeedlessFallbackRestoresTarget(t *testing.T) {
+	restored := withLoopSeams(t, nil)
+
+	l := newLoop("auld", "older")
+	nc := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("attached", protocol.SessionInfo{ID: "new", Name: "bonnie", ExperimentalAttach: true})),
+	}}
+
+	l.switchTo(nc, "new", true)
+
+	if l.sessionID != "new" || l.prevSessionID != "auld" {
+		t.Errorf("session/prev = %q/%q, want new/auld", l.sessionID, l.prevSessionID)
+	}
+
+	if !l.experimentalAttach || l.opts.ExperimentalSeed != nil {
+		t.Fatalf("experimentalAttach=%v seed=%+v, want experimental raw fallback", l.experimentalAttach, l.opts.ExperimentalSeed)
+	}
+
+	if len(*restored) != 1 || (*restored)[0] != "new" {
+		t.Errorf("restoreScreen calls = %v, want [new]", *restored)
 	}
 }
 

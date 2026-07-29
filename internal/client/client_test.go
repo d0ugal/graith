@@ -887,6 +887,20 @@ func TestWriteScreenRestore_HiddenCursorOmitsShowSequence(t *testing.T) {
 	}
 }
 
+func TestWriteScreenRestoreResetsTerminalStateBeforeFrame(t *testing.T) {
+	snap := &protocol.ScreenSnapshotResponseMsg{
+		Frame:         "braw\r\nbothy",
+		CursorVisible: true,
+	}
+
+	out := captureStdout(t, func() { WriteScreenRestore(snap) })
+	wantPrefix := "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[H"
+
+	if !strings.HasPrefix(out, wantPrefix) {
+		t.Fatalf("screen restore prefix = %q, want %q", out, wantPrefix)
+	}
+}
+
 func TestWriteExperimentalAttachSeed(t *testing.T) {
 	var buf bytes.Buffer
 
@@ -914,6 +928,31 @@ func TestWriteExperimentalAttachSeed(t *testing.T) {
 
 	if !strings.Contains(out, "\x1b[?25h") {
 		t.Fatalf("experimental seed should show a visible cursor, got %q", out)
+	}
+}
+
+func TestExperimentalAttachRepaintResetsScrollRegionBeforeFrame(t *testing.T) {
+	var buf bytes.Buffer
+
+	writeExperimentalScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
+		Frame:         "braw\r\nbothy",
+		CursorVisible: true,
+	})
+
+	out := buf.String()
+	wantPrefix := "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[H\x1b[2J"
+
+	if !strings.HasPrefix(out, wantPrefix) {
+		t.Fatalf("experimental repaint prefix = %q, want %q", out, wantPrefix)
+	}
+}
+
+func TestExperimentalAttachEnterResetsScrollRegionBeforeClear(t *testing.T) {
+	out := experimentalAttachEnterSequence()
+	wantPrefix := "\x1b[?1049h\x1b[r\x1b[0m\x1b[?25l\x1b[H\x1b[2J"
+
+	if out != wantPrefix {
+		t.Fatalf("experimental enter sequence = %q, want %q", out, wantPrefix)
 	}
 }
 
