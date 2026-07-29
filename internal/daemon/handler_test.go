@@ -801,6 +801,10 @@ func TestExperimentalAttachSendsSeed(t *testing.T) {
 	if seed.Snapshot.SessionID != "braw-exp" || seed.Snapshot.Cols != 80 || seed.Snapshot.Rows != 24 {
 		t.Fatalf("seed snapshot = %+v, want braw-exp 80x24", seed.Snapshot)
 	}
+
+	if seed.Snapshot.InputModes == nil || seed.Snapshot.InputModes.MouseTracking != protocol.TerminalMouseTrackingNone {
+		t.Fatalf("seed input modes = %+v, want default mouse tracking", seed.Snapshot.InputModes)
+	}
 }
 
 func TestExperimentalAttachFallsBackWhenSnapshotEmpty(t *testing.T) {
@@ -1669,6 +1673,41 @@ func TestScreenSnapshotDeltaRequestFallsBackToFull(t *testing.T) {
 
 	if resp.Frame != "full-croft" || resp.SnapshotID != 3 {
 		t.Fatalf("fallback response = %+v, want full-croft snapshot 3", resp)
+	}
+}
+
+func TestScreenSnapshotResponseCarriesInputModes(t *testing.T) {
+	resp := screenSnapshotResponse("braw-modes", grpty.ScreenCapture{
+		Frame: "braw",
+		Cols:  80,
+		Rows:  24,
+		InputModes: grpty.TerminalInputModes{
+			MouseTracking:         grpty.TerminalMouseTrackingAny,
+			MouseFormat:           grpty.TerminalMouseFormatSGR,
+			Focus:                 true,
+			BracketedPaste:        true,
+			KeyboardLocked:        true,
+			ApplicationCursorKeys: true,
+			ApplicationKeypad:     true,
+			AlternateScreen:       true,
+			AlternateScroll:       true,
+		},
+	})
+
+	if resp.InputModes == nil {
+		t.Fatal("input modes missing from snapshot response")
+	}
+
+	if resp.InputModes.MouseTracking != protocol.TerminalMouseTrackingAny ||
+		resp.InputModes.MouseFormat != protocol.TerminalMouseFormatSGR ||
+		!resp.InputModes.Focus ||
+		!resp.InputModes.BracketedPaste ||
+		!resp.InputModes.KeyboardLocked ||
+		!resp.InputModes.ApplicationCursorKeys ||
+		!resp.InputModes.ApplicationKeypad ||
+		!resp.InputModes.AlternateScreen ||
+		!resp.InputModes.AlternateScroll {
+		t.Fatalf("input modes = %+v", resp.InputModes)
 	}
 }
 

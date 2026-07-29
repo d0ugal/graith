@@ -77,6 +77,33 @@ type TerminalSnapshot struct {
 	CursorVisible bool
 	Cols          int
 	Rows          int
+	InputModes    TerminalInputModes
+}
+
+const (
+	TerminalMouseTrackingNone   = "none"
+	TerminalMouseTrackingX10    = "x10"
+	TerminalMouseTrackingNormal = "normal"
+	TerminalMouseTrackingButton = "button"
+	TerminalMouseTrackingAny    = "any"
+
+	TerminalMouseFormatX10       = "x10"
+	TerminalMouseFormatUTF8      = "utf8"
+	TerminalMouseFormatSGR       = "sgr"
+	TerminalMouseFormatURxvt     = "urxvt"
+	TerminalMouseFormatSGRPixels = "sgr_pixels"
+)
+
+type TerminalInputModes struct {
+	MouseTracking         string
+	MouseFormat           string
+	Focus                 bool
+	BracketedPaste        bool
+	KeyboardLocked        bool
+	ApplicationCursorKeys bool
+	ApplicationKeypad     bool
+	AlternateScreen       bool
+	AlternateScroll       bool
 }
 
 // Terminal is the terminal-screen emulation surface graith needs: feed it raw
@@ -156,6 +183,10 @@ type terminalSnapshotter interface {
 	Snapshot() (TerminalSnapshot, error)
 }
 
+type terminalInputModer interface {
+	InputModes() (TerminalInputModes, error)
+}
+
 // HelperProcessIdentity identifies a native terminal helper across an exec.
 // StartTime is mandatory so a non-zombie PID is never signalled after reuse.
 type HelperProcessIdentity struct {
@@ -197,7 +228,14 @@ func (t *unavailableTerminal) Snapshot() (TerminalSnapshot, error) {
 
 func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
 	if snapshotter, ok := term.(terminalSnapshotter); ok {
-		return snapshotter.Snapshot()
+		snapshot, err := snapshotter.Snapshot()
+		if err != nil {
+			return TerminalSnapshot{}, err
+		}
+
+		snapshot.InputModes = snapshot.InputModes.normalized()
+
+		return snapshot, nil
 	}
 
 	cols, rows := term.Size()
@@ -217,7 +255,33 @@ func snapshotTerminal(term Terminal) (TerminalSnapshot, error) {
 		CursorVisible: cursorVisible,
 		Cols:          cols,
 		Rows:          rows,
+		InputModes:    terminalInputModes(term),
 	}, nil
+}
+
+func terminalInputModes(term Terminal) TerminalInputModes {
+	if inputModer, ok := term.(terminalInputModer); ok {
+		if modes, err := inputModer.InputModes(); err == nil {
+			return modes.normalized()
+		}
+	}
+
+	return TerminalInputModes{
+		MouseTracking: TerminalMouseTrackingNone,
+		MouseFormat:   TerminalMouseFormatX10,
+	}
+}
+
+func (m TerminalInputModes) normalized() TerminalInputModes {
+	if m.MouseTracking == "" {
+		m.MouseTracking = TerminalMouseTrackingNone
+	}
+
+	if m.MouseFormat == "" {
+		m.MouseFormat = TerminalMouseFormatX10
+	}
+
+	return m
 }
 
 func clampSize(cols, rows int) (int, int) {

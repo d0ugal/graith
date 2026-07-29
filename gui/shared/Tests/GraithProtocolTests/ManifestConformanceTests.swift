@@ -179,6 +179,7 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "ScreenSnapshotRowMsg": probe(ScreenSnapshotRowMsg.self),
     "ScreenPreviewResponseMsg": probe(ScreenPreviewResponseMsg.self),
     "ScreenSnapshotResponseMsg": probe(ScreenSnapshotResponseMsg.self),
+    "TerminalInputModes": probe(TerminalInputModes.self),
 
 
     // Pairing + proof-of-possession.

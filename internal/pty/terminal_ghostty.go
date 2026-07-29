@@ -51,6 +51,7 @@ type ghosttyTerminal struct {
 
 var _ Terminal = (*ghosttyTerminal)(nil)
 var _ terminalSnapshotter = (*ghosttyTerminal)(nil)
+var _ terminalInputModer = (*ghosttyTerminal)(nil)
 
 func newGhosttyTerminal(cols, rows int) (gt *ghosttyTerminal, err error) {
 	defer func() {
@@ -331,7 +332,132 @@ func (gt *ghosttyTerminal) Snapshot() (snapshot TerminalSnapshot, err error) {
 		CursorVisible: cursorVisible,
 		Cols:          gt.cols,
 		Rows:          gt.rows,
+		InputModes:    terminalInputModes(gt),
 	}, nil
+}
+
+func (gt *ghosttyTerminal) InputModes() (TerminalInputModes, error) {
+	if gt.terminal == nil {
+		return TerminalInputModes{}, errGhosttyClosed
+	}
+
+	mode := func(m libghostty.Mode) (bool, error) {
+		v, err := gt.terminal.ModeGet(m)
+		if err != nil {
+			return false, fmt.Errorf("read go-libghostty mode %d: %w", m.Value(), err)
+		}
+
+		return v, nil
+	}
+
+	x10Mouse, err := mode(libghostty.ModeX10Mouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	normalMouse, err := mode(libghostty.ModeNormalMouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	buttonMouse, err := mode(libghostty.ModeButtonMouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	anyMouse, err := mode(libghostty.ModeAnyMouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	utf8Mouse, err := mode(libghostty.ModeUTF8Mouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	sgrMouse, err := mode(libghostty.ModeSGRMouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	urxvtMouse, err := mode(libghostty.ModeURxvtMouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	sgrPixelsMouse, err := mode(libghostty.ModeSGRPixelsMouse)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	altScreenLegacy, err := mode(libghostty.ModeAltScreenLegacy)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	altScreen, err := mode(libghostty.ModeAltScreen)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	altScreenSave, err := mode(libghostty.ModeAltScreenSave)
+	if err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	modes := TerminalInputModes{
+		MouseTracking:   TerminalMouseTrackingNone,
+		MouseFormat:     TerminalMouseFormatX10,
+		AlternateScreen: altScreenLegacy || altScreen || altScreenSave,
+	}
+
+	switch {
+	case anyMouse:
+		modes.MouseTracking = TerminalMouseTrackingAny
+	case buttonMouse:
+		modes.MouseTracking = TerminalMouseTrackingButton
+	case normalMouse:
+		modes.MouseTracking = TerminalMouseTrackingNormal
+	case x10Mouse:
+		modes.MouseTracking = TerminalMouseTrackingX10
+	}
+
+	switch {
+	case sgrPixelsMouse:
+		modes.MouseFormat = TerminalMouseFormatSGRPixels
+	case urxvtMouse:
+		modes.MouseFormat = TerminalMouseFormatURxvt
+	case sgrMouse:
+		modes.MouseFormat = TerminalMouseFormatSGR
+	case utf8Mouse:
+		modes.MouseFormat = TerminalMouseFormatUTF8
+	}
+
+	if modes.Focus, err = mode(libghostty.ModeFocusEvent); err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	if modes.BracketedPaste, err = mode(libghostty.ModeBracketedPaste); err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	if modes.KeyboardLocked, err = mode(libghostty.ModeKAM); err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	if modes.ApplicationCursorKeys, err = mode(libghostty.ModeDECCKM); err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	if modes.ApplicationKeypad, err = mode(libghostty.ModeKeypadKeys); err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	if modes.AlternateScroll, err = mode(libghostty.ModeAltScroll); err != nil {
+		return TerminalInputModes{}, err
+	}
+
+	return modes, nil
 }
 
 func (gt *ghosttyTerminal) Close() (err error) {

@@ -234,7 +234,12 @@ type PassthroughOpts struct {
 	TerminalOwned        bool
 	experimentalChrome   *experimentalAttachChrome
 	experimentalViewport *experimentalAttachViewport
+	experimentalInput    *experimentalInputRouter
 	terminalRefresh      chan struct{}
+	// LocalHistoryScroll is the experimental attach hook for wheel events that
+	// are not routed to a child mouse-tracking or alternate-scroll mode. The
+	// #1827 local-history work will install the actual history view here.
+	LocalHistoryScroll func(delta int) bool
 	// DragArrowKeys enables the touch/hold-and-drag gesture that translates
 	// left-button mouse drags into arrow-key presses. Off by default.
 	DragArrowKeys bool
@@ -245,7 +250,8 @@ type PassthroughOpts struct {
 	// without risk of injecting input (issue #31). Prefix-key actions (detach,
 	// session switching, overlays) still work; only data sent to the agent is
 	// suppressed. A persistent indicator shows the mode.
-	ReadOnly               bool
+	ReadOnly bool
+
 	experimentalSnapshotID uint64
 }
 
@@ -497,12 +503,16 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 	prefixByte := keys.Prefix
 	hasKitty := kittyCtrlSeq(prefixByte) != nil
 
-	// sendInput forwards keystrokes to the daemon, except in read-only mode where
-	// all input is dropped so an observer can't inject anything (issue #31).
-	// Prefix-key actions (detach, overlays, session switching) bypass this — they
-	// never reach the agent.
+	// sendInput forwards keystrokes to the daemon, except in read-only mode
+	// or while the child has keyboard action mode enabled. Prefix-key actions
+	// (detach, overlays, session switching) bypass this; they never reach the
+	// agent.
 	sendInput := func(b []byte) {
 		if opts.ReadOnly {
+			return
+		}
+
+		if opts.experimentalInput != nil && opts.experimentalInput.keyboardLocked() {
 			return
 		}
 
@@ -610,6 +620,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 								c.sendExperimentalViewportResize(opts.experimentalViewport)
 							} else {
+								if opts.experimentalInput != nil {
+									opts.experimentalInput.updateSnapshot(&snap)
+								}
+
 								writeExperimentalScreenSnapshotWithChrome(stdout, &snap, opts.experimentalChrome)
 
 								if snap.SnapshotID != 0 {
@@ -680,6 +694,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 		buf := make([]byte, 4096)
 		prefixSeen := false
+		forwardedPasteActive := false
 
 		for {
 			n, err := stdin.Read(buf)
@@ -710,14 +725,35 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			// Translate left-button drag gestures into arrow-key presses before
 			// the prefix scan. Emitted arrow sequences contain no prefix byte,
 			// and mouse-wheel/other events pass through untouched.
-			if dragArrow != nil {
+			if dragArrow != nil && (opts.experimentalInput == nil || !opts.experimentalInput.childMouseTracking()) {
 				input = dragArrow.process(input)
+				n = len(input)
+			}
+
+			if opts.experimentalInput != nil {
+				input = opts.experimentalInput.process(input)
 				n = len(input)
 			}
 
 			sendStart := 0
 
 			for i := 0; i < n; i++ {
+				if opts.experimentalInput != nil {
+					if hasSequence(input, i, bracketedPasteStart) {
+						forwardedPasteActive = true
+						i += len(bracketedPasteStart) - 1
+
+						continue
+					}
+
+					if hasSequence(input, i, bracketedPasteEnd) {
+						forwardedPasteActive = false
+						i += len(bracketedPasteEnd) - 1
+
+						continue
+					}
+				}
+
 				if prefixSeen {
 					key := input[i]
 					skip := 0
@@ -793,6 +829,10 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					i += skip
 					sendStart = i + 1
 
+					continue
+				}
+
+				if forwardedPasteActive {
 					continue
 				}
 

@@ -40,6 +40,17 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 		CursorVisible: true,
 		Cols:          2,
 		Rows:          1,
+		InputModes: TerminalInputModes{
+			MouseTracking:         TerminalMouseTrackingButton,
+			MouseFormat:           TerminalMouseFormatSGR,
+			Focus:                 true,
+			BracketedPaste:        true,
+			KeyboardLocked:        true,
+			ApplicationCursorKeys: true,
+			ApplicationKeypad:     true,
+			AlternateScreen:       true,
+			AlternateScroll:       true,
+		},
 	}
 
 	payload, err := encodeGhosttySnapshot(want)
@@ -58,6 +69,10 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 		t.Fatalf("snapshot metadata = %+v, want %+v", got, want)
 	}
 
+	if got.InputModes != want.InputModes {
+		t.Fatalf("snapshot input modes = %+v, want %+v", got.InputModes, want.InputModes)
+	}
+
 	if len(got.Cells) != len(want.Cells) {
 		t.Fatalf("snapshot cells = %d, want %d", len(got.Cells), len(want.Cells))
 	}
@@ -66,6 +81,33 @@ func TestGhosttySnapshotProtocolRoundTrip(t *testing.T) {
 		if got.Cells[i] != want.Cells[i] {
 			t.Errorf("cell %d = %+v, want %+v", i, got.Cells[i], want.Cells[i])
 		}
+	}
+}
+
+func TestGhosttySnapshotProtocolAcceptsLegacyFrameWithoutInputModes(t *testing.T) {
+	payload, err := encodeGhosttySnapshot(TerminalSnapshot{
+		Cells:         []Cell{{Content: "braw"}},
+		CursorVisible: true,
+		Cols:          1,
+		Rows:          1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload = payload[:len(payload)-ghosttySnapshotInputModeBytes]
+
+	got, err := decodeGhosttySnapshot(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := TerminalInputModes{
+		MouseTracking: TerminalMouseTrackingNone,
+		MouseFormat:   TerminalMouseFormatX10,
+	}
+	if got.InputModes != want {
+		t.Fatalf("legacy input modes = %+v, want %+v", got.InputModes, want)
 	}
 }
 
@@ -318,7 +360,7 @@ func TestGhosttySnapshotProtocolRejectsMalformedFrames(t *testing.T) {
 	tests["invalid color kind"][17] = 0xff
 	tests["invalid cursor bool"][8] = 2
 	tests["unknown style flag"][19] = 0x80
-	tests["invalid utf8"][len(valid)-1] = 0xff
+	tests["invalid utf8"][13+16+3] = 0xff
 	tests["cursor outside grid"][5] = 1
 	tests["indexed color range"][17] = byte(ColorIndexed)
 	binary.BigEndian.PutUint32(tests["indexed color range"][21:25], 256)

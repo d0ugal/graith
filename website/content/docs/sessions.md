@@ -127,12 +127,15 @@ clients filter those query sequences and unsafe OSC/DCS/APC side-effect
 protocols before they reach the host terminal. Window-title changes stay
 model-local, clipboard writes are denied, hyperlink labels remain visible but
 are not forwarded as host hyperlinks, and notification/image protocols are
-ignored or stripped. Expect incomplete support for child-driven
-mouse/focus/bracketed-paste modes. Host-terminal scrollback is not the history
-surface in this mode. The Graith status bar is composed inside the owned frame,
-with read-only attach still replacing it with the persistent read-only
-indicator.
-
+ignored or stripped. Graith mirrors the child's mouse, focus, bracketed-paste,
+application cursor-key, and keypad modes from the same daemon-side terminal
+model. Wheel events go to child mouse tracking when requested, use
+alternate-scroll cursor keys for alternate-screen children without mouse
+tracking, and otherwise wait for the local terminal-aware history surface.
+Pixel-coordinate mouse reporting is still incomplete. Host-terminal scrollback
+is not the history surface in this mode. The Graith status bar is composed
+inside the owned frame, with read-only attach still replacing it with the
+persistent read-only indicator.
 When the status bar or read-only indicator is visible and the terminal has at
 least two rows, Graith reserves one top or bottom row according to
 `[status_bar].position` and resizes the child PTY to the remaining rows. The

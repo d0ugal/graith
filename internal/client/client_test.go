@@ -956,6 +956,25 @@ func TestExperimentalAttachEnterResetsScrollRegionBeforeClear(t *testing.T) {
 	}
 }
 
+func TestExperimentalAttachExitSequenceCleansMirroredModes(t *testing.T) {
+	seq := experimentalAttachExitSequence()
+
+	for _, want := range []string{
+		"\x1b[?1000l",
+		"\x1b[?1002l",
+		"\x1b[?1003l",
+		"\x1b[?1006l",
+		"\x1b[?1004l",
+		"\x1b[?2004l",
+		"\x1b[?1l",
+		"\x1b>",
+	} {
+		if !strings.Contains(seq, want) {
+			t.Fatalf("experimental attach exit sequence missing %q in %q", want, seq)
+		}
+	}
+}
+
 func TestWriteExperimentalScreenSnapshotIgnoresEmptyFrame(t *testing.T) {
 	var buf bytes.Buffer
 

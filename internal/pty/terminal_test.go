@@ -151,6 +151,38 @@ func TestNormalAndAlternateScreen(t *testing.T) {
 	}
 }
 
+func TestTerminalInputModes(t *testing.T) {
+	term := newTerminalTestTerm(t, 20, 3)
+
+	write(t, term, ""+
+		"\x1b[?1002h"+ // button-event mouse
+		"\x1b[?1006h"+ // SGR mouse format
+		"\x1b[?1004h"+ // focus events
+		"\x1b[?2004h"+ // bracketed paste
+		"\x1b[2h"+ // keyboard action mode
+		"\x1b[?1h"+ // application cursor keys
+		"\x1b="+ // application keypad
+		"\x1b[?1049h"+ // alternate screen
+		"\x1b[?1007h") // alternate scroll
+
+	snap := renderFrame(term)
+
+	want := TerminalInputModes{
+		MouseTracking:         TerminalMouseTrackingButton,
+		MouseFormat:           TerminalMouseFormatSGR,
+		Focus:                 true,
+		BracketedPaste:        true,
+		KeyboardLocked:        true,
+		ApplicationCursorKeys: true,
+		ApplicationKeypad:     true,
+		AlternateScreen:       true,
+		AlternateScroll:       true,
+	}
+	if snap.InputModes != want {
+		t.Fatalf("input modes = %+v, want %+v", snap.InputModes, want)
+	}
+}
+
 func TestCursorMovement(t *testing.T) {
 	term := newTerminalTestTerm(t, 20, 5)
 
