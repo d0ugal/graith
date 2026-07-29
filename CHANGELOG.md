@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.71.0](https://github.com/d0ugal/graith/compare/v0.70.6...v0.71.0) (2026-07-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* gr new --experimental-attach and the experimental_attach wire request key have been removed. Interactive CLI attaches now require terminal-owned attach seeds by default, and the control protocol is bumped to 3.0 to keep older clients and daemons from silently using the removed attach mode.
+
+### Features
+
+* add row deltas for experimental attach ([2612a9c](https://github.com/d0ugal/graith/commit/2612a9c38175bb4a44c52bb3457111bbaa4fcda8))
+* bound attach output backpressure ([303526e](https://github.com/d0ugal/graith/commit/303526e443a93e6adbea22a1b28f0b092bdae2b1))
+* cache agent info results ([bc1f386](https://github.com/d0ugal/graith/commit/bc1f386b72252f37667b3adbc6e94aa0abe3e877))
+* centralize terminal query ownership ([7926bb8](https://github.com/d0ugal/graith/commit/7926bb81629d2f07d45ab42977ae8537b20ee0ce))
+* default to terminal-owned attach ([7035c99](https://github.com/d0ugal/graith/commit/7035c9947394d23dcb6ef81169c80219e88422c0))
+* define experimental attach chrome frame ([ce26a6c](https://github.com/d0ugal/graith/commit/ce26a6c05bc14c8df8d7fac6a2b9b583cf5ebf28))
+* make topic browser hierarchical ([62e479b](https://github.com/d0ugal/graith/commit/62e479b7b738baf4716b194d177100e5da3177f4))
+* route experimental attach input modes ([b5087cb](https://github.com/d0ugal/graith/commit/b5087cb2893aa62c8f1b68e483653d42ddefdb32))
+* seed experimental attach history ([1bd9c1e](https://github.com/d0ugal/graith/commit/1bd9c1ef2f491cb75a1b96c0b1606193e62cfa6f))
+
+
+### Bug Fixes
+
+* adapt libghostty native 0.16 APIs ([f75f5d8](https://github.com/d0ugal/graith/commit/f75f5d8c3f9b144e955e2cfb93140740bb7480af))
+* cap libghostty zig source-build jobs ([#1853](https://github.com/d0ugal/graith/issues/1853)) ([e2f8f3c](https://github.com/d0ugal/graith/commit/e2f8f3c8d644c6ece795f05f12a201c56f419239))
+* harden experimental attach fallback ([88197ef](https://github.com/d0ugal/graith/commit/88197ef206ae1a6446aca270cba89d2f56f2ebc2))
+* isolate lint registry auth ([dd257aa](https://github.com/d0ugal/graith/commit/dd257aa3f330f32edf923b6f554da1ce5e91d353))
+* keep native generated commits renovate-managed ([fdd81b1](https://github.com/d0ugal/graith/commit/fdd81b1b7b41a44c1e3f755eec04507d57734bb5))
+* pass repo to libghostty release publishing ([#1832](https://github.com/d0ugal/graith/issues/1832)) ([38472bb](https://github.com/d0ugal/graith/commit/38472bb8a94a37d1bffe01085f1c886f227dc3ef))
+* preserve overlay selection after delete ([2694cec](https://github.com/d0ugal/graith/commit/2694cec3c9f8ec7de0c43bf40fc00d9eec2e4d62))
+* publish libghostty artifacts from materialized lock ([#1834](https://github.com/d0ugal/graith/issues/1834)) ([f8f3e2b](https://github.com/d0ugal/graith/commit/f8f3e2b751514c59b625765448aecf206df485e2))
+* restore experimental attach cursor after chrome refresh ([ef60a0c](https://github.com/d0ugal/graith/commit/ef60a0ca1a609de0eb0c615e497020ce2c2a35b3))
+* update libghostty native dependency unit ([4320ea9](https://github.com/d0ugal/graith/commit/4320ea91a86faa235536401c43418fbef1a541e2))
+* update module github.com/go-git/go-git/v5 to v5.19.2 ([#1859](https://github.com/d0ugal/graith/issues/1859)) ([19f46c7](https://github.com/d0ugal/graith/commit/19f46c77cfe6a95e4a0be89f1bff552da4271b5b))
+* update module modernc.org/sqlite to v1.55.0 ([#1854](https://github.com/d0ugal/graith/issues/1854)) ([6ebdb06](https://github.com/d0ugal/graith/commit/6ebdb0647776abd35703f241cd540f09240157ba))
+* use gomodguard_v2 linter ([2427b88](https://github.com/d0ugal/graith/commit/2427b88839fa0eb3ce143dfc2d985d642a13ff4c))
+* validate libghostty Linux artifact pkg-config portably ([#1856](https://github.com/d0ugal/graith/issues/1856)) ([c520a77](https://github.com/d0ugal/graith/commit/c520a77d819599a752ecc579cfc0460dc450bfc2))
+
+
+### Documentation
+
+* remove stray README session metadata ([c16d891](https://github.com/d0ugal/graith/commit/c16d8911820a158e5a202521dac55ad9eaee9d36))
+* standardize messaging topic examples ([2561638](https://github.com/d0ugal/graith/commit/2561638f3c6c1e063925b398bf7ce4861644694c))
+
+
+### Dependencies
+
+* **deps:** update dependency nolabs-ai/nono to v0.70.0 ([#1860](https://github.com/d0ugal/graith/issues/1860)) ([78773fc](https://github.com/d0ugal/graith/commit/78773fc8ab2ee36a8644d36185240505840c885d))
+* **deps:** update renovate/renovate docker tag to v43.286.1 ([#1823](https://github.com/d0ugal/graith/issues/1823)) ([a84e890](https://github.com/d0ugal/graith/commit/a84e89072b51dcaeeaa645bd5ca7e561db509d73))
+* **deps:** update renovate/renovate docker tag to v43.287.0 ([#1852](https://github.com/d0ugal/graith/issues/1852)) ([8e9142d](https://github.com/d0ugal/graith/commit/8e9142d18d5b2683fbc102f66631cd5f90bb3281))
+* **deps:** update renovate/renovate docker tag to v44 ([#1857](https://github.com/d0ugal/graith/issues/1857)) ([2a84b31](https://github.com/d0ugal/graith/commit/2a84b3130e11b8d040906417230dbfc0e50fa105))
+* **generated:** refresh generated dependency metadata ([44f0f10](https://github.com/d0ugal/graith/commit/44f0f10b1fff915d0faac49c4d3ea86f6910daee))
+
 ## [0.70.6](https://github.com/d0ugal/graith/compare/v0.70.5...v0.70.6) (2026-07-29)
 
 
