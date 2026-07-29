@@ -457,6 +457,37 @@ func TestGolangciLintDockerImageIsDigestPinned(t *testing.T) {
 	assertNotContains(t, renovate, "pinDigests: false")
 }
 
+func TestGolangciLintUsesGomodguardV2(t *testing.T) {
+	repoRoot := p11RepoRoot()
+	config := readPolicyFile(t, filepath.Join(repoRoot, ".golangci.yml"))
+
+	var parsed struct {
+		Linters struct {
+			Enable  []string `yaml:"enable"`
+			Disable []string `yaml:"disable"`
+		} `yaml:"linters"`
+	}
+	if err := yaml.Unmarshal([]byte(config), &parsed); err != nil {
+		t.Fatalf("parse .golangci.yml: %v", err)
+	}
+
+	if !containsString(parsed.Linters.Enable, "gomodguard_v2") {
+		t.Fatal(".golangci.yml must enable gomodguard_v2")
+	}
+
+	if containsString(parsed.Linters.Enable, "gomodguard") {
+		t.Fatal(".golangci.yml must not enable deprecated gomodguard")
+	}
+
+	if !containsString(parsed.Linters.Disable, "gomodguard") {
+		t.Fatal(".golangci.yml must disable deprecated gomodguard")
+	}
+
+	if containsString(parsed.Linters.Disable, "gomodguard_v2") {
+		t.Fatal(".golangci.yml must not disable gomodguard_v2")
+	}
+}
+
 func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	pins := readPolicyFile(t, filepath.Join(repoRoot, ".github/ci-tool-versions.env"))
