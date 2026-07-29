@@ -118,13 +118,16 @@ While attached to a session, press `ctrl+b m` to open the message browser. It
 opens on the latest direct message. Use `j`/`k` to move through older and newer
 messages, `G` to jump back to the latest message, `h`/`l` to switch the selected
 conversation or topic, `t` to browse available topics, and `d` to return to
-direct messages.
+direct messages. Topic names that contain `/` are shown as a tree; namespace
+rows aggregate message counts, unread counts, and latest-message metadata, and
+`enter` expands or collapses the selected namespace row.
 
 The browser keeps rendering bounded to the terminal pane. If a refresh brings in
 new messages while you are reading older history, the selected message stays in
-place; press `G` when you want the latest view again. Topic rows show total and
-unread counts, and empty direct-message, topic, and no-topic states are shown
-explicitly. Browsing a topic in the overlay is read-only and does not mark
+place; press `G` when you want the latest view again. Topic leaf rows keep using
+the full raw topic name when loading messages, and empty direct-message, topic,
+and no-topic states are shown explicitly. Browsing a topic in the overlay is
+read-only and does not mark
 messages read; use `gr msg sub --topic <name> --all --ack` to acknowledge a
 topic.
 

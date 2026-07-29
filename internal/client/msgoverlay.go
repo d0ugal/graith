@@ -24,10 +24,180 @@ const (
 // msg_topics. It mirrors the daemon response without importing daemon types into
 // the client package.
 type MsgTopicInfo struct {
-	Name     string `json:"name"`
-	Total    int64  `json:"total"`
-	Unread   int64  `json:"unread"`
-	LatestAt string `json:"latest_at,omitempty"`
+	Name          string `json:"name"`
+	Total         int64  `json:"total"`
+	Unread        int64  `json:"unread"`
+	LatestAt      string `json:"latest_at,omitempty"`
+	LatestPreview string `json:"latest_preview,omitempty"`
+}
+
+type topicRailRow struct {
+	key           string
+	path          string
+	label         string
+	depth         int
+	hasChildren   bool
+	expanded      bool
+	topic         MsgTopicInfo
+	topicCount    int
+	total         int64
+	unread        int64
+	latestAt      string
+	latestPreview string
+	latestTopic   string
+}
+
+func (r topicRailRow) isLeaf() bool {
+	return r.topic.Name != ""
+}
+
+func (r topicRailRow) displayLabel() string {
+	label := r.label
+	if r.hasChildren {
+		label += "/"
+	}
+
+	return label
+}
+
+type topicTreeNode struct {
+	part          string
+	path          string
+	topic         MsgTopicInfo
+	children      map[string]*topicTreeNode
+	childOrder    []string
+	total         int64
+	unread        int64
+	topicCount    int
+	latestAt      string
+	latestPreview string
+	latestTopic   string
+}
+
+func splitTopicPath(topic string) []string {
+	parts := strings.Split(topic, "/")
+
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+
+	if len(out) == 0 && topic != "" {
+		return []string{topic}
+	}
+
+	return out
+}
+
+func topicLatestAfter(candidate, current string) bool {
+	if current == "" {
+		return candidate != ""
+	}
+
+	if candidate == "" {
+		return false
+	}
+
+	candidateTime, currentTime := parseMsgTime(candidate), parseMsgTime(current)
+
+	if !candidateTime.IsZero() && !currentTime.IsZero() {
+		return candidateTime.After(currentTime)
+	}
+
+	return candidate > current
+}
+
+func (n *topicTreeNode) absorb(topic MsgTopicInfo) {
+	n.total += topic.Total
+	n.unread += topic.Unread
+	n.topicCount++
+
+	if topicLatestAfter(topic.LatestAt, n.latestAt) || (n.latestAt == "" && n.latestPreview == "") {
+		n.latestAt = topic.LatestAt
+		n.latestPreview = topic.LatestPreview
+		n.latestTopic = topic.Name
+	}
+}
+
+func buildTopicRailRows(topics []MsgTopicInfo, collapsed map[string]bool) []topicRailRow {
+	root := &topicTreeNode{children: map[string]*topicTreeNode{}}
+
+	for _, topic := range topics {
+		parts := splitTopicPath(topic.Name)
+		if len(parts) == 0 {
+			continue
+		}
+
+		node := root
+		for i, part := range parts {
+			if node.children == nil {
+				node.children = map[string]*topicTreeNode{}
+			}
+
+			path := strings.Join(parts[:i+1], "/")
+
+			child, ok := node.children[part]
+
+			if !ok {
+				child = &topicTreeNode{
+					part:     part,
+					path:     path,
+					children: map[string]*topicTreeNode{},
+				}
+				node.children[part] = child
+				node.childOrder = append(node.childOrder, part)
+			}
+
+			child.absorb(topic)
+			node = child
+		}
+
+		node.topic = topic
+	}
+
+	var (
+		rows []topicRailRow
+		walk func(*topicTreeNode, int)
+	)
+
+	walk = func(node *topicTreeNode, depth int) {
+		for _, part := range node.childOrder {
+			child := node.children[part]
+			hasChildren := len(child.childOrder) > 0
+			expanded := hasChildren && !collapsed[child.path]
+
+			keyPrefix := "topic:"
+			if hasChildren {
+				keyPrefix = "ns:"
+			}
+
+			rows = append(rows, topicRailRow{
+				key:           keyPrefix + child.path,
+				path:          child.path,
+				label:         child.part,
+				depth:         depth,
+				hasChildren:   hasChildren,
+				expanded:      expanded,
+				topic:         child.topic,
+				topicCount:    child.topicCount,
+				total:         child.total,
+				unread:        child.unread,
+				latestAt:      child.latestAt,
+				latestPreview: child.latestPreview,
+				latestTopic:   child.latestTopic,
+			})
+
+			if expanded {
+				walk(child, depth+1)
+			}
+		}
+	}
+
+	walk(root, 0)
+
+	return rows
 }
 
 // MessageFetchRequest describes the optional topic payload requested by a
@@ -108,16 +278,17 @@ type messageOverlayModel struct {
 	fetch MessageBrowserFetch
 	names map[string]string
 
-	mode          msgBrowserMode
-	conversations []msgConversation
-	cursor        int // selected direct conversation in the left rail
-	topics        []MsgTopicInfo
-	topicCursor   int
-	topicMessages []msgEntry
-	topicLoaded   string
-	topicTotal    int64
-	topicLatestAt string
-	msgCursor     int // selected message within the current direct thread/topic
+	mode           msgBrowserMode
+	conversations  []msgConversation
+	cursor         int // selected direct conversation in the left rail
+	topics         []MsgTopicInfo
+	topicCollapsed map[string]bool
+	topicCursor    int
+	topicMessages  []msgEntry
+	topicLoaded    string
+	topicTotal     int64
+	topicLatestAt  string
+	msgCursor      int // selected message within the current direct thread/topic
 	// lineScroll pages within the focused message when it's taller than the
 	// viewport; reset to 0 whenever the message cursor moves.
 	lineScroll int
@@ -158,12 +329,13 @@ func newMessageOverlayModel(selfID string, fetch func() ([]protocol.Conversation
 
 func newMessageBrowserModel(selfID string, fetch MessageBrowserFetch, names map[string]string) messageOverlayModel {
 	return messageOverlayModel{
-		selfID:  selfID,
-		fetch:   fetch,
-		names:   names,
-		pinned:  map[string]bool{},
-		keys:    DefaultMessageKeys(),
-		refresh: refreshInterval,
+		selfID:         selfID,
+		fetch:          fetch,
+		names:          names,
+		pinned:         map[string]bool{},
+		topicCollapsed: map[string]bool{},
+		keys:           DefaultMessageKeys(),
+		refresh:        refreshInterval,
 	}
 }
 
@@ -366,11 +538,34 @@ func (m messageOverlayModel) selectedTopicName() string {
 }
 
 func (m messageOverlayModel) selectedTopicInfo() (MsgTopicInfo, bool) {
-	if m.topicCursor < 0 || m.topicCursor >= len(m.topics) {
+	row, ok := m.selectedTopicRow()
+	if !ok || !row.isLeaf() {
 		return MsgTopicInfo{}, false
 	}
 
-	return m.topics[m.topicCursor], true
+	return row.topic, true
+}
+
+func (m messageOverlayModel) topicRows() []topicRailRow {
+	return buildTopicRailRows(m.topics, m.topicCollapsed)
+}
+
+func (m messageOverlayModel) selectedTopicRow() (topicRailRow, bool) {
+	rows := m.topicRows()
+	if m.topicCursor < 0 || m.topicCursor >= len(rows) {
+		return topicRailRow{}, false
+	}
+
+	return rows[m.topicCursor], true
+}
+
+func (m messageOverlayModel) selectedTopicKey() string {
+	row, ok := m.selectedTopicRow()
+	if !ok {
+		return ""
+	}
+
+	return row.key
 }
 
 func (m messageOverlayModel) needsTopicFetch() bool {
@@ -412,9 +607,9 @@ func restoreDirectCursor(conversations []msgConversation, selectedPeer string) (
 	return 0, false
 }
 
-func restoreTopicCursor(topics []MsgTopicInfo, selectedTopic string) (int, bool) {
-	for i, t := range topics {
-		if t.Name == selectedTopic {
+func restoreTopicCursor(rows []topicRailRow, selectedKey string) (int, bool) {
+	for i, row := range rows {
+		if row.key == selectedKey {
 			return i, true
 		}
 	}
@@ -478,12 +673,12 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Preserve the selected source and focused message across refreshes.
-		var selectedPeer, selectedTopic, focusedMsgID string
+		var selectedPeer, selectedTopicKey, focusedMsgID string
 		if m.cursor >= 0 && m.cursor < len(m.conversations) {
 			selectedPeer = m.conversations[m.cursor].peerID
 		}
 
-		selectedTopic = m.selectedTopicName()
+		selectedTopicKey = m.selectedTopicKey()
 		if e := m.currentEntry(); e != nil {
 			focusedMsgID = e.id
 		}
@@ -513,7 +708,7 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.cursor, peerFound = restoreDirectCursor(m.conversations, selectedPeer)
 
-		m.topicCursor, topicFound = restoreTopicCursor(m.topics, selectedTopic)
+		m.topicCursor, topicFound = restoreTopicCursor(m.topicRows(), selectedTopicKey)
 		if currentTopic := m.selectedTopicName(); currentTopic != m.topicLoaded {
 			m.topicMessages = nil
 			m.topicLoaded = ""
@@ -584,7 +779,8 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Horizontal: switch conversation/topic in the rail.
 		case matchKey(m.keys.NextConv, s):
 			if m.mode == msgModeTopics {
-				if m.topicCursor < len(m.topics)-1 {
+				rows := m.topicRows()
+				if m.topicCursor < len(rows)-1 {
 					m.topicCursor++
 					m.msgCursor = max(0, m.msgCount()-1)
 					m.lineScroll = 0
@@ -655,6 +851,16 @@ func (m messageOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Pin/unpin the focused message so it stays expanded even when not
 		// focused (the focused message is always expanded regardless).
 		case matchKey(m.keys.Pin, s):
+			if m.mode == msgModeTopics {
+				if m.topicCollapsed == nil {
+					m.topicCollapsed = map[string]bool{}
+				}
+
+				if m.toggleSelectedTopicNamespace() {
+					return m, nil
+				}
+			}
+
 			if e := m.currentEntry(); e != nil && e.id != "" {
 				m.pinned[e.id] = !m.pinned[e.id]
 			}
@@ -697,12 +903,25 @@ func (m messageOverlayModel) threadViewport() (int, int) {
 		return max(1, m.width-1), bodyH
 	}
 
-	railW := 26
-	if m.width < 70 {
-		railW = max(16, m.width/3)
-	}
+	railW := m.railWidth(m.width)
 
 	return max(10, m.width-railW-3), bodyH
+}
+
+func (m messageOverlayModel) railWidth(width int) int {
+	if width < 70 {
+		return max(16, width/3)
+	}
+
+	if m.mode == msgModeTopics {
+		if width < 90 {
+			return 32
+		}
+
+		return 38
+	}
+
+	return 26
 }
 
 // maxLineScroll is the furthest lineScroll can advance for the focused message:
@@ -758,12 +977,32 @@ func (m messageOverlayModel) setAllPinned(v bool) {
 	}
 }
 
+func (m messageOverlayModel) toggleSelectedTopicNamespace() bool {
+	row, ok := m.selectedTopicRow()
+	if !ok || !row.hasChildren {
+		return false
+	}
+
+	if m.topicCollapsed[row.path] {
+		delete(m.topicCollapsed, row.path)
+	} else {
+		m.topicCollapsed[row.path] = true
+	}
+
+	return true
+}
+
 func (m messageOverlayModel) contextLabel() string {
 	source := "Direct"
 	if m.mode == msgModeTopics {
 		source = "Topics"
-		if topic := m.selectedTopicName(); topic != "" {
-			source = "Topic " + topic
+		if row, ok := m.selectedTopicRow(); ok {
+			source = "Topic " + row.path
+			if row.hasChildren {
+				source += "/"
+			} else if row.isLeaf() {
+				source = "Topic " + row.topic.Name
+			}
 		}
 	} else if m.cursor >= 0 && m.cursor < len(m.conversations) {
 		source = "Direct " + m.conversations[m.cursor].peerName
@@ -816,7 +1055,7 @@ func (m messageOverlayModel) View() tea.View {
 	// single-column thread view so the overlay stays usable (and exitable).
 	var body, helpLine string
 	if w < 36 {
-		helpLine = help.Render(fmt.Sprintf("%s/%s msg  %s/%s scroll  %s pin  %s close",
+		helpLine = help.Render(fmt.Sprintf("%s/%s msg  %s/%s scroll  %s pin/toggle  %s close",
 			primaryKey(m.keys.Up), primaryKey(m.keys.Down),
 			primaryKey(m.keys.PageDown), primaryKey(m.keys.PageUp),
 			primaryKey(m.keys.Pin), primaryKey(m.keys.Cancel)))
@@ -824,7 +1063,7 @@ func (m messageOverlayModel) View() tea.View {
 		body = m.renderThread(max(1, w-1), bodyH)
 	} else {
 		helpLine = help.Render(fmt.Sprintf(
-			"%s/%s older/newer  %s/%s scroll long msg  %s latest  %s/%s source  %s topics  %s direct  %s pin  %s/%s all  %s close",
+			"%s/%s older/newer  %s/%s scroll long msg  %s latest  %s/%s source  %s topics  %s direct  %s pin/toggle  %s/%s all  %s close",
 			primaryKey(m.keys.Up), primaryKey(m.keys.Down),
 			primaryKey(m.keys.PageUp), primaryKey(m.keys.PageDown),
 			primaryKey(m.keys.Bottom),
@@ -835,10 +1074,7 @@ func (m messageOverlayModel) View() tea.View {
 			primaryKey(m.keys.Cancel)))
 		helpLine = ansi.Truncate(helpLine, w, "…")
 
-		railW := 26
-		if w < 70 {
-			railW = max(16, w/3)
-		}
+		railW := m.railWidth(w)
 		// Reserve 3 columns for the thread pane's border + padding.
 		threadW := max(10, w-railW-3)
 
@@ -919,19 +1155,22 @@ func (m messageOverlayModel) renderRail(width, height int) string {
 
 func (m messageOverlayModel) renderTopicRail(width, height int) string {
 	dim := lipgloss.NewStyle().Foreground(colorDim)
-	if m.loaded && len(m.topics) == 0 {
+
+	rows := m.topicRows()
+
+	if m.loaded && len(rows) == 0 {
 		return dim.Render("No available topics")
 	}
 
 	start := 0
 
-	if len(m.topics) > height {
+	if len(rows) > height {
 		if m.topicCursor >= height {
 			start = m.topicCursor - height + 1
 		}
 
-		if start > len(m.topics)-height {
-			start = len(m.topics) - height
+		if start > len(rows)-height {
+			start = len(rows) - height
 		}
 
 		if start < 0 {
@@ -939,12 +1178,12 @@ func (m messageOverlayModel) renderTopicRail(width, height int) string {
 		}
 	}
 
-	end := min(len(m.topics), start+height)
+	end := min(len(rows), start+height)
 
 	var lines []string
 
 	for i := start; i < end; i++ {
-		topic := m.topics[i]
+		row := rows[i]
 		prefix := "  "
 		style := lipgloss.NewStyle()
 
@@ -953,16 +1192,58 @@ func (m messageOverlayModel) renderTopicRail(width, height int) string {
 			style = style.Bold(true).Foreground(colorPurple)
 		}
 
-		countStr := " (" + strconv.FormatInt(topic.Total, 10) + ")"
-		if topic.Unread > 0 {
-			countStr = " (" + strconv.FormatInt(topic.Total, 10) + "/" + strconv.FormatInt(topic.Unread, 10) + " new)"
+		indent := strings.Repeat("  ", row.depth)
+		marker := "  "
+
+		if row.hasChildren {
+			marker = "▾ "
+			if !row.expanded {
+				marker = "▸ "
+			}
 		}
 
-		label := truncate(topic.Name, max(1, width-len(prefix)-lipgloss.Width(countStr)))
-		lines = append(lines, prefix+style.Render(label)+dim.Render(countStr))
+		lead := prefix + indent + marker
+		countStr := topicCountLabel(row.total, row.unread)
+		suffix := countStr
+
+		if latest := topicLatestLabel(row.latestAt); latest != "" {
+			suffix += " " + latest
+		}
+
+		if preview := topicPreviewLabel(row.latestPreview); preview != "" {
+			suffix += " " + preview
+		}
+
+		labelBudget := max(1, width-lipgloss.Width(lead)-lipgloss.Width(countStr))
+		label := ansi.Truncate(row.displayLabel(), labelBudget, "…")
+		suffixBudget := max(0, width-lipgloss.Width(lead)-lipgloss.Width(label))
+		suffix = ansi.Truncate(suffix, suffixBudget, "…")
+
+		lines = append(lines, lead+style.Render(label)+dim.Render(suffix))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func topicCountLabel(total, unread int64) string {
+	if unread > 0 {
+		return " (" + strconv.FormatInt(total, 10) + "/" + strconv.FormatInt(unread, 10) + " new)"
+	}
+
+	return " (" + strconv.FormatInt(total, 10) + ")"
+}
+
+func topicLatestLabel(latestAt string) string {
+	t := parseMsgTime(latestAt)
+	if t.IsZero() {
+		return latestAt
+	}
+
+	return t.Local().Format("Jan 2 15:04")
+}
+
+func topicPreviewLabel(preview string) string {
+	return strings.TrimSpace(firstLine(sanitizeMessageBody(preview)))
 }
 
 func (m messageOverlayModel) renderThread(width, height int) string {
@@ -975,12 +1256,13 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 	)
 
 	if m.mode == msgModeTopics {
-		if m.loaded && len(m.topics) == 0 {
+		rows := m.topicRows()
+		if m.loaded && len(rows) == 0 {
 			return dim.Render("No available topics")
 		}
 
-		topicName = m.selectedTopicName()
-		if topicName == "" {
+		row, ok := m.selectedTopicRow()
+		if !ok {
 			if m.loaded {
 				return dim.Render("Select a topic")
 			}
@@ -988,6 +1270,11 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 			return ""
 		}
 
+		if !row.isLeaf() {
+			return m.renderTopicNamespace(row, width, height)
+		}
+
+		topicName = row.topic.Name
 		if topicName != m.topicLoaded {
 			return dim.Render("Loading topic messages…")
 		}
@@ -1137,6 +1424,43 @@ func (m messageOverlayModel) renderThread(width, height int) string {
 	end := min(total, start+height)
 
 	return strings.Join(lines[start:end], "\n")
+}
+
+func (m messageOverlayModel) renderTopicNamespace(row topicRailRow, width, height int) string {
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+
+	title := row.path
+
+	if row.hasChildren {
+		title += "/"
+	}
+
+	lines := []string{
+		dim.Render(ansi.Truncate(title, width, "…")),
+		dim.Render(ansi.Truncate(fmt.Sprintf("%d messages across %d topics", row.total, row.topicCount), width, "…")),
+	}
+
+	if preview := topicPreviewLabel(row.latestPreview); preview != "" {
+		latest := "Latest"
+		if stamp := topicLatestLabel(row.latestAt); stamp != "" {
+			latest += " " + stamp
+		}
+
+		if row.latestTopic != "" {
+			latest += " in " + row.latestTopic
+		}
+
+		lines = append(lines,
+			dim.Render(ansi.Truncate(latest, width, "…")),
+			dim.Render(ansi.Truncate(preview, width, "…")),
+		)
+	}
+
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // msgTimestamp renders an absolute time plus a relative delta, e.g.

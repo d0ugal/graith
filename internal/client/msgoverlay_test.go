@@ -37,6 +37,16 @@ func findConv(convs []msgConversation, peerID string) *msgConversation {
 	return nil
 }
 
+func findTopicRow(rows []topicRailRow, key string) (topicRailRow, bool) {
+	for _, row := range rows {
+		if row.key == key {
+			return row, true
+		}
+	}
+
+	return topicRailRow{}, false
+}
+
 func TestGroupConversationsDirections(t *testing.T) {
 	self := "ben"
 	names := map[string]string{"bairn": "wee-bairn"}
@@ -668,6 +678,68 @@ func TestMsgOverlay_FetchCmdDirectModeDoesNotRequestTopicBody(t *testing.T) {
 	}
 }
 
+func TestBuildTopicRailRowsAggregatesSlashNamespaces(t *testing.T) {
+	topics := []MsgTopicInfo{
+		{Name: "ship/pr-1817/tribunal/codex", Total: 3, Unread: 1, LatestAt: "2026-06-25T10:04:00Z", LatestPreview: "codex says braw\nmore"},
+		{Name: "ship/pr-1817/ci", Total: 1, LatestAt: "2026-06-25T10:03:00Z", LatestPreview: "ci says canny"},
+		{Name: "ship/pr-1817/tribunal/claude", Total: 2, Unread: 1, LatestAt: "2026-06-25T10:02:00Z", LatestPreview: "claude says dreich"},
+		{Name: "chat", Total: 5, LatestAt: "2026-06-25T10:01:00Z", LatestPreview: "chat says braw"},
+	}
+
+	rows := buildTopicRailRows(topics, nil)
+
+	ship, ok := findTopicRow(rows, "ns:ship")
+	if !ok {
+		t.Fatalf("ship namespace row missing from %+v", rows)
+	}
+
+	if ship.total != 6 || ship.unread != 2 || ship.topicCount != 3 {
+		t.Fatalf("ship aggregate = total %d unread %d topics %d, want 6/2/3", ship.total, ship.unread, ship.topicCount)
+	}
+
+	if ship.latestPreview != "codex says braw\nmore" || ship.latestTopic != "ship/pr-1817/tribunal/codex" {
+		t.Fatalf("ship latest = preview %q topic %q, want codex latest", ship.latestPreview, ship.latestTopic)
+	}
+
+	codex, ok := findTopicRow(rows, "topic:ship/pr-1817/tribunal/codex")
+	if !ok {
+		t.Fatalf("codex leaf row missing from %+v", rows)
+	}
+
+	if codex.label != "codex" || codex.topic.Name != "ship/pr-1817/tribunal/codex" {
+		t.Fatalf("codex row = label %q raw %q, want readable leaf with full raw topic", codex.label, codex.topic.Name)
+	}
+
+	chat, ok := findTopicRow(rows, "topic:chat")
+	if !ok || chat.label != "chat" {
+		t.Fatalf("flat chat topic should remain a leaf row, got %+v ok=%v", chat, ok)
+	}
+}
+
+func TestRenderTopicRail_HierarchicalMetadata(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{
+		{Name: "ship/pr-1817/tribunal/codex", Total: 3, Unread: 1, LatestAt: "2026-06-25T10:04:00Z", LatestPreview: "codex says braw\nmore"},
+		{Name: "ship/pr-1817/ci", Total: 1, LatestAt: "2026-06-25T10:03:00Z", LatestPreview: "ci says canny"},
+		{Name: "ship/pr-1817/tribunal/claude", Total: 2, Unread: 1, LatestAt: "2026-06-25T10:02:00Z", LatestPreview: "claude says dreich"},
+	}
+
+	out := m.renderTopicRail(90, 20)
+	if !strings.Contains(out, "ship/") || !strings.Contains(out, "tribunal/") || !strings.Contains(out, "codex") {
+		t.Fatalf("hierarchical topic rail did not show expected tree labels:\n%s", out)
+	}
+
+	if !strings.Contains(out, "(6/2 new)") {
+		t.Fatalf("namespace row should show aggregate count/unread metadata:\n%s", out)
+	}
+
+	if !strings.Contains(out, "codex says braw") {
+		t.Fatalf("namespace row should show latest preview text:\n%s", out)
+	}
+}
+
 // Note: tickCmd's timer behavior is covered structurally via the msgTickMsg
 // handler tests below (TickStartsFetch / TickSkipsWhenFetching) rather than by
 // executing the real 2-second tea.Tick, which would add a wall-clock delay to
@@ -811,6 +883,102 @@ func TestMsgOverlay_TopicSwitchFetchesSelectedTopic(t *testing.T) {
 
 	if mm.topicLoaded != "blether" || mm.msgCount() != 2 || mm.msgCursor != 1 {
 		t.Fatalf("topic state = loaded %q count %d cursor %d, want blether/2/latest", mm.topicLoaded, mm.msgCount(), mm.msgCursor)
+	}
+}
+
+func TestMsgOverlay_TopicNamespaceToggleCollapsesChildren(t *testing.T) {
+	m := newMessageBrowserModel("ben", nil, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{
+		{Name: "ship/pr-1817/tribunal/codex", Total: 3},
+		{Name: "ship/pr-1817/ci", Total: 1},
+		{Name: "chat", Total: 5},
+	}
+
+	if _, ok := findTopicRow(m.topicRows(), "topic:ship/pr-1817/ci"); !ok {
+		t.Fatal("expanded tree should initially include ci leaf")
+	}
+
+	updated, cmd := m.Update(keyPress("enter"))
+	mm := updated.(messageOverlayModel)
+
+	if cmd != nil {
+		t.Fatal("collapsing a topic namespace should not return a command")
+	}
+
+	if !mm.topicCollapsed["ship"] {
+		t.Fatalf("ship namespace should be collapsed, got %+v", mm.topicCollapsed)
+	}
+
+	if _, ok := findTopicRow(mm.topicRows(), "topic:ship/pr-1817/ci"); ok {
+		t.Fatalf("collapsed ship namespace should hide ci leaf, rows %+v", mm.topicRows())
+	}
+
+	if _, ok := findTopicRow(mm.topicRows(), "topic:chat"); !ok {
+		t.Fatalf("collapsing ship should leave unrelated flat topics visible, rows %+v", mm.topicRows())
+	}
+}
+
+func TestMsgOverlay_TopicLeafUnderNamespaceFetchesRawTopicAtLatest(t *testing.T) {
+	var requested []string
+
+	fetch := func(req MessageFetchRequest) (MessageFetchResult, bool) {
+		requested = append(requested, req.Topic)
+
+		result := MessageFetchResult{
+			Topics: []MsgTopicInfo{
+				{Name: "ship/pr-1817/tribunal/codex", Total: 2},
+			},
+		}
+		if req.Topic == "ship/pr-1817/tribunal/codex" {
+			result.TopicMessages = []protocol.ConversationMessage{
+				cmID("t0", "ship/pr-1817/tribunal/codex", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
+				cmID("t1", "ship/pr-1817/tribunal/codex", "croft", "croft", "braw", "2026-06-25T10:00:01Z"),
+			}
+		}
+
+		return result, true
+	}
+
+	m := newMessageBrowserModel("ben", fetch, nil)
+	m.mode = msgModeTopics
+	m.loaded = true
+	m.topics = []MsgTopicInfo{{Name: "ship/pr-1817/tribunal/codex", Total: 2}}
+	m.width, m.height = 100, 24
+
+	var cmd tea.Cmd
+
+	var mm messageOverlayModel
+
+	for i := 0; i < 10 && cmd == nil; i++ {
+		updated, nextCmd := m.Update(keyPress("l"))
+		mm = updated.(messageOverlayModel)
+		cmd = nextCmd
+		m = mm
+	}
+
+	if cmd == nil {
+		t.Fatal("selecting an unloaded leaf topic should fetch it")
+	}
+
+	gotMsg := cmd()
+
+	fetched, ok := gotMsg.(msgFetchedMsg)
+
+	if !ok {
+		t.Fatalf("topic fetch command returned %T, want msgFetchedMsg", gotMsg)
+	}
+
+	updated, _ := mm.Update(fetched)
+	mm = updated.(messageOverlayModel)
+
+	if len(requested) != 1 || requested[0] != "ship/pr-1817/tribunal/codex" {
+		t.Fatalf("requested topics = %v, want full raw codex topic", requested)
+	}
+
+	if got := mm.currentEntry(); got == nil || got.id != "t1" {
+		t.Fatalf("selected topic should open at newest fetched message t1, got %+v", got)
 	}
 }
 

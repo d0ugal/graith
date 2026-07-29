@@ -311,10 +311,11 @@ var msgTopicsCmd = &cobra.Command{
 
 		var list struct {
 			Streams []struct {
-				Name     string `json:"name"`
-				Total    int64  `json:"total"`
-				Unread   int64  `json:"unread"`
-				LatestAt string `json:"latest_at"`
+				Name          string `json:"name"`
+				Total         int64  `json:"total"`
+				Unread        int64  `json:"unread"`
+				LatestAt      string `json:"latest_at"`
+				LatestPreview string `json:"latest_preview,omitempty"`
 			} `json:"streams"`
 		}
 
