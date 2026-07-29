@@ -18,10 +18,10 @@ Use when: validating designs, stress-testing plans, surfacing hidden assumptions
 ```bash
 gr new proposer --repo ~/Code/api --prompt "design the new caching layer"
 gr new devil --mirror proposer --background \
-  --prompt "read the proposed design, find 10 counterarguments and edge cases, publish to /topic challenge"
+  --prompt "read the proposed design, find 10 counterarguments and edge cases, publish to topic advocate/cache-design/7f2a9/response"
 
 # Proposer reads challenges
-gr msg sub --topic challenge --wait --ack
+gr msg sub --topic advocate/cache-design/7f2a9/response --wait --ack
 
 # Proposer responds
 gr msg send devil "addressed issues 1-7, disagree on 8 because ..."
@@ -39,16 +39,16 @@ Use when: high-stakes code review, security audit, architectural decisions. Find
 ```bash
 # Launch 3 independent reviewers sharing the same worktree
 gr new judge-bugs --mirror feature-branch --background \
-  --prompt "review for correctness and logic bugs, publish findings to /topic review-bugs"
+  --prompt "review for correctness and logic bugs, publish findings to topic tribunal/auth-refactor/7f2a9/judge/bugs"
 gr new judge-security --mirror feature-branch --background \
-  --prompt "review for security issues and input validation, publish to /topic review-security"
+  --prompt "review for security issues and input validation, publish to topic tribunal/auth-refactor/7f2a9/judge/security"
 gr new judge-perf --mirror feature-branch --background \
-  --prompt "review for performance and scalability, publish to /topic review-perf"
+  --prompt "review for performance and scalability, publish to topic tribunal/auth-refactor/7f2a9/judge/perf"
 
 # Collect verdicts
-gr msg sub --topic review-bugs --wait --ack
-gr msg sub --topic review-security --wait --ack
-gr msg sub --topic review-perf --wait --ack
+gr msg sub --topic tribunal/auth-refactor/7f2a9/judge/bugs --wait --ack
+gr msg sub --topic tribunal/auth-refactor/7f2a9/judge/security --wait --ack
+gr msg sub --topic tribunal/auth-refactor/7f2a9/judge/perf --wait --ack
 
 # Store results
 gr store put reviews/2026-06-17.md --file /tmp/synthesized-review.md
@@ -64,9 +64,9 @@ Use when: security hardening, robustness testing, error-handling edge cases.
 
 ```bash
 gr new red-team --mirror app --background \
-  --prompt "attack the auth system, try SQL injection, token theft, session fixation, publish each finding to /topic red-findings"
+  --prompt "attack the auth system, try SQL injection, token theft, session fixation, publish each finding to topic red-blue/auth-hardening/7f2a9/loop"
 gr new blue-team --repo ~/Code/api \
-  --prompt "subscribe to /topic red-findings, fix each vulnerability as reported, confirm fix to /topic blue-fixes"
+  --prompt "subscribe to topic red-blue/auth-hardening/7f2a9/loop, fix each vulnerability as reported, confirm fixes to the same topic"
 
 # Red team publishes findings
 # Blue team patches and confirms
@@ -122,20 +122,20 @@ Use when: design decisions with multiple valid approaches, or to converge divers
 ```bash
 # Three independent proposals
 gr new proposal-1 --no-repo --background \
-  --prompt "propose a caching strategy for the API, publish to /topic proposals"
+  --prompt "propose a caching strategy for the API, publish to topic pair/api-cache/7f2a9/response/proposal-1"
 gr new proposal-2 --no-repo --background \
-  --prompt "propose a caching strategy for the API, publish to /topic proposals"
+  --prompt "propose a caching strategy for the API, publish to topic pair/api-cache/7f2a9/response/proposal-2"
 gr new proposal-3 --no-repo --background \
-  --prompt "propose a caching strategy for the API, publish to /topic proposals"
+  --prompt "propose a caching strategy for the API, publish to topic pair/api-cache/7f2a9/response/proposal-3"
 
 # Wait for all three
-gr msg sub --topic proposals --wait --ack
-gr msg sub --topic proposals --wait --ack
-gr msg sub --topic proposals --wait --ack
+gr msg sub --topic pair/api-cache/7f2a9/response/proposal-1 --wait --ack
+gr msg sub --topic pair/api-cache/7f2a9/response/proposal-2 --wait --ack
+gr msg sub --topic pair/api-cache/7f2a9/response/proposal-3 --wait --ack
 
 # Synthesize
 gr new synthesizer --no-repo \
-  --prompt "read all proposals from /topic proposals, find common ground, produce one unified solution"
+  --prompt "read all proposal topics under pair/api-cache/7f2a9/response, find common ground, produce one unified solution"
 ```
 
 ## Swarm audit
@@ -147,14 +147,16 @@ Use when: large codebases, security audits, dependency reviews, batch linting ac
 ```bash
 for module in auth database cache api middleware; do
   gr new audit-$module --repo ~/Code/api --in-place --background \
-    --prompt "security audit of the $module package, publish findings to /topic audit-results"
+    --prompt "security audit of the $module package, publish findings to topic audit/api/7f2a9/file/$module"
 done
 
 # Monitor progress
 gr list
 
 # Collect all findings
-gr msg sub --topic audit-results --all --ack
+for module in auth database cache api middleware; do
+  gr msg sub --topic audit/api/7f2a9/file/$module --all --ack
+done
 
 # Clean up
 gr delete --repo api --stopped -f

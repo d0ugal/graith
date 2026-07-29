@@ -15,10 +15,10 @@ One publishes; many react:
 
 ```bash
 # Scanner agent
-gr msg pub --topic vulnerabilities "SQL injection in user.go:89"
+gr msg pub --topic audit/auth-hardening/7f2a9/file/user "SQL injection in user.go:89"
 
 # Fixer agents (each subscribing)
-gr msg sub --topic vulnerabilities --follow --ack
+gr msg sub --topic audit/auth-hardening/7f2a9/file/user --follow --ack
 ```
 
 ## Request/reply
@@ -27,13 +27,13 @@ A request with a dedicated reply channel:
 
 ```bash
 # Requester
-gr msg send worker-1 "analyze auth.go for race conditions" --reply-to analysis-results
-gr msg sub --topic analysis-results --wait
+gr msg send worker-1 "analyze auth.go for race conditions" --reply-to review/auth-races/7f2a9/response/worker-1
+gr msg sub --topic review/auth-races/7f2a9/response/worker-1 --wait
 
 # Worker
 gr msg inbox --all --ack
 # ... does analysis ...
-gr msg pub --topic analysis-results "No race conditions found. Thread-safe."
+gr msg pub --topic review/auth-races/7f2a9/response/worker-1 "No race conditions found. Thread-safe."
 ```
 
 ## Hierarchical coordination

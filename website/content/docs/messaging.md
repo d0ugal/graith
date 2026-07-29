@@ -25,12 +25,44 @@ graith's SQLite-backed messaging connects sessions, sessions and the user, and a
 ## Publishing to topics
 
 ```bash
-gr msg pub --topic code-review "Found a race condition in handler.go:245"
-gr msg pub --topic build-results --file ./test-output.txt
-gr msg pub --topic updates --no-reply "Morning report is ready"
+gr msg pub --topic review/auth-middleware/7f2a9 "Found a race condition in handler.go:245"
+gr msg pub --topic ci/auth-middleware/7f2a9/result --file ./test-output.txt
+gr msg pub --topic updates/daily/2026-07-29/summary --no-reply "Morning report is ready"
 ```
 
 Any session can publish to any topic. The sender is auto-detected from `GRAITH_SESSION_ID` and `GRAITH_SESSION_NAME`. Outside a graith session, `sender_name` is empty and `sender_id` becomes `pid:<pid>`.
+
+### Topic naming
+
+Use slash-delimited semantic paths for shared workflow topics. Put a stable,
+human-readable work scope near the front, put uniqueness in a dedicated run-id
+segment, and use short semantic leaves for the role of each stream:
+
+```text
+ship/<work-scope>/<run-id>/tribunal/<judge>
+tribunal/<work-scope>/<run-id>/judge/<agent>
+pair/<work-scope>/<run-id>/chat
+pair/<work-scope>/<run-id>/response/<agent>
+review/<run-id>
+```
+
+Good scope segments are short slugs such as `auth-middleware`, `ci-overlay`, or
+`api-cache`; good run IDs are `$GRAITH_SESSION_ID`, a short timestamp, or an
+8-character random slug. Keep run IDs in their own segment instead of appending
+timestamps or model names to the topic. Prefer semantic leaves such as `chat`,
+`ci`, `judge`, `response`, `stage`, `file`, `loop`, and `round/<n>`.
+
+Reserved stream families:
+
+- `inbox:<session-id>` is for direct messages and is managed by graith.
+- `_system.` is for daemon-authored system streams.
+- Shipped orchestration skills reserve roots such as `ship`, `tribunal`, `pair`,
+  `review`, `research`, `chain`, `audit`, `security`, `advocate`, `impl`, and
+  `red-blue`.
+
+Publisher and subscriber topic strings must match exactly. When writing prompts
+for child agents, expand topic placeholders to literal topic paths before
+launching the agent; agents should not receive template-looking topic names.
 
 ## Direct messaging
 
@@ -66,22 +98,22 @@ gr msg send --parent "tests are green, ready for review"
 
 ```bash
 # Read unread messages
-gr msg sub --topic code-review
+gr msg sub --topic review/auth-middleware/7f2a9
 
 # Read all messages (not just unread)
-gr msg sub --topic code-review --all
+gr msg sub --topic review/auth-middleware/7f2a9 --all
 
 # Read and acknowledge
-gr msg sub --topic code-review --all --ack
+gr msg sub --topic review/auth-middleware/7f2a9 --all --ack
 
 # Block until a message arrives
-gr msg sub --topic code-review --wait
+gr msg sub --topic review/auth-middleware/7f2a9 --wait
 
 # Stream continuously
-gr msg sub --topic code-review --follow
+gr msg sub --topic review/auth-middleware/7f2a9 --follow
 
 # Filter to a specific thread
-gr msg sub --topic code-review --thread abc123
+gr msg sub --topic review/auth-middleware/7f2a9 --thread abc123
 
 # Read inbox
 gr msg inbox --all --ack
@@ -98,7 +130,7 @@ gr msg inbox --all --ack
 ## Acknowledging
 
 ```bash
-gr msg ack --topic code-review
+gr msg ack --topic review/auth-middleware/7f2a9
 ```
 
 Marks every message in the stream as read for the current subscriber.
@@ -134,17 +166,17 @@ Threads structure conversations within a stream:
 
 ```bash
 # Start a thread
-gr msg pub --topic design "Proposal: new API endpoint for /users"
+gr msg pub --topic design/api-cache/7f2a9/chat "Proposal: new API endpoint for /users"
 
 # Continue the thread (use the message ID from the first message as thread ID)
-gr msg pub --topic design --thread msg_abc123 "I agree, but we should add pagination"
+gr msg pub --topic design/api-cache/7f2a9/chat --thread msg_abc123 "I agree, but we should add pagination"
 
 # Read only messages in a thread
-gr msg sub --topic design --thread msg_abc123
+gr msg sub --topic design/api-cache/7f2a9/chat --thread msg_abc123
 
 # Set up a reply channel
-gr msg send worker-1 "Please review this change" --reply-to review-results
-# worker-1 can then publish results to the review-results topic
+gr msg send worker-1 "Please review this change" --reply-to review/auth-middleware/7f2a9/response/worker-1
+# worker-1 can then publish results to the reply topic
 ```
 
 ## Message format
@@ -155,7 +187,7 @@ In JSON output (`--json` or agent mode):
 {
   "id": "msg_abc123",
   "seq": 1,
-  "stream": "code-review",
+  "stream": "review/auth-middleware/7f2a9",
   "body": "Found a race condition in handler.go:245",
   "sender_id": "session-uuid",
   "sender_name": "fix-auth-bug",

@@ -345,7 +345,7 @@ agent = "claude"
 prompt = "Synthesize the completed work into a release report, deliver it, then exit."
 [trigger.action.deliver]
 store = "shared:reports/{scenario_name}-final.md"
-topic = "scenario-reports"
+topic = "scenario/{scenario_name}/report"
 required = true
 ```
 
