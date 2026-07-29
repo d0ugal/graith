@@ -22,18 +22,10 @@ var attachReadOnly bool
 // attachMsg builds an AttachMsg carrying the invocation-wide read-only flag, so
 // every (re)attach in the passthrough loop preserves the observer's mode.
 func attachMsg(sessionID string) protocol.AttachMsg {
-	return attachMsgWithOptions(sessionID, attachRequestOptions{})
-}
-
-type attachRequestOptions struct {
-	ExperimentalAttach bool
-}
-
-func attachMsgWithOptions(sessionID string, opts attachRequestOptions) protocol.AttachMsg {
 	return protocol.AttachMsg{
-		SessionID:          sessionID,
-		ReadOnly:           attachReadOnly,
-		ExperimentalAttach: opts.ExperimentalAttach,
+		SessionID:     sessionID,
+		ReadOnly:      attachReadOnly,
+		TerminalOwned: true,
 	}
 }
 
@@ -87,9 +79,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 
 	for _, s := range list.Sessions {
 		if s.Name == name || s.ID == name {
-			return runAttachByIDWithOptions(c, s.ID, nil, attachRunOptions{
-				ExperimentalAttach: s.ExperimentalAttach,
-			})
+			return runAttachByID(c, s.ID, nil)
 		}
 	}
 
@@ -148,24 +138,10 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 
 		_ = protocol.DecodePayload(createResp, &newInfo)
 
-		return runAttachByIDWithOptions(c, newInfo.ID, result.Collapsed, attachRunOptions{
-			ExperimentalAttach: newInfo.ExperimentalAttach,
-		}, result.PickerState)
+		return runAttachByID(c, newInfo.ID, result.Collapsed, result.PickerState)
 	}
 
-	return runAttachByIDWithOptions(c, result.SessionID, result.Collapsed, attachRunOptions{
-		ExperimentalAttach: sessionExperimentalAttach(sessions, result.SessionID),
-	}, result.PickerState)
-}
-
-func sessionExperimentalAttach(sessions []protocol.SessionInfo, sessionID string) bool {
-	for _, s := range sessions {
-		if s.ID == sessionID {
-			return s.ExperimentalAttach
-		}
-	}
-
-	return false
+	return runAttachByID(c, result.SessionID, result.Collapsed, result.PickerState)
 }
 
 // terminalResetSequence is the escape-sequence blob that undoes terminal state
@@ -191,13 +167,4 @@ func terminalResetSequence() string {
 // terminal — unsupported sequences are ignored.
 func resetTerminal() {
 	fmt.Print(terminalResetSequence())
-}
-
-// restoreScreen repaints a session's last screen snapshot after an overlay or
-// prompt drew over it. It is a package var so the attach-loop state helpers can
-// be unit-tested without a live daemon; production always fetches the real
-// snapshot.
-var restoreScreen = func(sessionID string) {
-	snap := client.FetchScreenSnapshot(cfg, paths, cfgFile, sessionID)
-	client.WriteScreenRestore(snap)
 }

@@ -17,11 +17,10 @@ position = "bottom"  # "bottom" or "top"
 
 The status bar shows session name, status, agent type, branch, git status, unread messages, and fleet summary, updating in real time.
 
-In experimental terminal-owned attach sessions, this position also selects the
-Graith-owned chrome row. With a visible status bar or read-only indicator,
-Graith reserves that row outside the child PTY viewport when the terminal has at
-least two rows; one-row terminals suppress the chrome row so the child keeps the
-line.
+In terminal-owned attach, this position also selects the Graith-owned chrome
+row. With a visible status bar or read-only indicator, Graith reserves that row
+outside the child PTY viewport when the terminal has at least two rows; one-row
+terminals suppress the chrome row so the child keeps the line.
 
 ## Notifications
 

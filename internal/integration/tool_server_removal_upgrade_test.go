@@ -19,10 +19,12 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/daemon"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 const (
 	preToolServerRemovalRevision = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
+	preToolServerRemovalProtocol = "2"
 	exactRevisionFetchURL        = "https://github.com/d0ugal/graith.git"
 )
 
@@ -31,9 +33,17 @@ const (
 // daemon before the replacement runs, rather than relying on deleted manager
 // code in the new binary.
 func TestToolServerRemovalUpgradeFromExactMain(t *testing.T) {
+	currentProtocol, _, ok := strings.Cut(protocol.Version, ".")
+	if !ok || currentProtocol != preToolServerRemovalProtocol {
+		t.Skipf("exact-main tool-server handoff fixture is protocol %s; current protocol %s uses clean protocol-boundary restart", preToolServerRemovalProtocol, protocol.Version)
+	}
+
 	repoRoot := integrationRepoRoot(t)
-	oldBinary := buildRevisionBinary(t, repoRoot, preToolServerRemovalRevision, "old-gr")
-	newBinary := buildCurrentBinary(t, repoRoot, "new-gr")
+	// Protocol-boundary restart stops the authenticated daemon peer through the
+	// same production PID identity guard, so the fixture daemon must use the
+	// production process name instead of a test-only "old-gr" binary name.
+	oldBinary := buildRevisionBinary(t, repoRoot, preToolServerRemovalRevision, "gr")
+	newBinary := buildCurrentBinary(t, repoRoot, "gr")
 
 	root := t.TempDir()
 	configHome := filepath.Join(root, "config")

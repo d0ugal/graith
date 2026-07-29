@@ -142,11 +142,11 @@ func TestNewLabelFlagIsRepeatable(t *testing.T) {
 	}
 }
 
-func TestNewExperimentalAttachFlagRegistered(t *testing.T) {
+func TestNewExperimentalAttachFlagRemoved(t *testing.T) {
 	registerCommands()
 
-	if flag := newCmd.Flags().Lookup("experimental-attach"); flag == nil || flag.Value.Type() != "bool" {
-		t.Fatalf("new --experimental-attach = %#v, want bool flag", flag)
+	if flag := newCmd.Flags().Lookup("experimental-attach"); flag != nil {
+		t.Fatalf("new --experimental-attach = %#v, want removed flag", flag)
 	}
 }
 

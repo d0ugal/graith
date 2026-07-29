@@ -73,13 +73,11 @@ public struct CreateMsg: Codable, Sendable {
     public var inPlace: Bool?
     public var allowConcurrent: Bool?
     public var skipModelValidation: Bool?
-    public var experimentalAttach: Bool?
 
     public init(name: String, labels: [String]? = nil, agent: String, repoPath: String, base: String? = nil,
                 prompt: String? = nil, model: String? = nil, parentID: String? = nil,
                 noRepo: Bool? = nil, mirror: String? = nil, readOnly: Bool? = nil,
-                agentHooks: Bool? = nil, inPlace: Bool? = nil,
-                experimentalAttach: Bool? = nil) {
+                agentHooks: Bool? = nil, inPlace: Bool? = nil) {
         self.name = name
         self.labels = labels
         self.agent = agent
@@ -93,7 +91,6 @@ public struct CreateMsg: Codable, Sendable {
         self.readOnly = readOnly
         self.agentHooks = agentHooks
         self.inPlace = inPlace
-        self.experimentalAttach = experimentalAttach
     }
 
     enum CodingKeys: String, CodingKey {
@@ -112,7 +109,6 @@ public struct CreateMsg: Codable, Sendable {
         case inPlace = "in_place"
         case allowConcurrent = "allow_concurrent"
         case skipModelValidation = "skip_model_validation"
-        case experimentalAttach = "experimental_attach"
     }
 }
 
@@ -148,16 +144,16 @@ public struct MigrateMsg: Codable, Sendable {
 public struct AttachMsg: Codable, Sendable {
     public var sessionID: String
     public var readOnly: Bool?
-    public var experimentalAttach: Bool?
-    public init(sessionID: String, readOnly: Bool? = nil, experimentalAttach: Bool? = nil) {
+    public var terminalOwned: Bool?
+    public init(sessionID: String, readOnly: Bool? = nil, terminalOwned: Bool? = nil) {
         self.sessionID = sessionID
         self.readOnly = readOnly
-        self.experimentalAttach = experimentalAttach
+        self.terminalOwned = terminalOwned
     }
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case readOnly = "read_only"
-        case experimentalAttach = "experimental_attach"
+        case terminalOwned = "terminal_owned"
     }
 }
 
@@ -321,7 +317,6 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
     public var readOnlyBranch: Bool?
     public var readOnlyRevision: String?
     public var inPlace: Bool?
-    public var experimentalAttach: Bool?
     public var model: String?
     public var toolName: String?
     public var includes: [IncludedRepoInfo]?
@@ -350,7 +345,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         statusChangedAt: String? = nil, dirty: Bool? = nil, unpushedCount: Int? = nil,
         sandboxed: Bool? = nil, mirror: Bool? = nil,
         readOnlyBranch: Bool? = nil, readOnlyRevision: String? = nil,
-        inPlace: Bool? = nil, experimentalAttach: Bool? = nil,
+        inPlace: Bool? = nil,
         model: String? = nil, toolName: String? = nil,
         includes: [IncludedRepoInfo]? = nil, configStale: Bool? = nil, starred: Bool? = nil,
         systemKind: String? = nil,
@@ -365,7 +360,7 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         self.statusChangedAt = statusChangedAt; self.dirty = dirty; self.unpushedCount = unpushedCount
         self.sandboxed = sandboxed; self.mirror = mirror
         self.readOnlyBranch = readOnlyBranch; self.readOnlyRevision = readOnlyRevision
-        self.inPlace = inPlace; self.experimentalAttach = experimentalAttach
+        self.inPlace = inPlace
         self.model = model; self.toolName = toolName; self.includes = includes
         self.configStale = configStale; self.starred = starred; self.systemKind = systemKind
         self.summaryText = summaryText
@@ -400,7 +395,6 @@ public struct SessionInfo: Codable, Sendable, Identifiable, Hashable {
         case readOnlyBranch = "read_only_branch"
         case readOnlyRevision = "read_only_revision"
         case inPlace = "in_place"
-        case experimentalAttach = "experimental_attach"
         case model
         case toolName = "tool_name"
         case includes

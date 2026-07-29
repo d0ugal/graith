@@ -8,7 +8,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-func TestExperimentalChromeFrameLayout(t *testing.T) {
+func TestTerminalOwnedChromeFrameLayout(t *testing.T) {
 	tests := map[string]struct {
 		rows          int
 		cols          int
@@ -68,7 +68,7 @@ func TestExperimentalChromeFrameLayout(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			frame := newExperimentalChromeFrame(test.rows, test.cols, test.position, test.chromeEnabled)
+			frame := newTerminalOwnedChromeFrame(test.rows, test.cols, test.position, test.chromeEnabled)
 
 			gotCols, gotRows := frame.childSize()
 			if gotCols != test.wantChildCols || gotRows != test.wantChildRows {
@@ -92,9 +92,9 @@ func TestExperimentalChromeFrameLayout(t *testing.T) {
 	}
 }
 
-func TestExperimentalChromeFrameOuterToChildCells(t *testing.T) {
+func TestTerminalOwnedChromeFrameOuterToChildCells(t *testing.T) {
 	tests := map[string]struct {
-		frame        experimentalChromeFrame
+		frame        terminalOwnedChromeFrame
 		outerCol     int
 		outerRow     int
 		wantChildCol int
@@ -102,7 +102,7 @@ func TestExperimentalChromeFrameOuterToChildCells(t *testing.T) {
 		wantOK       bool
 	}{
 		"top chrome shifts child row": {
-			frame:        newExperimentalChromeFrame(24, 80, "top", true),
+			frame:        newTerminalOwnedChromeFrame(24, 80, "top", true),
 			outerCol:     7,
 			outerRow:     2,
 			wantChildCol: 7,
@@ -110,17 +110,17 @@ func TestExperimentalChromeFrameOuterToChildCells(t *testing.T) {
 			wantOK:       true,
 		},
 		"top chrome owns first row": {
-			frame:    newExperimentalChromeFrame(24, 80, "top", true),
+			frame:    newTerminalOwnedChromeFrame(24, 80, "top", true),
 			outerCol: 7,
 			outerRow: 1,
 		},
 		"bottom chrome owns last row": {
-			frame:    newExperimentalChromeFrame(24, 80, "bottom", true),
+			frame:    newTerminalOwnedChromeFrame(24, 80, "bottom", true),
 			outerCol: 7,
 			outerRow: 24,
 		},
 		"bottom chrome leaves child rows unchanged": {
-			frame:        newExperimentalChromeFrame(24, 80, "bottom", true),
+			frame:        newTerminalOwnedChromeFrame(24, 80, "bottom", true),
 			outerCol:     7,
 			outerRow:     23,
 			wantChildCol: 7,
@@ -128,7 +128,7 @@ func TestExperimentalChromeFrameOuterToChildCells(t *testing.T) {
 			wantOK:       true,
 		},
 		"disabled chrome accepts last row": {
-			frame:        newExperimentalChromeFrame(24, 80, "bottom", false),
+			frame:        newTerminalOwnedChromeFrame(24, 80, "bottom", false),
 			outerCol:     7,
 			outerRow:     24,
 			wantChildCol: 7,
@@ -149,49 +149,49 @@ func TestExperimentalChromeFrameOuterToChildCells(t *testing.T) {
 	}
 }
 
-func TestTranslateSGRMouseForExperimentalFrame(t *testing.T) {
+func TestTranslateSGRMouseForTerminalOwnedFrame(t *testing.T) {
 	tests := map[string]struct {
-		frame experimentalChromeFrame
+		frame terminalOwnedChromeFrame
 		input string
 		want  string
 	}{
 		"top chrome shifts child mouse row": {
-			frame: newExperimentalChromeFrame(24, 80, "top", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "top", true),
 			input: "a\x1b[<0;10;5Mb",
 			want:  "a\x1b[<0;10;4Mb",
 		},
 		"top chrome drops owned row": {
-			frame: newExperimentalChromeFrame(24, 80, "top", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "top", true),
 			input: "a\x1b[<0;10;1Mb",
 			want:  "ab",
 		},
 		"bottom chrome drops owned row": {
-			frame: newExperimentalChromeFrame(24, 80, "bottom", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "bottom", true),
 			input: "a\x1b[<0;10;24Mb",
 			want:  "ab",
 		},
 		"top chrome release without child press drops owned row": {
-			frame: newExperimentalChromeFrame(24, 80, "top", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "top", true),
 			input: "a\x1b[<0;10;1mb",
 			want:  "ab",
 		},
 		"bottom chrome release without child press drops owned row": {
-			frame: newExperimentalChromeFrame(24, 80, "bottom", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "bottom", true),
 			input: "a\x1b[<0;10;24mb",
 			want:  "ab",
 		},
 		"bottom chrome leaves child mouse row unchanged": {
-			frame: newExperimentalChromeFrame(24, 80, "bottom", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "bottom", true),
 			input: "a\x1b[<0;10;23Mb",
 			want:  "a\x1b[<0;10;23Mb",
 		},
 		"release terminator is preserved": {
-			frame: newExperimentalChromeFrame(24, 80, "top", true),
+			frame: newTerminalOwnedChromeFrame(24, 80, "top", true),
 			input: "a\x1b[<0;10;5mb",
 			want:  "a\x1b[<0;10;4mb",
 		},
 		"disabled chrome leaves last row report unchanged": {
-			frame: newExperimentalChromeFrame(24, 80, "bottom", false),
+			frame: newTerminalOwnedChromeFrame(24, 80, "bottom", false),
 			input: "a\x1b[<0;10;24Mb",
 			want:  "a\x1b[<0;10;24Mb",
 		},
@@ -201,15 +201,15 @@ func TestTranslateSGRMouseForExperimentalFrame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := string(translateSGRMouseForExperimentalFrame([]byte(test.input), test.frame)); got != test.want {
-				t.Fatalf("translateSGRMouseForExperimentalFrame() = %q, want %q", got, test.want)
+			if got := string(translateSGRMouseForTerminalOwnedFrame([]byte(test.input), test.frame)); got != test.want {
+				t.Fatalf("translateSGRMouseForTerminalOwnedFrame() = %q, want %q", got, test.want)
 			}
 		})
 	}
 }
 
-func TestExperimentalChromeMouseReleaseClearsDragArrow(t *testing.T) {
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+func TestTerminalOwnedChromeMouseReleaseClearsDragArrow(t *testing.T) {
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:   "drag-braw",
 		Agent:  "codex",
 		Status: "running",
@@ -232,7 +232,7 @@ func TestExperimentalChromeMouseReleaseClearsDragArrow(t *testing.T) {
 	}
 }
 
-func TestExperimentalChromeMouseReleaseFromOwnedRowRequiresChildPress(t *testing.T) {
+func TestTerminalOwnedChromeMouseReleaseFromOwnedRowRequiresChildPress(t *testing.T) {
 	tests := map[string]struct {
 		position string
 		pressRow int
@@ -249,7 +249,7 @@ func TestExperimentalChromeMouseReleaseFromOwnedRowRequiresChildPress(t *testing
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+			chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 				Name:   "mouse-braw",
 				Agent:  "codex",
 				Status: "running",
@@ -274,23 +274,23 @@ func TestExperimentalChromeMouseReleaseFromOwnedRowRequiresChildPress(t *testing
 	}
 }
 
-func TestExperimentalAttachEnterSequenceResetsScrollRegion(t *testing.T) {
-	out := experimentalAttachEnterSequence()
+func TestTerminalOwnedAttachEnterSequenceResetsScrollRegion(t *testing.T) {
+	out := terminalOwnedAttachEnterSequence()
 	if !strings.Contains(out, "\x1b[?1049h\x1b[r") {
 		t.Fatalf("enter sequence should reset scroll region after entering alternate screen, got %q", out)
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotPreservesBottomChromeChildCursor(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotPreservesBottomChromeChildCursor(t *testing.T) {
 	var buf bytes.Buffer
 
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:   "bottom-braw",
 		Agent:  "codex",
 		Status: "running",
 	}, false, "bottom", 24, 80)
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "hello bothy",
 		CursorX:       4,
@@ -314,16 +314,16 @@ func TestWriteExperimentalScreenSnapshotPreservesBottomChromeChildCursor(t *test
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotSuppressesChromeWhenFrameTooShort(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotSuppressesChromeWhenFrameTooShort(t *testing.T) {
 	var buf bytes.Buffer
 
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:   "short-braw",
 		Agent:  "codex",
 		Status: "running",
 	}, true, "top", 1, 80)
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "hello bothy",
 		CursorVisible: true,
@@ -341,7 +341,7 @@ func TestWriteExperimentalScreenSnapshotSuppressesChromeWhenFrameTooShort(t *tes
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotClipsChildFrameToReservedViewport(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotClipsChildFrameToReservedViewport(t *testing.T) {
 	tests := map[string]struct {
 		position        string
 		wantChromeRow   string
@@ -365,13 +365,13 @@ func TestWriteExperimentalScreenSnapshotClipsChildFrameToReservedViewport(t *tes
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 
-			chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+			chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 				Name:   "clip-braw",
 				Agent:  "codex",
 				Status: "running",
 			}, false, test.position, 3, 80)
 
-			writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+			writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 				SessionID:     "canny",
 				Frame:         "row1\r\nrow2\r\nrow3\x1b[0m",
 				CursorX:       2,

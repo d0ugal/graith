@@ -27,6 +27,16 @@ var (
 	remotePairFn      = client.PairRemote
 )
 
+type remoteAttachConn interface {
+	controlConn
+	RunPassthrough(ctx context.Context, opts client.PassthroughOpts) client.PassthroughResult
+	Close()
+}
+
+var connectRemoteForCLI = func(paths config.Paths, rh *client.RemoteHost, signer ed25519.PrivateKey, cols, rows uint16) (remoteAttachConn, error) {
+	return client.ConnectRemote(paths, rh, signer, cols, rows)
+}
+
 var remotePairCmd = &cobra.Command{
 	Use:   "pair <host>",
 	Short: "Pair this device with a remote daemon (approve with `gr remote pairings approve` on the host)",
@@ -179,7 +189,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 	sessionID := ""
 
 	for {
-		c, err := client.ConnectRemote(paths, rh, signer, cols, rows)
+		c, err := connectRemoteForCLI(paths, rh, signer, cols, rows)
 		if err != nil {
 			return err
 		}
@@ -192,7 +202,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 			}
 		}
 
-		_ = c.SendControl("attach", protocol.AttachMsg{SessionID: sessionID})
+		_ = c.SendControl("attach", attachMsg(sessionID))
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -212,9 +222,19 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 
 		var info protocol.SessionInfo
 
-		_ = protocol.DecodePayload(resp, &info)
+		seed, err := decodeAttachResponse(resp, &info)
+		if err != nil {
+			c.Close()
 
-		opts := client.PassthroughOpts{Keys: keys, SessionID: sessionID, Info: &info}
+			return err
+		}
+
+		opts := client.PassthroughOpts{
+			Keys:              keys,
+			SessionID:         sessionID,
+			Info:              &info,
+			TerminalOwnedSeed: seed,
+		}
 		opts.DragArrowKeys = cfg.Input.DragArrowKeys
 		opts.DragArrowThreshold = cfg.Input.DragArrowThreshold
 

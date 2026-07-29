@@ -29,7 +29,7 @@ struct RealHostClientTests {
     private func handshake(_ d: MockDaemon) async throws {
         let hs = try await d.readControl()
         #expect(hs.type == "handshake")
-        try await d.writeControl("handshake_ok", HandshakeOkMsg(version: "2.0", daemonVersion: "dev"))
+        try await d.writeControl("handshake_ok", HandshakeOkMsg(version: "3.0", daemonVersion: "dev"))
     }
 
     @Test func connectThenListSessions() async throws {

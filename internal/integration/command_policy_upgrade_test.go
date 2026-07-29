@@ -24,7 +24,10 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 )
 
-const commandPolicyBaselineCommit = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
+const (
+	commandPolicyBaselineCommit   = "3fdb037103f6f32ef9d35210a7d920d44d2d18b7"
+	commandPolicyBaselineProtocol = "2"
+)
 
 type commandPolicyUpgradeSession struct {
 	ID           string `json:"id"`
@@ -46,6 +49,11 @@ type commandPolicyUpgradeState struct {
 // Graith-owned hook, bound an attempted old-hook call with a native deny, and
 // leave the session resumable with lifecycle-only hooks.
 func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
+	currentProtocol, _, ok := strings.Cut(protocol.Version, ".")
+	if !ok || currentProtocol != commandPolicyBaselineProtocol {
+		t.Skipf("exact-baseline command-policy handoff fixture is protocol %s; current protocol %s uses clean protocol-boundary restart", commandPolicyBaselineProtocol, protocol.Version)
+	}
+
 	if testing.Short() {
 		t.Skip("builds and exec-upgrades the exact removal baseline")
 	}

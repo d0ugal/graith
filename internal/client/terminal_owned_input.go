@@ -19,29 +19,29 @@ const (
 	applicationCursorDown = "\x1bOB"
 )
 
-type experimentalChildArea struct {
+type terminalOwnedChildArea struct {
 	topOffset int
 	cols      int
 	rows      int
 }
 
-type experimentalInputRouter struct {
+type terminalOwnedInputRouter struct {
 	mu                 sync.Mutex
 	modes              protocol.TerminalInputModes
 	childCols          int
 	childRows          int
-	chrome             *experimentalAttachChrome
-	modeMirror         *experimentalTerminalModeMirror
+	chrome             *terminalOwnedAttachChrome
+	modeMirror         *terminalOwnedTerminalModeMirror
 	localHistoryScroll func(delta int) bool
 	readOnly           bool
 }
 
-func newExperimentalInputRouter(
-	chrome *experimentalAttachChrome,
-	modeMirror *experimentalTerminalModeMirror,
+func newTerminalOwnedInputRouter(
+	chrome *terminalOwnedAttachChrome,
+	modeMirror *terminalOwnedTerminalModeMirror,
 	localHistoryScroll func(delta int) bool,
-) *experimentalInputRouter {
-	return &experimentalInputRouter{
+) *terminalOwnedInputRouter {
+	return &terminalOwnedInputRouter{
 		modes:              normalizeTerminalInputModes(nil),
 		chrome:             chrome,
 		modeMirror:         modeMirror,
@@ -49,7 +49,7 @@ func newExperimentalInputRouter(
 	}
 }
 
-func (r *experimentalInputRouter) updateSnapshot(snap *protocol.ScreenSnapshotResponseMsg) {
+func (r *terminalOwnedInputRouter) updateSnapshot(snap *protocol.ScreenSnapshotResponseMsg) {
 	if r == nil || snap == nil {
 		return
 	}
@@ -68,7 +68,7 @@ func (r *experimentalInputRouter) updateSnapshot(snap *protocol.ScreenSnapshotRe
 	}
 }
 
-func (r *experimentalInputRouter) childMouseTracking() bool {
+func (r *terminalOwnedInputRouter) childMouseTracking() bool {
 	if r == nil {
 		return false
 	}
@@ -80,7 +80,7 @@ func (r *experimentalInputRouter) childMouseTracking() bool {
 	return canRouteChildMouse(modes)
 }
 
-func (r *experimentalInputRouter) keyboardLocked() bool {
+func (r *terminalOwnedInputRouter) keyboardLocked() bool {
 	if r == nil {
 		return false
 	}
@@ -92,7 +92,7 @@ func (r *experimentalInputRouter) keyboardLocked() bool {
 	return locked
 }
 
-func (r *experimentalInputRouter) process(input []byte) []byte {
+func (r *terminalOwnedInputRouter) process(input []byte) []byte {
 	if r == nil || len(input) == 0 {
 		return input
 	}
@@ -116,7 +116,7 @@ func (r *experimentalInputRouter) process(input []byte) []byte {
 
 	for i := 0; i < len(input); i++ {
 		if ev, seqLen, ok := parseSGRMouse(input, i); ok {
-			replace(i, seqLen, routeExperimentalMouse(ev, modes, area, localHistoryScroll))
+			replace(i, seqLen, routeTerminalOwnedMouse(ev, modes, area, localHistoryScroll))
 			i += seqLen - 1
 
 			continue
@@ -178,9 +178,9 @@ func (r *experimentalInputRouter) process(input []byte) []byte {
 	return out
 }
 
-func (r *experimentalInputRouter) snapshot() (
+func (r *terminalOwnedInputRouter) snapshot() (
 	protocol.TerminalInputModes,
-	experimentalChildArea,
+	terminalOwnedChildArea,
 	func(delta int) bool,
 ) {
 	r.mu.Lock()
@@ -191,7 +191,7 @@ func (r *experimentalInputRouter) snapshot() (
 	localHistoryScroll := r.localHistoryScroll
 	r.mu.Unlock()
 
-	return modes, experimentalChromeChildArea(chrome, childCols, childRows), localHistoryScroll
+	return modes, terminalOwnedChromeChildArea(chrome, childCols, childRows), localHistoryScroll
 }
 
 func normalizeTerminalInputModes(m *protocol.TerminalInputModes) protocol.TerminalInputModes {
@@ -225,8 +225,8 @@ func normalizeTerminalInputModes(m *protocol.TerminalInputModes) protocol.Termin
 	return out
 }
 
-func experimentalChromeChildArea(chrome *experimentalAttachChrome, childCols, childRows int) experimentalChildArea {
-	area := experimentalChildArea{cols: childCols, rows: childRows}
+func terminalOwnedChromeChildArea(chrome *terminalOwnedAttachChrome, childCols, childRows int) terminalOwnedChildArea {
+	area := terminalOwnedChildArea{cols: childCols, rows: childRows}
 	if chrome == nil {
 		return area
 	}
@@ -257,10 +257,10 @@ func experimentalChromeChildArea(chrome *experimentalAttachChrome, childCols, ch
 	return area
 }
 
-func routeExperimentalMouse(
+func routeTerminalOwnedMouse(
 	ev sgrMouseEvent,
 	modes protocol.TerminalInputModes,
-	area experimentalChildArea,
+	area terminalOwnedChildArea,
 	localHistoryScroll func(delta int) bool,
 ) []byte {
 	translated, ok := translateMouseToChild(ev, area)
@@ -327,7 +327,7 @@ func shouldForwardMouse(ev sgrMouseEvent, tracking string) bool {
 	}
 }
 
-func translateMouseToChild(ev sgrMouseEvent, area experimentalChildArea) (sgrMouseEvent, bool) {
+func translateMouseToChild(ev sgrMouseEvent, area terminalOwnedChildArea) (sgrMouseEvent, bool) {
 	if ev.col < 1 || ev.row < 1 {
 		if !ev.isDragOrRelease() {
 			return sgrMouseEvent{}, false
@@ -359,7 +359,7 @@ func (ev sgrMouseEvent) isDragOrRelease() bool {
 	return ev.release || ev.button&mouseMotionBit != 0
 }
 
-func clampMouseToChild(ev sgrMouseEvent, area experimentalChildArea) sgrMouseEvent {
+func clampMouseToChild(ev sgrMouseEvent, area terminalOwnedChildArea) sgrMouseEvent {
 	if ev.col < 1 {
 		ev.col = 1
 	}
@@ -474,12 +474,12 @@ func hasSequence(input []byte, pos int, seq string) bool {
 	return pos+len(seq) <= len(input) && string(input[pos:pos+len(seq)]) == seq
 }
 
-type experimentalTerminalModeMirror struct {
+type terminalOwnedTerminalModeMirror struct {
 	w     io.Writer
-	state experimentalOuterModes
+	state terminalOwnedOuterModes
 }
 
-type experimentalOuterModes struct {
+type terminalOwnedOuterModes struct {
 	mouseEnabled  bool
 	mouseTracking string
 	focus         bool
@@ -488,16 +488,16 @@ type experimentalOuterModes struct {
 	keypad        bool
 }
 
-func newExperimentalTerminalModeMirror(w io.Writer) *experimentalTerminalModeMirror {
-	return &experimentalTerminalModeMirror{w: w}
+func newTerminalOwnedTerminalModeMirror(w io.Writer) *terminalOwnedTerminalModeMirror {
+	return &terminalOwnedTerminalModeMirror{w: w}
 }
 
-func (m *experimentalTerminalModeMirror) apply(modes protocol.TerminalInputModes, captureLocalHistory bool) {
+func (m *terminalOwnedTerminalModeMirror) apply(modes protocol.TerminalInputModes, captureLocalHistory bool) {
 	if m == nil || m.w == nil {
 		return
 	}
 
-	want := experimentalOuterModes{
+	want := terminalOwnedOuterModes{
 		mouseTracking: protocol.TerminalMouseTrackingNormal,
 		focus:         modes.Focus,
 		paste:         modes.BracketedPaste,

@@ -35,8 +35,7 @@ func (c *fakeClock) sleep(d time.Duration) {
 func TestReconnectLoopSucceeds(t *testing.T) {
 	clock := newFakeClock()
 
-	attached := payloadEnv("attached", protocol.SessionInfo{ID: "braw"})
-	conn := &scriptedConn{responses: []scriptedResp{okResp(attached)}}
+	conn := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"}))}}
 
 	got, resp, err := reconnectLoop("braw",
 		func() (reconnectConn, error) { return conn, nil },
@@ -49,8 +48,8 @@ func TestReconnectLoopSucceeds(t *testing.T) {
 		t.Error("expected the successful connection to be returned")
 	}
 
-	if resp.Type != "attached" {
-		t.Errorf("resp.Type = %q, want attached", resp.Type)
+	if resp.Type != "terminal_owned_attached" {
+		t.Errorf("resp.Type = %q, want terminal_owned_attached", resp.Type)
 	}
 
 	if conn.closed != 0 {
@@ -61,7 +60,7 @@ func TestReconnectLoopSucceeds(t *testing.T) {
 func TestReconnectLoopRetriesThenSucceeds(t *testing.T) {
 	clock := newFakeClock()
 
-	good := &scriptedConn{responses: []scriptedResp{okResp(payloadEnv("attached", protocol.SessionInfo{ID: "braw"}))}}
+	good := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"}))}}
 
 	// First dial fails, second returns a read error (and must be closed), third
 	// succeeds.
@@ -113,6 +112,45 @@ func TestReconnectLoopSessionGone(t *testing.T) {
 
 	if conn.closed != 1 {
 		t.Errorf("the errored connection was closed %d times, want 1", conn.closed)
+	}
+}
+
+func TestReconnectLoopRetriesWhenTerminalOwnedSeedNotReady(t *testing.T) {
+	clock := newFakeClock()
+
+	notReady := &scriptedConn{responses: []scriptedResp{okResp(errEnv(protocol.TerminalOwnedAttachSeedNotReadyMessage))}}
+	good := &scriptedConn{responses: []scriptedResp{okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"}))}}
+
+	var attempt int
+
+	dial := func() (reconnectConn, error) {
+		attempt++
+		if attempt == 1 {
+			return notReady, nil
+		}
+
+		return good, nil
+	}
+
+	got, resp, err := reconnectLoop("braw", dial, clock.now, clock.sleep, 10*time.Second, 250*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got != good {
+		t.Fatal("reconnectLoop did not return the ready terminal-owned connection")
+	}
+
+	if resp.Type != "terminal_owned_attached" {
+		t.Fatalf("response type = %q, want terminal_owned_attached", resp.Type)
+	}
+
+	if notReady.closed != 1 {
+		t.Fatalf("not-ready connection closed %d times, want 1", notReady.closed)
+	}
+
+	if got := notReady.sentTypes(); len(got) != 1 || got[0] != "attach" {
+		t.Fatalf("not-ready connection sent %v, want [attach]", got)
 	}
 }
 

@@ -267,7 +267,7 @@ func connect(ctx context.Context, cfg *config.Config, paths config.Paths, config
 }
 
 // OlderServerProtocolFromHandshakeError recognizes the exact rejection emitted
-// by older graith daemons. Protocol 1 rejects a protocol-2 client before it can
+// by older graith daemons. Protocol 2 rejects a protocol-3 client before it can
 // report handshake_ok, so this is the only safe point at which the new client
 // can choose a clean, non-preserving transition. Only an older numeric major is
 // accepted; arbitrary handshake failures never trigger process lifecycle work.
@@ -1063,52 +1063,6 @@ func (c *Client) ReadControlResponse() (protocol.Envelope, error) {
 	}
 
 	return protocol.DecodeControl(frame.Payload)
-}
-
-func WriteScreenRestore(snap *protocol.ScreenSnapshotResponseMsg) {
-	if snap == nil || snap.Frame == "" {
-		return
-	}
-
-	var buf strings.Builder
-	buf.WriteString("\x1b[?2026h")
-	buf.WriteString("\x1b[r")
-	buf.WriteString("\x1b[0m")
-	buf.WriteString("\x1b[?25l")
-	buf.WriteString("\x1b[H")
-	buf.WriteString(snap.Frame)
-	fmt.Fprintf(&buf, "\x1b[%d;%dH", snap.CursorY+1, snap.CursorX+1)
-
-	if snap.CursorVisible {
-		buf.WriteString("\x1b[?25h")
-	}
-
-	buf.WriteString("\x1b[?2026l")
-	_, _ = os.Stdout.WriteString(buf.String())
-}
-
-func FetchScreenSnapshot(cfg *config.Config, paths config.Paths, configFile string, sessionID string) *protocol.ScreenSnapshotResponseMsg {
-	c, err := Connect(cfg, paths, configFile)
-	if err != nil {
-		return nil
-	}
-	defer c.Close()
-
-	if err := c.SendControl("screen_snapshot", protocol.ScreenSnapshotMsg{SessionID: sessionID}); err != nil {
-		return nil
-	}
-
-	resp, err := c.ReadControlResponse()
-	if err != nil || resp.Type != "screen_snapshot_response" {
-		return nil
-	}
-
-	var snap protocol.ScreenSnapshotResponseMsg
-	if err := protocol.DecodePayload(resp, &snap); err != nil {
-		return nil
-	}
-
-	return &snap
 }
 
 func FetchScrollbackPreview(cfg *config.Config, paths config.Paths, configFile string, sessionID string) string {

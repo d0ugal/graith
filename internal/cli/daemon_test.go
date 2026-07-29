@@ -392,6 +392,7 @@ type fakeUpgradeConn struct {
 	deadlineSet  bool
 	deadlineErr  error
 	daemonPID    int
+	daemonStart  int64
 	daemonPIDErr error
 	sendErr      error
 	sendErrAt    int
@@ -420,6 +421,20 @@ func (f *fakeUpgradeConn) DaemonPID() (int, error) {
 	}
 
 	return f.daemonPID, nil
+}
+
+func (f *fakeUpgradeConn) DaemonIdentity() (client.DaemonIdentity, error) {
+	pid, err := f.DaemonPID()
+	if err != nil {
+		return client.DaemonIdentity{}, err
+	}
+
+	startTime := f.daemonStart
+	if startTime == 0 {
+		startTime = 1473
+	}
+
+	return client.DaemonIdentity{PID: pid, StartTime: startTime}, nil
 }
 
 func (f *fakeUpgradeConn) SendControl(msgType string, _ any) error {
@@ -451,14 +466,14 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 	origDial, origProbe, origOut, origPaths := dialUpgradeClient, probeDaemonIdentityFn, out, paths
 	origNegotiationFloor, origReadinessFloor := upgradeNegotiationFloor, upgradeReadinessFloor
 	origProcessAlive := daemonProcessAlive
-	origPrepare, origStop := prepareDaemonCleanRestartForCLI, stopDaemonPIDForCLI
+	origPrepare, origStop := prepareDaemonCleanRestartForCLI, stopDaemonIdentityForCLI
 
 	t.Cleanup(func() {
 		cfg, connectionNow, connectionSleep = origCfg, origNow, origSleep
 		dialUpgradeClient, probeDaemonIdentityFn, out, paths = origDial, origProbe, origOut, origPaths
 		upgradeNegotiationFloor, upgradeReadinessFloor = origNegotiationFloor, origReadinessFloor
 		daemonProcessAlive = origProcessAlive
-		prepareDaemonCleanRestartForCLI, stopDaemonPIDForCLI = origPrepare, origStop
+		prepareDaemonCleanRestartForCLI, stopDaemonIdentityForCLI = origPrepare, origStop
 	})
 
 	upgradeNegotiationFloor = 0
@@ -471,7 +486,7 @@ func setupUpgradeTest(t *testing.T) *fakeConnClock {
 	}}
 	out = output.NewWithWriter(false, io.Discard)
 	prepareDaemonCleanRestartForCLI = func(context.Context, config.Paths) error { return nil }
-	stopDaemonPIDForCLI = func(int) error { return nil }
+	stopDaemonIdentityForCLI = func(client.DaemonIdentity) error { return nil }
 
 	clk := &fakeConnClock{now: time.Unix(1_700_000, 0)}
 	connectionNow = clk.Now
@@ -559,8 +574,8 @@ func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
 }
 
 // TestExecUpgradeClassifiesHandshakeErr proves the pre-upgrade handshake_err is
-// classified by its reason: an older-protocol rejection (a protocol-1 daemon
-// still running after the binary upgraded to protocol 2) becomes a
+// classified by its reason: an older-protocol rejection (a protocol-2 daemon
+// still running after the binary upgraded to protocol 3) becomes a
 // protocolBoundaryRestartError so the caller can cleanly stop/start, while any
 // other rejection (e.g. a profile mismatch to the wrong daemon) is a generic
 // failure that must NOT trigger process lifecycle work.
@@ -588,6 +603,8 @@ func TestExecUpgradeClassifiesHandshakeErr(t *testing.T) {
 			setupUpgradeTest(t)
 
 			fake := &fakeUpgradeConn{
+				daemonPID:   4242,
+				daemonStart: 1473,
 				responses: []protocol.Envelope{
 					payloadEnv("handshake_err", protocol.HandshakeErrMsg{Reason: tc.reason}),
 				},
@@ -607,6 +624,11 @@ func TestExecUpgradeClassifiesHandshakeErr(t *testing.T) {
 
 				if boundary.serverProtocol != tc.wantBoundary {
 					t.Fatalf("server protocol = %q, want %q", boundary.serverProtocol, tc.wantBoundary)
+				}
+
+				wantIdentity := client.DaemonIdentity{PID: 4242, StartTime: 1473}
+				if boundary.priorIdentity != wantIdentity {
+					t.Fatalf("protocol boundary identity = %#v, want %#v", boundary.priorIdentity, wantIdentity)
 				}
 			} else {
 				if errors.As(err, &boundary) {
@@ -638,11 +660,9 @@ func TestExecUpgradeClassifiesHandshakeErr(t *testing.T) {
 func TestRestartPreserveCleanlyCrossesProtocolBoundary(t *testing.T) {
 	setupUpgradeTest(t)
 
-	// A non-existent PID file: StopDaemon reports "not running" (a warning), and
-	// the clean start still runs. This keeps the test off real process signalling.
-	paths.PIDFile = filepath.Join(t.TempDir(), "absent.pid")
-
 	fake := &fakeUpgradeConn{
+		daemonPID:   4242,
+		daemonStart: 1473,
 		responses: []protocol.Envelope{
 			payloadEnv("handshake_err", protocol.HandshakeErrMsg{
 				Reason: "protocol version mismatch: client=" + protocol.Version + ", server=1.0; try upgrading the client and running: gr daemon restart",
@@ -676,9 +696,16 @@ func TestRestartPreserveCleanlyCrossesProtocolBoundary(t *testing.T) {
 func TestRestartAfterProtocolBoundaryContinuesWhenPeerAlreadyExited(t *testing.T) {
 	setupUpgradeTest(t)
 
-	stopDaemonPIDForCLI = func(int) error { return errors.New("process already exited") }
+	identity := client.DaemonIdentity{PID: 4242, StartTime: 1473}
+	stopDaemonIdentityForCLI = func(got client.DaemonIdentity) error {
+		if got != identity {
+			t.Fatalf("stopped identity = %#v, want %#v", got, identity)
+		}
+
+		return errors.New("process already exited")
+	}
 	daemonProcessAlive = func(pid int) bool {
-		if pid != 4242 {
+		if pid != identity.PID {
 			t.Fatalf("checked PID %d, want authenticated peer", pid)
 		}
 
@@ -687,7 +714,7 @@ func TestRestartAfterProtocolBoundaryContinuesWhenPeerAlreadyExited(t *testing.T
 
 	started := false
 
-	if err := restartAfterProtocolBoundary(4242, func() error {
+	if err := restartAfterProtocolBoundary(identity, func() error {
 		started = true
 		return nil
 	}); err != nil {
@@ -705,12 +732,12 @@ func TestRestartAfterProtocolBoundaryDoesNotStopBeforeManagedPreflight(t *testin
 	prepareDaemonCleanRestartForCLI = func(context.Context, config.Paths) error {
 		return errors.New("agent-mode caller rejected")
 	}
-	stopDaemonPIDForCLI = func(int) error {
+	stopDaemonIdentityForCLI = func(client.DaemonIdentity) error {
 		t.Fatal("daemon stopped before managed restart preflight")
 		return nil
 	}
 
-	err := restartAfterProtocolBoundary(4242, func() error {
+	err := restartAfterProtocolBoundary(client.DaemonIdentity{PID: 4242, StartTime: 1473}, func() error {
 		t.Fatal("daemon started after failed managed restart preflight")
 		return nil
 	})

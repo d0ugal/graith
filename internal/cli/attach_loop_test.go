@@ -38,31 +38,10 @@ func TestResetTerminalWritesSequence(t *testing.T) {
 }
 
 // TestDispatchTerminalExit verifies the detach/quit results end the loop
-// (done=true, no error) after resetting the terminal.
+// (done=true, no error).
 func TestDispatchTerminalExit(t *testing.T) {
 	for _, result := range []client.PassthroughResult{client.ResultDetached, client.ResultQuit} {
 		l := &attachLoop{}
-
-		var (
-			done bool
-			err  error
-		)
-
-		out := captureStdout(t, func() { done, err = l.dispatch(result) })
-
-		if !done || err != nil {
-			t.Errorf("dispatch(%v) = (%v, %v), want (true, nil)", result, done, err)
-		}
-
-		if out == "" {
-			t.Errorf("dispatch(%v) should reset the terminal", result)
-		}
-	}
-}
-
-func TestDispatchTerminalOwnedExitDoesNotClearRestoredScreen(t *testing.T) {
-	for _, result := range []client.PassthroughResult{client.ResultDetached, client.ResultQuit} {
-		l := &attachLoop{terminalOwnedPass: true}
 
 		var (
 			done bool
@@ -94,7 +73,7 @@ func TestDispatchUnknownResultContinues(t *testing.T) {
 
 func TestTerminalHistoryClearedAfterLiveOutputAndRestoredByFreshSeed(t *testing.T) {
 	l := &attachLoop{}
-	seed := &protocol.ExperimentalAttachSeedMsg{
+	seed := &protocol.TerminalOwnedAttachSeedMsg{
 		History: protocol.TerminalHistoryMsg{
 			MaxLines:     17,
 			ActiveScreen: "primary",
@@ -104,10 +83,10 @@ func TestTerminalHistoryClearedAfterLiveOutputAndRestoredByFreshSeed(t *testing.
 		},
 	}
 
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 
 	if !l.hasTerminalHistory {
-		t.Fatal("fresh experimental seed did not install terminal history")
+		t.Fatal("fresh terminal-owned seed did not install terminal history")
 	}
 
 	l.clearTerminalHistory()
@@ -116,7 +95,7 @@ func TestTerminalHistoryClearedAfterLiveOutputAndRestoredByFreshSeed(t *testing.
 		t.Fatalf("terminal history after live output = %+v, present=%v; want cleared", l.terminalHistory, l.hasTerminalHistory)
 	}
 
-	l.setExperimentalSeed(seed)
+	l.setTerminalOwnedSeed(seed)
 
 	if !l.hasTerminalHistory || len(l.terminalHistory.Lines) != 1 {
 		t.Fatalf("terminal history after fresh seed = %+v, present=%v; want restored", l.terminalHistory, l.hasTerminalHistory)

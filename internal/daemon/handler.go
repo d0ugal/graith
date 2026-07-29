@@ -466,6 +466,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					if attachedDataWriter != nil {
 						attachedDataWriter.Close()
 					}
+
+					attachedSessionID = ""
+					attachedDataWriter = nil
+					attachedReadOnly = false
 				}
 
 				// Headless sessions have no interactive TUI to stream. Attaching
@@ -519,20 +523,24 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				terminalOwnedRequested := a.TerminalOwned
+
 				var atomicOutput atomicAttachOutput
-				if a.ExperimentalAttach {
+				if terminalOwnedRequested {
 					atomicOutput, ok = output.(atomicAttachOutput)
 					if !ok {
-						sendControl("error", protocol.ErrorMsg{Message: "session does not provide experimental attach output"})
+						sendControl("error", protocol.ErrorMsg{Message: protocol.TerminalOwnedAttachUnsupportedMessage})
+
 						continue
 					}
 				}
 
-				attachedSessionID = a.SessionID
+				var (
+					dataWriter  attachOutputWriter
+					gatedWriter *gatedDataWriter
+				)
 
-				var gatedWriter *gatedDataWriter
-
-				if a.ExperimentalAttach {
+				if terminalOwnedRequested {
 					liveDataWriter := newAttachDataWriter(attachDataWriterConfig{
 						SessionID: a.SessionID,
 						Writer:    writer,
@@ -541,9 +549,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						Mode:      attachOutputCoalesced,
 					})
 					gatedWriter = newGatedDataWriter(liveDataWriter)
-					attachedDataWriter = gatedWriter
+					dataWriter = gatedWriter
 				} else {
-					attachedDataWriter = newAttachDataWriter(attachDataWriterConfig{
+					dataWriter = newAttachDataWriter(attachDataWriterConfig{
 						SessionID: a.SessionID,
 						Writer:    writer,
 						Conn:      conn,
@@ -552,30 +560,34 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					})
 				}
 
-				attachedReadOnly = a.ReadOnly
+				registerAttach := func() {
+					attachedSessionID = a.SessionID
+					attachedDataWriter = dataWriter
+					attachedReadOnly = a.ReadOnly
 
-				sm.KickAttachedClient(a.SessionID)
-				sm.SetAttachedClient(a.SessionID, conn,
-					func() {
-						data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
-						_ = writer.WriteFrameWithDeadline(protocol.ChannelControl, data, defaultAttachOutputWriteTimeout)
+					sm.KickAttachedClient(a.SessionID)
+					sm.SetAttachedClient(a.SessionID, conn,
+						func() {
+							data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
+							_ = writer.WriteFrameWithDeadline(protocol.ChannelControl, data, defaultAttachOutputWriteTimeout)
 
-						_ = conn.Close()
-					},
-					sendControl,
-				)
+							_ = conn.Close()
+						},
+						sendControl,
+					)
 
-				now := time.Now().UTC()
+					now := time.Now().UTC()
 
-				sm.mu.Lock()
-				if s, ok := sm.state.Sessions[a.SessionID]; ok {
-					s.LastAttachedAt = &now
+					sm.mu.Lock()
+					if s, ok := sm.state.Sessions[a.SessionID]; ok {
+						s.LastAttachedAt = &now
+					}
+
+					if err := sm.saveState(); err != nil {
+						log.Error("failed to save state after attach", "session", a.SessionID, "err", err)
+					}
+					sm.mu.Unlock()
 				}
-
-				if err := sm.saveState(); err != nil {
-					log.Error("failed to save state after attach", "session", a.SessionID, "err", err)
-				}
-				sm.mu.Unlock()
 
 				if interactive, ok := interactiveCapability(ptySess); ok {
 					_ = interactive.Resize(clientRows, clientCols)
@@ -584,46 +596,36 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sess, _ := sm.Get(a.SessionID)
 				info := toSessionInfo(sess, sm.Config(), sm.getHookReport(sess.ID))
 
-				if a.ExperimentalAttach {
-					snapshot := atomicOutput.AttachWithScreenSnapshot(attachedDataWriter)
-					seed := protocol.ExperimentalAttachSeedMsg{
+				if terminalOwnedRequested {
+					snapshot := atomicOutput.AttachWithScreenSnapshot(gatedWriter)
+					seed := protocol.TerminalOwnedAttachSeedMsg{
 						Session:  info,
 						Snapshot: screenSnapshotResponse(a.SessionID, snapshot),
 						History:  terminalHistoryResponse(snapshot.History),
 					}
-					trimExperimentalAttachSeedHistory(&seed)
+					trimTerminalOwnedAttachSeedHistory(&seed)
 
 					if seed.Snapshot.Frame == "" {
-						output.DetachWriter(attachedDataWriter)
-						attachedDataWriter.Close()
+						output.DetachWriter(dataWriter)
+						dataWriter.Close()
 
-						attachedDataWriter = newAttachDataWriter(attachDataWriterConfig{
-							SessionID: a.SessionID,
-							Writer:    writer,
-							Conn:      conn,
-							Log:       log,
-							Mode:      attachOutputRaw,
-						})
-
-						sendControl("attached", info)
-
-						if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
-							_ = writeAttachDataFrame(writer, tail)
-						}
-
-						output.Attach(attachedDataWriter)
+						sendControl("error", protocol.ErrorMsg{Message: protocol.TerminalOwnedAttachSeedNotReadyMessage})
 
 						continue
 					}
 
-					if err := writeControlResult("experimental_attached", seed, defaultAttachOutputWriteTimeout); err != nil {
+					if err := writeControlResult("terminal_owned_attached", seed, defaultAttachOutputWriteTimeout); err != nil {
 						gatedWriter.Discard()
+						output.DetachWriter(dataWriter)
+						dataWriter.Close()
 
 						continue
 					}
+
+					registerAttach()
 
 					if err := gatedWriter.Release(); err != nil {
-						log.Debug("experimental attach live-output release failed", "session", a.SessionID, "err", err)
+						log.Debug("terminal-owned attach live-output release failed", "session", a.SessionID, "err", err)
 
 						_ = conn.Close()
 					}
@@ -631,13 +633,17 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					continue
 				}
 
+				// Direct protocol clients that do not request terminal-owned attach
+				// still consume the raw PTY byte stream, notably the shared Swift
+				// GUI protocol client.
+				registerAttach()
 				sendControl("attached", info)
 
 				if tail, err := output.ScrollbackFile().Tail(sm.Config().Limits.LogLinesOrDefault()); err == nil && len(tail) > 0 {
 					_ = writeAttachDataFrame(writer, tail)
 				}
 
-				output.Attach(attachedDataWriter)
+				output.Attach(dataWriter)
 
 			case "attach_convert":
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
@@ -1352,13 +1358,13 @@ func terminalHistoryResponse(history grpty.TerminalHistory) protocol.TerminalHis
 	return resp
 }
 
-func trimExperimentalAttachSeedHistory(seed *protocol.ExperimentalAttachSeedMsg) {
+func trimTerminalOwnedAttachSeedHistory(seed *protocol.TerminalOwnedAttachSeedMsg) {
 	if seed == nil {
 		return
 	}
 
 	for terminalHistoryMessagePresent(seed.History) {
-		data, err := protocol.EncodeControl("experimental_attached", *seed)
+		data, err := protocol.EncodeControl("terminal_owned_attached", *seed)
 		if err != nil || len(data) <= protocol.MaxPayload {
 			return
 		}
@@ -1380,43 +1386,42 @@ func terminalHistoryMessagePresent(history protocol.TerminalHistoryMsg) bool {
 
 func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.SessionInfo {
 	info := protocol.SessionInfo{
-		ID:                 s.ID,
-		ParentID:           s.ParentID,
-		Name:               s.Name,
-		Labels:             append([]string{}, s.Labels...),
-		RepoPath:           s.RepoPath,
-		RepoName:           s.RepoName,
-		WorktreePath:       s.WorktreePath,
-		CWD:                s.CWD,
-		Branch:             s.Branch,
-		BaseBranch:         s.BaseBranch,
-		Agent:              s.Agent,
-		AgentSessionID:     s.AgentSessionID,
-		Status:             string(s.Status),
-		AgentStatus:        s.AgentStatus,
-		ExitCode:           s.ExitCode,
-		ExitSignal:         s.ExitSignal,
-		CreatedAt:          s.CreatedAt.Format(time.RFC3339),
-		Dirty:              s.GitDirty,
-		UnpushedCount:      s.GitUnpushed,
-		PullRequest:        prInfo(s.PullRequest),
-		CI:                 ciInfo(s.CI),
-		Tokens:             tokenInfo(s.Tokens),
-		Sandboxed:          s.Sandboxed,
-		Mirror:             s.Mirror,
-		ReadOnlyBranch:     s.ReadOnlyBranch,
-		ReadOnlyRevision:   s.ReadOnlyRevision,
-		InPlace:            s.InPlace,
-		ExperimentalAttach: s.ExperimentalAttach,
-		Model:              s.Model,
-		ToolName:           s.HookToolName,
-		ConfigStale:        isConfigStale(s, cfg),
-		Starred:            s.Starred,
-		SystemKind:         s.SystemKind,
-		ScenarioID:         s.ScenarioID,
-		ScenarioName:       s.ScenarioName,
-		ContextPressure:    s.ContextPressure,
-		SubAgentCount:      len(s.SubAgents),
+		ID:               s.ID,
+		ParentID:         s.ParentID,
+		Name:             s.Name,
+		Labels:           append([]string{}, s.Labels...),
+		RepoPath:         s.RepoPath,
+		RepoName:         s.RepoName,
+		WorktreePath:     s.WorktreePath,
+		CWD:              s.CWD,
+		Branch:           s.Branch,
+		BaseBranch:       s.BaseBranch,
+		Agent:            s.Agent,
+		AgentSessionID:   s.AgentSessionID,
+		Status:           string(s.Status),
+		AgentStatus:      s.AgentStatus,
+		ExitCode:         s.ExitCode,
+		ExitSignal:       s.ExitSignal,
+		CreatedAt:        s.CreatedAt.Format(time.RFC3339),
+		Dirty:            s.GitDirty,
+		UnpushedCount:    s.GitUnpushed,
+		PullRequest:      prInfo(s.PullRequest),
+		CI:               ciInfo(s.CI),
+		Tokens:           tokenInfo(s.Tokens),
+		Sandboxed:        s.Sandboxed,
+		Mirror:           s.Mirror,
+		ReadOnlyBranch:   s.ReadOnlyBranch,
+		ReadOnlyRevision: s.ReadOnlyRevision,
+		InPlace:          s.InPlace,
+		Model:            s.Model,
+		ToolName:         s.HookToolName,
+		ConfigStale:      isConfigStale(s, cfg),
+		Starred:          s.Starred,
+		SystemKind:       s.SystemKind,
+		ScenarioID:       s.ScenarioID,
+		ScenarioName:     s.ScenarioName,
+		ContextPressure:  s.ContextPressure,
+		SubAgentCount:    len(s.SubAgents),
 	}
 	if s.MigratedFrom != nil {
 		info.MigratedFrom = s.MigratedFrom.Agent

@@ -676,7 +676,7 @@ func resolveBody(args []string, filePath string) (string, error) {
 	return "", errors.New("message body required (as argument, --file, or stdin)")
 }
 
-func resolveSession(c *client.Client, nameOrID string) (string, error) {
+func resolveSession(c controlConn, nameOrID string) (string, error) {
 	_ = c.SendControl("list", struct{}{})
 
 	resp, err := c.ReadControlResponse()

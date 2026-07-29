@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,27 +10,13 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-// attachWithConvert performs the attach handshake, transparently handling a
-// headless session that must first be converted to interactive (issue #1137).
-// The daemon answers an attach to a headless session with "convert_required"
-// (attaching would restart it as a PTY via `claude --resume`); this prompts the
-// human to confirm (unless --yes), sends "attach_convert" to perform the swap,
-// then re-attaches to the now-interactive session. It returns the attached
-// SessionInfo and attached=true on success, or attached=false when the human
-// declines the convert.
-func attachWithConvert(c controlConn, sessionID string) (protocol.SessionInfo, bool, error) {
-	info, _, attached, err := attachWithConvertOptions(c, sessionID, attachRequestOptions{})
-
-	return info, attached, err
-}
-
-func attachWithConvertOptions(c controlConn, sessionID string, opts attachRequestOptions) (protocol.SessionInfo, *protocol.ExperimentalAttachSeedMsg, bool, error) {
+func attachWithConvertSeed(c controlConn, sessionID string) (protocol.SessionInfo, *protocol.TerminalOwnedAttachSeedMsg, bool, error) {
 	var info protocol.SessionInfo
 
 	converted := false
 
 	for {
-		_ = c.SendControl("attach", attachMsgWithOptions(sessionID, opts))
+		_ = c.SendControl("attach", attachMsg(sessionID))
 
 		resp, err := c.ReadControlResponse()
 		if err != nil {
@@ -77,7 +64,7 @@ func attachWithConvertOptions(c controlConn, sessionID string, opts attachReques
 			converted = true
 			// Loop back and attach to the now-interactive session.
 
-		case "attached", "experimental_attached":
+		case "attached", "terminal_owned_attached":
 			seed, err := decodeAttachResponse(resp, &info)
 			if err != nil {
 				return info, nil, false, err
@@ -95,19 +82,18 @@ func attachWithConvertOptions(c controlConn, sessionID string, opts attachReques
 	}
 }
 
-func decodeAttachResponse(resp protocol.Envelope, info *protocol.SessionInfo) (*protocol.ExperimentalAttachSeedMsg, error) {
+func decodeAttachResponse(resp protocol.Envelope, info *protocol.SessionInfo) (*protocol.TerminalOwnedAttachSeedMsg, error) {
 	switch resp.Type {
+	case "error":
+		return nil, errors.New(errorMessage(resp))
+
 	case "attached":
-		if err := protocol.DecodePayload(resp, info); err != nil {
-			return nil, fmt.Errorf("decode attach response: %w", err)
-		}
+		return nil, errors.New(protocol.TerminalOwnedAttachRawResponseMessage)
 
-		return nil, nil
-
-	case "experimental_attached":
-		var seed protocol.ExperimentalAttachSeedMsg
+	case "terminal_owned_attached":
+		var seed protocol.TerminalOwnedAttachSeedMsg
 		if err := protocol.DecodePayload(resp, &seed); err != nil {
-			return nil, fmt.Errorf("decode experimental attach response: %w", err)
+			return nil, fmt.Errorf("decode terminal-owned attach response: %w", err)
 		}
 
 		*info = seed.Session

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"os"
 	"strings"
@@ -193,7 +192,7 @@ func TestReadControlResponse(t *testing.T) {
 	serverWriter := protocol.NewFrameWriter(serverConn)
 
 	ctrlBytes, err := protocol.EncodeControl("handshake_ok", protocol.HandshakeOkMsg{
-		Version:       "2.0",
+		Version:       "3.0",
 		DaemonVersion: "0.1.0",
 	})
 	if err != nil {
@@ -808,103 +807,10 @@ func TestReadControlResponse_PropagatesReadError(t *testing.T) {
 	}
 }
 
-// captureStdout redirects os.Stdout for the duration of fn and returns whatever
-// was written.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-
-	orig := os.Stdout
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-
-	os.Stdout = w
-
-	done := make(chan string, 1)
-
-	go func() {
-		data, _ := io.ReadAll(r)
-		done <- string(data)
-	}()
-
-	fn()
-
-	_ = w.Close()
-
-	os.Stdout = orig
-
-	return <-done
-}
-
-func TestWriteScreenRestore_NilAndEmptyAreNoOps(t *testing.T) {
-	out := captureStdout(t, func() {
-		WriteScreenRestore(nil)
-		WriteScreenRestore(&protocol.ScreenSnapshotResponseMsg{Frame: ""})
-	})
-
-	if out != "" {
-		t.Errorf("nil/empty snapshot should write nothing, got %q", out)
-	}
-}
-
-func TestWriteScreenRestore_EmitsFrameAndCursor(t *testing.T) {
-	snap := &protocol.ScreenSnapshotResponseMsg{
-		Frame:         "hello bothy",
-		CursorX:       4,
-		CursorY:       2,
-		CursorVisible: true,
-	}
-
-	out := captureStdout(t, func() { WriteScreenRestore(snap) })
-
-	if !strings.Contains(out, "hello bothy") {
-		t.Errorf("output should contain the frame body, got %q", out)
-	}
-
-	// Cursor is placed at (Y+1;X+1) = row 3, col 5.
-	if !strings.Contains(out, "\x1b[3;5H") {
-		t.Errorf("output should position the cursor at row 3 col 5, got %q", out)
-	}
-
-	// Visible cursor → the show-cursor sequence must be present.
-	if !strings.Contains(out, "\x1b[?25h") {
-		t.Errorf("output should show the cursor when CursorVisible is true, got %q", out)
-	}
-}
-
-func TestWriteScreenRestore_HiddenCursorOmitsShowSequence(t *testing.T) {
-	snap := &protocol.ScreenSnapshotResponseMsg{
-		Frame:         "dreich",
-		CursorVisible: false,
-	}
-
-	out := captureStdout(t, func() { WriteScreenRestore(snap) })
-
-	if strings.Contains(out, "\x1b[?25h") {
-		t.Errorf("hidden cursor should not emit the show-cursor sequence, got %q", out)
-	}
-}
-
-func TestWriteScreenRestoreResetsTerminalStateBeforeFrame(t *testing.T) {
-	snap := &protocol.ScreenSnapshotResponseMsg{
-		Frame:         "braw\r\nbothy",
-		CursorVisible: true,
-	}
-
-	out := captureStdout(t, func() { WriteScreenRestore(snap) })
-	wantPrefix := "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[H"
-
-	if !strings.HasPrefix(out, wantPrefix) {
-		t.Fatalf("screen restore prefix = %q, want %q", out, wantPrefix)
-	}
-}
-
-func TestWriteExperimentalAttachSeed(t *testing.T) {
+func TestWriteTerminalOwnedAttachSeed(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeExperimentalAttachSeed(&buf, &protocol.ExperimentalAttachSeedMsg{
+	writeTerminalOwnedAttachSeed(&buf, &protocol.TerminalOwnedAttachSeedMsg{
 		Snapshot: protocol.ScreenSnapshotResponseMsg{
 			Frame:         "hello bothy",
 			CursorX:       4,
@@ -915,26 +821,26 @@ func TestWriteExperimentalAttachSeed(t *testing.T) {
 
 	out := buf.String()
 	if !strings.Contains(out, "\x1b[?2026h") || !strings.Contains(out, "\x1b[?2026l") {
-		t.Fatalf("experimental seed should wrap repaint in synchronized update, got %q", out)
+		t.Fatalf("terminal-owned seed should wrap repaint in synchronized update, got %q", out)
 	}
 
 	if !strings.Contains(out, "hello bothy") {
-		t.Fatalf("experimental seed should contain the frame body, got %q", out)
+		t.Fatalf("terminal-owned seed should contain the frame body, got %q", out)
 	}
 
 	if !strings.Contains(out, "\x1b[3;5H") {
-		t.Fatalf("experimental seed should place cursor at row 3 col 5, got %q", out)
+		t.Fatalf("terminal-owned seed should place cursor at row 3 col 5, got %q", out)
 	}
 
 	if !strings.Contains(out, "\x1b[?25h") {
-		t.Fatalf("experimental seed should show a visible cursor, got %q", out)
+		t.Fatalf("terminal-owned seed should show a visible cursor, got %q", out)
 	}
 }
 
-func TestExperimentalAttachRepaintResetsScrollRegionBeforeFrame(t *testing.T) {
+func TestTerminalOwnedAttachRepaintResetsScrollRegionBeforeFrame(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeExperimentalScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
 		Frame:         "braw\r\nbothy",
 		CursorVisible: true,
 	})
@@ -947,8 +853,8 @@ func TestExperimentalAttachRepaintResetsScrollRegionBeforeFrame(t *testing.T) {
 	}
 }
 
-func TestExperimentalAttachEnterResetsScrollRegionBeforeClear(t *testing.T) {
-	out := experimentalAttachEnterSequence()
+func TestTerminalOwnedAttachEnterResetsScrollRegionBeforeClear(t *testing.T) {
+	out := terminalOwnedAttachEnterSequence()
 	wantPrefix := "\x1b[?1049h\x1b[r\x1b[0m\x1b[?25l\x1b[H\x1b[2J"
 
 	if out != wantPrefix {
@@ -956,8 +862,8 @@ func TestExperimentalAttachEnterResetsScrollRegionBeforeClear(t *testing.T) {
 	}
 }
 
-func TestExperimentalAttachExitSequenceCleansMirroredModes(t *testing.T) {
-	seq := experimentalAttachExitSequence()
+func TestTerminalOwnedAttachExitSequenceCleansMirroredModes(t *testing.T) {
+	seq := terminalOwnedAttachExitSequence()
 
 	for _, want := range []string{
 		"\x1b[?1000l",
@@ -970,15 +876,15 @@ func TestExperimentalAttachExitSequenceCleansMirroredModes(t *testing.T) {
 		"\x1b>",
 	} {
 		if !strings.Contains(seq, want) {
-			t.Fatalf("experimental attach exit sequence missing %q in %q", want, seq)
+			t.Fatalf("terminal-owned attach exit sequence missing %q in %q", want, seq)
 		}
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotIgnoresEmptyFrame(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotIgnoresEmptyFrame(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeExperimentalScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "",
 		CursorVisible: true,
@@ -989,15 +895,15 @@ func TestWriteExperimentalScreenSnapshotIgnoresEmptyFrame(t *testing.T) {
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotDrawsReadOnlyChrome(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotDrawsReadOnlyChrome(t *testing.T) {
 	var buf bytes.Buffer
 
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:  "canny-observer",
 		Agent: "codex",
 	}, true, "bottom", 24, 80)
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "hello bothy",
 		CursorVisible: true,
@@ -1015,17 +921,17 @@ func TestWriteExperimentalScreenSnapshotDrawsReadOnlyChrome(t *testing.T) {
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotDrawsStatusChrome(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotDrawsStatusChrome(t *testing.T) {
 	var buf bytes.Buffer
 
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:        "canny-status",
 		Agent:       "codex",
 		Status:      "running",
 		AgentStatus: "active",
 	}, false, "bottom", 24, 80)
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "hello bothy",
 		CursorVisible: true,
@@ -1043,16 +949,16 @@ func TestWriteExperimentalScreenSnapshotDrawsStatusChrome(t *testing.T) {
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotShiftsFrameBelowTopChrome(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotShiftsFrameBelowTopChrome(t *testing.T) {
 	var buf bytes.Buffer
 
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:   "top-braw",
 		Agent:  "codex",
 		Status: "running",
 	}, false, "top", 24, 80)
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "hello bothy",
 		CursorX:       4,
@@ -1076,7 +982,7 @@ func TestWriteExperimentalScreenSnapshotShiftsFrameBelowTopChrome(t *testing.T) 
 	}
 }
 
-func TestExperimentalStatusChromeRefreshRestoresChildCursor(t *testing.T) {
+func TestTerminalOwnedStatusChromeRefreshRestoresChildCursor(t *testing.T) {
 	tests := map[string]struct {
 		position      string
 		readOnly      bool
@@ -1137,14 +1043,14 @@ func TestExperimentalStatusChromeRefreshRestoresChildCursor(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+			chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 				Name:   "dreich-seed",
 				Agent:  "codex",
 				Status: "running",
 			}, test.readOnly, test.position, 24, 80)
 
 			var seed bytes.Buffer
-			writeExperimentalScreenSnapshotWithChrome(&seed, &protocol.ScreenSnapshotResponseMsg{
+			writeTerminalOwnedScreenSnapshotWithChrome(&seed, &protocol.ScreenSnapshotResponseMsg{
 				SessionID:     "canny",
 				Frame:         "hello bothy",
 				CursorX:       test.cursorX,
@@ -1210,8 +1116,8 @@ func TestExperimentalStatusChromeRefreshRestoresChildCursor(t *testing.T) {
 	}
 }
 
-func TestExperimentalStatusChromeRefreshBeforeSnapshotDoesNotTouchCursor(t *testing.T) {
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+func TestTerminalOwnedStatusChromeRefreshBeforeSnapshotDoesNotTouchCursor(t *testing.T) {
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:   "blether-refresh",
 		Agent:  "codex",
 		Status: "running",
@@ -1238,10 +1144,10 @@ func TestExperimentalStatusChromeRefreshBeforeSnapshotDoesNotTouchCursor(t *test
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotAppliesRowDeltas(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotAppliesRowDeltas(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID: "canny",
 		Delta:     true,
 		RowDeltas: []protocol.ScreenSnapshotRowMsg{
@@ -1278,16 +1184,16 @@ func TestWriteExperimentalScreenSnapshotAppliesRowDeltas(t *testing.T) {
 	}
 }
 
-func TestWriteExperimentalScreenSnapshotOffsetsRowDeltasBelowTopChrome(t *testing.T) {
+func TestWriteTerminalOwnedScreenSnapshotOffsetsRowDeltasBelowTopChrome(t *testing.T) {
 	var buf bytes.Buffer
 
-	chrome := newExperimentalAttachChrome(protocol.SessionInfo{
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{
 		Name:   "top-delta",
 		Agent:  "codex",
 		Status: "running",
 	}, false, "top", 24, 80)
 
-	writeExperimentalScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID: "canny",
 		Delta:     true,
 		RowDeltas: []protocol.ScreenSnapshotRowMsg{
@@ -1326,14 +1232,6 @@ func withStubDaemonStart(t *testing.T) (config.Paths, *config.Config) {
 	})
 
 	return config.Paths{SocketPath: "/tmp/graith-nonexistent-scunner.sock"}, config.Default()
-}
-
-func TestFetchScreenSnapshot_NilWhenDaemonUnreachable(t *testing.T) {
-	paths, cfg := withStubDaemonStart(t)
-
-	if got := FetchScreenSnapshot(cfg, paths, "", "braw"); got != nil {
-		t.Errorf("FetchScreenSnapshot should return nil when the daemon is unreachable, got %+v", got)
-	}
 }
 
 func TestFetchScrollbackPreview_EmptyWhenDaemonUnreachable(t *testing.T) {

@@ -226,18 +226,18 @@ type PassthroughKeys struct {
 }
 
 type PassthroughOpts struct {
-	Keys                 PassthroughKeys
-	SessionID            string
-	Info                 *protocol.SessionInfo
-	StatusBar            *StatusBarCfg
-	ExperimentalSeed     *protocol.ExperimentalAttachSeedMsg
-	TerminalOwned        bool
-	OnTerminalOutput     func()
-	experimentalChrome   *experimentalAttachChrome
-	experimentalViewport *experimentalAttachViewport
-	experimentalInput    *experimentalInputRouter
-	terminalRefresh      chan struct{}
-	// LocalHistoryScroll is the experimental attach hook for wheel events that
+	Keys                  PassthroughKeys
+	SessionID             string
+	Info                  *protocol.SessionInfo
+	StatusBar             *StatusBarCfg
+	TerminalOwnedSeed     *protocol.TerminalOwnedAttachSeedMsg
+	TerminalOwned         bool
+	OnTerminalOutput      func()
+	terminalOwnedChrome   *terminalOwnedAttachChrome
+	terminalOwnedViewport *terminalOwnedAttachViewport
+	terminalOwnedInput    *terminalOwnedInputRouter
+	terminalRefresh       chan struct{}
+	// LocalHistoryScroll is the terminal-owned attach hook for wheel events that
 	// are not routed to a child mouse-tracking or alternate-scroll mode. The
 	// #1827 local-history work will install the actual history view here.
 	LocalHistoryScroll func(delta int) bool
@@ -253,27 +253,27 @@ type PassthroughOpts struct {
 	// suppressed. A persistent indicator shows the mode.
 	ReadOnly bool
 
-	experimentalSnapshotID uint64
+	terminalOwnedSnapshotID uint64
 }
 
 type StatusBarCfg struct {
 	Position string
 }
 
-const experimentalSnapshotMinInterval = 33 * time.Millisecond
+const terminalOwnedSnapshotMinInterval = 33 * time.Millisecond
 
-type experimentalSnapshotRequest struct {
+type terminalOwnedSnapshotRequest struct {
 	deltaFrom uint64
 }
 
-type experimentalSnapshotRequester struct {
-	requestCh chan experimentalSnapshotRequest
+type terminalOwnedSnapshotRequester struct {
+	requestCh chan terminalOwnedSnapshotRequest
 	done      chan struct{}
 }
 
-func startExperimentalSnapshotRequester(ctx context.Context, c *Client, sessionID string) *experimentalSnapshotRequester {
-	r := &experimentalSnapshotRequester{
-		requestCh: make(chan experimentalSnapshotRequest, 1),
+func startTerminalOwnedSnapshotRequester(ctx context.Context, c *Client, sessionID string) *terminalOwnedSnapshotRequester {
+	r := &terminalOwnedSnapshotRequester{
+		requestCh: make(chan terminalOwnedSnapshotRequest, 1),
 		done:      make(chan struct{}),
 	}
 
@@ -287,8 +287,8 @@ func startExperimentalSnapshotRequester(ctx context.Context, c *Client, sessionI
 			case <-ctx.Done():
 				return
 			case req := <-r.requestCh:
-				wait := time.Until(lastSent.Add(experimentalSnapshotMinInterval))
-				if !waitExperimentalSnapshotInterval(ctx, wait) {
+				wait := time.Until(lastSent.Add(terminalOwnedSnapshotMinInterval))
+				if !waitTerminalOwnedSnapshotInterval(ctx, wait) {
 					return
 				}
 
@@ -304,18 +304,18 @@ func startExperimentalSnapshotRequester(ctx context.Context, c *Client, sessionI
 	return r
 }
 
-func (r *experimentalSnapshotRequester) request(deltaFrom uint64) {
+func (r *terminalOwnedSnapshotRequester) request(deltaFrom uint64) {
 	select {
-	case r.requestCh <- experimentalSnapshotRequest{deltaFrom: deltaFrom}:
+	case r.requestCh <- terminalOwnedSnapshotRequest{deltaFrom: deltaFrom}:
 	default:
 	}
 }
 
-func (r *experimentalSnapshotRequester) wait() {
+func (r *terminalOwnedSnapshotRequester) wait() {
 	<-r.done
 }
 
-func experimentalSnapshotViewportMismatch(snap *protocol.ScreenSnapshotResponseMsg, viewport *experimentalAttachViewport) bool {
+func terminalOwnedSnapshotViewportMismatch(snap *protocol.ScreenSnapshotResponseMsg, viewport *terminalOwnedAttachViewport) bool {
 	if snap == nil || snap.Cols <= 0 || snap.Rows <= 0 {
 		return false
 	}
@@ -328,7 +328,7 @@ func experimentalSnapshotViewportMismatch(snap *protocol.ScreenSnapshotResponseM
 	return snap.Cols != cols || snap.Rows != rows
 }
 
-func (c *Client) sendExperimentalViewportResize(viewport *experimentalAttachViewport) {
+func (c *Client) sendTerminalOwnedViewportResize(viewport *terminalOwnedAttachViewport) {
 	cols, rows, ok := viewport.size()
 	if !ok {
 		return
@@ -340,7 +340,7 @@ func (c *Client) sendExperimentalViewportResize(viewport *experimentalAttachView
 	})
 }
 
-func waitExperimentalSnapshotInterval(ctx context.Context, wait time.Duration) bool {
+func waitTerminalOwnedSnapshotInterval(ctx context.Context, wait time.Duration) bool {
 	if wait <= 0 {
 		return true
 	}
@@ -357,8 +357,8 @@ func waitExperimentalSnapshotInterval(ctx context.Context, wait time.Duration) b
 }
 
 func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) PassthroughResult {
-	if opts.ExperimentalSeed != nil {
-		return c.runExperimentalPassthrough(ctx, opts)
+	if opts.TerminalOwnedSeed != nil {
+		return c.runTerminalOwnedPassthrough(ctx, opts)
 	}
 
 	fd := int(os.Stdin.Fd())
@@ -513,7 +513,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 			return
 		}
 
-		if opts.experimentalInput != nil && opts.experimentalInput.keyboardLocked() {
+		if opts.terminalOwnedInput != nil && opts.terminalOwnedInput.keyboardLocked() {
 			return
 		}
 
@@ -535,15 +535,15 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 	demux := c.startDemux(innerCtx)
 
-	var snapshotRequester *experimentalSnapshotRequester
+	var snapshotRequester *terminalOwnedSnapshotRequester
 	if opts.TerminalOwned && opts.SessionID != "" {
-		snapshotRequester = startExperimentalSnapshotRequester(innerCtx, c, opts.SessionID)
+		snapshotRequester = startTerminalOwnedSnapshotRequester(innerCtx, c, opts.SessionID)
 	}
 
 	snapshotPending := false
 	snapshotDirty := false
 	snapshotForceFull := false
-	snapshotBaseID := opts.experimentalSnapshotID
+	snapshotBaseID := opts.terminalOwnedSnapshotID
 	requestSnapshot := func(forceFull bool) {
 		if snapshotRequester == nil {
 			return
@@ -579,7 +579,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 		statusSessionID = sb.sessionID
 		ticker = time.NewTicker(refreshInterval)
 		tickerCh = ticker.C
-	} else if opts.experimentalChrome != nil && opts.SessionID != "" {
+	} else if opts.terminalOwnedChrome != nil && opts.SessionID != "" {
 		statusSessionID = opts.SessionID
 		ticker = time.NewTicker(refreshInterval)
 		tickerCh = ticker.C
@@ -618,18 +618,18 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					if opts.TerminalOwned {
 						var snap protocol.ScreenSnapshotResponseMsg
 						if protocol.DecodePayload(msg, &snap) == nil && snap.SessionID == opts.SessionID {
-							if experimentalSnapshotViewportMismatch(&snap, opts.experimentalViewport) {
+							if terminalOwnedSnapshotViewportMismatch(&snap, opts.terminalOwnedViewport) {
 								snapshotBaseID = 0
 								snapshotDirty = true
 								snapshotForceFull = true
 
-								c.sendExperimentalViewportResize(opts.experimentalViewport)
+								c.sendTerminalOwnedViewportResize(opts.terminalOwnedViewport)
 							} else {
-								if opts.experimentalInput != nil {
-									opts.experimentalInput.updateSnapshot(&snap)
+								if opts.terminalOwnedInput != nil {
+									opts.terminalOwnedInput.updateSnapshot(&snap)
 								}
 
-								writeExperimentalScreenSnapshotWithChrome(stdout, &snap, opts.experimentalChrome)
+								writeTerminalOwnedScreenSnapshotWithChrome(stdout, &snap, opts.terminalOwnedChrome)
 
 								if snap.SnapshotID != 0 {
 									snapshotBaseID = snap.SnapshotID
@@ -651,7 +651,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 						snapshotDirty = false
 					}
 				case "status_response":
-					if sb != nil || opts.experimentalChrome != nil {
+					if sb != nil || opts.terminalOwnedChrome != nil {
 						var resp protocol.StatusResponseMsg
 						if protocol.DecodePayload(msg, &resp) == nil {
 							info := newStatusBarInfo(resp.Session, resp.UnreadCount, resp.Fleet)
@@ -660,9 +660,9 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 								sb.render(stdout)
 							}
 
-							if opts.experimentalChrome != nil {
-								opts.experimentalChrome.updateInfo(info)
-								opts.experimentalChrome.renderTo(stdout)
+							if opts.terminalOwnedChrome != nil {
+								opts.terminalOwnedChrome.updateInfo(info)
+								opts.terminalOwnedChrome.renderTo(stdout)
 							}
 						}
 					}
@@ -672,8 +672,8 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					sb.render(stdout)
 				}
 
-				if opts.experimentalChrome != nil {
-					opts.experimentalChrome.renderTo(stdout)
+				if opts.terminalOwnedChrome != nil {
+					opts.terminalOwnedChrome.renderTo(stdout)
 				}
 
 				if statusSessionID != "" {
@@ -722,28 +722,28 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 				n = len(input)
 			}
 
-			if opts.TerminalOwned && opts.experimentalChrome != nil {
-				input = opts.experimentalChrome.translateMouseInput(input)
+			if opts.TerminalOwned && opts.terminalOwnedChrome != nil {
+				input = opts.terminalOwnedChrome.translateMouseInput(input)
 				n = len(input)
 			}
 
 			// Translate left-button drag gestures into arrow-key presses before
 			// the prefix scan. Emitted arrow sequences contain no prefix byte,
 			// and mouse-wheel/other events pass through untouched.
-			if dragArrow != nil && (opts.experimentalInput == nil || !opts.experimentalInput.childMouseTracking()) {
+			if dragArrow != nil && (opts.terminalOwnedInput == nil || !opts.terminalOwnedInput.childMouseTracking()) {
 				input = dragArrow.process(input)
 				n = len(input)
 			}
 
-			if opts.experimentalInput != nil {
-				input = opts.experimentalInput.process(input)
+			if opts.terminalOwnedInput != nil {
+				input = opts.terminalOwnedInput.process(input)
 				n = len(input)
 			}
 
 			sendStart := 0
 
 			for i := 0; i < n; i++ {
-				if opts.experimentalInput != nil {
+				if opts.terminalOwnedInput != nil {
 					if hasSequence(input, i, bracketedPasteStart) {
 						forwardedPasteActive = true
 						i += len(bracketedPasteStart) - 1
@@ -782,7 +782,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 					clearHelpBar(stdout)
 
 					if opts.TerminalOwned {
-						signalExperimentalRefresh(opts.terminalRefresh)
+						signalTerminalOwnedRefresh(opts.terminalRefresh)
 					}
 
 					switch key {

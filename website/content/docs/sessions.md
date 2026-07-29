@@ -104,25 +104,25 @@ stall the session's PTY drain. Raw attach and `gr logs -f` preserve byte order,
 coalesce adjacent queued chunks, and buffer until the per-client queue reaches
 1 MiB or 16,384 chunks. Graith disconnects a client whose queue overflows or
 whose queued write cannot complete within 2 seconds, and the session keeps
-running. Experimental terminal-owned attach coalesces live output into repaint
+running. Terminal-owned attach coalesces live output into repaint
 hints because snapshots carry the screen state.
 
-Sessions created with `gr new --experimental-attach` use the experimental
-terminal-owned attach client on future attaches. The daemon sends a coherent
-current-screen seed before live output resumes, including bounded
-terminal-aware primary-screen history retained by the daemon. The client owns
-the outer alternate screen for that attach. Sessions created without the flag
-keep the default raw passthrough behavior. When an attach request asks for the
-experimental handshake but the daemon answers with ordinary attach output (for
-example an older compatible daemon that ignores the experimental flag, or a
-current daemon falling back because the screen seed is empty), the client
-continues with the raw attach path.
-
-While experimental, this mode renders from daemon-maintained screen snapshots
+Interactive attach renders from daemon-maintained screen snapshots by default
 instead of forwarding all child terminal control traffic directly to your
-emulator. The initial attach uses a full-screen seed; later refreshes use
-dirty-row updates when the client and daemon share a compatible snapshot base,
-falling back to full snapshots or raw attach when needed. The daemon-side
+emulator. The daemon sends a coherent current-screen seed before live output
+resumes, including bounded terminal-aware primary-screen history retained by the
+daemon, and the client owns the outer alternate screen for that attach. Existing
+sessions created with the removed `gr new --experimental-attach` flag need no
+manual migration; upgraded clients request terminal-owned attach for every
+interactive session, and the daemon drops the obsolete persisted state key the
+next time it saves state. The control protocol is bumped to 3.0 so older clients
+and daemons do not silently reconnect through the removed experimental attach
+request.
+
+CLI attach requires that seed; if the daemon cannot provide one, attach fails
+with an error. The initial terminal-owned attach uses a full-screen seed; later
+refreshes use dirty-row updates when the client and daemon share a compatible
+snapshot base, falling back to full snapshots when needed. The daemon-side
 terminal model is the only authority for terminal query replies, so attached
 clients filter those query sequences and unsafe OSC/DCS/APC side-effect
 protocols before they reach the host terminal. Window-title changes stay

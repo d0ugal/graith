@@ -3951,17 +3951,16 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	sm := newSMWithConfig(t, cfg)
 
 	sm.state.Sessions["src1"] = &SessionState{
-		ID:                 "src1",
-		Name:               "braw-source-session",
-		RepoPath:           repoDir,
-		RepoName:           "testrepo",
-		WorktreePath:       repoDir,
-		Branch:             "feat/my-feature",
-		BaseBranch:         "main",
-		Agent:              "sleeper",
-		AgentSessionID:     "braw-agent-id",
-		ExperimentalAttach: true,
-		Status:             StatusRunning,
+		ID:             "src1",
+		Name:           "braw-source-session",
+		RepoPath:       repoDir,
+		RepoName:       "testrepo",
+		WorktreePath:   repoDir,
+		Branch:         "feat/my-feature",
+		BaseBranch:     "main",
+		Agent:          "sleeper",
+		AgentSessionID: "braw-agent-id",
+		Status:         StatusRunning,
 	}
 
 	forked, err := sm.Fork("braw-fork", "src1", 24, 80)
@@ -3992,10 +3991,6 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 
 	if forked.BaseBranch == "feat/my-feature" {
 		t.Error("Fork() incorrectly used source Branch as BaseBranch")
-	}
-
-	if !forked.ExperimentalAttach {
-		t.Error("Fork() did not inherit experimental attach opt-in")
 	}
 }
 

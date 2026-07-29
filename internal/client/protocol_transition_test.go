@@ -93,7 +93,7 @@ func TestIncompatibleProtocolUpgradeUsesExactCleanRestart(t *testing.T) {
 			}
 
 			if requests.Load() != 0 {
-				t.Fatalf("protocol-2 client sent %d preserve/exec requests to protocol-1 daemon", requests.Load())
+				t.Fatalf("protocol-3 client sent %d preserve/exec requests to protocol-2 daemon", requests.Load())
 			}
 
 			if reconnects.Load() != tc.wantResume {
@@ -136,12 +136,12 @@ func TestOlderServerProtocolFromHandshakeError(t *testing.T) {
 		reason string
 		want   string
 	}{
-		{reason: "protocol version mismatch: client=2.0, server=1.0; try upgrading the client", want: "1.0"},
-		{reason: "protocol version mismatch: client=2.0, server=2.0; incompatible minor"},
-		{reason: "protocol version mismatch: client=2.0, server=thrawn; malformed"},
-		{reason: "protocol version mismatch: client=2.0, server=1.thrawn; malformed minor"},
-		{reason: "protocol version mismatch: client=2.0, server=-1.0; negative major"},
-		{reason: "protocol version mismatch: client=3.0, server=1.0; wrong client"},
+		{reason: "protocol version mismatch: client=3.0, server=2.0; try upgrading the client", want: "2.0"},
+		{reason: "protocol version mismatch: client=3.0, server=3.0; incompatible minor"},
+		{reason: "protocol version mismatch: client=3.0, server=thrawn; malformed"},
+		{reason: "protocol version mismatch: client=3.0, server=2.thrawn; malformed minor"},
+		{reason: "protocol version mismatch: client=3.0, server=-1.0; negative major"},
+		{reason: "protocol version mismatch: client=2.0, server=1.0; wrong client"},
 		{reason: "profile mismatch: client is braw"},
 	}
 	for _, tc := range tests {
@@ -206,7 +206,7 @@ func serveLegacyProtocolDaemon(t *testing.T) (string, <-chan string, func(string
 			}
 
 			response, _ := protocol.EncodeControl("handshake_err", protocol.HandshakeErrMsg{
-				Reason: "protocol version mismatch: client=2.0, server=1.0; try upgrading the client and running: gr daemon restart",
+				Reason: "protocol version mismatch: client=3.0, server=2.0; try upgrading the client and running: gr daemon restart",
 			})
 			_ = writer.WriteFrame(protocol.ChannelControl, response)
 
