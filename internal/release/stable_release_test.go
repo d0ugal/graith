@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -230,6 +231,33 @@ func TestStableRPMBytesAreFinalBeforeChecksumAndAttestation(t *testing.T) {
 	}
 }
 
+func TestStableRPMSigningImportsVerifierKeyIntoInvokerDatabase(t *testing.T) {
+	workflow := loadStableReleaseWorkflow(t)
+	step := workflowStep(workflow.Jobs["attest-stable"], "Apply configured RPM signatures before checksums and provenance")
+	script := step.Run
+
+	exportAt := strings.Index(script, `gpg --armor --export "$key_id" >"${RUNNER_TEMP}/graith.asc"`)
+	importAt := strings.Index(script, `if ! import_output="$(rpm --import "${RUNNER_TEMP}/graith.asc" 2>&1)"; then`)
+	signAt := strings.Index(script, `rpm --addsign "$package"`)
+	checkAt := strings.Index(script, `rpm --checksig "$package"`)
+
+	if exportAt < 0 || importAt <= exportAt || signAt <= importAt || checkAt <= signAt {
+		t.Fatalf("RPM key import/sign/check order = %d/%d/%d/%d", exportAt, importAt, signAt, checkAt)
+	}
+
+	rootImport := regexp.MustCompile(`(?m)^\s*[^#\n]*sudo\b[^\n]*(?:rpm|rpmkeys)\s+--import\s+"?\$\{RUNNER_TEMP\}/graith\.asc"?`)
+	if rootImport.MatchString(script) {
+		t.Fatal("stable RPM verification imports the public key as root, but rpm --checksig uses the invoking user's RPM key database")
+	}
+
+	publishScript := string(mustReadReleaseFile(t, "scripts/publish-linux-repositories.sh"))
+
+	publishRootImport := regexp.MustCompile(`(?m)^\s*[^#\n]*sudo\b[^\n]*(?:rpm|rpmkeys)\s+--import\s+"\$repository/gpg/graith\.asc"`)
+	if publishRootImport.MatchString(publishScript) {
+		t.Fatal("repository RPM verification imports the public key as root, but rpm --checksig uses the invoking user's RPM key database")
+	}
+}
+
 func TestStableRPMSigningSetupFailuresAreDiagnostic(t *testing.T) {
 	workflow := loadStableReleaseWorkflow(t)
 	step := workflowStep(workflow.Jobs["attest-stable"], "Apply configured RPM signatures before checksums and provenance")
@@ -252,6 +280,7 @@ func TestStableRPMSigningSetupFailuresAreDiagnostic(t *testing.T) {
 		`Could not inspect GPG keygrips for imported signing key $key_id`,
 		`preset_output="$(printf '%s\n' "$keygrip_listing"`,
 		`Could not preset GPG passphrase for imported signing key $key_id`,
+		`Could not import the RPM verification key into the invoking user's RPM database`,
 		`Could not verify RPM signature for $(basename "$package")`,
 		`RPM signature verification did not report signatures OK for $(basename "$package")`,
 		`Expected 9 finalized release artifacts in dist, found ${#artifacts[@]}`,
