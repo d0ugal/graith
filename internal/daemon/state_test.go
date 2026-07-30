@@ -685,6 +685,55 @@ func TestLoadStatePromptedAuthorsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadStateEventFollowRulesRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	now := time.Date(2026, time.July, 30, 10, 0, 0, 0, time.UTC)
+
+	st := NewState()
+	st.Sessions["bairn"] = &SessionState{
+		ID:        "bairn",
+		Name:      "bairn",
+		Status:    StatusRunning,
+		CreatedAt: now,
+	}
+	st.EventFollowRules["bairn"] = &EventFollowRuleState{
+		SourceSessionID: "bairn",
+		Events:          []string{"ci"},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastDelivered:   map[string]string{"ci": "pr:7:head:sha1:state:passing"},
+	}
+	st.EventFollowRules["glaur"] = &EventFollowRuleState{
+		SourceSessionID: "glaur",
+		Events:          []string{"ci"},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastDelivered:   map[string]string{"ci": "pr:8:head:sha2:state:failing"},
+	}
+
+	if err := SaveState(path, st); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rule := loaded.EventFollowRules["bairn"]
+	if rule == nil {
+		t.Fatal("event follow rule missing after load")
+	}
+
+	if strings.Join(rule.Events, ",") != "ci" || rule.LastDelivered["ci"] != "pr:7:head:sha1:state:passing" {
+		t.Fatalf("event follow rule did not round-trip: %+v", rule)
+	}
+
+	if _, ok := loaded.EventFollowRules["glaur"]; ok {
+		t.Fatal("orphaned event follow rule survived load")
+	}
+}
+
 func TestLoadStateV14RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 
@@ -1474,8 +1523,8 @@ func TestMigrateV22ToCurrentAppliesAllMigrations(t *testing.T) {
 }
 
 func TestStateMigrationsRegisteredSequentially(t *testing.T) {
-	if CurrentStateVersion != 31 {
-		t.Fatalf("CurrentStateVersion = %d, want 31", CurrentStateVersion)
+	if CurrentStateVersion != 32 {
+		t.Fatalf("CurrentStateVersion = %d, want 32", CurrentStateVersion)
 	}
 
 	if len(migrations) != CurrentStateVersion {

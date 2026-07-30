@@ -219,6 +219,120 @@ too slow, use `gr list --json` and `gr msg sub --topic <name> --all` to rebuild
 current state. The stream is fleet-wide for authenticated users and sessions,
 matching the visibility of `gr list` plus public topic subscriptions.
 
+### `gr events follow <child> --events <events>`
+
+Register a durable follow rule so the child session's direct parent receives
+selected child events. The only event class in v1 is `ci`:
+
+```console
+$ gr events follow bairn --events ci
+Following ci from bairn -> ben
+```
+
+`--events` accepts a comma-separated list or repeated values. Re-running
+`follow` for the same child replaces that child's followed event set. Unknown
+event classes are rejected. Only the direct parent session, or the local user,
+may create or change a follow rule. The config-managed system orchestrator
+cannot follow child events; commands that would target it fail and no event is
+delivered.
+
+`gr new --follow-events=ci` creates the same rule atomically while creating a
+child session. If the follow rule is invalid, session creation fails before the
+child starts.
+
+Follow rules are keyed by source child and persisted in daemon state. Delivery
+is exactly one hop to the source child's current direct parent; forwarded events
+are terminal and are never forwarded again to a grandparent. Reparenting moves
+the rule to the new direct parent when that parent is valid. Reparenting to no
+parent, to a deleted parent, or to the system orchestrator disables the rule.
+Purging a source session removes its rule.
+
+### `gr events unfollow <child> [--events <events>]`
+
+Remove selected event classes from a direct-child follow rule:
+
+```console
+$ gr events unfollow bairn --events ci
+Unfollowed none from bairn -> ben
+```
+
+Omit `--events` to remove the whole follow rule.
+
+### `gr events following`
+
+List active follow rules visible to the caller:
+
+```console
+$ gr events following
+ci from bairn -> ben
+```
+
+Use `--json` for the stable structured form:
+
+```json
+{
+  "rules": [
+    {
+      "child_session_id": "bairn-id",
+      "child_session": "bairn",
+      "parent_session_id": "ben-id",
+      "parent_session": "ben",
+      "events": ["ci"],
+      "created_at": "2026-07-30T12:00:00Z",
+      "updated_at": "2026-07-30T12:00:00Z"
+    }
+  ]
+}
+```
+
+### Forwarded `ci` events
+
+The `ci` class forwards the aggregate PR-watch CI transitions graith already
+computes: `pending`, `failing`, and `passing`. The first matching PR-watch
+observation after a rule is registered can therefore forward the current
+aggregate state. It does not forward raw GitHub `check_run` or `check_suite`
+webhook payloads, does not start extra GitHub polling, and does not treat
+unknown CI as passing.
+
+The parent receives a daemon-authored inbox message and `gr events` subscribers
+also see a `session_event` payload:
+
+```json
+{
+  "type": "session_event",
+  "event_class": "ci",
+  "forwarded": true,
+  "session_id": "ben-id",
+  "session": "ben",
+  "source_session_id": "bairn-id",
+  "source_session": "bairn",
+  "destination_session_id": "ben-id",
+  "destination_session": "ben",
+  "pr_number": 1646,
+  "pr_url": "https://github.com/d0ugal/graith/pull/1646",
+  "head_ref_oid": "abc123def456...",
+  "ci_state": "failing",
+  "failing_checks": ["test"],
+  "ci_pending": 1,
+  "ci_passed": 3,
+  "ci_total": 5,
+  "system": true
+}
+```
+
+The event identifies the source child and PR, includes the child PR head SHA,
+aggregate check counts, and failing-check names when known, and preserves
+daemon/system authorship. It does not mutate or masquerade as the parent's own
+PR or CI state.
+
+Forwarded `ci` messages use the parent's normal inbox notification path, so a
+new forwarded transition can notify or auto-resume the parent session just like
+other daemon-authored inbox messages. They are deduplicated by source session,
+PR number, head SHA, and aggregate state, but they do not use PR-watch's
+user-facing notification rate limit because they are explicit child-to-parent
+follow events. Raw GitHub comments still use the existing trust and quarantine
+paths instead of event forwarding.
+
 ### `gr logs <name-or-id>` (alias: `l`)
 
 Show session output without attaching.

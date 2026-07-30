@@ -46,7 +46,7 @@ func describeSessionExit(s SessionState) string {
 // barrier transition itself.
 func mutatingControlMessage(msg protocol.Envelope) bool {
 	switch msg.Type {
-	case "msg_inbox", "msg_sub", "events_sub":
+	case "msg_inbox", "msg_sub", "events_sub", "event_following":
 		// Reading, waiting, and following are observational. ACK persistence
 		// acquires its own narrowly scoped lease after a message is delivered.
 		// Keeping these requests out of the connection lease is essential for
@@ -864,6 +864,15 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				if sm.handleEventsSub(ctx, sendControl, sendControlResult, reader) {
 					return
 				}
+
+			case "event_follow":
+				handleEventFollow(sm, auth, sendControl, msg)
+
+			case "event_unfollow":
+				handleEventUnfollow(sm, auth, sendControl, msg)
+
+			case "event_following":
+				handleEventFollowing(sm, auth, sendControl, msg)
 
 			case "msg_ack":
 				handleMsgAck(sm, auth, sendControl, msg)

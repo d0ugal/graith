@@ -209,6 +209,13 @@ func TestResumeTombstonesFinishesInterruptedDelete(t *testing.T) {
 		WorktreePath: worktree,
 		Status:       StatusDeleting,
 	}
+	sm.state.EventFollowRules["thrawn1"] = &EventFollowRuleState{
+		SourceSessionID: "thrawn1",
+		Events:          []string{eventFollowClassCI},
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+		LastDelivered:   map[string]string{eventFollowClassCI: "pr:7:head:sha1:state:failing"},
+	}
 
 	if err := sm.writeTombstone(tombstone{
 		teardownSpec: teardownSpec{ID: "thrawn1", WorktreePath: worktree},
@@ -222,6 +229,10 @@ func TestResumeTombstonesFinishesInterruptedDelete(t *testing.T) {
 
 	if _, ok := sm.state.Sessions["thrawn1"]; ok {
 		t.Error("session still in state after resume")
+	}
+
+	if _, ok := sm.state.EventFollowRules["thrawn1"]; ok {
+		t.Error("event follow rule still in state after resume")
 	}
 
 	if _, err := os.Stat(worktree); !os.IsNotExist(err) {

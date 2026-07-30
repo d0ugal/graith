@@ -31,6 +31,7 @@ var (
 	newHeadless            bool
 	newNoFetch             bool
 	newLabels              []string
+	newFollowEvents        []string
 
 	newCodexProfile     string
 	newCodexReasoning   string
@@ -143,6 +144,7 @@ var newCmd = &cobra.Command{
 			Headless:            newHeadless,
 			NoFetch:             newNoFetch,
 			Codex:               codexOptionsToProtocol(codexOpts),
+			FollowEvents:        append([]string{}, newFollowEvents...),
 		})
 
 		resp, err := c.ReadControlResponse()
@@ -240,6 +242,7 @@ func registerNewCmd() {
 	newCmd.Flags().BoolVar(&newHeadless, "headless", false, "run as a headless stream-json session instead of an interactive PTY (experimental; Claude only)")
 	newCmd.Flags().BoolVar(&newNoFetch, "no-fetch", false, "skip git fetch origin and create the worktree from local repo state (use when SSH auth is unavailable or offline)")
 	newCmd.Flags().StringArrayVar(&newLabels, "label", nil, "session label (repeatable)")
+	newCmd.Flags().StringSliceVar(&newFollowEvents, "follow-events", nil, "event classes for the direct parent to follow from the new child (allowed: ci)")
 	newCmd.Flags().StringVar(&newCodexProfile, "codex-profile", "", "Codex config profile to layer on top (codex --profile)")
 	newCmd.Flags().StringVar(&newCodexReasoning, "codex-reasoning-effort", "", "Codex model reasoning effort: minimal, low, medium, high, xhigh")
 	newCmd.Flags().StringVar(&newCodexServiceTier, "codex-service-tier", "", "Codex service tier: auto, default, flex, priority")

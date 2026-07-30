@@ -99,6 +99,7 @@ func (sm *SessionManager) Delete(id string) error {
 		// Session is mid-creation (Phase 2). Remove from state so Phase 3 detects
 		// the deletion and handles cleanup (worktree, PTY).
 		delete(sm.state.Sessions, id)
+		delete(sm.state.EventFollowRules, id)
 		delete(sm.hookReports, id)
 
 		saveErr := sm.saveState()
@@ -354,6 +355,7 @@ func (sm *SessionManager) Delete(id string) error {
 
 	sm.mu.Lock()
 	delete(sm.state.Sessions, id)
+	delete(sm.state.EventFollowRules, id)
 	delete(sm.hookReports, id)
 	delete(sm.silentWarned, id)
 
@@ -789,6 +791,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 		if sess.Status == StatusCreating {
 			// Mid-creation: remove from state so Phase 3 detects the deletion.
 			delete(sm.state.Sessions, did)
+			delete(sm.state.EventFollowRules, did)
 			delete(sm.hookReports, did)
 
 			if ac, ok := sm.attachedClients[did]; ok {
@@ -958,6 +961,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 
 			if sess.Status == StatusCreating {
 				delete(sm.state.Sessions, sid)
+				delete(sm.state.EventFollowRules, sid)
 				delete(sm.hookReports, sid)
 
 				if ac, ok := sm.attachedClients[sid]; ok {
@@ -1128,6 +1132,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 			}
 
 			delete(sm.state.Sessions, s.id)
+			delete(sm.state.EventFollowRules, s.id)
 			delete(sm.hookReports, s.id)
 			deletedIDs = append(deletedIDs, s.id)
 			removedSet[s.id] = true

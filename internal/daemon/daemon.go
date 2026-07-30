@@ -1479,6 +1479,9 @@ type CreateOpts struct {
 	Rows     uint16
 	Cols     uint16
 	EnvExtra []map[string]string
+	// FollowEvents creates a durable event forwarding rule in the same state
+	// reservation as the child session. The destination is ParentID.
+	FollowEvents []string
 	// TriggerID / TriggerReactor tag a session spawned by a trigger, applied in
 	// the same durable reservation as creation so reactor ownership survives a
 	// crash between Create and a separate tag-and-save.

@@ -19,7 +19,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
-const CurrentStateVersion = 31
+const CurrentStateVersion = 32
 
 // StateVersionError is returned by LoadState when the on-disk state file is
 // newer than this binary understands. The daemon treats this as fatal (refuses
@@ -625,6 +625,19 @@ type State struct {
 	// guarantee survives a daemon restart. Bounded (see PRWatchConfig.MaxPromptedAuthors)
 	// so it can't grow without limit on a busy public repo.
 	PRWatchPromptedAuthors map[string]bool `json:"pr_watch_prompted_authors,omitempty"`
+	// EventFollowRules holds opt-in direct-child event forwarding rules, keyed by
+	// source child session ID. The destination is resolved from the source
+	// session's current ParentID at delivery time, so reparenting cannot leave a
+	// stale target.
+	EventFollowRules map[string]*EventFollowRuleState `json:"event_follow_rules,omitempty"`
+}
+
+type EventFollowRuleState struct {
+	SourceSessionID string            `json:"source_session_id"`
+	Events          []string          `json:"events"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+	LastDelivered   map[string]string `json:"last_delivered,omitempty"`
 }
 
 type GraithBuildState struct {
@@ -716,6 +729,7 @@ func NewState() *State {
 		TriggerRuntime:         make(map[string]*TriggerRuntimeState),
 		UpgradeCleanup:         make(map[string]UpgradeCleanupState),
 		PRWatchPromptedAuthors: make(map[string]bool),
+		EventFollowRules:       make(map[string]*EventFollowRuleState),
 	}
 }
 
@@ -759,6 +773,10 @@ func LoadState(path string) (*State, error) {
 		state.PRWatchPromptedAuthors = make(map[string]bool)
 	}
 
+	if state.EventFollowRules == nil {
+		state.EventFollowRules = make(map[string]*EventFollowRuleState)
+	}
+
 	if state.Version > CurrentStateVersion {
 		return nil, &StateVersionError{FileVersion: state.Version, BinaryVersion: CurrentStateVersion}
 	}
@@ -778,6 +796,8 @@ func LoadState(path string) (*State, error) {
 		slog.Warn("state migration failed, starting fresh", "path", path, "err", err)
 		return NewState(), nil
 	}
+
+	pruneEventFollowRules(&state)
 
 	return &state, nil
 }
@@ -876,7 +896,21 @@ func LoadStateSnapshotForAdoption(data []byte) (*State, int, error) {
 		state.PRWatchPromptedAuthors = make(map[string]bool)
 	}
 
+	if state.EventFollowRules == nil {
+		state.EventFollowRules = make(map[string]*EventFollowRuleState)
+	}
+
+	pruneEventFollowRules(&state)
+
 	return &state, originalVersion, nil
+}
+
+func pruneEventFollowRules(state *State) {
+	for childID := range state.EventFollowRules {
+		if _, ok := state.Sessions[childID]; !ok {
+			delete(state.EventFollowRules, childID)
+		}
+	}
 }
 
 func SaveState(path string, state *State) error {
@@ -922,6 +956,7 @@ var migrations = map[int]func(*State) error{
 	28: migrateV28ToV29,
 	29: migrateV29ToV30,
 	30: migrateV30ToV31,
+	31: migrateV31ToV32,
 }
 
 func generateToken() (string, error) {
@@ -1242,6 +1277,16 @@ func migrateV29ToV30(_ *State) error { return nil }
 // captured Codex ids; existing state has no reliable backfill once the transient
 // capture root has already been cleared.
 func migrateV30ToV31(_ *State) error { return nil }
+
+// migrateV31ToV32 adds durable child-session event forwarding rules. Existing
+// state has no rules, so the only migration work is map initialization.
+func migrateV31ToV32(state *State) error {
+	if state.EventFollowRules == nil {
+		state.EventFollowRules = make(map[string]*EventFollowRuleState)
+	}
+
+	return nil
+}
 
 // writeFileAtomic writes state to disk crash-safely (temp + fsync + rename +
 // dir fsync). It delegates to the shared atomicfile helper so every state
