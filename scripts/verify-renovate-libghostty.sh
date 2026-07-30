@@ -82,7 +82,7 @@ if ! run_renovate_lookup; then
     exit 1
 fi
 
-ci_expected='["gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6"]'
+ci_expected='["gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6","trufflesecurity/trufflehog"]'
 ci_actual="$(jq -sc '
     [
         .[] |
@@ -127,7 +127,16 @@ if ! jq -se '
         (.replaceString | test("^GORELEASER_VERSION=v[0-9]+[.][0-9]+[.][0-9]+$"))) and
     any($deps[];
         .depName == "gohugoio/hugo" and
-        .datasource == "github-releases")
+        .datasource == "github-releases") and
+    any($deps[];
+        .depName == "trufflesecurity/trufflehog" and
+        .packageName == "ghcr.io/trufflesecurity/trufflehog" and
+        .datasource == "docker" and
+        (.currentDigest | test("^sha256:[a-f0-9]{64}$")) and
+        all(.updates[]?;
+            .branchName != "renovate/pin-dependencies" and
+            (.newValue | test("^[0-9]+[.][0-9]+[.][0-9]+$")) and
+            (.newDigest | test("^sha256:[a-f0-9]{64}$"))))
     ' "$log" >/dev/null; then
     echo "error: CI tool managers did not retain expected datasource or integrity metadata" >&2
     exit 1

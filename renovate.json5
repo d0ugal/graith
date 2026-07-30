@@ -134,6 +134,18 @@
       versioningTemplate: 'semver',
     },
     {
+      // TruffleHog runs directly from Docker in secret-scan.yml. Keep its tag
+      // and OCI index digest in one managed value so security scanning remains
+      // immutable while Renovate updates both together.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['TRUFFLEHOG_IMAGE=(?<packageName>ghcr\\.io/trufflesecurity/trufflehog):(?<currentValue>[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})'],
+      autoReplaceStringTemplate: 'TRUFFLEHOG_IMAGE=ghcr.io/trufflesecurity/trufflehog:{{{newValue}}}@{{{newDigest}}}',
+      depNameTemplate: 'trufflesecurity/trufflehog',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
+    },
+    {
       // Commit-only repositories follow the selected branch digest. The update
       // command resolves go-libghostty's digest to its Go pseudo-version.
       customType: 'regex',
