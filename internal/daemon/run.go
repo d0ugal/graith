@@ -1171,6 +1171,19 @@ func run(
 			return fail("accepted daemon mutations did not drain before upgrade", admissionErr)
 		}
 
+		// Background loops are daemon-owned writers. Join them before the frozen
+		// session snapshot so status detection, fetch, purge, or similar work
+		// cannot dirty state at the final exec barrier.
+		backgroundCtx, backgroundCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		backgroundDrainAttempted = true
+
+		if err := stopBackground(backgroundCtx); err != nil {
+			backgroundCancel()
+			return fail("upgrade background drain failed", fmt.Errorf("upgrade background drain failed: %w", err))
+		}
+
+		backgroundCancel()
+
 		if err := sm.preflightUpgradeSessions(target.capacity); err != nil {
 			return fail(err.Error(), err)
 		}
@@ -1280,16 +1293,6 @@ func run(
 		}
 
 		log.Info("exec-ing new binary", "sessions", len(manifest.Sessions), "active_version", version.Version, "active_commit", version.CommitSHA, "target_version", target.targetVersion, "target_commit", target.targetCommit)
-
-		backgroundCtx, backgroundCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		backgroundDrainAttempted = true
-
-		if err := stopBackground(backgroundCtx); err != nil {
-			backgroundCancel()
-			return fmt.Errorf("upgrade background drain failed: %w", err)
-		}
-
-		backgroundCancel()
 
 		// Stop PTY reads and input only at the last reversible moment, after
 		// acknowledgement and every potentially slow background drain. This keeps

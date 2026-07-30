@@ -171,6 +171,11 @@ func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string
 func (sm *SessionManager) detectAgentStatuses() {
 	sm.mu.RLock()
 
+	if sm.upgradePending {
+		sm.mu.RUnlock()
+		return
+	}
+
 	det := sm.cfg.Detection
 
 	type target struct {
@@ -281,6 +286,11 @@ func (sm *SessionManager) detectAgentStatuses() {
 		)
 
 		sm.mu.Lock()
+		if sm.upgradePending {
+			sm.mu.Unlock()
+			return
+		}
+
 		if s, ok := sm.state.Sessions[t.id]; ok {
 			oldStatus = s.AgentStatus
 			sessionName = s.Name
@@ -322,6 +332,11 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 	for _, id := range toAutoStop {
 		sm.mu.RLock()
+
+		if sm.upgradePending {
+			sm.mu.RUnlock()
+			return
+		}
 
 		s, ok := sm.state.Sessions[id]
 		if !ok {

@@ -548,10 +548,10 @@ func TestExecUpgradeInstallsConfiguredHandshakeDeadline(t *testing.T) {
 	}
 }
 
-func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
+func TestExecUpgradeNegotiationFloorCoversServerPreparation(t *testing.T) {
 	setupUpgradeTest(t)
 
-	upgradeNegotiationFloor = 30 * time.Second
+	upgradeNegotiationFloor = protocol.UpgradeNegotiationTimeout
 	cfg.Connection.HandshakeTimeout = "1s"
 	fixedNow := time.Unix(1_700_000, 0)
 	connectionNow = func() time.Time { return fixedNow }
@@ -568,7 +568,7 @@ func TestExecUpgradeNegotiationFloorCoversServerAdmission(t *testing.T) {
 		t.Fatal("expected injected refusal")
 	}
 
-	if want := fixedNow.Add(30 * time.Second); !fake.deadline.Equal(want) {
+	if want := fixedNow.Add(45 * time.Second); !fake.deadline.Equal(want) {
 		t.Fatalf("upgrade negotiation deadline = %v, want %v", fake.deadline, want)
 	}
 }
