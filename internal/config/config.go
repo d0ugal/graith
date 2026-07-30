@@ -732,12 +732,190 @@ type InputConfig struct {
 	// DragArrowKeys enables touch/hold-and-drag arrow keys:
 	// press-and-hold the left mouse button then drag to emit discrete arrow-key
 	// presses to the focused pane. Off by default because it repurposes
-	// left-drag (which terminals otherwise use for text selection). Mouse-wheel
-	// scrolling is always passed through unchanged.
+	// left-drag (which terminals otherwise use for text selection).
 	DragArrowKeys bool `toml:"drag_arrow_keys"`
 	// DragArrowThreshold is the number of cells of drag movement that produces
 	// one arrow-key press. Values below 1 fall back to the default.
 	DragArrowThreshold int `toml:"drag_arrow_threshold"`
+	// MouseWheelPolicy selects when configured mouse-wheel gestures trigger Graith
+	// actions: off, respect_terminal_modes, or always. Empty falls back to off.
+	MouseWheelPolicy string `toml:"mouse_wheel_policy"`
+	// Bindings maps semantic terminal input gestures to Graith actions. Supported
+	// v1 gestures are mouse wheel up/down, with optional Shift variants.
+	Bindings map[string]string `toml:"bindings"`
+}
+
+// AgentInputConfig is the optional [agents.<name>.input] block. It intentionally
+// contains only fields that can be overridden per agent without ambiguity; global
+// [input] fields such as drag_arrow_keys remain global for now.
+type AgentInputConfig struct {
+	MouseWheelPolicy string            `json:"mouse_wheel_policy,omitempty" toml:"mouse_wheel_policy"`
+	Bindings         map[string]string `json:"bindings,omitempty"           toml:"bindings"`
+}
+
+// EffectiveInputConfig is the resolved attach-time input policy after applying
+// global defaults and the current session's agent-specific overrides.
+type EffectiveInputConfig struct {
+	MouseWheelPolicy string
+	Bindings         map[string]string
+}
+
+const (
+	InputMouseWheelPolicyOff                  = "off"
+	InputMouseWheelPolicyRespectTerminalModes = "respect_terminal_modes"
+	InputMouseWheelPolicyAlways               = "always"
+
+	InputGestureMouseWheelUp        = "mouse_wheel_up"
+	InputGestureMouseWheelDown      = "mouse_wheel_down"
+	InputGestureShiftMouseWheelUp   = "shift_mouse_wheel_up"
+	InputGestureShiftMouseWheelDown = "shift_mouse_wheel_down"
+
+	InputActionNone       = "none"
+	InputActionScrollMode = "scroll_mode"
+)
+
+func (i InputConfig) Validate() error {
+	var errs []error
+
+	if err := validateMouseWheelPolicy("input.mouse_wheel_policy", i.MouseWheelPolicy); err != nil {
+		errs = append(errs, err)
+	}
+
+	errs = append(errs, validateInputBindings("input.bindings", i.Bindings)...)
+
+	return errors.Join(errs...)
+}
+
+func (i AgentInputConfig) Validate(path string) error {
+	var errs []error
+
+	if err := validateMouseWheelPolicy(path+".mouse_wheel_policy", i.MouseWheelPolicy); err != nil {
+		errs = append(errs, err)
+	}
+
+	errs = append(errs, validateInputBindings(path+".bindings", i.Bindings)...)
+
+	return errors.Join(errs...)
+}
+
+func validateMouseWheelPolicy(path, policy string) error {
+	if policy == "" {
+		return nil
+	}
+
+	switch policy {
+	case InputMouseWheelPolicyOff, InputMouseWheelPolicyRespectTerminalModes, InputMouseWheelPolicyAlways:
+		return nil
+	default:
+		return fmt.Errorf("%s %q: must be one of %q, %q, %q", path, policy,
+			InputMouseWheelPolicyOff, InputMouseWheelPolicyRespectTerminalModes, InputMouseWheelPolicyAlways)
+	}
+}
+
+func validateInputBindings(path string, bindings map[string]string) []error {
+	var errs []error
+
+	for gesture, action := range bindings {
+		if !ValidInputGesture(gesture) {
+			errs = append(errs, fmt.Errorf("%s.%s: unsupported gesture (must be one of %s)", path, gesture, strings.Join(InputGestureNames(), ", ")))
+			continue
+		}
+
+		if !ValidInputAction(action) {
+			errs = append(errs, fmt.Errorf("%s.%s %q: unsupported action (must be one of %s)", path, gesture, action, strings.Join(InputActionNames(), ", ")))
+		}
+	}
+
+	return errs
+}
+
+func InputGestureNames() []string {
+	return []string{
+		InputGestureMouseWheelUp,
+		InputGestureMouseWheelDown,
+		InputGestureShiftMouseWheelUp,
+		InputGestureShiftMouseWheelDown,
+	}
+}
+
+func ValidInputGesture(gesture string) bool {
+	switch gesture {
+	case InputGestureMouseWheelUp,
+		InputGestureMouseWheelDown,
+		InputGestureShiftMouseWheelUp,
+		InputGestureShiftMouseWheelDown:
+		return true
+	default:
+		return false
+	}
+}
+
+func InputActionNames() []string {
+	return []string{
+		InputActionNone,
+		InputActionScrollMode,
+	}
+}
+
+func ValidInputAction(action string) bool {
+	switch action {
+	case InputActionNone, InputActionScrollMode:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Config) EffectiveInput(agentName string) EffectiveInputConfig {
+	if c == nil {
+		return EffectiveInputConfig{MouseWheelPolicy: InputMouseWheelPolicyOff}
+	}
+
+	effective := EffectiveInputConfig{
+		MouseWheelPolicy: c.Input.MouseWheelPolicy,
+		Bindings:         cloneStringMap(c.Input.Bindings),
+	}
+	if effective.MouseWheelPolicy == "" {
+		effective.MouseWheelPolicy = InputMouseWheelPolicyOff
+	}
+
+	if agent, ok := c.Agents[agentName]; ok {
+		if agent.Input.MouseWheelPolicy != "" {
+			effective.MouseWheelPolicy = agent.Input.MouseWheelPolicy
+		}
+
+		for gesture, action := range agent.Input.Bindings {
+			if effective.Bindings == nil {
+				effective.Bindings = make(map[string]string)
+			}
+
+			effective.Bindings[gesture] = action
+		}
+	}
+
+	return effective
+}
+
+func (e EffectiveInputConfig) ActionForGesture(gesture string) string {
+	if action, ok := e.Bindings[gesture]; ok && action != "" {
+		return action
+	}
+
+	return InputActionNone
+}
+
+func (e EffectiveInputConfig) CapturesWheelGesture() bool {
+	if e.MouseWheelPolicy == "" || e.MouseWheelPolicy == InputMouseWheelPolicyOff {
+		return false
+	}
+
+	for _, gesture := range InputGestureNames() {
+		if e.ActionForGesture(gesture) != InputActionNone {
+			return true
+		}
+	}
+
+	return false
 }
 
 // DefaultRemotePort is the TCP port the tailnet control listener binds when
@@ -3554,6 +3732,10 @@ type Agent struct {
 	// define its own control-channel flags (issue #1236). Built-in claude sets the
 	// `-p --output-format stream-json …` flags.
 	HeadlessArgs []string `json:"headless_args,omitempty" toml:"headless_args"`
+	// Input overrides the global [input] gesture policy for this agent. Only the
+	// semantic gesture/action mapping is configurable; graith never accepts raw
+	// terminal escape-code bindings from config.
+	Input AgentInputConfig `json:"input,omitempty" toml:"input"`
 	// OptionArgs are conditional argv groups appended after the base args on every
 	// launch (create/resume/fork). Each group's Args are template-expanded and
 	// appended only when its When template variable resolves non-empty, so an
@@ -4406,8 +4588,16 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
+	if err := c.Input.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
 	for agentName, agent := range c.Agents {
 		if err := agent.Sandbox.validateSignalMode("agents." + agentName + ".sandbox"); err != nil {
+			errs = append(errs, err)
+		}
+
+		if err := agent.Input.Validate("agents." + agentName + ".input"); err != nil {
 			errs = append(errs, err)
 		}
 
@@ -5443,6 +5633,8 @@ func mergeAgent(def, usr Agent) Agent {
 		def.HeadlessArgs = usr.HeadlessArgs
 	}
 
+	def.Input = mergeAgentInput(def.Input, usr.Input)
+
 	if usr.NonInteractiveArgs != nil {
 		def.NonInteractiveArgs = usr.NonInteractiveArgs
 	}
@@ -5456,6 +5648,40 @@ func mergeAgent(def, usr Agent) Agent {
 	}
 
 	return def
+}
+
+func mergeAgentInput(def, usr AgentInputConfig) AgentInputConfig {
+	if usr.MouseWheelPolicy != "" {
+		def.MouseWheelPolicy = usr.MouseWheelPolicy
+	}
+
+	if usr.Bindings != nil {
+		merged := cloneStringMap(def.Bindings)
+		if merged == nil {
+			merged = make(map[string]string, len(usr.Bindings))
+		}
+
+		for gesture, action := range usr.Bindings {
+			merged[gesture] = action
+		}
+
+		def.Bindings = merged
+	}
+
+	return def
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+
+	return out
 }
 
 func Default() *Config {

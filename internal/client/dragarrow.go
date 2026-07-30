@@ -32,6 +32,12 @@ const (
 	mouseWheelBit  = 64
 )
 
+const (
+	mouseShiftBit = 4
+	mouseAltBit   = 8
+	mouseCtrlBit  = 16
+)
+
 const defaultDragArrowThreshold = 2
 
 // maxMouseFieldDigits bounds the digit run parseUint will accept for a single

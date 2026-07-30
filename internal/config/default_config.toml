@@ -534,16 +534,30 @@ message_direct = "d"                     # switch the message viewer to direct m
 
 # Terminal input gestures for the attach passthrough loop.
 [input]
+# Mouse-wheel capture for Graith actions. Global default is off so unknown or
+# custom interactive agents keep receiving wheel input. Bundled coding agents
+# opt into "respect_terminal_modes" below. "respect_terminal_modes" triggers
+# only when the child is not using mouse tracking and is not in alternate-screen
+# alternate-scroll; "always" also steals wheel events from child apps and should
+# be opt-in.
+mouse_wheel_policy = "off" # off | respect_terminal_modes | always
 # Touch/hold-and-drag arrow keys: press-and-hold the left mouse
 # button then drag up/down/left/right to emit discrete arrow-key presses to the
 # focused pane. Off by default because it repurposes left-drag, which terminals
-# otherwise use for text selection; mouse-wheel scrolling always passes through.
-# Only takes effect when the focused app has SGR mouse reporting enabled (e.g. a
-# TUI that tracks the mouse, or a touch/mobile terminal that reports drags);
-# graith translates those reports, it does not enable mouse tracking itself.
+# otherwise use for text selection. Only takes effect when the focused app has
+# SGR mouse reporting enabled (e.g. a TUI that tracks the mouse, or a
+# touch/mobile terminal that reports drags); graith translates those reports, it
+# does not enable mouse tracking itself.
 drag_arrow_keys = false
 # Cells of drag movement per emitted arrow-key press (values < 1 use the default).
 drag_arrow_threshold = 2
+
+[input.bindings]
+# Semantic gesture bindings. Supported actions are "scroll_mode" and "none".
+mouse_wheel_up = "scroll_mode"
+# mouse_wheel_down = "none"
+# shift_mouse_wheel_up = "scroll_mode"
+# shift_mouse_wheel_down = "none"
 
 # A special worktree-less session for coordinating other sessions (ctrl+b o).
 [orchestrator]
@@ -694,7 +708,7 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_pre
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox,
 #   validate_model, interrupt_count, interrupt_delay_ms, inject_prompt,
 #   pre_trust_workspace, headless_capable, non_interactive_args, add_dir_args, headless_args,
-#   option_args (conditional [[agents.<name>.option_args]] groups)
+#   input, option_args (conditional [[agents.<name>.option_args]] groups)
 
 [agents.claude]
 command = "claude"                                    # binary to launch
@@ -723,6 +737,9 @@ add_dir_args = ["--add-dir", "{dir}"]
 # Control-channel argv prefix prepended in headless stream-json mode; the agent's
 # own args follow. Pinned to what was verified against claude 2.1.211. (#1236)
 headless_args = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
+
+[agents.claude.input]
+mouse_wheel_policy = "respect_terminal_modes"
 
 [agents.claude.info]
 version = ["--version"]  # provider CLI version
@@ -755,6 +772,9 @@ add_dir_args        = ["--add-dir", "{dir}"]     # grant an included repo's work
 # effort and service tier have no dedicated Codex flag, so they ride
 # `-c key=value` overrides; the rest map to real flags. All are accepted on the
 # bare invocation and on the `resume`/`fork` subcommands.
+[agents.codex.input]
+mouse_wheel_policy = "respect_terminal_modes"
+
 [[agents.codex.option_args]]
 when = "model"                                   # --model <session model>
 args = ["--model", "{model}"]
@@ -788,6 +808,9 @@ inject_prompt       = true     # inject agent_prompt into the session
 prompt_injection    = "none"   # OpenCode has no supported injection mechanism; set to opt in
 pre_trust_workspace = true     # pre-trust the worktree so the agent skips its trust prompt
 
+[agents.opencode.input]
+mouse_wheel_policy = "respect_terminal_modes"
+
 [agents.cursor]
 command = "agent"           # the Cursor CLI binary is named `agent`
 non_interactive_args = [] # keep Cursor's native prompts. Set ["--force"] to run unattended
@@ -801,6 +824,9 @@ inject_prompt       = true            # inject agent_prompt into the session
 prompt_injection    = "cursor_rules"  # delivery mechanism: writes .cursor/rules/graith.mdc
 pre_trust_workspace = true            # pre-trust the worktree so the agent skips its trust prompt
 add_dir_args        = ["--add-dir", "{dir}"]  # grant an included repo's worktree
+
+[agents.cursor.input]
+mouse_wheel_policy = "respect_terminal_modes"
 
 [agents.cursor.info]
 version = ["-v"]  # provider CLI version
@@ -822,6 +848,9 @@ idle_timeout        = "1h"     # auto-stop after this long idle (0 disables)
 inject_prompt       = true     # inject agent_prompt into the session
 prompt_injection    = "none"   # Agy has no supported injection mechanism; set to opt in
 pre_trust_workspace = true     # pre-trust the worktree so the agent skips its trust prompt
+
+[agents.agy.input]
+mouse_wheel_policy = "respect_terminal_modes"
 
 [agents.agy.sandbox]
 read_dirs = ["~/.gemini"]

@@ -161,9 +161,12 @@ the default aliases for that action. See [interface configuration]({{< relref "c
 for the full list and defaults.
 
 Terminal control sequences such as Kitty keyboard protocol, paste markers, mouse
-reports, and viewport-owned pager navigation are not remappable keybindings.
-macOS menu shortcuts use native Command-key equivalents in the app; daemon config
-does not rewrite those platform shortcuts.
+reports, and viewport-owned pager navigation are not raw remappable keybindings.
+Mouse-wheel reports can be mapped only through the typed gestures in
+[`[input.bindings]`]({{< relref "configuration/interface.md#input" >}}), such
+as `mouse_wheel_up = "scroll_mode"`. macOS menu shortcuts use native
+Command-key equivalents in the app; daemon config does not rewrite those
+platform shortcuts.
 
 ## macOS menu shortcuts
 

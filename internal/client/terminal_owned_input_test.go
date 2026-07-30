@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -141,6 +142,160 @@ func TestTerminalOwnedInputRoutesWheelByChildMode(t *testing.T) {
 
 			if gotDelta != test.wantDelta {
 				t.Fatalf("local history delta = %d, want %d", gotDelta, test.wantDelta)
+			}
+		})
+	}
+}
+
+func TestTerminalOwnedInputRoutesConfiguredWheelGestures(t *testing.T) {
+	tests := map[string]struct {
+		policy      string
+		bindings    map[string]string
+		modes       protocol.TerminalInputModes
+		button      int
+		want        string
+		wantAction  string
+		wantHandled bool
+	}{
+		"off forwards child mouse tracking": {
+			policy: config.InputMouseWheelPolicyOff,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNormal,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button: 64,
+			want:   "\x1b[<64;5;6M",
+		},
+		"respect terminal modes captures primary wheel up": {
+			policy: config.InputMouseWheelPolicyRespectTerminalModes,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNone,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button:      64,
+			wantAction:  config.InputActionScrollMode,
+			wantHandled: true,
+		},
+		"respect terminal modes preserves child mouse tracking": {
+			policy: config.InputMouseWheelPolicyRespectTerminalModes,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNormal,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button: 64,
+			want:   "\x1b[<64;5;6M",
+		},
+		"respect terminal modes preserves alternate scroll": {
+			policy: config.InputMouseWheelPolicyRespectTerminalModes,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking:         protocol.TerminalMouseTrackingNone,
+				MouseFormat:           protocol.TerminalMouseFormatSGR,
+				AlternateScreen:       true,
+				AlternateScroll:       true,
+				ApplicationCursorKeys: true,
+			},
+			button: 64,
+			want:   applicationCursorUp,
+		},
+		"always captures child mouse tracking": {
+			policy: config.InputMouseWheelPolicyAlways,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNormal,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button:      64,
+			wantAction:  config.InputActionScrollMode,
+			wantHandled: true,
+		},
+		"always honours explicit none": {
+			policy: config.InputMouseWheelPolicyAlways,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionNone,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNormal,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button: 64,
+			want:   "\x1b[<64;5;6M",
+		},
+		"shift wheel uses shift gesture": {
+			policy: config.InputMouseWheelPolicyRespectTerminalModes,
+			bindings: map[string]string{
+				config.InputGestureShiftMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNone,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button:      68,
+			wantAction:  config.InputActionScrollMode,
+			wantHandled: true,
+		},
+		"ctrl wheel has no v1 gesture": {
+			policy: config.InputMouseWheelPolicyAlways,
+			bindings: map[string]string{
+				config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+			},
+			modes: protocol.TerminalInputModes{
+				MouseTracking: protocol.TerminalMouseTrackingNormal,
+				MouseFormat:   protocol.TerminalMouseFormatSGR,
+			},
+			button: 80,
+			want:   "\x1b[<80;5;6M",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var (
+				gotAction  string
+				gotHandled bool
+			)
+
+			router := newTerminalOwnedInputRouter(nil, nil, nil)
+			router.setInputConfig(config.EffectiveInputConfig{
+				MouseWheelPolicy: test.policy,
+				Bindings:         test.bindings,
+			})
+			router.setLocalGestureAction(func(action string) bool {
+				gotAction = action
+				gotHandled = true
+
+				return true
+			})
+			router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
+				Cols:       80,
+				Rows:       24,
+				InputModes: &test.modes,
+			})
+
+			got := string(router.process([]byte(fmt.Sprintf("\x1b[<%d;5;6M", test.button))))
+			if got != test.want {
+				t.Fatalf("wheel output = %q, want %q", got, test.want)
+			}
+
+			if gotHandled != test.wantHandled {
+				t.Fatalf("gesture handled = %t, want %t", gotHandled, test.wantHandled)
+			}
+
+			if gotAction != test.wantAction {
+				t.Fatalf("gesture action = %q, want %q", gotAction, test.wantAction)
 			}
 		})
 	}
@@ -355,6 +510,131 @@ func TestTerminalOwnedReadOnlyDropsRoutedMouseInput(t *testing.T) {
 	case data := <-received:
 		t.Fatalf("read-only terminal-owned attach forwarded mouse input: %q", data)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestTerminalOwnedWheelGestureReturnsScrollMode(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+	router := newTerminalOwnedInputRouter(nil, nil, nil)
+	router.setInputConfig(config.EffectiveInputConfig{
+		MouseWheelPolicy: config.InputMouseWheelPolicyRespectTerminalModes,
+		Bindings: map[string]string{
+			config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+		},
+	})
+	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
+		Cols: 80,
+		Rows: 24,
+		InputModes: &protocol.TerminalInputModes{
+			MouseTracking: protocol.TerminalMouseTrackingNone,
+			MouseFormat:   protocol.TerminalMouseFormatSGR,
+		},
+	})
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte("\x1b[<64;5;5M"))
+	}()
+
+	opts := testOpts
+	opts.terminalOwnedInput = router
+
+	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultScrollMode {
+		t.Fatalf("result = %d, want ResultScrollMode (%d)", result, ResultScrollMode)
+	}
+}
+
+func TestTerminalOwnedWheelGestureForwardsEarlierBytesBeforeScrollMode(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+	received := captureDaemonDataFrames(daemonConn, 1)
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+	router := newTerminalOwnedInputRouter(nil, nil, nil)
+	router.setInputConfig(config.EffectiveInputConfig{
+		MouseWheelPolicy: config.InputMouseWheelPolicyRespectTerminalModes,
+		Bindings: map[string]string{
+			config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+		},
+	})
+	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
+		Cols: 80,
+		Rows: 24,
+		InputModes: &protocol.TerminalInputModes{
+			MouseTracking: protocol.TerminalMouseTrackingNone,
+			MouseFormat:   protocol.TerminalMouseFormatSGR,
+		},
+	})
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte("braw\x1b[<64;5;5M"))
+	}()
+
+	opts := testOpts
+	opts.terminalOwnedInput = router
+
+	result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
+	if result != ResultScrollMode {
+		t.Fatalf("result = %d, want ResultScrollMode (%d)", result, ResultScrollMode)
+	}
+
+	select {
+	case data := <-received:
+		if string(data) != "braw" {
+			t.Fatalf("forwarded bytes = %q, want braw", data)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for forwarded bytes before wheel action")
+	}
+}
+
+func TestTerminalOwnedWheelGestureUsesTopChromeTranslatedChildRow(t *testing.T) {
+	clientConn, daemonConn := net.Pipe()
+	defer func() { _ = daemonConn.Close() }()
+
+	c := newTestClient(clientConn)
+	stdinR, stdinW := io.Pipe()
+	stdout := &lockedWriter{}
+	chrome := newTerminalOwnedAttachChrome(protocol.SessionInfo{Name: "braw"}, false, "top", 24, 80)
+	router := newTerminalOwnedInputRouter(chrome, nil, nil)
+	router.setInputConfig(config.EffectiveInputConfig{
+		MouseWheelPolicy: config.InputMouseWheelPolicyRespectTerminalModes,
+		Bindings: map[string]string{
+			config.InputGestureMouseWheelUp: config.InputActionScrollMode,
+		},
+	})
+	router.updateSnapshot(&protocol.ScreenSnapshotResponseMsg{
+		Cols: 80,
+		Rows: 23,
+		InputModes: &protocol.TerminalInputModes{
+			MouseTracking: protocol.TerminalMouseTrackingNone,
+			MouseFormat:   protocol.TerminalMouseFormatSGR,
+		},
+	})
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+
+		_, _ = stdinW.Write([]byte("\x1b[<64;5;2M"))
+	}()
+
+	opts := testOpts
+	opts.TerminalOwned = true
+	opts.terminalOwnedChrome = chrome
+	opts.terminalOwnedInput = router
+
+	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultScrollMode {
+		t.Fatalf("result = %d, want ResultScrollMode (%d)", result, ResultScrollMode)
 	}
 }
 

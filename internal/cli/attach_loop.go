@@ -103,6 +103,7 @@ func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]b
 }
 
 func (l *attachLoop) setTerminalOwnedSeed(seed *protocol.TerminalOwnedAttachSeedMsg) {
+	l.refreshInputConfig()
 	l.opts.TerminalOwnedSeed = seed
 
 	if seed == nil {
@@ -116,6 +117,16 @@ func (l *attachLoop) setTerminalOwnedSeed(seed *protocol.TerminalOwnedAttachSeed
 	l.terminalHistory = seed.History
 	l.terminalSnapshot = seed.Snapshot
 	l.hasTerminalHistory = terminalHistoryPresent(seed.History)
+}
+
+func (l *attachLoop) refreshInputConfig() {
+	var zero client.PassthroughOpts
+
+	l.opts.Input = zero.Input
+
+	if cfg != nil {
+		l.opts.Input = cfg.EffectiveInput(l.info.Agent)
+	}
 }
 
 func (l *attachLoop) clearTerminalHistory() {
