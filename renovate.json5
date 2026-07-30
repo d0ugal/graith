@@ -111,6 +111,14 @@
     {
       customType: 'regex',
       managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['COMMITSAR_VERSION=(?<currentValue>v[\\d.]+)'],
+      depNameTemplate: 'github.com/aevea/commitsar',
+      datasourceTemplate: 'go',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
       matchStrings: ['K6_IMAGE=(?<packageName>grafana/k6):(?<currentValue>[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})'],
       autoReplaceStringTemplate: 'K6_IMAGE=grafana/k6:{{{newValue}}}@{{{newDigest}}}',
       datasourceTemplate: 'docker',

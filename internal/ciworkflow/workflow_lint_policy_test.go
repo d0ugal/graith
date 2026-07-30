@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -548,6 +549,7 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	pins := readPolicyFile(t, filepath.Join(repoRoot, ".github/ci-tool-versions.env"))
 	renovate := readPolicyFile(t, filepath.Join(repoRoot, "renovate.json5"))
 
+	assertRegexp(t, pins, `(?m)^COMMITSAR_VERSION=v\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^HUGO_VERSION=\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^K6_IMAGE=grafana/k6:\d+\.\d+\.\d+-with-browser@sha256:[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^GOVULNCHECK_VERSION=v\d+\.\d+\.\d+$`)
@@ -557,6 +559,7 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertRegexp(t, pins, `(?m)^TRUFFLEHOG_IMAGE=ghcr\.io/trufflesecurity/trufflehog:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$`)
 
 	for _, workflowPath := range []string{
+		".github/workflows/commits.yml",
 		".github/workflows/ci.yml",
 		".github/workflows/docs.yml",
 		".github/workflows/docs-preview.yml",
@@ -571,6 +574,8 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 		assertCIToolVersionsLoadOrder(t, path)
 	}
 
+	assertContains(t, renovate, "COMMITSAR_VERSION=(?<currentValue>v[\\\\d.]+)")
+	assertContains(t, renovate, "depNameTemplate: 'github.com/aevea/commitsar'")
 	assertContains(t, renovate, "HUGO_VERSION=(?<currentValue>[\\\\d.]+)")
 	assertContains(t, renovate, "K6_IMAGE=(?<packageName>grafana/k6):(?<currentValue>[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
 	assertContains(t, renovate, "autoReplaceStringTemplate: 'K6_IMAGE=grafana/k6:{{{newValue}}}@{{{newDigest}}}',")
@@ -625,6 +630,31 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 
 	if scorecardRun.Env["INPUT_PUBLISH_RESULTS"] != "true" {
 		t.Fatalf("Scorecard publish env = %q, want true", scorecardRun.Env["INPUT_PUBLISH_RESULTS"])
+	}
+
+	commits, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/commits.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commitsarJob := p11WorkflowJob(t, commits, "commitsar")
+	commitsarInstall := p11WorkflowStep(t, commitsarJob, "Install Commitsar")
+
+	for _, want := range []string{
+		`[[ ! "$COMMITSAR_VERSION" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]`,
+		`Clear GONOSUMDB so inherited private-module settings cannot bypass`,
+		`GOBIN="$bin_dir" GONOSUMDB="" GOSUMDB=sum.golang.org go install "github.com/aevea/commitsar@$COMMITSAR_VERSION"`,
+		`go version -m "$bin_dir/commitsar" | awk -v version="$COMMITSAR_VERSION"`,
+		`$1 == "mod" && $2 == "github.com/aevea/commitsar" && $3 == version { found = 1 }`,
+		`END { exit found ? 0 : 1 }`,
+		`printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"`,
+	} {
+		assertContains(t, commitsarInstall.Run, want)
+	}
+
+	commitsarRun := p11WorkflowStep(t, commitsarJob, "Conventional commits")
+	if commitsarRun.Run != "commitsar --config-path=." {
+		t.Fatalf("Commitsar run = %q, want commitsar --config-path=.", commitsarRun.Run)
 	}
 
 	secretScan, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/secret-scan.yml"))
@@ -689,6 +719,134 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 		assertContains(t, workflow, "goreleaser release")
 	}
 }
+
+func TestCommitsarInstallScriptChecksGoModuleMetadata(t *testing.T) {
+	t.Parallel()
+
+	commits, err := ReadP11WorkflowSummary(filepath.Join(p11RepoRoot(), ".github/workflows/commits.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commitsarJob := p11WorkflowJob(t, commits, "commitsar")
+
+	commitsarInstall := p11WorkflowStep(t, commitsarJob, "Install Commitsar")
+	if commitsarInstall.Run == "" {
+		t.Fatal("Commitsar install step has no run script")
+	}
+
+	tests := map[string]struct {
+		metadataVersion string
+		wantErr         bool
+	}{
+		"matching module metadata passes": {
+			metadataVersion: "v1.0.3",
+		},
+		"mismatched module metadata fails": {
+			metadataVersion: "v1.0.4",
+			wantErr:         true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			binDir := filepath.Join(dir, "bin")
+			runnerTemp := filepath.Join(dir, "runner")
+			githubPath := filepath.Join(dir, "github_path")
+			scriptPath := filepath.Join(dir, "install-commitsar.sh")
+
+			if err := os.MkdirAll(binDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+
+			writeTestExecutable(t, filepath.Join(binDir, "go"), fakeCommitsarGoScript)
+
+			if err := os.WriteFile(scriptPath, []byte(commitsarInstall.Run), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd := exec.Command("bash", scriptPath)
+
+			cmd.Env = append(os.Environ(),
+				"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"COMMITSAR_VERSION=v1.0.3",
+				"GITHUB_PATH="+githubPath,
+				"RUNNER_TEMP="+runnerTemp,
+				"GRAITH_FAKE_COMMITSAR_METADATA_VERSION="+test.metadataVersion,
+			)
+
+			output, err := cmd.CombinedOutput()
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("Commitsar install succeeded unexpectedly:\n%s", output)
+				}
+
+				if _, statErr := os.Stat(githubPath); !os.IsNotExist(statErr) {
+					t.Fatalf("GITHUB_PATH was updated despite failed metadata verification: %v", statErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Commitsar install failed: %v\n%s", err, output)
+			}
+
+			wantPath := filepath.Join(runnerTemp, "commitsar-bin")
+
+			githubPathData, err := os.ReadFile(githubPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			assertContains(t, string(githubPathData), wantPath)
+
+			if _, err := os.Stat(filepath.Join(wantPath, "commitsar")); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+const fakeCommitsarGoScript = `#!/bin/sh
+set -eu
+
+case "$1" in
+  install)
+    if [ "$2" != "github.com/aevea/commitsar@v1.0.3" ]; then
+      echo "unexpected go install target: $2" >&2
+      exit 99
+    fi
+    if [ "${GONOSUMDB+x}" != "x" ] || [ -n "$GONOSUMDB" ]; then
+      echo "GONOSUMDB must be set and empty" >&2
+      exit 99
+    fi
+    if [ "${GOSUMDB:-}" != "sum.golang.org" ]; then
+      echo "GOSUMDB must use the public checksum database" >&2
+      exit 99
+    fi
+    mkdir -p "$GOBIN"
+    printf '#!/bin/sh\nexit 0\n' >"$GOBIN/commitsar"
+    chmod +x "$GOBIN/commitsar"
+    ;;
+  version)
+    if [ "$2" != "-m" ]; then
+      echo "unexpected go version flag: $2" >&2
+      exit 99
+    fi
+    printf '%s: go1.26.5\n' "$3"
+    printf 'path\tgithub.com/aevea/commitsar\n'
+    printf 'mod\tgithub.com/aevea/commitsar\t%s\th1:canny\n' "$GRAITH_FAKE_COMMITSAR_METADATA_VERSION"
+    ;;
+  *)
+    echo "unexpected go command: $*" >&2
+    exit 99
+    ;;
+esac
+`
 
 func TestGoReleaserInstallFailsClosedOnMissingChecksum(t *testing.T) {
 	repoRoot := p11RepoRoot()
@@ -773,7 +931,7 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 }
 
 func stepConsumesCIToolVersion(step P11WorkflowStep) bool {
-	for _, name := range []string{"HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "GITLEAKS_IMAGE", "SCORECARD_IMAGE", "TRUFFLEHOG_IMAGE"} {
+	for _, name := range []string{"COMMITSAR_VERSION", "HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "GITLEAKS_IMAGE", "SCORECARD_IMAGE", "TRUFFLEHOG_IMAGE"} {
 		if strings.Contains(step.Run, name) {
 			return true
 		}

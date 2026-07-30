@@ -17,9 +17,38 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: aevea/commitsar@909c3ab676c9af63cb84f2e38f395c7e89829b04 # v1.0.3
+
+      - name: Load CI tool versions
+        run: grep -E '^(COMMITSAR_VERSION)=' .github/ci-tool-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install Commitsar
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$COMMITSAR_VERSION" =~ ^v[0-9]+[.][0-9]+[.][0-9]+$ ]]; then
+            echo "::error title=Invalid Commitsar pin::COMMITSAR_VERSION must be a semver tag."
+            exit 1
+          fi
+
+          bin_dir="$RUNNER_TEMP/commitsar-bin"
+          mkdir -p "$bin_dir"
+          # Clear GONOSUMDB so inherited private-module settings cannot bypass
+          # the public checksum database for the pinned Commitsar module.
+          GOBIN="$bin_dir" GONOSUMDB="" GOSUMDB=sum.golang.org go install "github.com/aevea/commitsar@$COMMITSAR_VERSION"
+          go version -m "$bin_dir/commitsar" | awk -v version="$COMMITSAR_VERSION" '
+            $1 == "mod" && $2 == "github.com/aevea/commitsar" && $3 == version { found = 1 }
+            END { exit found ? 0 : 1 }
+          '
+          printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Conventional commits
         env:
           # Commitsar otherwise defaults to origin/master when a dispatch has
           # no GITHUB_BASE_REF. Use its supported GitLab-compatible variable
           # so the exact generated branch SHA is compared with main.
           CI_MERGE_REQUEST_TARGET_BRANCH_NAME: ${{ github.event_name == 'workflow_dispatch' && 'main' || '' }}
+        run: commitsar --config-path=.
