@@ -378,6 +378,10 @@ func (sm *SessionManager) SetTodoStore(ts *TodoStore) {
 // in-memory hookReports map and the session's AgentStatus. This is the
 // authoritative source of agent status when hooks are active.
 func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
+	// Production hook reports are admitted through the mutating control-message
+	// lease. Recheck at each write boundary as defense-in-depth for direct callers
+	// so hook-only status drift cannot invalidate a frozen upgrade snapshot.
+
 	// Context-pressure and sub-agent events are runtime signals that must NOT
 	// change AgentStatus — a compacting agent, or one that spawned a sub-agent,
 	// is still active, and clobbering a ready status here would be a
@@ -396,6 +400,12 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	// so a stale reason can't outlive its turn.
 	if sr.Event == "SessionEnd" {
 		sm.mu.Lock()
+
+		if sm.upgradePending {
+			sm.mu.Unlock()
+			return
+		}
+
 		if sess, ok := sm.state.Sessions[sr.SessionID]; ok {
 			sess.SessionEndReason = sr.Reason
 			sess.SessionEndReasonGen = sess.PIDStartTime
@@ -492,6 +502,11 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 
 	sm.mu.Lock()
 
+	if sm.upgradePending {
+		sm.mu.Unlock()
+		return
+	}
+
 	sess, ok := sm.state.Sessions[sr.SessionID]
 	if !ok {
 		sm.mu.Unlock()
@@ -568,6 +583,11 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 // place, so an off-lock cloneSessionState reading len() is race-free.
 func (sm *SessionManager) handleContextSubagentReport(sr protocol.StatusReportMsg) {
 	sm.mu.Lock()
+
+	if sm.upgradePending {
+		sm.mu.Unlock()
+		return
+	}
 
 	sess, ok := sm.state.Sessions[sr.SessionID]
 	if !ok {

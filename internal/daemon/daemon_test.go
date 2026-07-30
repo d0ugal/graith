@@ -2002,6 +2002,65 @@ func TestToSessionInfoContextSubagent(t *testing.T) {
 	}
 }
 
+func TestHandleHookReportSkipsStateDuringUpgradeReservation(t *testing.T) {
+	sm := newTestSessionManager(t)
+	statusChangedAt := time.Date(2026, 7, 30, 5, 0, 0, 0, time.UTC)
+
+	sm.state.Sessions["canny"] = &SessionState{
+		ID: "canny", Name: "canny", Status: StatusRunning,
+		AgentStatus: "active", StatusChangedAt: statusChangedAt, PIDStartTime: 4242,
+	}
+	sm.upgradePending = true
+
+	sm.HandleHookReport(protocol.StatusReportMsg{
+		SessionID: "canny", Event: "Stop", ToolName: "Bash", LastMessage: "braw done",
+	})
+	sm.HandleHookReport(protocol.StatusReportMsg{
+		SessionID: "canny", Event: "SessionEnd", Reason: "logout",
+	})
+	sm.HandleHookReport(protocol.StatusReportMsg{
+		SessionID: "canny", Event: "PreCompact",
+	})
+
+	sm.mu.RLock()
+	sess := sm.state.Sessions["canny"]
+	_, hookReported := sm.hookReports["canny"]
+	upgradePending := sm.upgradePending
+	sm.mu.RUnlock()
+
+	if sess.AgentStatus != "active" {
+		t.Errorf("AgentStatus = %q, want active", sess.AgentStatus)
+	}
+
+	if !sess.StatusChangedAt.Equal(statusChangedAt) {
+		t.Errorf("StatusChangedAt = %v, want %v", sess.StatusChangedAt, statusChangedAt)
+	}
+
+	if sess.HookToolName != "" {
+		t.Errorf("HookToolName = %q, want empty", sess.HookToolName)
+	}
+
+	if sess.LastMessage != "" {
+		t.Errorf("LastMessage = %q, want empty", sess.LastMessage)
+	}
+
+	if sess.SessionEndReason != "" || sess.SessionEndReasonGen != 0 {
+		t.Errorf("SessionEnd = (%q, %d), want empty", sess.SessionEndReason, sess.SessionEndReasonGen)
+	}
+
+	if sess.ContextPressure {
+		t.Error("ContextPressure = true, want false")
+	}
+
+	if hookReported {
+		t.Fatal("hook report was recorded during upgrade reservation")
+	}
+
+	if !upgradePending {
+		t.Fatal("upgrade reservation was cleared")
+	}
+}
+
 func TestMapSessionEndReason(t *testing.T) {
 	cases := []struct {
 		reason  string
@@ -2430,6 +2489,86 @@ func TestDetectAgentStatuses_MirrorSkipsGit(t *testing.T) {
 
 	if normal.AgentStatus != "active" {
 		t.Errorf("normal session AgentStatus=%q, want 'active'", normal.AgentStatus)
+	}
+}
+
+type upgradePendingScreenDriver struct {
+	*emptySnapshotAttachDriver
+
+	sm *SessionManager
+}
+
+func (d *upgradePendingScreenDriver) ScreenPreview() string {
+	d.sm.mu.Lock()
+	d.sm.upgradePending = true
+	d.sm.mu.Unlock()
+
+	return "output done\n>\n"
+}
+
+func TestDetectAgentStatusesSkipsStateDuringUpgradeReservation(t *testing.T) {
+	tests := map[string]struct {
+		seedPending bool
+		driver      func(*SessionManager) sessionDriver
+	}{
+		"reservation already pending": {
+			seedPending: true,
+			driver: func(*SessionManager) sessionDriver {
+				return &emptySnapshotAttachDriver{}
+			},
+		},
+		"reservation begins before status commit": {
+			driver: func(sm *SessionManager) sessionDriver {
+				return &upgradePendingScreenDriver{emptySnapshotAttachDriver: &emptySnapshotAttachDriver{}, sm: sm}
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			statusChangedAt := time.Date(2026, 7, 30, 5, 0, 0, 0, time.UTC)
+
+			sm.state.Sessions["canny"] = &SessionState{
+				ID: "canny", Name: "canny", Agent: "claude",
+				Status: StatusRunning, AgentStatus: "active", StatusChangedAt: statusChangedAt,
+			}
+			sm.sessions["canny"] = test.driver(sm)
+
+			if test.seedPending {
+				sm.upgradePending = true
+				sm.hookReports["canny"] = hookReport{
+					Status: "ready", Event: "Notification",
+					ReportedAt: time.Now(), AuthoritativeUntil: time.Now().Add(time.Minute),
+				}
+			}
+
+			sm.detectAgentStatuses()
+
+			sm.mu.RLock()
+			session := sm.state.Sessions["canny"]
+			agentStatus := session.AgentStatus
+			gotStatusChangedAt := session.StatusChangedAt
+			idleSince := session.IdleSince
+			upgradePending := sm.upgradePending
+			sm.mu.RUnlock()
+
+			if agentStatus != "active" {
+				t.Fatalf("AgentStatus = %q, want unchanged active", agentStatus)
+			}
+
+			if !gotStatusChangedAt.Equal(statusChangedAt) {
+				t.Fatalf("StatusChangedAt = %s, want unchanged %s", gotStatusChangedAt, statusChangedAt)
+			}
+
+			if idleSince != nil {
+				t.Fatal("IdleSince changed during upgrade reservation")
+			}
+
+			if !upgradePending {
+				t.Fatal("upgrade reservation was not active during detection")
+			}
+		})
 	}
 }
 

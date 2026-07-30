@@ -386,6 +386,94 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	}
 }
 
+func TestLibghosttyPreservingRestartWithActiveDetectionAndProbes(t *testing.T) {
+	h := startNativeDaemonWithConfig(t, func(cfg *config.Config) {
+		cfg.Detection.ScanInterval = "5ms"
+		cfg.Detection.RecentOutputWindow = "5s"
+		cfg.Detection.HookTerminalWindow = "5ms"
+	})
+	defer h.cleanup()
+
+	client := h.connect()
+
+	sessionNames := []string{"braw-restart-one", "canny-restart-two", "dreich-restart-three"}
+	sessions := make([]protocol.SessionInfo, 0, len(sessionNames))
+	lastMarkers := make([]string, 0, len(sessionNames))
+
+	for i, name := range sessionNames {
+		session := createNativeSession(t, client, name)
+		sessions = append(sessions, session)
+		waitForPreview(t, client, session.ID, nativeReadyText)
+
+		marker := fmt.Sprintf("blether-initial-%d", i)
+		if err := typeNativeInput(client, session.ID, marker); err != nil {
+			t.Fatal("type initial restart marker failed")
+		}
+
+		waitForPreview(t, client, session.ID, marker)
+		lastMarkers = append(lastMarkers, marker)
+	}
+
+	waitForHelperCount(t, h, len(sessions))
+
+	stopProbes := startNativeProbeHammer(t, h)
+	time.Sleep(25 * time.Millisecond)
+
+	for cycle := 0; cycle < 2; cycle++ {
+		oldHelpers := h.helperProcesses()
+
+		for _, session := range sessions {
+			mustControl(t, client, "status_report", protocol.StatusReportMsg{
+				SessionID: session.ID,
+				Event:     "Stop",
+			}, "status_reported")
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		for i, session := range sessions {
+			marker := fmt.Sprintf("croft-restart-cycle-%d-%d", cycle, i)
+			if err := typeNativeInput(client, session.ID, marker); err != nil {
+				t.Fatal("type before preserving restart failed")
+			}
+
+			waitForPreview(t, client, session.ID, marker)
+			lastMarkers[i] = marker
+		}
+
+		client = requestNativePreservingRestart(t, h, client)
+
+		for _, helper := range oldHelpers {
+			waitForProcessExit(t, helper)
+		}
+
+		waitForHelperCount(t, h, len(sessions))
+
+		for i, session := range sessions {
+			waitForPreview(t, client, session.ID, lastMarkers[i])
+
+			marker := fmt.Sprintf("strath-after-cycle-%d-%d", cycle, i)
+			if err := typeNativeInput(client, session.ID, marker); err != nil {
+				t.Fatal("type after preserving restart failed")
+			}
+
+			waitForPreview(t, client, session.ID, marker)
+			lastMarkers[i] = marker
+		}
+	}
+
+	if probes := stopProbes(); probes == 0 {
+		t.Fatal("preserving restart test did not exercise concurrent probe handshakes")
+	}
+
+	for _, session := range sessions {
+		purgeNativeSession(t, client, session.ID)
+	}
+
+	waitForHelperCount(t, h, 0)
+	client.close()
+}
+
 func TestLibghosttyHistoricalPreRemovalUpgrade(t *testing.T) {
 	charmBinary := os.Getenv(nativeUpgradeFromEnv)
 	if charmBinary == "" {
@@ -600,6 +688,14 @@ func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
 	return startNativeDaemonFrom(t, binary, binary)
 }
 
+func startNativeDaemonWithConfig(t *testing.T, configure func(*config.Config)) *nativeDaemonHarness {
+	t.Helper()
+
+	binary := requiredNativeBinary(t)
+
+	return startNativeDaemonFromWithConfig(t, binary, binary, configure)
+}
+
 func requiredNativeBinary(t *testing.T) string {
 	t.Helper()
 
@@ -612,6 +708,16 @@ func requiredNativeBinary(t *testing.T) string {
 }
 
 func startNativeDaemonFrom(t *testing.T, startBinary, targetBinary string) *nativeDaemonHarness {
+	t.Helper()
+
+	return startNativeDaemonFromWithConfig(t, startBinary, targetBinary, nil)
+}
+
+func startNativeDaemonFromWithConfig(
+	t *testing.T,
+	startBinary, targetBinary string,
+	configure func(*config.Config),
+) *nativeDaemonHarness {
 	t.Helper()
 
 	for _, binary := range []string{startBinary, targetBinary} {
@@ -651,6 +757,9 @@ func startNativeDaemonFrom(t *testing.T, startBinary, targetBinary string) *nati
 		Command:    "sh",
 		Args:       []string{"-c", "printf '" + nativeReadyText + "\\r\\n'; exec cat"},
 		ResumeArgs: []string{"-c", "printf '" + nativeResumeText + "\\r\\n'; exec cat"},
+	}
+	if configure != nil {
+		configure(cfg)
 	}
 
 	// EffectiveTOML is a display renderer that materializes optional tool
@@ -859,10 +968,8 @@ func (h *nativeDaemonHarness) tryConnect() (*nativeControlClient, error) {
 func (h *nativeDaemonHarness) connectNewGeneration(previous string) *nativeControlClient {
 	h.t.Helper()
 
-	// Upgrade acknowledgement precedes the daemon's bounded background and
-	// session-I/O drains. Match the production client's protocol floor so
-	// the integration harness does not kill a valid transition after an ordinary
-	// per-request timeout.
+	// Match the production client's protocol floor so the integration harness
+	// does not kill a valid transition after an ordinary per-request timeout.
 	deadline := time.Now().Add(nativeUpgradeTimeout)
 	observation := nativeRestartTimeoutObservation{}
 
@@ -893,6 +1000,85 @@ func (h *nativeDaemonHarness) connectNewGeneration(previous string) *nativeContr
 	h.failNewGenerationTimeout(observation)
 
 	return nil
+}
+
+func requestNativePreservingRestart(
+	t *testing.T,
+	h *nativeDaemonHarness,
+	client *nativeControlClient,
+) *nativeControlClient {
+	t.Helper()
+
+	previous := client.instance
+	upgradeMsg := protocol.UpgradeMsg{ExecPath: h.binary, ClientVersion: version.Version}
+	if upgradeMsg.ClientVersion == "" {
+		t.Fatal("tagged binary version is empty")
+	}
+
+	mustControl(t, client, "upgrade_preflight", upgradeMsg, "upgrade_preflight_ok")
+
+	if err := client.send("upgrade", upgradeMsg); err != nil {
+		t.Fatal("request preserving daemon restart failed")
+	}
+
+	response, err := client.readControl()
+	if err != nil {
+		t.Fatalf("read preserving restart response failed (%T)", err)
+	}
+
+	if response.Type != "upgrading" {
+		t.Fatalf("daemon did not accept preserving restart: %s", h.redactedControlResponse(response))
+	}
+
+	client.close()
+
+	return h.connectNewGeneration(previous)
+}
+
+func startNativeProbeHammer(t *testing.T, h *nativeDaemonHarness) func() int {
+	t.Helper()
+
+	done := make(chan struct{})
+	counts := make(chan int, 1)
+
+	go func() {
+		count := 0
+		defer func() { counts <- count }()
+
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
+			probe, err := h.tryConnect()
+			if err == nil {
+				count++
+				probe.close()
+			}
+
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	var (
+		once  sync.Once
+		count int
+	)
+
+	stop := func() int {
+		once.Do(func() {
+			close(done)
+			count = <-counts
+		})
+
+		return count
+	}
+
+	t.Cleanup(func() { _ = stop() })
+
+	return stop
 }
 
 func (h *nativeDaemonHarness) runCLI(args ...string) []byte {

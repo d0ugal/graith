@@ -263,7 +263,7 @@ jobs:
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$arm64_root/gr" \
             GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
-              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyPreservingRestartWithActiveDetectionAndProbes|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
               ./internal/integration
 
           jq -n --arg revision "$RELEASE_REVISION" --arg version "$version" \
@@ -515,7 +515,7 @@ jobs:
           GRAITH_LIBGHOSTTY_DAEMON_BINARY="$release_root/gr" \
             GRAITH_LIBGHOSTTY_HISTORICAL_UPGRADE_BINARY="$historical_binary" \
             go test -v -race -count=1 -tags='integration releaseartifact' -timeout=15m \
-              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
+              -run '^(TestLibghosttyDaemonLifecycle|TestLibghosttyPreservingRestartWithActiveDetectionAndProbes|TestLibghosttyHistoricalPreRemovalUpgrade)$' \
               ./internal/integration
 
   assemble-stable:
