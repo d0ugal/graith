@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.2](https://github.com/d0ugal/graith/compare/v0.71.1...v0.71.2) (2026-07-30)
+
+
+### Bug Fixes
+
+* stabilize stable Darwin release verification ([c9d7151](https://github.com/d0ugal/graith/commit/c9d715176d3481f85e9a7841f3f5c0f134cb6b36))
+
 ## [0.71.1](https://github.com/d0ugal/graith/compare/v0.71.0...v0.71.1) (2026-07-30)
 
 
