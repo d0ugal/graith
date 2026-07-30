@@ -553,6 +553,7 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertRegexp(t, pins, `(?m)^GOVULNCHECK_VERSION=v\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^GORELEASER_VERSION=v\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^GITLEAKS_IMAGE=ghcr\.io/gitleaks/gitleaks:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$`)
+	assertRegexp(t, pins, `(?m)^SCORECARD_IMAGE=ghcr\.io/ossf/scorecard-action:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^TRUFFLEHOG_IMAGE=ghcr\.io/trufflesecurity/trufflehog:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$`)
 
 	for _, workflowPath := range []string{
@@ -561,6 +562,7 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 		".github/workflows/docs-preview.yml",
 		".github/workflows/dev-release.yml",
 		".github/workflows/goreleaser.yml",
+		".github/workflows/scorecard.yml",
 		".github/workflows/secret-scan.yml",
 	} {
 		path := filepath.Join(repoRoot, workflowPath)
@@ -580,9 +582,50 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertContains(t, renovate, "GITLEAKS_IMAGE=(?<packageName>ghcr\\\\.io/gitleaks/gitleaks):(?<currentValue>v[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
 	assertContains(t, renovate, "autoReplaceStringTemplate: 'GITLEAKS_IMAGE=ghcr.io/gitleaks/gitleaks:{{{newValue}}}@{{{newDigest}}}',")
 	assertContains(t, renovate, "depNameTemplate: 'gitleaks/gitleaks'")
+	assertContains(t, renovate, "SCORECARD_IMAGE=(?<packageName>ghcr\\\\.io/ossf/scorecard-action):(?<currentValue>v[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
+	assertContains(t, renovate, "autoReplaceStringTemplate: 'SCORECARD_IMAGE=ghcr.io/ossf/scorecard-action:{{{newValue}}}@{{{newDigest}}}',")
+	assertContains(t, renovate, "depNameTemplate: 'ossf/scorecard-action'")
 	assertContains(t, renovate, "TRUFFLEHOG_IMAGE=(?<packageName>ghcr\\\\.io/trufflesecurity/trufflehog):(?<currentValue>[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
 	assertContains(t, renovate, "autoReplaceStringTemplate: 'TRUFFLEHOG_IMAGE=ghcr.io/trufflesecurity/trufflehog:{{{newValue}}}@{{{newDigest}}}',")
 	assertContains(t, renovate, "depNameTemplate: 'trufflesecurity/trufflehog'")
+
+	scorecard, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/scorecard.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scorecardAnalysis := p11WorkflowJob(t, scorecard, "analysis")
+	scorecardRun := p11WorkflowStep(t, scorecardAnalysis, "Run analysis")
+
+	for _, want := range []string{
+		`[[ ! "$SCORECARD_IMAGE" =~ ^ghcr[.]io/ossf/scorecard-action:`,
+		`immutable_image="${image_repo}@${image_digest}"`,
+		`docker run --rm \`,
+		`-e ACTIONS_ID_TOKEN_REQUEST_TOKEN`,
+		`-e ACTIONS_ID_TOKEN_REQUEST_URL`,
+		`-e GITHUB_WORKSPACE=/github/workspace`,
+		`-e GITHUB_EVENT_PATH=/github/event.json`,
+		`-e INPUT_INTERNAL_DEFAULT_TOKEN`,
+		`-e INPUT_PUBLISH_RESULTS`,
+		`-e INPUT_REPO_TOKEN`,
+		`-v "$PWD:/github/workspace"`,
+		`-v "$GITHUB_EVENT_PATH:/github/event.json:ro"`,
+		`"$immutable_image"`,
+	} {
+		assertContains(t, scorecardRun.Run, want)
+	}
+
+	if scorecardRun.Env["INPUT_RESULTS_FILE"] != "results.sarif" {
+		t.Fatalf("Scorecard results file env = %q, want results.sarif", scorecardRun.Env["INPUT_RESULTS_FILE"])
+	}
+
+	if scorecardRun.Env["INPUT_RESULTS_FORMAT"] != "sarif" {
+		t.Fatalf("Scorecard results format env = %q, want sarif", scorecardRun.Env["INPUT_RESULTS_FORMAT"])
+	}
+
+	if scorecardRun.Env["INPUT_PUBLISH_RESULTS"] != "true" {
+		t.Fatalf("Scorecard publish env = %q, want true", scorecardRun.Env["INPUT_PUBLISH_RESULTS"])
+	}
 
 	secretScan, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/secret-scan.yml"))
 	if err != nil {
@@ -619,13 +662,16 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	} {
 		assertContains(t, gitleaks.Run, want)
 	}
+
 	gitleaksUpload := p11WorkflowStep(t, p11WorkflowJob(t, secretScan, "gitleaks"), "Upload Gitleaks SARIF")
 	if gitleaksUpload.Uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" {
 		t.Fatalf("Gitleaks SARIF upload action = %q, want pinned upload-artifact v7", gitleaksUpload.Uses)
 	}
+
 	if gitleaksUpload.If != "always()" {
 		t.Fatalf("Gitleaks SARIF upload if = %q, want always()", gitleaksUpload.If)
 	}
+
 	if got := gitleaksUpload.With["if-no-files-found"]; got != "ignore" {
 		t.Fatalf("Gitleaks SARIF upload if-no-files-found = %q, want ignore", got)
 	}
@@ -727,7 +773,7 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 }
 
 func stepConsumesCIToolVersion(step P11WorkflowStep) bool {
-	for _, name := range []string{"HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "GITLEAKS_IMAGE", "TRUFFLEHOG_IMAGE"} {
+	for _, name := range []string{"HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "GITLEAKS_IMAGE", "SCORECARD_IMAGE", "TRUFFLEHOG_IMAGE"} {
 		if strings.Contains(step.Run, name) {
 			return true
 		}

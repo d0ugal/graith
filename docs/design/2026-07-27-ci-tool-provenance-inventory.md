@@ -132,7 +132,7 @@ disposition of each tool family.
 | GitHub artifact attestation action | `goreleaser.yml`, `dev-release.yml` attest jobs | Platform-managed | `actions/attest` is GitHub-owned, SHA-pinned, and isolated to jobs with `attestations: write`. | No replacement; keep attestation write permission scoped to attest jobs. |
 | Release Please action | `release-please.yml` | Immutable/provenance-verified | Third-party action source is pinned to commit `45996ed...`. | No current material gap found. |
 | Commitsar action container build | `commits.yml` | Mutable | Third-party action source is pinned to commit `909c3ab...`, but its Docker action builds from `golang:1.25.5-alpine` and `alpine:3.18` tag-only base images with `apk` and `go mod download` during the action build. | New required-check follow-up: either replace with a digest/provenance-verified commitsar install or pin the Docker build inputs tightly enough that executed bytes cannot float independently. |
-| Scorecard action container | `scorecard.yml` | Mutable | Third-party action source is pinned to commit `2d11466...`, but `action.yaml` executes `docker://ghcr.io/ossf/scorecard-action:v2.4.4` without an OCI digest; SARIF upload remains SHA-pinned GitHub CodeQL. | New security follow-up: evaluate a digest-pinned Scorecard image or equivalent action path while preserving `security-events` and `id-token` least privilege. |
+| Scorecard image | `scorecard.yml` | Immutable/provenance-verified | Workflow runs the official `ghcr.io/ossf/scorecard-action` image directly by OCI digest selected from `SCORECARD_IMAGE` in `.github/ci-tool-versions.env`; SARIF upload and code-scanning upload remain SHA-pinned platform-managed actions. | Action-internal mutable image gap closed by #1888 while preserving `security-events` and `id-token` least privilege. Keep tag and digest managed together. |
 | TruffleHog image | `secret-scan.yml` | Immutable/provenance-verified | Workflow runs `ghcr.io/trufflesecurity/trufflehog` directly by OCI digest selected from `TRUFFLEHOG_IMAGE` in `.github/ci-tool-versions.env`; the same value retains the version tag for Renovate's Docker manager, and the workflow rejects values without a `sha256` digest before execution. | Action-internal mutable image gap closed by #1888. Keep tag and digest managed together. |
 | Gitleaks image | `secret-scan.yml` | Immutable/provenance-verified | Workflow runs `ghcr.io/gitleaks/gitleaks` directly by OCI digest selected from `GITLEAKS_IMAGE` in `.github/ci-tool-versions.env`; the workflow rejects values without a version tag and `sha256` digest before execution. | Action-internal release-download gap closed by #1888. Keep tag and digest managed together. |
 | `golangci-lint` container | `ci.yml` lint via `make lint-only` and `make lint-darwin`; local `make lint*` | Immutable/provenance-verified | `Makefile` selects `golangci/golangci-lint:v2.12.2@sha256:5ccee...`; Renovate manages version and digest as one unit. | No change. Required `Lint` already uses immutable container bytes. |
@@ -161,7 +161,7 @@ disposition of each tool family.
 
 #### Follow-Up PR Queue
 
-1. Action-internal security and required-check tools: Scorecard and Commitsar.
+1. Action-internal security and required-check tools: Commitsar.
    Priority: required and security-adjacent
    CI. Keep each PR small; pin executable bytes or prove the replacement path has
    stronger integrity without broad workflow permission changes.

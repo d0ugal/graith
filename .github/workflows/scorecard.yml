@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      contents: read
       # Upload the results to code scanning.
       security-events: write
       # Needed to publish results and get a badge (OIDC).
@@ -31,12 +32,52 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load CI tool versions
+        run: grep -E '^(SCORECARD_IMAGE)=' .github/ci-tool-versions.env >> "$GITHUB_ENV"
+
       - name: Run analysis
-        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
-        with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
+        env:
+          INPUT_INTERNAL_DEFAULT_TOKEN: ${{ github.token }}
+          INPUT_INTERNAL_PUBLISH_BASE_URL: https://api.scorecard.dev
+          INPUT_PUBLISH_RESULTS: "true"
+          INPUT_REPO_TOKEN: ${{ github.token }}
+          INPUT_RESULTS_FILE: results.sarif
+          INPUT_RESULTS_FORMAT: sarif
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$SCORECARD_IMAGE" =~ ^ghcr[.]io/ossf/scorecard-action:v[0-9]+[.][0-9]+[.][0-9]+@sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error title=Invalid Scorecard pin::SCORECARD_IMAGE must include a version tag and sha256 digest."
+            exit 1
+          fi
+
+          tagged_image="${SCORECARD_IMAGE%@*}"
+          image_repo="${tagged_image%:*}"
+          image_digest="${SCORECARD_IMAGE##*@}"
+          immutable_image="${image_repo}@${image_digest}"
+
+          docker run --rm \
+            -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL \
+            -e GITHUB_ACTIONS \
+            -e GITHUB_API_URL \
+            -e GITHUB_EVENT_NAME \
+            -e GITHUB_REF \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_SERVER_URL \
+            -e GITHUB_SHA \
+            -e GITHUB_WORKSPACE=/github/workspace \
+            -e GITHUB_EVENT_PATH=/github/event.json \
+            -e INPUT_INTERNAL_DEFAULT_TOKEN \
+            -e INPUT_INTERNAL_PUBLISH_BASE_URL \
+            -e INPUT_PUBLISH_RESULTS \
+            -e INPUT_REPO_TOKEN \
+            -e INPUT_RESULTS_FILE \
+            -e INPUT_RESULTS_FORMAT \
+            -v "$PWD:/github/workspace" \
+            -v "$GITHUB_EVENT_PATH:/github/event.json:ro" \
+            -w /github/workspace \
+            "$immutable_image"
 
       # Upload the results as an artifact for debugging / offline inspection.
       - name: Upload artifact
