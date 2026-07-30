@@ -74,6 +74,9 @@ func TestDispatchUnknownResultContinues(t *testing.T) {
 func TestTerminalHistoryClearedAfterLiveOutputAndRestoredByFreshSeed(t *testing.T) {
 	l := &attachLoop{}
 	seed := &protocol.TerminalOwnedAttachSeedMsg{
+		Snapshot: protocol.ScreenSnapshotResponseMsg{
+			Frame: "braw screen",
+		},
 		History: protocol.TerminalHistoryMsg{
 			MaxLines:     17,
 			ActiveScreen: "primary",
@@ -89,15 +92,27 @@ func TestTerminalHistoryClearedAfterLiveOutputAndRestoredByFreshSeed(t *testing.
 		t.Fatal("fresh terminal-owned seed did not install terminal history")
 	}
 
+	if l.terminalSnapshot.Frame != "braw screen" {
+		t.Fatalf("fresh terminal-owned seed did not install terminal snapshot: %+v", l.terminalSnapshot)
+	}
+
 	l.clearTerminalHistory()
 
 	if l.hasTerminalHistory || len(l.terminalHistory.Lines) != 0 {
 		t.Fatalf("terminal history after live output = %+v, present=%v; want cleared", l.terminalHistory, l.hasTerminalHistory)
 	}
 
+	if l.terminalSnapshot.Frame != "" {
+		t.Fatalf("terminal snapshot after live output = %+v, want cleared", l.terminalSnapshot)
+	}
+
 	l.setTerminalOwnedSeed(seed)
 
 	if !l.hasTerminalHistory || len(l.terminalHistory.Lines) != 1 {
 		t.Fatalf("terminal history after fresh seed = %+v, present=%v; want restored", l.terminalHistory, l.hasTerminalHistory)
+	}
+
+	if l.terminalSnapshot.Frame != "braw screen" {
+		t.Fatalf("terminal snapshot after fresh seed = %+v, want restored", l.terminalSnapshot)
 	}
 }

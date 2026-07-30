@@ -73,6 +73,52 @@ func FormatTerminalHistory(history protocol.TerminalHistoryMsg) string {
 	return out.String()
 }
 
+// FormatTerminalScrollback formats terminal-owned scrollback for the pager. It
+// uses terminal history only when actual history rows are present so callers can
+// still fall back to daemon log scrollback when the terminal seed has no rows.
+func FormatTerminalScrollback(history protocol.TerminalHistoryMsg, snapshot protocol.ScreenSnapshotResponseMsg) string {
+	historyText := FormatTerminalHistory(history)
+	if historyText == "" {
+		return ""
+	}
+
+	frame := formatScreenSnapshotForScrollback(snapshot.Frame)
+	if frame == "" {
+		return historyText
+	}
+
+	if history.Lines[len(history.Lines)-1].Wrapped {
+		return historyText + frame
+	}
+
+	return historyText + "\n" + frame
+}
+
+func formatScreenSnapshotForScrollback(frame string) string {
+	if frame == "" {
+		return ""
+	}
+
+	frame = strings.ReplaceAll(frame, "\r\n", "\n")
+	frame = strings.ReplaceAll(frame, "\r", "\n")
+
+	lines := strings.Split(frame, "\n")
+	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	out := strings.Join(lines, "\n")
+	if !strings.HasSuffix(out, "\x1b[0m") {
+		out += "\x1b[0m"
+	}
+
+	return out
+}
+
 // scrollViewModel is a read-only pager over a session's scrollback history. It
 // wraps a bubbles viewport for the actual scrolling and adds a title header and
 // a help/percent footer. It is entered from passthrough via ctrl+b + scroll_mode.

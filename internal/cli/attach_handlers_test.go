@@ -207,11 +207,14 @@ func TestSwitchToAttachErrorKeepsCurrentSession(t *testing.T) {
 }
 
 // TestOnScrollModeUsesDaemonDefaultOnEveryReconnect is the CLI-side regression
-// for issue #1320. Scroll mode must send the zero sentinel on every fetch so a
-// long-lived attach process does not pin either the historical 2,000-line
-// literal or a client-side snapshot of [limits].log_lines across daemon reloads.
+// for issue #1320. When terminal-owned attach yields no history rows, scroll
+// mode must send the zero sentinel on every raw-log fallback so a long-lived
+// attach process does not pin either the historical 2,000-line literal or a
+// client-side snapshot of [limits].log_lines across daemon reloads.
 func TestOnScrollModeUsesDaemonDefaultOnEveryReconnect(t *testing.T) {
 	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
 	}}
@@ -305,6 +308,128 @@ func TestOnScrollModePrefersTerminalHistory(t *testing.T) {
 
 	if viewed != "brawcanny" {
 		t.Fatalf("scroll view content = %q, want formatted terminal history", viewed)
+	}
+}
+
+func TestOnScrollModeRefreshesTerminalHistoryBeforeRawLogs(t *testing.T) {
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("terminal_owned_attached", protocol.TerminalOwnedAttachSeedMsg{
+			Session: protocol.SessionInfo{ID: "braw", Name: "braw"},
+			Snapshot: protocol.ScreenSnapshotResponseMsg{
+				SessionID: "braw",
+				Frame:     "visible screen\r\ncurrent prompt\r\n   \x1b[0m",
+			},
+			History: protocol.TerminalHistoryMsg{
+				Lines: []protocol.TerminalHistoryLineMsg{
+					{Frame: "scrolled off 1"},
+					{Frame: "scrolled off 2"},
+				},
+			},
+		})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+	}}
+	withLoopSeams(t, fake)
+
+	origCfg := cfg
+	origFetch := fetchScrollback
+	origView := runScrollView
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		fetchScrollback = origFetch
+		runScrollView = origView
+	})
+
+	cfg = config.Default()
+	fetchScrollback = func(*config.Config, config.Paths, string, string, int) string {
+		t.Fatal("raw scrollback should not be fetched when fresh terminal history is available")
+
+		return ""
+	}
+
+	var viewed string
+
+	runScrollView = func(_ string, content string, _ client.ScrollKeys) {
+		viewed = content
+	}
+
+	l := newLoop("braw", "")
+
+	if done, err := l.onScrollMode(); done || err != nil {
+		t.Fatalf("onScrollMode() = (%v, %v), want (false, nil)", done, err)
+	}
+
+	want := "scrolled off 1\nscrolled off 2\nvisible screen\ncurrent prompt\x1b[0m"
+	if viewed != want {
+		t.Fatalf("scroll view content = %q, want fresh terminal history", viewed)
+	}
+
+	if got := fake.sentTypes(); !reflect.DeepEqual(got, []string{"attach", "attach"}) {
+		t.Fatalf("sent = %v, want fresh-history attach then reattach", got)
+	}
+
+	if fake.closed != 1 {
+		t.Fatalf("fresh-history attach closed %d times, want 1", fake.closed)
+	}
+}
+
+func TestOnScrollModeFallsBackToRawLogsWhenFreshTerminalHistoryFails(t *testing.T) {
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(errEnv("dreich terminal history")),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+	}}
+	withLoopSeams(t, fake)
+
+	origCfg := cfg
+	origFetch := fetchScrollback
+	origView := runScrollView
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		fetchScrollback = origFetch
+		runScrollView = origView
+	})
+
+	cfg = config.Default()
+
+	var requested []int
+
+	fetchScrollback = func(_ *config.Config, _ config.Paths, _ string, sessionID string, lines int) string {
+		if sessionID != "braw" {
+			t.Errorf("sessionID = %q, want braw", sessionID)
+		}
+
+		requested = append(requested, lines)
+
+		return "raw dreich logs"
+	}
+
+	var viewed string
+
+	runScrollView = func(_ string, content string, _ client.ScrollKeys) {
+		viewed = content
+	}
+
+	l := newLoop("braw", "")
+
+	if done, err := l.onScrollMode(); done || err != nil {
+		t.Fatalf("onScrollMode() = (%v, %v), want (false, nil)", done, err)
+	}
+
+	if viewed != "raw dreich logs" {
+		t.Fatalf("scroll view content = %q, want raw log fallback", viewed)
+	}
+
+	if want := []int{0}; !reflect.DeepEqual(requested, want) {
+		t.Fatalf("requested lines = %v, want daemon-default sentinel %v", requested, want)
+	}
+
+	if got := fake.sentTypes(); !reflect.DeepEqual(got, []string{"attach", "attach"}) {
+		t.Fatalf("sent = %v, want failed fresh-history attach then reattach", got)
+	}
+
+	if fake.closed != 1 {
+		t.Fatalf("fresh-history attach closed %d times, want 1", fake.closed)
 	}
 }
 

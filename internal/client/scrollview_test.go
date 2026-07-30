@@ -94,6 +94,61 @@ func TestFormatTerminalHistoryEmpty(t *testing.T) {
 	}
 }
 
+func TestFormatTerminalScrollback(t *testing.T) {
+	tests := map[string]struct {
+		history  protocol.TerminalHistoryMsg
+		snapshot protocol.ScreenSnapshotResponseMsg
+		want     string
+	}{
+		"history and visible frame": {
+			history: protocol.TerminalHistoryMsg{
+				Lines: []protocol.TerminalHistoryLineMsg{
+					{Frame: "scrolled off 1"},
+					{Frame: "scrolled off 2"},
+				},
+			},
+			snapshot: protocol.ScreenSnapshotResponseMsg{
+				Frame: "visible screen\r\ncurrent prompt\r\n   \x1b[0m",
+			},
+			want: "scrolled off 1\nscrolled off 2\nvisible screen\ncurrent prompt\x1b[0m",
+		},
+		"soft wrap crosses history and frame boundary": {
+			history: protocol.TerminalHistoryMsg{
+				Lines: []protocol.TerminalHistoryLineMsg{
+					{Frame: "wrapped ", Wrapped: true},
+				},
+			},
+			snapshot: protocol.ScreenSnapshotResponseMsg{
+				Frame: "continuation\r\n\x1b[0m",
+			},
+			want: "wrapped continuation\x1b[0m",
+		},
+		"empty history preserves raw log fallback": {
+			snapshot: protocol.ScreenSnapshotResponseMsg{
+				Frame: "visible screen\r\n\x1b[0m",
+			},
+			want: "",
+		},
+		"empty frame returns history": {
+			history: protocol.TerminalHistoryMsg{
+				Lines: []protocol.TerminalHistoryLineMsg{
+					{Frame: "braw"},
+				},
+			},
+			want: "braw",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := FormatTerminalScrollback(test.history, test.snapshot)
+			if got != test.want {
+				t.Fatalf("FormatTerminalScrollback() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestScrollViewModel_ViewEmptyBeforeReady(t *testing.T) {
 	m := newScrollViewModel("Scrollback — braw", "some history")
 	if got := m.View().Content; got != "" {
