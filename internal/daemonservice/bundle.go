@@ -223,7 +223,7 @@ func validateBundle(appPath string, expectations BundleExpectations, requireSecu
 	}
 
 	if expectations.StandalonePath != "" {
-		standaloneHash, err := hashRegularFile(expectations.StandalonePath)
+		standaloneHash, err := hashStandaloneFile(expectations.StandalonePath)
 		if err != nil {
 			return ValidatedBundle{}, fmt.Errorf("hash standalone gr: %w", err)
 		}
@@ -333,6 +333,15 @@ func hashRegularFile(path string) (string, error) {
 	}
 
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func hashStandaloneFile(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	return hashRegularFile(resolved)
 }
 
 func readPlistStrings(path string) (map[string]string, error) {

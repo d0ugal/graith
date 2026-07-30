@@ -207,6 +207,72 @@ func TestHomebrewSourceBundleAllowsWritableCellarBeforeSecureCache(t *testing.T)
 	}
 }
 
+func TestHomebrewSourceBundleAllowsSymlinkedStandaloneBeforeSecureCache(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	prefix := filepath.Join(root, "opt", "homebrew")
+	formulaRoot := filepath.Join(prefix, "Cellar", "graith", testVersion)
+	sourceRoot := filepath.Join(formulaRoot, "libexec", "graith")
+	app, sourceStandalone := writeBundleFixture(t, sourceRoot)
+
+	payload, err := os.ReadFile(sourceStandalone)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	formulaBin := filepath.Join(formulaRoot, "bin")
+	if err := os.MkdirAll(formulaBin, 0o755); err != nil { // #nosec G301 -- executable package fixture.
+		t.Fatal(err)
+	}
+
+	realExecutable := filepath.Join(formulaBin, "gr-dev")
+	if err := os.WriteFile(realExecutable, payload, 0o755); err != nil { // #nosec G306 G703 -- executable package fixture with controlled temp path.
+		t.Fatal(err)
+	}
+
+	linkedBin := filepath.Join(prefix, "bin")
+	if err := os.MkdirAll(linkedBin, 0o755); err != nil { // #nosec G301 -- executable package fixture.
+		t.Fatal(err)
+	}
+
+	executable := filepath.Join(linkedBin, "gr-dev")
+
+	target, err := filepath.Rel(linkedBin, realExecutable)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(target, executable); err != nil {
+		t.Fatal(err)
+	}
+
+	expectations := bundleExpectations(executable)
+
+	source, present, err := DiscoverBundle(executable, expectations)
+	if err != nil {
+		t.Fatalf("DiscoverBundle() = %v", err)
+	}
+
+	if !present || source.AppPath != app {
+		t.Fatalf("DiscoverBundle() = present %v app %q, want %q", present, source.AppPath, app)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRoot(source, expectations, cache)
+	if err != nil {
+		t.Fatalf("cacheBundleAtRoot() = %v", err)
+	}
+
+	if cached.AppPath == app || cached.Generation.ID != source.Generation.ID {
+		t.Fatalf("cached bundle = %#v, source app %q generation %q", cached, app, source.Generation.ID)
+	}
+}
+
 func TestManagedBuildSigningExpectationValidation(t *testing.T) {
 	originalManaged := ManagedBuild
 	originalTeam := ExpectedTeamID
