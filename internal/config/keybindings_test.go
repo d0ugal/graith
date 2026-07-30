@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,151 @@ func TestDefaultTUIKeybindings(t *testing.T) {
 	if !strings.Contains(tui.Cancel, "ctrl+c") {
 		t.Errorf("Keybindings.TUI.cancel = %q, want ctrl+c clean-exit binding", tui.Cancel)
 	}
+}
+
+func TestDefaultSessionNavigatorHelp(t *testing.T) {
+	help := Default().SessionNavigator.Help
+
+	for _, action := range []string{"attach", "new", "view", "help", "quit"} {
+		if !containsString(help.CompactActions, action) {
+			t.Errorf("session_navigator.help.compact_actions missing %q: %v", action, help.CompactActions)
+		}
+	}
+
+	for _, action := range []string{"delete", "stop", "restart_menu", "jump"} {
+		if !containsString(help.ExpandedActions, action) {
+			t.Errorf("session_navigator.help.expanded_actions missing %q: %v", action, help.ExpandedActions)
+		}
+	}
+
+	if help.ToggleKeys != "? f1" {
+		t.Errorf("session_navigator.help.toggle_keys = %q, want ? f1", help.ToggleKeys)
+	}
+
+	if help.ExpandedByDefault {
+		t.Error("session_navigator.help.expanded_by_default should be false by default")
+	}
+}
+
+func TestSessionNavigatorHelpValidation(t *testing.T) {
+	tests := map[string]struct {
+		body string
+		want string
+	}{
+		"invalid compact action": {
+			body: `
+[session_navigator.help]
+compact_actions = ["attach", "bogus"]
+`,
+			want: `session_navigator.help.compact_actions[1] "bogus"`,
+		},
+		"invalid expanded action": {
+			body: `
+[session_navigator.help]
+expanded_actions = ["stop", " fold"]
+`,
+			want: `session_navigator.help.expanded_actions[1] " fold"`,
+		},
+		"duplicate action": {
+			body: `
+[session_navigator.help]
+expanded_actions = ["stop", "stop"]
+`,
+			want: `session_navigator.help.expanded_actions[1] "stop": duplicate action`,
+		},
+		"invalid toggle key": {
+			body: `
+[session_navigator.help]
+toggle_keys = "f99"
+`,
+			want: `session_navigator.help.toggle_keys "f99"`,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			cfgPath := filepath.Join(dir, "config.toml")
+			if err := os.WriteFile(cfgPath, []byte(test.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Load(cfgPath)
+			if err == nil {
+				t.Fatal("Load succeeded, want validation error")
+			}
+
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error %q does not contain %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestSessionNavigatorHelpPartialConfigPreservesToggleDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	body := `
+[session_navigator.help]
+compact_actions = ["attach", "help"]
+`
+
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.SessionNavigator.Help.ToggleKeys; got != "? f1" {
+		t.Fatalf("session_navigator.help.toggle_keys = %q, want inherited default ? f1", got)
+	}
+
+	wantCompact := []string{"attach", "help"}
+	if !reflect.DeepEqual(cfg.SessionNavigator.Help.CompactActions, wantCompact) {
+		t.Fatalf("session_navigator.help.compact_actions = %#v, want %#v", cfg.SessionNavigator.Help.CompactActions, wantCompact)
+	}
+}
+
+func TestSessionNavigatorHelpEmptyToggleKeysDisablesHelpToggle(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	body := `
+[session_navigator.help]
+toggle_keys = ""
+`
+
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.SessionNavigator.Help.ToggleKeys; got != "" {
+		t.Fatalf("session_navigator.help.toggle_keys = %q, want explicit empty override", got)
+	}
+
+	for _, action := range []string{"attach", "new", "help", "quit"} {
+		if !containsString(cfg.SessionNavigator.Help.CompactActions, action) {
+			t.Fatalf("session_navigator.help.compact_actions lost default action %q: %v", action, cfg.SessionNavigator.Help.CompactActions)
+		}
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TestTUIKeybindingPartialOverride confirms that naming only some TUI

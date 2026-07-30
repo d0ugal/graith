@@ -763,7 +763,99 @@ func positiveIntOrDefault(n, def int) int {
 }
 
 type SessionNavigatorConfig struct {
-	ShortcutKeys string `toml:"shortcut_keys"`
+	ShortcutKeys string               `toml:"shortcut_keys"`
+	Help         SessionNavigatorHelp `toml:"help"`
+}
+
+func (s SessionNavigatorConfig) Validate() error {
+	return s.Help.Validate()
+}
+
+// SessionNavigatorHelp configures the Session Navigator help/action footer. The
+// action lists are ordered semantic IDs rather than rendered labels so existing
+// keybindings can keep driving the labels.
+type SessionNavigatorHelp struct {
+	CompactActions    []string `toml:"compact_actions"`
+	ExpandedActions   []string `toml:"expanded_actions"`
+	ToggleKeys        string   `toml:"toggle_keys"`
+	ExpandedByDefault bool     `toml:"expanded_by_default"`
+}
+
+var supportedSessionNavigatorHelpActions = map[string]struct{}{
+	"attach":       {},
+	"delete":       {},
+	"filter":       {},
+	"fold":         {},
+	"fold_all":     {},
+	"group":        {},
+	"help":         {},
+	"jump":         {},
+	"move":         {},
+	"new":          {},
+	"quit":         {},
+	"restart":      {},
+	"restart_menu": {},
+	"star":         {},
+	"stop":         {},
+	"top_bottom":   {},
+	"view":         {},
+}
+
+func (h SessionNavigatorHelp) Validate() error {
+	var errs []error
+
+	errs = append(errs, validateSessionNavigatorHelpActions("session_navigator.help.compact_actions", h.CompactActions)...)
+	errs = append(errs, validateSessionNavigatorHelpActions("session_navigator.help.expanded_actions", h.ExpandedActions)...)
+
+	for _, key := range strings.Fields(h.ToggleKeys) {
+		if err := ValidateTUIKeyName(key); err != nil {
+			errs = append(errs, fmt.Errorf("session_navigator.help.toggle_keys %q: %w", key, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func validateSessionNavigatorHelpActions(field string, actions []string) []error {
+	var errs []error
+
+	seen := make(map[string]struct{}, len(actions))
+
+	for i, action := range actions {
+		if action == "" || strings.TrimSpace(action) != action {
+			errs = append(errs, fmt.Errorf("%s[%d] %q: must be one of %s", field, i, action, sessionNavigatorHelpActionList()))
+
+			continue
+		}
+
+		if _, ok := supportedSessionNavigatorHelpActions[action]; !ok {
+			errs = append(errs, fmt.Errorf("%s[%d] %q: must be one of %s", field, i, action, sessionNavigatorHelpActionList()))
+
+			continue
+		}
+
+		if _, ok := seen[action]; ok {
+			errs = append(errs, fmt.Errorf("%s[%d] %q: duplicate action", field, i, action))
+
+			continue
+		}
+
+		seen[action] = struct{}{}
+	}
+
+	return errs
+}
+
+func sessionNavigatorHelpActionList() string {
+	names := make([]string, 0, len(supportedSessionNavigatorHelpActions))
+
+	for name := range supportedSessionNavigatorHelpActions {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	return strings.Join(names, ", ")
 }
 
 // InputConfig is the optional [input] block controlling terminal input
@@ -4625,6 +4717,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.Keybindings.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.SessionNavigator.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

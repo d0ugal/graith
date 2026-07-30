@@ -147,9 +147,9 @@ the right side of the title or list body.
 The remaining accepted work should stay split:
 
 1. [**Adaptive Navigator help**](https://github.com/d0ugal/graith/issues/1869):
-   replace the single long help line with compact
-   first-line actions plus an expanded in-overlay help state. This improves
-   discoverability without changing views or adding a dashboard.
+   implemented by replacing the single long help line with compact first-line
+   actions plus an expanded in-overlay help state, improving discoverability
+   without changing views or adding a dashboard.
 2. [**Wide Navigator layout**](https://github.com/d0ugal/graith/issues/1870):
    for very wide terminals, keep the tree and live
    preview but use spare width for a richer selected-session detail area instead

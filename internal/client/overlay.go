@@ -628,14 +628,26 @@ func sessionCountLabel(count int) string {
 
 func (m *overlayModel) panelWidth() int {
 	if m.width == 0 {
-		return m.contentWidth + 4
+		return m.minPanelInnerWidth() + 4
 	}
 
-	return min(m.contentWidth+4, m.width-4)
+	return min(m.minPanelInnerWidth()+4, m.width-4)
 }
 
 func (m *overlayModel) panelInnerWidth() int {
 	return max(1, m.panelWidth()-4)
+}
+
+func (m *overlayModel) minPanelInnerWidth() int {
+	width := m.contentWidth
+
+	if m.state == stateFilter {
+		width = max(width, lipgloss.Width(m.filterHelpLine(0)))
+	} else if m.state == stateList && !m.helpExpanded {
+		width = max(width, lipgloss.Width(strings.Join(m.helpActionLabels(m.helpCompactActions, false), "  ")))
+	}
+
+	return width
 }
 
 func (m *overlayModel) resizeFilterInput() {
@@ -724,6 +736,338 @@ func selectedSessionContext(item sessionItem, currentSessionID string) string {
 	}
 
 	return strings.Join(parts, "  ")
+}
+
+var (
+	defaultNavigatorCompactHelpActions  = []string{"attach", "new", "view", "group", "filter", "help", "quit"}
+	defaultNavigatorExpandedHelpActions = []string{
+		"move",
+		"top_bottom",
+		"view",
+		"group",
+		"jump",
+		"attach",
+		"new",
+		"star",
+		"fold",
+		"fold_all",
+		"delete",
+		"stop",
+		"restart",
+		"restart_menu",
+		"filter",
+		"help",
+		"quit",
+	}
+	defaultNavigatorHelpToggleKeys = []string{"?", "f1"}
+)
+
+// SessionNavigatorHelp configures the Session Navigator help/action footer.
+// Action names are validated by the config layer; unknown programmatic values
+// are ignored.
+type SessionNavigatorHelp struct {
+	CompactActions    []string
+	ExpandedActions   []string
+	ToggleKeys        []string
+	ExpandedByDefault bool
+}
+
+func DefaultSessionNavigatorHelp() SessionNavigatorHelp {
+	return SessionNavigatorHelp{
+		CompactActions:  append([]string(nil), defaultNavigatorCompactHelpActions...),
+		ExpandedActions: append([]string(nil), defaultNavigatorExpandedHelpActions...),
+		ToggleKeys:      append([]string(nil), defaultNavigatorHelpToggleKeys...),
+	}
+}
+
+func (m *overlayModel) listActionClaimsKey(k string) bool {
+	if matchKey(m.keyCancel, k) || m.keyDelete == k || m.keyResume == k || m.keySearch == k {
+		return true
+	}
+
+	for _, fixed := range []string{
+		"left", "h", "right", "l", "enter", "r", "S", "s", " ", "space",
+		"C", "j", "down", "k", "up", "g", "G", "home", "end", "pgup", "pgdown",
+		"b", "u", "f", "d", "tab", "shift+tab", "n",
+	} {
+		if fixed == k {
+			return true
+		}
+	}
+
+	if pressed := []rune(k); len(pressed) == 1 {
+		for _, shortcut := range m.shortcutKeys {
+			if pressed[0] == shortcut {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (m *overlayModel) navigatorHelpKey() string {
+	for _, k := range m.helpToggleKeys {
+		if !m.listActionClaimsKey(k) {
+			return k
+		}
+	}
+
+	return ""
+}
+
+func helpPart(keyName, action string) string {
+	if keyName == "" {
+		return ""
+	}
+
+	return keyName + " " + action
+}
+
+func compactHelpLine(parts []string, width int) string {
+	var kept []string
+
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+
+	line := strings.Join(kept, "  ")
+	if width > 0 && lipgloss.Width(line) > width {
+		line = compactHelpLinePreservingTail(kept, width)
+	}
+
+	return line
+}
+
+func compactHelpLinePreservingTail(parts []string, width int) string {
+	if width <= 0 || len(parts) <= 2 {
+		return ansi.Truncate(strings.Join(parts, "  "), width, "…")
+	}
+
+	suffix := parts[len(parts)-2:]
+	prefix := make([]string, 0, len(parts)-2)
+
+	for _, part := range parts[:len(parts)-2] {
+		candidate := make([]string, 0, len(prefix)+1+1+len(suffix))
+		candidate = append(candidate, prefix...)
+		candidate = append(candidate, part, "…")
+		candidate = append(candidate, suffix...)
+
+		if lipgloss.Width(strings.Join(candidate, "  ")) > width {
+			break
+		}
+
+		prefix = append(prefix, part)
+	}
+
+	candidate := make([]string, 0, len(prefix)+1+len(suffix))
+	candidate = append(candidate, prefix...)
+	candidate = append(candidate, "…")
+	candidate = append(candidate, suffix...)
+
+	line := strings.Join(candidate, "  ")
+	if lipgloss.Width(line) <= width {
+		return line
+	}
+
+	line = strings.Join(append([]string{"…"}, suffix...), "  ")
+	if lipgloss.Width(line) <= width {
+		return line
+	}
+
+	return ansi.Truncate(line, width, "…")
+}
+
+func (m *overlayModel) shortcutRangeHint() string {
+	if len(m.shortcutKeys) == 0 {
+		return ""
+	}
+
+	first := string(m.shortcutKeys[0])
+	last := string(m.shortcutKeys[len(m.shortcutKeys)-1])
+
+	return first + "-" + last + " jump"
+}
+
+func (m *overlayModel) helpActionLabel(action string, expanded bool) string {
+	switch action {
+	case "attach":
+		if m.view == viewDeleted {
+			return "enter restore"
+		}
+
+		return "enter attach"
+	case "delete":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return helpPart(m.keyDelete, "delete")
+	case "filter":
+		return helpPart(m.keySearch, "filter")
+	case "fold":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return "space fold"
+	case "fold_all":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return "C fold-all"
+	case "group":
+		if m.view == viewRepo || m.view == viewLabels || m.view == viewScenario {
+			return "tab group"
+		}
+
+		return ""
+	case "help":
+		actionLabel := "help"
+		if expanded {
+			actionLabel = "hide"
+		}
+
+		return helpPart(m.navigatorHelpKey(), actionLabel)
+	case "jump":
+		return m.shortcutRangeHint()
+	case "move":
+		return "j/k move"
+	case "new":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return "n new"
+	case "quit":
+		if expanded {
+			return helpPart(keyHint(m.keyCancel), "quit")
+		}
+
+		return helpPart(primaryKey(m.keyCancel), "quit")
+	case "restart":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return "r restart"
+	case "restart_menu":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return helpPart(m.keyResume, "restart menu")
+	case "star":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return "s star"
+	case "stop":
+		if m.view == viewDeleted {
+			return ""
+		}
+
+		return "S stop"
+	case "top_bottom":
+		return "g/G top/bottom"
+	case "view":
+		return "h/l view"
+	default:
+		return ""
+	}
+}
+
+func (m *overlayModel) helpActionLabels(actions []string, expanded bool) []string {
+	labels := make([]string, 0, len(actions))
+
+	for _, action := range actions {
+		if label := m.helpActionLabel(action, expanded); label != "" {
+			labels = append(labels, label)
+		}
+	}
+
+	return labels
+}
+
+func (m *overlayModel) compactNavigatorHelpLine(width int) string {
+	return compactHelpLine(m.helpActionLabels(m.helpCompactActions, false), width)
+}
+
+func (m *overlayModel) expandedNavigatorHelpLines(width int) []string {
+	return wrapHelpLines(m.helpActionLabels(m.helpExpandedActions, true), width)
+}
+
+func (m *overlayModel) filterHelpLine(width int) string {
+	enterAction := "enter attach"
+	if m.view == viewDeleted {
+		enterAction = "enter restore"
+	}
+
+	return compactHelpLine([]string{
+		"type to filter",
+		enterAction,
+		"esc/ctrl+c clear",
+	}, width)
+}
+
+func clampHelpLines(lines []string, maxLines, width int) []string {
+	if maxLines <= 0 {
+		return nil
+	}
+
+	if len(lines) <= maxLines {
+		return lines
+	}
+
+	out := append([]string(nil), lines[:maxLines]...)
+
+	last := out[len(out)-1]
+	if width > 0 && lipgloss.Width(last)+3 <= width {
+		last += "  …"
+	} else {
+		last = ansi.Truncate(last, width, "…")
+	}
+
+	out[len(out)-1] = last
+
+	return out
+}
+
+func wrapHelpLines(parts []string, width int) []string {
+	if width <= 0 {
+		return []string{strings.Join(parts, "  ")}
+	}
+
+	var (
+		lines   []string
+		current string
+	)
+
+	for _, part := range parts {
+		if current == "" {
+			current = part
+			continue
+		}
+
+		next := current + "  " + part
+		if lipgloss.Width(next) <= width {
+			current = next
+			continue
+		}
+
+		lines = append(lines, compactHelpLine([]string{current}, width))
+		current = part
+	}
+
+	if current != "" {
+		lines = append(lines, compactHelpLine([]string{current}, width))
+	}
+
+	return lines
 }
 
 // compactDelegate renders each item on a single line with aligned columns.
@@ -948,33 +1292,37 @@ type refreshDeletedMsg struct {
 }
 
 type overlayModel struct {
-	list             list.Model
-	filterInput      textinput.Model
-	state            overlayState
-	selected         *protocol.SessionInfo
-	width            int
-	height           int
-	contentWidth     int
-	cols             columnWidths
-	currentSessionID string
-	allSessions      []protocol.SessionInfo
-	view             viewMode
-	fetchPreview     func(sessionID string) string
-	refreshSessions  func() []protocol.SessionInfo
-	refreshDeleted   func() []protocol.SessionInfo
-	deleteSession    func(sessionID string, children bool) error
-	deleteError      string
-	restartSession   func(sessionID string) error
-	stopSession      func(sessionID string) error
-	toggleStar       func(sessionID string, star bool) error
-	restoreSession   func(sessionID string) error
-	deletedSessions  []protocol.SessionInfo
-	deletedReady     bool
-	previewContent   string
-	previewSessionID string
-	profile          string
-	collapsed        map[string]bool
-	shortcutKeys     []rune
+	list                list.Model
+	filterInput         textinput.Model
+	state               overlayState
+	selected            *protocol.SessionInfo
+	width               int
+	height              int
+	contentWidth        int
+	cols                columnWidths
+	currentSessionID    string
+	allSessions         []protocol.SessionInfo
+	view                viewMode
+	fetchPreview        func(sessionID string) string
+	refreshSessions     func() []protocol.SessionInfo
+	refreshDeleted      func() []protocol.SessionInfo
+	deleteSession       func(sessionID string, children bool) error
+	deleteError         string
+	restartSession      func(sessionID string) error
+	stopSession         func(sessionID string) error
+	toggleStar          func(sessionID string, star bool) error
+	restoreSession      func(sessionID string) error
+	deletedSessions     []protocol.SessionInfo
+	deletedReady        bool
+	previewContent      string
+	previewSessionID    string
+	profile             string
+	collapsed           map[string]bool
+	shortcutKeys        []rune
+	helpExpanded        bool
+	helpCompactActions  []string
+	helpExpandedActions []string
+	helpToggleKeys      []string
 
 	restartQueue  []string
 	restartIdx    int
@@ -1034,6 +1382,22 @@ func (m *overlayModel) applyKeys(keys SessionNavigatorKeys) {
 	}
 }
 
+func (m *overlayModel) applyHelp(help SessionNavigatorHelp) {
+	if help.CompactActions != nil {
+		m.helpCompactActions = append([]string(nil), help.CompactActions...)
+	}
+
+	if help.ExpandedActions != nil {
+		m.helpExpandedActions = append([]string(nil), help.ExpandedActions...)
+	}
+
+	if help.ToggleKeys != nil {
+		m.helpToggleKeys = append([]string(nil), help.ToggleKeys...)
+	}
+
+	m.helpExpanded = help.ExpandedByDefault
+}
+
 func (m *overlayModel) resizeList() {
 	if m.width == 0 || m.height == 0 {
 		return
@@ -1042,6 +1406,8 @@ func (m *overlayModel) resizeList() {
 	reserve := 12
 	if m.state == stateConfirmDelete || m.state == stateConfirmStop || m.state == stateConfirmRestart || m.state == stateRestartMenu || m.state == stateRestartingAll {
 		reserve = 14
+	} else if m.state == stateList && m.helpExpanded {
+		reserve += len(m.expandedNavigatorHelpLines(m.panelInnerWidth()))
 	}
 
 	listHeight := min(len(m.list.Items())+4, m.height-reserve)
@@ -1563,22 +1929,27 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	fi.CharLimit = 64
 	fi.SetWidth(contentWidth)
 
+	help := DefaultSessionNavigatorHelp()
+
 	return &overlayModel{
-		list:             l,
-		filterInput:      fi,
-		state:            stateList,
-		contentWidth:     contentWidth,
-		cols:             cols,
-		currentSessionID: currentSessionID,
-		allSessions:      sessions,
-		fetchPreview:     fetchPreview,
-		deleteSession:    deleteSession,
-		collapsed:        collapsed,
-		shortcutKeys:     shortcutKeys,
-		keyDelete:        "x",
-		keyResume:        "R",
-		keySearch:        "/",
-		keyCancel:        []string{"q", "esc", "ctrl+c"},
+		list:                l,
+		filterInput:         fi,
+		state:               stateList,
+		contentWidth:        contentWidth,
+		cols:                cols,
+		currentSessionID:    currentSessionID,
+		allSessions:         sessions,
+		fetchPreview:        fetchPreview,
+		deleteSession:       deleteSession,
+		collapsed:           collapsed,
+		shortcutKeys:        shortcutKeys,
+		helpCompactActions:  help.CompactActions,
+		helpExpandedActions: help.ExpandedActions,
+		helpToggleKeys:      help.ToggleKeys,
+		keyDelete:           "x",
+		keyResume:           "R",
+		keySearch:           "/",
+		keyCancel:           []string{"q", "esc", "ctrl+c"},
 	}
 }
 
@@ -2194,7 +2565,21 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.Blur()
 
 				if item, ok := m.list.SelectedItem().(sessionItem); ok {
+					if m.view == viewDeleted {
+						if m.restoreSession != nil {
+							sid := item.info.ID
+							restoreFn := m.restoreSession
+
+							return m, func() tea.Msg {
+								return restoreResultMsg{sessionID: sid, err: restoreFn(sid)}
+							}
+						}
+
+						return m, nil
+					}
+
 					m.selected = &item.info
+
 					return m, tea.Quit
 				}
 
@@ -2368,6 +2753,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.deleteError = ""
 					m.state = stateConfirmDelete
+					m.helpExpanded = false
 					m.resizeList()
 
 					if m.refreshDeleted != nil && !m.deletedReady {
@@ -2384,6 +2770,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmRestart
+					m.helpExpanded = false
 					m.resizeList()
 				}
 
@@ -2395,6 +2782,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				m.state = stateRestartMenu
+				m.helpExpanded = false
 				m.resizeList()
 
 				return m, nil
@@ -2403,6 +2791,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.SetValue("")
 				m.filterInput.Focus()
 				m.state = stateFilter
+				m.helpExpanded = false
 
 				return m, textinput.Blink
 
@@ -2413,6 +2802,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if _, ok := m.list.SelectedItem().(sessionItem); ok {
 					m.state = stateConfirmStop
+					m.helpExpanded = false
 					m.resizeList()
 				}
 
@@ -2594,6 +2984,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cm.height = m.height
 				m.createModel = cm
 				m.state = stateCreate
+				m.helpExpanded = false
 
 				return m, textinput.Blink
 
@@ -2614,6 +3005,13 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, nil
 						}
 					}
+				}
+
+				if matchKey(m.helpToggleKeys, msg.String()) && !m.listActionClaimsKey(msg.String()) {
+					m.helpExpanded = !m.helpExpanded
+					m.resizeList()
+
+					return m, nil
 				}
 			}
 		}
@@ -2924,27 +3322,22 @@ func (m *overlayModel) View() tea.View {
 
 		panelContent.WriteString("\n")
 
-		helpParts := []string{}
+		if m.state == stateFilter {
+			panelContent.WriteString(helpStyle.Render(m.filterHelpLine(panelInnerWidth)))
+		} else if m.helpExpanded {
+			lines := m.expandedNavigatorHelpLines(panelInnerWidth)
 
-		if len(m.shortcutKeys) > 0 {
-			first := string(m.shortcutKeys[0])
-			last := string(m.shortcutKeys[len(m.shortcutKeys)-1])
-			helpParts = append(helpParts, first+"-"+last+" jump")
-		}
+			lines = clampHelpLines(lines, m.height-12-m.list.Height(), panelInnerWidth)
+			for i, line := range lines {
+				if i > 0 {
+					panelContent.WriteString("\n")
+				}
 
-		if m.view == viewDeleted {
-			// The Deleted view offers only restore.
-			helpParts = append(helpParts, "enter restore", "◂▸ view", m.keySearch+" filter", keyHint(m.keyCancel)+" quit")
-		} else {
-			helpParts = append(helpParts, "enter attach", "n new", "◂▸ view", m.keySearch+" filter")
-			if m.view == viewRepo || m.view == viewLabels || m.view == viewScenario {
-				helpParts = append(helpParts, "tab group")
+				panelContent.WriteString(helpStyle.Render(line))
 			}
-
-			helpParts = append(helpParts, "s star", "space fold", "C fold-all", m.keyDelete+" delete", "S stop", "r/"+m.keyResume+" restart", keyHint(m.keyCancel)+" quit")
+		} else {
+			panelContent.WriteString(helpStyle.Render(m.compactNavigatorHelpLine(panelInnerWidth)))
 		}
-
-		panelContent.WriteString(helpStyle.Render(strings.Join(helpParts, "  ")))
 	}
 
 	panel := lipgloss.NewStyle().
@@ -3070,6 +3463,8 @@ type RunSessionNavigatorOpts struct {
 	DefaultAgent string
 	// Keys is the resolved Navigator keybinding set.
 	Keys SessionNavigatorKeys
+	// Help is the resolved Navigator help/action presentation.
+	Help SessionNavigatorHelp
 }
 
 // RunSessionNavigator launches the Bubble Tea Session Navigator.
@@ -3088,6 +3483,7 @@ func RunSessionNavigator(opts RunSessionNavigatorOpts) *SessionNavigatorResult {
 	m.agents = opts.Agents
 	m.defaultAgent = opts.DefaultAgent
 	m.applyKeys(opts.Keys)
+	m.applyHelp(opts.Help)
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()

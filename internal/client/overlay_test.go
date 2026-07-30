@@ -83,6 +83,10 @@ func sendShiftTab(m tea.Model) (tea.Model, tea.Cmd) {
 	return m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 }
 
+func sendF1(m tea.Model) (tea.Model, tea.Cmd) {
+	return m.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+}
+
 func sendWindowSize(m tea.Model, w, h int) (tea.Model, tea.Cmd) {
 	return m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 }
@@ -3505,6 +3509,268 @@ func TestView_ShowsHelpBar(t *testing.T) {
 	}
 }
 
+func TestView_NavigatorCompactHelpAtCompactAndWideSizes(t *testing.T) {
+	tests := map[string]struct {
+		width  int
+		height int
+	}{
+		"compact 80x24": {width: 80, height: 24},
+		"wide 160x40":   {width: 160, height: 40},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+			updated, _ := sendWindowSize(m, test.width, test.height)
+			view := ansi.Strip(asOverlay(updated).View().Content)
+
+			for _, want := range []string{"enter attach", "n new", "h/l view", "/ filter", "? help", "q quit"} {
+				if !strings.Contains(view, want) {
+					t.Errorf("compact help should contain %q at %s:\n%s", want, name, view)
+				}
+			}
+
+			for _, notWant := range []string{"S stop", "C fold-all", "x delete"} {
+				if strings.Contains(view, notWant) {
+					t.Errorf("compact help should move %q behind expanded help at %s:\n%s", notWant, name, view)
+				}
+			}
+		})
+	}
+}
+
+func TestView_NavigatorCompactHelpTruncatesWholeActions(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
+
+	got := m.compactNavigatorHelpLine(40)
+
+	for _, want := range []string{"enter attach", "? help", "q quit"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("compact help = %q, want to preserve %q", got, want)
+		}
+	}
+
+	if strings.Contains(got, "? h…") || strings.Contains(got, "q q…") {
+		t.Fatalf("compact help should not truncate inside preserved actions: %q", got)
+	}
+}
+
+func TestView_NavigatorExpandedHelp(t *testing.T) {
+	tests := map[string]struct {
+		width  int
+		height int
+	}{
+		"compact 80x24": {width: 80, height: 24},
+		"wide 160x40":   {width: 160, height: 40},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, []rune("1234567890"))
+			updated, _ := sendWindowSize(m, test.width, test.height)
+			updated, _ = sendKey(asOverlay(updated), "?")
+			om := asOverlay(updated)
+
+			if !om.helpExpanded {
+				t.Fatal("pressing ? should expand Navigator help")
+			}
+
+			view := ansi.Strip(om.View().Content)
+			for _, want := range []string{
+				"j/k move",
+				"g/G top/bottom",
+				"h/l view",
+				"1-0 jump",
+				"enter attach",
+				"n new",
+				"s star",
+				"space fold",
+				"C fold-all",
+				"x delete",
+				"S stop",
+				"r restart",
+				"R restart menu",
+			} {
+				if !strings.Contains(view, want) {
+					t.Errorf("expanded help should contain %q at %s:\n%s", want, name, view)
+				}
+			}
+
+			updated, _ = sendKey(om, "?")
+
+			om = asOverlay(updated)
+			if om.helpExpanded {
+				t.Fatal("pressing ? again should collapse Navigator help")
+			}
+		})
+	}
+}
+
+func TestView_NavigatorHelpUsesConfiguredActions(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.applyHelp(SessionNavigatorHelp{
+		CompactActions:    []string{"help", "quit"},
+		ExpandedActions:   []string{"delete", "stop", "help"},
+		ToggleKeys:        []string{"f2"},
+		ExpandedByDefault: true,
+	})
+	updated, _ := sendWindowSize(m, 80, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{"x delete", "S stop", "f2 hide"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("configured expanded help should contain %q:\n%s", want, view)
+		}
+	}
+
+	for _, notWant := range []string{"enter attach", "n new", "/ filter"} {
+		if strings.Contains(view, notWant) {
+			t.Errorf("configured expanded help should omit %q:\n%s", notWant, view)
+		}
+	}
+}
+
+func TestSessionNavigatorHelpToggleDoesNotStealExistingActions(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, func(string, bool) error { return nil }, nil, nil)
+	m.applyHelp(SessionNavigatorHelp{ToggleKeys: []string{"x", "f1"}})
+
+	updated, _ := sendKey(m, "x")
+
+	om := asOverlay(updated)
+	if got := om.state; got != stateConfirmDelete {
+		t.Fatalf("x state = %v, want %v", got, stateConfirmDelete)
+	}
+
+	if om.helpExpanded {
+		t.Fatal("x delete should not toggle help")
+	}
+
+	updated, _ = sendWindowSize(om, 80, 24)
+
+	view := ansi.Strip(asOverlay(updated).View().Content)
+	if strings.Contains(view, "x help") {
+		t.Fatalf("claimed x key should not be advertised as help:\n%s", view)
+	}
+}
+
+func TestSessionNavigatorHelpToggleDoesNotStealListNavigation(t *testing.T) {
+	for _, navKey := range []string{"g", "G", "home", "end", "pgup", "pgdown", "b", "u", "f", "d"} {
+		t.Run(navKey, func(t *testing.T) {
+			m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+			m.applyHelp(SessionNavigatorHelp{ToggleKeys: []string{navKey, "f1"}})
+
+			updated, _ := sendWindowSize(m, 80, 24)
+			om := asOverlay(updated)
+
+			view := ansi.Strip(om.View().Content)
+			if strings.Contains(view, navKey+" help") {
+				t.Fatalf("claimed list-navigation key should not be advertised as help:\n%s", view)
+			}
+
+			if !strings.Contains(view, "f1 help") {
+				t.Fatalf("help should fall back to f1 when %s is claimed by list navigation:\n%s", navKey, view)
+			}
+
+			updated, _ = sendNavigatorKey(om, navKey)
+			om = asOverlay(updated)
+
+			if om.helpExpanded {
+				t.Fatalf("%s list navigation should not toggle help", navKey)
+			}
+
+			updated, _ = sendF1(om)
+			om = asOverlay(updated)
+
+			if !om.helpExpanded {
+				t.Fatalf("f1 should toggle help when %s is claimed by list navigation", navKey)
+			}
+		})
+	}
+}
+
+func sendNavigatorKey(m tea.Model, keyName string) (tea.Model, tea.Cmd) {
+	switch keyName {
+	case "home":
+		return m.Update(tea.KeyPressMsg{Code: tea.KeyHome})
+	case "end":
+		return m.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	case "pgup":
+		return m.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	case "pgdown":
+		return m.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	default:
+		return sendKey(m, keyName)
+	}
+}
+
+func TestSessionNavigatorHelpToggleKeepsConfiguredQuestionMarkSearch(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.applyKeys(SessionNavigatorKeys{Search: "?"})
+
+	updated, _ := sendKey(m, "?")
+	om := asOverlay(updated)
+
+	if got := om.state; got != stateFilter {
+		t.Fatalf("configured ? search state = %v, want %v", got, stateFilter)
+	}
+
+	if om.helpExpanded {
+		t.Fatal("configured ? search should not toggle help")
+	}
+
+	m = newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.applyKeys(SessionNavigatorKeys{Search: "?"})
+	updated, _ = sendF1(m)
+
+	om = asOverlay(updated)
+	if !om.helpExpanded {
+		t.Fatal("f1 should expand help when ? is configured for search")
+	}
+
+	updated, _ = sendWindowSize(om, 80, 24)
+
+	view := ansi.Strip(asOverlay(updated).View().Content)
+	if !strings.Contains(view, "f1 hide") {
+		t.Fatalf("expanded help should advertise f1 when ? is configured:\n%s", view)
+	}
+}
+
+func TestOverlayExpandedHelpReserveTracksWrappedLines(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.applyHelp(SessionNavigatorHelp{
+		ExpandedActions: []string{
+			"restart_menu",
+			"restart_menu",
+			"restart_menu",
+			"restart_menu",
+			"restart_menu",
+			"restart_menu",
+			"restart_menu",
+			"restart_menu",
+		},
+		ExpandedByDefault: true,
+	})
+
+	updated, _ := sendWindowSize(m, 50, 24)
+	om := asOverlay(updated)
+
+	lines := om.expandedNavigatorHelpLines(om.panelInnerWidth())
+	if len(lines) < 4 {
+		t.Fatalf("test setup produced %d wrapped help lines, want at least 4: %v", len(lines), lines)
+	}
+
+	wantHeight := min(len(om.list.Items())+4, om.height-(12+len(lines)))
+	if wantHeight < 4 {
+		wantHeight = 4
+	}
+
+	if got := om.list.Height(); got != wantHeight {
+		t.Fatalf("list height = %d, want %d for %d wrapped help lines", got, wantHeight, len(lines))
+	}
+}
+
 func TestView_ShowsDetailLine(t *testing.T) {
 	sessions := overlayTestSessions()
 	sessions[0].BaseBranch = "main"
@@ -4536,6 +4802,52 @@ func TestOverlayDeletedViewShowsDeletedAndRestores(t *testing.T) {
 
 	if restored != "dreich" {
 		t.Errorf("restore hook got %q, want dreich", restored)
+	}
+}
+
+func TestOverlayDeletedFilterRestoresInsteadOfAttaching(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", noopFetchPreview, nil, nil, nil)
+	m.deletedSessions = []protocol.SessionInfo{
+		{ID: "dreich", Name: "dreich", Status: "stopped", DeletedAt: "2026-07-10T10:00:00Z", DeleteExpiresAt: "2026-07-11T10:00:00Z"},
+	}
+
+	var restored string
+
+	m.restoreSession = func(id string) error { restored = id; return nil }
+
+	updated, _ := sendWindowSize(m, 120, 40)
+	updated, _ = sendKey(updated, "left")
+	updated, _ = sendKey(updated, "/")
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+
+	om := asOverlay(updated)
+
+	view := ansi.Strip(om.View().Content)
+	if !strings.Contains(view, "enter restore") {
+		t.Fatalf("deleted filter footer should advertise restore:\n%s", view)
+	}
+
+	if strings.Contains(view, "enter attach") {
+		t.Fatalf("deleted filter footer should not advertise attach:\n%s", view)
+	}
+
+	updated, cmd := sendKey(om, "enter")
+	om = asOverlay(updated)
+
+	if om.selected != nil {
+		t.Fatal("enter in deleted filter must not select/attach")
+	}
+
+	if cmd == nil {
+		t.Fatal("enter in deleted filter should return restore command")
+	}
+
+	if msg := cmd(); msg != nil {
+		_, _ = om.Update(msg)
+	}
+
+	if restored != "dreich" {
+		t.Fatalf("restore hook got %q, want dreich", restored)
 	}
 }
 

@@ -272,6 +272,7 @@ func (l *attachLoop) onOverlay() (bool, error) {
 		Agents:           agents,
 		DefaultAgent:     defaultAgent,
 		Keys:             sessionNavigatorKeysFromConfig(),
+		Help:             sessionNavigatorHelpFromConfig(),
 	})
 	if navigatorResult != nil {
 		l.collapsed = navigatorResult.Collapsed
