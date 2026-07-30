@@ -150,7 +150,7 @@ func DiscoverBundle(executable string, expectations BundleExpectations) (Validat
 			return ValidatedBundle{}, true, err
 		}
 
-		bundle, err := ValidateBundle(candidate, expectations)
+		bundle, err := validatePackageSourceBundle(candidate, expectations)
 
 		return bundle, true, err
 	}
@@ -159,6 +159,14 @@ func DiscoverBundle(executable string, expectations BundleExpectations) (Validat
 }
 
 func ValidateBundle(appPath string, expectations BundleExpectations) (ValidatedBundle, error) {
+	return validateBundle(appPath, expectations, true)
+}
+
+func validatePackageSourceBundle(appPath string, expectations BundleExpectations) (ValidatedBundle, error) {
+	return validateBundle(appPath, expectations, false)
+}
+
+func validateBundle(appPath string, expectations BundleExpectations, requireSecureAncestors bool) (ValidatedBundle, error) {
 	if expectations.VerifySignature == nil {
 		return ValidatedBundle{}, errors.New("daemon service signature verifier is required")
 	}
@@ -168,7 +176,11 @@ func ValidateBundle(appPath string, expectations BundleExpectations) (ValidatedB
 		return ValidatedBundle{}, fmt.Errorf("unexpected daemon service app name %q", filepath.Base(appPath))
 	}
 
-	if err := validateSecureAncestors(appPath, os.Geteuid()); err != nil {
+	if requireSecureAncestors {
+		if err := validateSecureAncestors(appPath, os.Geteuid()); err != nil {
+			return ValidatedBundle{}, fmt.Errorf("validate daemon service app path: %w", err)
+		}
+	} else if err := validateSourceAppLeaf(appPath); err != nil {
 		return ValidatedBundle{}, fmt.Errorf("validate daemon service app path: %w", err)
 	}
 
@@ -251,6 +263,19 @@ func ValidateBundle(appPath string, expectations BundleExpectations) (ValidatedB
 			TeamID: signature.TeamID, Requirement: signature.Requirement,
 		},
 	}, nil
+}
+
+func validateSourceAppLeaf(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("daemon service app must be a real directory")
+	}
+
+	return nil
 }
 
 func validateSecureAncestors(path string, uid int) error {
