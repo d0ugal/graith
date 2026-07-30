@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.71.8](https://github.com/d0ugal/graith/compare/v0.71.7...v0.71.8) (2026-07-30)
+
+
+### Bug Fixes
+
+* bound daemon log growth ([2f69aff](https://github.com/d0ugal/graith/commit/2f69aff1a83d8fc68192d71ad55f80f4c59be055))
+* publish stable homebrew formula at tap root ([a7a4172](https://github.com/d0ugal/graith/commit/a7a417292269c5d47b94da072362446d5587b5bc))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.4.1 ([#1918](https://github.com/d0ugal/graith/issues/1918)) ([3686c2a](https://github.com/d0ugal/graith/commit/3686c2abfed0ebbece9e0802942d63f7903bdf05))
+
 ## [0.71.7](https://github.com/d0ugal/graith/compare/v0.71.6...v0.71.7) (2026-07-30)
 
 
