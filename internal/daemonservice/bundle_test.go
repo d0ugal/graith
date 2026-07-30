@@ -150,6 +150,63 @@ func TestManagedInstallationValidationIsReadOnlyAndExact(t *testing.T) {
 	}
 }
 
+func TestHomebrewSourceBundleAllowsWritableCellarBeforeSecureCache(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	formulaRoot := filepath.Join(root, "opt", "homebrew", "Cellar", "graith", testVersion)
+	sourceRoot := filepath.Join(formulaRoot, "libexec", "graith")
+	app, sourceStandalone := writeBundleFixture(t, sourceRoot)
+
+	bin := filepath.Join(formulaRoot, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil { // #nosec G301 -- executable package fixture.
+		t.Fatal(err)
+	}
+
+	payload, err := os.ReadFile(sourceStandalone)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executable := filepath.Join(bin, "gr")
+	if err := os.WriteFile(executable, payload, 0o755); err != nil { // #nosec G306 G703 -- executable package fixture with controlled temp path.
+		t.Fatal(err)
+	}
+
+	cellar := filepath.Join(root, "opt", "homebrew", "Cellar")
+	if err := os.Chmod(cellar, 0o775); err != nil { // #nosec G302 -- Homebrew-style writable ancestor regression fixture.
+		t.Fatal(err)
+	}
+
+	expectations := bundleExpectations(executable)
+	if _, err := ValidateBundle(app, expectations); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("strict ValidateBundle() = %v, want writable ancestor error", err)
+	}
+
+	source, present, err := DiscoverBundle(executable, expectations)
+	if err != nil {
+		t.Fatalf("DiscoverBundle() = %v", err)
+	}
+
+	if !present || source.AppPath != app {
+		t.Fatalf("DiscoverBundle() = present %v app %q, want %q", present, source.AppPath, app)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRoot(source, expectations, cache)
+	if err != nil {
+		t.Fatalf("cacheBundleAtRoot() = %v", err)
+	}
+
+	if cached.AppPath == app || cached.Generation.ID != source.Generation.ID {
+		t.Fatalf("cached bundle = %#v, source app %q generation %q", cached, app, source.Generation.ID)
+	}
+}
+
 func TestManagedBuildSigningExpectationValidation(t *testing.T) {
 	originalManaged := ManagedBuild
 	originalTeam := ExpectedTeamID
