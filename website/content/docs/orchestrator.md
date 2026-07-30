@@ -61,7 +61,7 @@ reported as same-version replacements when the numeric version is unchanged.
 
 On receipt, the orchestrator should inspect release notes, configuration
 changes, and new capabilities when useful, then proactively suggest applicable
-configuration, workflow, trigger, or skill updates to the human.
+configuration, workflow, trigger, or skill updates to the user.
 
 ## Starting fresh
 

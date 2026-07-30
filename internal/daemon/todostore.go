@@ -573,7 +573,7 @@ func (s *TodoStore) queryTodos(query string, args ...any) ([]TodoItem, error) {
 	return out, nil
 }
 
-// ListAll returns items across every scope (human/orchestrator "--all" view),
+// ListAll returns items across every scope (user/orchestrator "--all" view),
 // ordered by scope then position.
 func (s *TodoStore) ListAll(f TodoFilter) ([]TodoItem, error) {
 	s.mu.Lock()
@@ -719,7 +719,7 @@ func (s *TodoStore) ClaimNext(scope, owner string, override bool) (TodoItem, boo
 }
 
 // Transition applies a guarded status change. actor is the caller; override is
-// true when the caller is the scope's override authority or the human (allowing
+// true when the caller is the scope's override authority or the user (allowing
 // them to transition an item they do not own). The conditional WHERE enforces
 // the pre-state so an out-of-order or unauthorized transition affects no rows.
 func (s *TodoStore) Transition(id, newStatus, actor string, override bool) (TodoItem, error) {

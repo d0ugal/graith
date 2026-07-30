@@ -86,7 +86,7 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	defer cancel()
 
 	sockPath := paths.SocketPath
-	// Present the caller's credential (session token or human token) in the
+	// Present the caller's credential (session token or user token) in the
 	// probe, matching the real handshake and the other probes (probeDaemonIdentity,
 	// doctor). A current daemon exempts the handshake from its fail-closed auth
 	// gate (PR #1066), so the token is not needed to reach one — but a pre-#1066
@@ -427,7 +427,7 @@ func prepareDaemonCleanRestartWithGuard(ctx context.Context, paths config.Paths,
 	}
 
 	// A managed clean restart can reserve/rotate service state and then stop all
-	// sessions. Enforce the same first-human boundary as Launch before resolving
+	// sessions. Enforce the same first-user boundary as Launch before resolving
 	// a manager or mutating the receipt.
 	if mode == daemonservice.ModeManaged && cleanRestartSecurityBoundaryDetected() {
 		return errors.New("an agent-mode caller cannot reserve a managed daemon clean restart")

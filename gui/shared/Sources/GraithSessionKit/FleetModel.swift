@@ -637,7 +637,7 @@ open class FleetModel: ObservableObject {
     }
 
     /// Take over a session's attach for `owner`, regardless of the prior owner
-    /// (the human explicitly chose "Open Here" in a second window).
+    /// (the user explicitly chose "Open Here" in a second window).
     public func forceClaimAttach(_ sessionID: String, owner: AnyObject) {
         attachOwners[sessionID] = AttachOwnerRef(owner)
     }

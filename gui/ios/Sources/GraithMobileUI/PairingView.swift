@@ -6,7 +6,7 @@ import UIKit
 #endif
 
 /// The add-host + pairing flow (design §B.2). The user enters a MagicDNS host
-/// and a label; the app sends `pair_request`; the local human approves with
+/// and a label; the app sends `pair_request`; the local user approves with
 /// `gr remote pairings approve`; on success the SPKI fingerprint is shown for
 /// TOFU confirmation against that local command's output.
 struct PairingView: View {

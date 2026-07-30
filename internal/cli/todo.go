@@ -275,7 +275,7 @@ var todoRemoveCmd = &cobra.Command{
 
 var todoAssignCmd = &cobra.Command{
 	Use:   "assign <id> <session-id>",
-	Short: "Assign an item to a scenario member (orchestrator/human)",
+	Short: "Assign an item to a scenario member (orchestrator/user)",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resp, err := todoRoundTrip("todo_assign", protocol.TodoAssignMsg{ID: args[0], Assignee: args[1]})
@@ -341,7 +341,7 @@ func registerTodoCmd() {
 	// Shared scope flags on the parent so every subcommand inherits them.
 	todoCmd.PersistentFlags().String("scenario", "", "target a scenario's shared list by name")
 	todoCmd.PersistentFlags().String("session", "", "target a specific session's subtree list")
-	todoCmd.PersistentFlags().Bool("all", false, "span every scope (human/orchestrator, list only)")
+	todoCmd.PersistentFlags().Bool("all", false, "span every scope (user/orchestrator, list only)")
 
 	todoAddCmd.Flags().StringArray("tag", nil, "tag (repeatable)")
 	todoAddCmd.Flags().String("parent", "", "parent item id (create a sub-item)")

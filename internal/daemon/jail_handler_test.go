@@ -51,7 +51,7 @@ func TestMsgJailList_MetadataOnly(t *testing.T) {
 	}
 }
 
-// TestMsgJailShow_HumanSeesBody: the human (local) gets the full body via show.
+// TestMsgJailShow_HumanSeesBody: the user (local) gets the full body via show.
 func TestMsgJailShow_HumanSeesBody(t *testing.T) {
 	h := newTestHarness(t)
 	id := h.jailOne(t, JailedComment{
@@ -66,7 +66,7 @@ func TestMsgJailShow_HumanSeesBody(t *testing.T) {
 	_ = protocol.DecodePayload(env, &resp)
 
 	if resp.Jailed.Body != "the real comment" {
-		t.Fatalf("human should see the full body, got %q", resp.Jailed.Body)
+		t.Fatalf("user should see the full body, got %q", resp.Jailed.Body)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestMsgJailRelease_AgentDenied(t *testing.T) {
 	}
 }
 
-// TestMsgJailRelease_HumanReleases: the local human releases and the content is
+// TestMsgJailRelease_HumanReleases: the local user releases and the content is
 // delivered to the target session's inbox.
 func TestMsgJailRelease_HumanReleases(t *testing.T) {
 	h := newTestHarness(t)

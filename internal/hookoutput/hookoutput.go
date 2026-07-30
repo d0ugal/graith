@@ -31,7 +31,7 @@ type claudeHookOutput struct {
 // InboxContext returns the hook stdout JSON that surfaces unread inbox messages
 // to an agent at a lifecycle event (e.g. "SessionStart"). For Claude Code the
 // context must be delivered via hookSpecificOutput.additionalContext so it
-// actually reaches the model — a plain systemMessage is shown to the human only.
+// actually reaches the model — a plain systemMessage is shown to the user only.
 // Other agents keep the systemMessage form they already consume.
 func InboxContext(agent, event, context string) string {
 	switch agent {

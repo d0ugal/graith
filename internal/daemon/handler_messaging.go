@@ -22,8 +22,8 @@ func filterInboxStreams(streams []StreamInfo) []StreamInfo {
 }
 
 // applyMsgPubSenderIdentity forces the publish sender identity by role so it
-// can't be spoofed. A session publishes as itself; the local human (CLI) may
-// address on behalf of a named session (trusted local use); a remote human
+// can't be spoofed. A session publishes as itself; the local user (CLI) may
+// address on behalf of a named session (trusted local use); a remote user
 // publishes as its device and CANNOT claim to be a session. It returns false
 // (after sending an error) when the caller's role may not publish at all.
 func applyMsgPubSenderIdentity(sm *SessionManager, auth authContext, m *protocol.MsgPubMsg, send func(string, any)) bool {
@@ -134,7 +134,7 @@ func handleMsgTopics(sm *SessionManager, auth authContext, send func(string, any
 }
 
 // handleMsgConversation returns the threaded conversation for a target session.
-// The self-or-descendant rule lets the human CLI, the session itself, an
+// The self-or-descendant rule lets the user CLI, the session itself, an
 // ancestor agent, or the orchestrator read it; the by-sender filter inside
 // Conversation keeps the cross-inbox scan safe.
 func handleMsgConversation(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
@@ -181,7 +181,7 @@ func handleMsgConversation(sm *SessionManager, auth authContext, send func(strin
 }
 
 // handleMsgJailList returns a metadata-only summary of jailed (quarantined) PR
-// comments — the raw untrusted body is never included here, even for the human,
+// comments — the raw untrusted body is never included here, even for the user,
 // so merely listing the jail can't be used to inject a body dump.
 func handleMsgJailList(sm *SessionManager, send func(string, any), msg protocol.Envelope) {
 	m, ok := decodePayload[protocol.MsgJailListMsg](msg, send, "invalid msg_jail_list message")
@@ -206,7 +206,7 @@ func handleMsgJailList(sm *SessionManager, send func(string, any), msg protocol.
 }
 
 // handleMsgJailShow returns one jailed comment. The raw body is revealed only to
-// a release-authorized role (human/orchestrator); an ordinary agent/guest gets
+// a release-authorized role (user/orchestrator); an ordinary agent/guest gets
 // the metadata with the body withheld.
 func handleMsgJailShow(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	m, ok := decodePayload[protocol.MsgJailShowMsg](msg, send, "invalid msg_jail_show message")
@@ -237,7 +237,7 @@ func handleMsgJailShow(sm *SessionManager, auth authContext, send func(string, a
 }
 
 // handleMsgJailRelease releases quarantined untrusted content to a working
-// agent, so it is restricted to a human operator or the orchestrator — a plain
+// agent, so it is restricted to a user or the orchestrator — a plain
 // agent session is rejected (issue #1082).
 func handleMsgJailRelease(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	m, ok := decodePayload[protocol.MsgJailReleaseMsg](msg, send, "invalid msg_jail_release message")

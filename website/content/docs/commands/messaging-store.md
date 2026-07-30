@@ -80,7 +80,7 @@ Show a single quarantined comment, including its body.
 
 ### `gr msg jail release [id]`
 
-Release a quarantined comment — deliver it to the target session's inbox. **Human or orchestrator only**; plain agent sessions are rejected.
+Release a quarantined comment — deliver it to the target session's inbox. **User or orchestrator only**; plain agent sessions are rejected.
 
 | Flag | Description |
 |------|-------------|

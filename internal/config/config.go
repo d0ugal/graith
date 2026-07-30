@@ -308,7 +308,7 @@ type ConnectionConfig struct {
 	// RemoteHandshakeTimeout bounds the remote handshake plus
 	// proof-of-possession exchange (default "15s").
 	RemoteHandshakeTimeout string `toml:"remote_handshake_timeout"`
-	// RemotePairingTimeout bounds how long the CLI waits for the remote human to
+	// RemotePairingTimeout bounds how long the CLI waits for the remote user to
 	// approve `gr remote pairings approve`, and should sit just past the daemon's
 	// pending-pairing TTL (default "11m").
 	RemotePairingTimeout string `toml:"remote_pairing_timeout"`
@@ -655,7 +655,7 @@ type RemoteConfig struct {
 	// tailnet user email or a "tag:"-prefixed tag. A bare "tag:" entry opts
 	// tagged nodes in; with no tag entry, tagged nodes are disallowed.
 	AllowTailnetUsers []string `toml:"allow_tailnet_users"`
-	// RequirePairing requires per-device pairing (Gate 2) for human-level
+	// RequirePairing requires per-device pairing (Gate 2) for user-level
 	// rights. Defaults to true; false is UNSAFE (trusts the tailnet identity
 	// alone) and is restricted to read-only access — see the design doc §B.2.
 	RequirePairing bool `toml:"require_pairing"`
@@ -1836,7 +1836,7 @@ type PRWatchConfig struct {
 	// case-insensitively and matched against the full "<name>[bot]" string. It is
 	// the ONLY way to trust a bot or GitHub App (their author_association is
 	// unreliable — a bot can carry NONE or CONTRIBUTOR), and also covers named
-	// humans. Defaults empty; discovery is via the orchestrator trust prompt.
+	// users. Defaults empty; discovery is via the orchestrator trust prompt.
 	CommentAuthorAllowlist []string `toml:"comment_author_allowlist"`
 	// TrustedAuthorAssociations is the set of GitHub author_association values
 	// treated as trusted. Defaults to OWNER/MEMBER/COLLABORATOR when unset (the
@@ -1846,7 +1846,7 @@ type PRWatchConfig struct {
 	TrustedAuthorAssociations []string `toml:"trusted_author_associations"`
 	// NotifyUntrustedAuthors, when true, sends a one-time metadata-only message to
 	// the orchestrator the first time a comment from a not-yet-trusted author is
-	// seen, so the human can decide whether to allowlist them. It NEVER carries
+	// seen, so the user can decide whether to allowlist them. It NEVER carries
 	// the untrusted comment body. False disables the prompt entirely (silent drop,
 	// still logged).
 	NotifyUntrustedAuthors bool `toml:"notify_untrusted_authors"`

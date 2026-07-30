@@ -13,7 +13,7 @@ A durable list of work owned by the daemon — a primitive alongside
 Unlike an agent's in-context checklist, items **survive session end, resume,
 compaction, and daemon restart**, are visible across a session subtree or
 scenario, and are **claimed atomically** so parallel agents never double-work an
-item. Agents drive it with `gr todo`; the human sees "what's left" in `gr list`
+item. Agents drive it with `gr todo`; the user sees "what's left" in `gr list`
 and the overlay.
 
 ## Items
@@ -67,7 +67,7 @@ free-floating global list.
 - **Scenario.** Pass `--scenario <name>` for a scenario's shared list; every
   member, including shared sessions, can read and claim.
 
-The local human (`gr` from the shell) is in every scope.
+The local user (`gr` from the shell) is in every scope.
 
 ## CLI
 
@@ -85,7 +85,7 @@ gr todo list                          # my subtree's items
 gr todo list --status blocked         # filter by status
 gr todo list --tag backend            # filter by tag
 gr todo list --scenario strath        # a scenario's shared list
-gr todo list --all                    # fleet-wide, every scope (human/orchestrator)
+gr todo list --all                    # fleet-wide, every scope (user/orchestrator)
 
 # Claim and progress
 gr todo claim td-abc123               # atomic claim → in-progress, owned by me
@@ -149,9 +149,9 @@ Ownership rules:
   calling session.
 - **Mutate an item** (done / block / reopen / edit / remove) — only the **owner**,
   an **override authority** (the subtree's anchor root or a scenario's
-  orchestrator), or the **human**, subject to state preconditions. A peer
+  orchestrator), or the **user**, subject to state preconditions. A peer
   draining the backlog can't close a sibling's in-progress item.
-- **The human retains override authority**, consistent with every other
+- **The user retains override authority**, consistent with every other
   subsystem: it *assigns* work and can transition any item once the required
   pre-state exists. `done` still needs a session claim — claiming is a session
   grabbing work for itself.
@@ -168,7 +168,7 @@ dead session. Two defences clear stale ownership:
 - **Claim lease.** An `in-progress` item idle for `[todo] claim_lease` is reopened
   automatically with the same assignment (see [configuration](#configuration)).
 
-For permanently abandoned assigned work, the override authority or human runs
+For permanently abandoned assigned work, the override authority or user runs
 `gr todo assign <id> <replacement-session>`, then that session claims it; they
 can also `reopen` a done or blocked item manually.
 

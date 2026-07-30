@@ -21,11 +21,11 @@ struct MessagingTests {
             let pub = try decodePayload(req, as: MsgPubMsg.self)
             #expect(pub.stream == "inbox:braw")
             #expect(pub.body == "wire up the bonnie feature")
-            #expect(pub.senderName == "human")
+            #expect(pub.senderName == "user")
             #expect(pub.noReply == nil)
             try await daemon.writeControl("msg_published", ConversationMessage(
                 id: "msg_01", seq: 7, stream: "inbox:braw", senderID: "",
-                senderName: "human", body: "wire up the bonnie feature",
+                senderName: "user", body: "wire up the bonnie feature",
                 createdAt: "2026-07-14T00:00:00Z"))
         }
 
@@ -36,7 +36,7 @@ struct MessagingTests {
             streamFactory: { _ in stream }
         )
         let published = try await client.sendMessage(
-            toSessionID: "braw", body: "wire up the bonnie feature", senderName: "human")
+            toSessionID: "braw", body: "wire up the bonnie feature", senderName: "user")
         #expect(published.id == "msg_01")
         #expect(published.seq == 7)
         #expect(published.body == "wire up the bonnie feature")

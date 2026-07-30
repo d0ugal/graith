@@ -4869,7 +4869,7 @@ func TestUpdateAllowsOrchestratorOrphan(t *testing.T) {
 	}
 }
 
-// #568: the human CLI (unauthenticated) may orphan any session.
+// #568: the user CLI (unauthenticated) may orphan any session.
 func TestUpdateAllowsHumanOrphan(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
@@ -4919,13 +4919,13 @@ func TestUpdateRejectsRenameOnlyUnrelated(t *testing.T) {
 	}
 }
 
-// #568: the human CLI (unauthenticated connection) retains unrestricted access.
+// #568: the user CLI (unauthenticated connection) retains unrestricted access.
 func TestUpdateAllowsHumanReparent(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "thrawn", "thrawn", "tok-thrawn")
 	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
 
-	// No token = human CLI.
+	// No token = user CLI.
 	parent := "scunner"
 	h.sendControl(t, "update", protocol.UpdateMsg{
 		SessionID: "thrawn",
@@ -5469,7 +5469,7 @@ func TestOversizedControlResponseClosesConnection(t *testing.T) {
 func TestCoverScenarioAddIncompleteSession(t *testing.T) {
 	h := newTestHarness(t)
 
-	// The local human passes the scenario-op check; AddToScenario then validates
+	// The local user passes the scenario-op check; AddToScenario then validates
 	// the session input and rejects it (a valid name but no repo). This exercises
 	// the scenario_add dispatch surfacing the operation error to the client.
 	h.sendControl(t, "scenario_add", protocol.ScenarioAddMsg{
@@ -5484,7 +5484,7 @@ func TestCoverTodoAddRequiresScope(t *testing.T) {
 	h := newTestHarness(t)
 	h.sm.todos = newTestTodoStore(t)
 
-	// A local human with no session and no scope hint cannot resolve a target
+	// A local user with no session and no scope hint cannot resolve a target
 	// list.
 	h.sendControl(t, "todo_add", protocol.TodoAddMsg{Title: "orphan"})
 

@@ -94,33 +94,33 @@ func TestRemoteAllowed(t *testing.T) {
 		{"guest cannot search conversations", roleRemoteGuest, "search", false},
 
 		// roleRemoteHuman: everything except local-only.
-		{"human can list", roleRemoteHuman, "list", true},
-		{"human can attach", roleRemoteHuman, "attach", true},
-		{"human can create", roleRemoteHuman, "create", true},
-		{"human can msg_pub", roleRemoteHuman, "msg_pub", true},
-		{"human can scenario_stop", roleRemoteHuman, "scenario_stop", true},
-		{"human cannot upgrade", roleRemoteHuman, "upgrade", false},
-		{"human cannot reload", roleRemoteHuman, "reload", false},
+		{"user can list", roleRemoteHuman, "list", true},
+		{"user can attach", roleRemoteHuman, "attach", true},
+		{"user can create", roleRemoteHuman, "create", true},
+		{"user can msg_pub", roleRemoteHuman, "msg_pub", true},
+		{"user can scenario_stop", roleRemoteHuman, "scenario_stop", true},
+		{"user cannot upgrade", roleRemoteHuman, "upgrade", false},
+		{"user cannot reload", roleRemoteHuman, "reload", false},
 		// Removed message names are absent from the matrix and remain fail-closed.
-		{"human cannot use removed tool-server connect message", roleRemoteHuman, "mcp_connect", false},
-		// #904: the GUI config viewer + diagnostics panel — paired human only.
-		{"human can diagnostics", roleRemoteHuman, "diagnostics", true},
-		{"human can config", roleRemoteHuman, "config", true},
-		{"human can agent_info", roleRemoteHuman, "agent_info", true},
+		{"user cannot use removed tool-server connect message", roleRemoteHuman, "mcp_connect", false},
+		// #904: the GUI config viewer + diagnostics panel — paired user only.
+		{"user can diagnostics", roleRemoteHuman, "diagnostics", true},
+		{"user can config", roleRemoteHuman, "config", true},
+		{"user can agent_info", roleRemoteHuman, "agent_info", true},
 		{"guest cannot diagnostics", roleRemoteGuest, "diagnostics", false},
 		{"guest cannot config", roleRemoteGuest, "config", false},
-		// Session-originated: a human must NOT be able to impersonate a session.
-		{"human cannot status_report", roleRemoteHuman, "status_report", false},
-		{"human cannot publish scenario result", roleRemoteHuman, "scenario_result_publish", false},
-		{"human can read DMs", roleRemoteHuman, "msg_conversation", true},
-		{"human can wait", roleRemoteHuman, "wait", true},
-		{"human can search conversations", roleRemoteHuman, "search", true},
-		{"human can events_sub", roleRemoteHuman, "events_sub", true},
+		// Session-originated: a user must NOT be able to impersonate a session.
+		{"user cannot status_report", roleRemoteHuman, "status_report", false},
+		{"user cannot publish scenario result", roleRemoteHuman, "scenario_result_publish", false},
+		{"user can read DMs", roleRemoteHuman, "msg_conversation", true},
+		{"user can wait", roleRemoteHuman, "wait", true},
+		{"user can search conversations", roleRemoteHuman, "search", true},
+		{"user can events_sub", roleRemoteHuman, "events_sub", true},
 
 		// Remote sessions: everything except local-only (self/descendant applied later).
 		{"session can attach", roleSession, "attach", true},
 		{"session can agent_info", roleSession, "agent_info", true},
-		{"session can reach search handler for human-only denial", roleSession, "search", true},
+		{"session can reach search handler for user-only denial", roleSession, "search", true},
 		{"session can events_sub", roleSession, "events_sub", true},
 		{"session can status_report", roleSession, "status_report", true},
 		{"session can publish own scenario result", roleSession, "scenario_result_publish", true},
@@ -135,11 +135,11 @@ func TestRemoteAllowed(t *testing.T) {
 
 		// roleLocalHuman is never gated by this table (the default branch fails
 		// closed here); the local 0700 socket is governed by the handler checks.
-		{"local human is not gated here (fails closed)", roleLocalHuman, "list", false},
-		{"local human fails closed on mutating too", roleLocalHuman, "create", false},
+		{"local user is not gated here (fails closed)", roleLocalHuman, "list", false},
+		{"local user fails closed on mutating too", roleLocalHuman, "create", false},
 
 		// Unknown message fails closed for everyone.
-		{"unknown denied for human", roleRemoteHuman, "wheesht", false},
+		{"unknown denied for user", roleRemoteHuman, "wheesht", false},
 		{"unknown denied for none", roleNone, "wheesht", false},
 		{"unknown denied for orchestrator", roleOrchestrator, "wheesht", false},
 	}

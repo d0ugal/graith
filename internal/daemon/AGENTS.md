@@ -16,13 +16,13 @@ When adding a case to `handler.go`:
    `../protocol/AGENTS.md`.
 2. Add an explicit row to `remoteMessagePolicy` in `authmatrix.go`.
 3. Apply the narrower handler authorization appropriate to the operation:
-   local-only, human, orchestrator, session self, descendant, read-only, etc.
+   local-only, user, orchestrator, session self, descendant, read-only, etc.
 4. Add success, denial, malformed-input, and remote-policy tests.
 5. Run `TestRemoteMatrixCompleteness`; unknown remote messages must remain
    denied by default.
 
-Do not infer a human identity merely from a local connection. Local auth uses a
-valid session token or the protected human token. Preserve identity forcing,
+Do not infer a user identity merely from a local connection. Local auth uses a
+valid session token or the protected user token (`human.token`). Preserve identity forcing,
 token rotation, descendant checks, and jail-body/release restrictions.
 
 ## Locking and lifecycle
@@ -51,7 +51,7 @@ token rotation, descendant checks, and jail-body/release restrictions.
   kernel, or network policy must produce an error rather than run unconfined.
 - GitHub comment bodies and similar external text are untrusted. Preserve the
   author allowlist/association check and quarantine path; only authorized
-  humans/orchestrators may read or release jailed bodies.
+  users/orchestrators may read or release jailed bodies.
 - Write delete tombstones durably before destructive teardown and fail closed if
   the tombstone cannot be written.
 - Preserve pre-migration state backups and the atomic-file write path.

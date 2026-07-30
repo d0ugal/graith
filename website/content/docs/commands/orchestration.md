@@ -132,7 +132,7 @@ List items, grouped by status.
 | `--status <s>` | Filter by status (`todo`/`in-progress`/`done`/`blocked`) |
 | `--tag <tag>` | Filter by tag |
 | `--scenario <name>` | List a scenario's shared list |
-| `-a, --all` | Fleet-wide, across every scope (human/orchestrator) |
+| `-a, --all` | Fleet-wide, across every scope (user/orchestrator) |
 
 ### `gr todo claim <id>` / `gr todo next` / `gr todo start <id>`
 

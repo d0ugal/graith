@@ -67,7 +67,7 @@ func handleTriggerPause(sm *SessionManager, auth authContext, send func(string, 
 	}
 }
 
-// handleNotify sends a push notification to the human. Orchestrator/human only
+// handleNotify sends a push notification to the user. Orchestrator/user only
 // (re-checked via authorizeNotify).
 func handleNotify(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	n, ok := decodePayload[protocol.NotifyMsg](msg, send, "invalid notify message")

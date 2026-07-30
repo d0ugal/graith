@@ -1017,7 +1017,7 @@ func aggregateUntrustedAuthors(untrusted []ghComment) []untrustedAuthor {
 }
 
 // promptUntrustedAuthors surfaces newly-seen untrusted comment authors to the
-// orchestrator as a ONE-TIME, METADATA-ONLY message so the human can decide
+// orchestrator as a ONE-TIME, METADATA-ONLY message so the user can decide
 // whether to allowlist them. It NEVER includes the comment body (the
 // orchestrator is itself an LLM — inlining the body would relocate the
 // injection). Called from diffAndBuild holding sm.prWatch.mu.
@@ -1174,7 +1174,7 @@ func (sm *SessionManager) recordPromptedAuthors(cfg *configPRWatch, authors []un
 // untrustedAuthorPromptBody renders the metadata-only orchestrator trust prompt.
 // HARD RULE: it must never include any comment body text — only the author
 // login, User/Bot type, author_association, PR number, per-author comment count,
-// and a `gh pr view` pointer for the human to read the content manually.
+// and a `gh pr view` pointer for the user to read the content manually.
 func untrustedAuthorPromptBody(t prWatchTarget, d prData, authors []untrustedAuthor) string {
 	var b strings.Builder
 

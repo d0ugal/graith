@@ -189,7 +189,7 @@ func TestConfigFileExists(t *testing.T) {
 	}
 }
 
-// TestApplyMsgPubSenderIdentityRemoteHuman verifies a paired remote human
+// TestApplyMsgPubSenderIdentityRemoteHuman verifies a paired remote user
 // publishes as its device and can never claim to be a session.
 func TestApplyMsgPubSenderIdentityRemoteHuman(t *testing.T) {
 	h := newTestHarness(t)
@@ -198,7 +198,7 @@ func TestApplyMsgPubSenderIdentityRemoteHuman(t *testing.T) {
 	auth := authContext{role: roleRemoteHuman, deviceID: "dev-braw"}
 
 	if ok := applyMsgPubSenderIdentity(h.sm, auth, &m, func(string, any) {}); !ok {
-		t.Fatal("remote human should be authorized to publish")
+		t.Fatal("remote user should be authorized to publish")
 	}
 
 	if m.SenderID != "device:dev-braw" {
@@ -260,7 +260,7 @@ func TestApplyMsgPubSenderIdentityUnauthorized(t *testing.T) {
 	}
 }
 
-// TestApplyMsgPubSenderIdentityLocalHumanNoSender verifies the local human with
+// TestApplyMsgPubSenderIdentityLocalHumanNoSender verifies the local user with
 // an empty SenderID (not addressing on behalf of anyone) is authorized and no
 // name is resolved.
 func TestApplyMsgPubSenderIdentityLocalHumanNoSender(t *testing.T) {
@@ -270,7 +270,7 @@ func TestApplyMsgPubSenderIdentityLocalHumanNoSender(t *testing.T) {
 	auth := authContext{role: roleLocalHuman}
 
 	if ok := applyMsgPubSenderIdentity(h.sm, auth, &m, func(string, any) {}); !ok {
-		t.Fatal("local human should be authorized to publish without a sender")
+		t.Fatal("local user should be authorized to publish without a sender")
 	}
 
 	if m.SenderID != "" || m.SenderName != "" {
@@ -278,7 +278,7 @@ func TestApplyMsgPubSenderIdentityLocalHumanNoSender(t *testing.T) {
 	}
 }
 
-// TestApplyMsgPubSenderIdentityLocalHumanOnBehalf verifies the local human (CLI)
+// TestApplyMsgPubSenderIdentityLocalHumanOnBehalf verifies the local user (CLI)
 // may address on behalf of a named session, resolving its display name.
 func TestApplyMsgPubSenderIdentityLocalHumanOnBehalf(t *testing.T) {
 	h := newTestHarness(t)
@@ -288,7 +288,7 @@ func TestApplyMsgPubSenderIdentityLocalHumanOnBehalf(t *testing.T) {
 	auth := authContext{role: roleLocalHuman}
 
 	if ok := applyMsgPubSenderIdentity(h.sm, auth, &m, func(string, any) {}); !ok {
-		t.Fatal("local human should be authorized to publish")
+		t.Fatal("local user should be authorized to publish")
 	}
 
 	if m.SenderID != "canny-id" || m.SenderName != "canny" {
@@ -298,7 +298,7 @@ func TestApplyMsgPubSenderIdentityLocalHumanOnBehalf(t *testing.T) {
 
 // TestAuthorizeUpdateOrphanRequiresOrchestrator verifies clearing a session's
 // parent (orphaning) is denied for an ordinary session but allowed for the
-// human CLI.
+// user CLI.
 func TestAuthorizeUpdateOrphanRequiresOrchestrator(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "bairn-id", "bairn", "tok-bairn")
@@ -311,10 +311,10 @@ func TestAuthorizeUpdateOrphanRequiresOrchestrator(t *testing.T) {
 		t.Fatal("expected orphan by non-orchestrator session to be denied")
 	}
 
-	// The human CLI (unauthenticated local) is exempt and may orphan.
+	// The user CLI (unauthenticated local) is exempt and may orphan.
 	humanAuth := authContext{role: roleLocalHuman}
 	if err := authorizeUpdate(h.sm, humanAuth, protocol.UpdateMsg{SessionID: "bairn-id", ParentID: &empty}); err != nil {
-		t.Fatalf("human CLI should be allowed to orphan, got %v", err)
+		t.Fatalf("user CLI should be allowed to orphan, got %v", err)
 	}
 }
 
@@ -338,10 +338,10 @@ func TestAuthorizeUpdateReparentRequiresAuthorityOverNewParent(t *testing.T) {
 		t.Fatal("expected reparent under an unauthorized new parent to be denied")
 	}
 
-	// The human CLI is exempt and may reparent freely.
+	// The user CLI is exempt and may reparent freely.
 	humanAuth := authContext{role: roleLocalHuman}
 	if err := authorizeUpdate(h.sm, humanAuth, protocol.UpdateMsg{SessionID: "bairn-id", ParentID: &stranger}); err != nil {
-		t.Fatalf("human CLI should be allowed to reparent, got %v", err)
+		t.Fatalf("user CLI should be allowed to reparent, got %v", err)
 	}
 }
 

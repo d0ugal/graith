@@ -79,7 +79,7 @@ func validEd25519PubKey(s string) bool {
 
 // --- pairing state operations (design §B.2) ---
 
-// pendingPairing is an unapproved device pairing request awaiting local human
+// pendingPairing is an unapproved device pairing request awaiting local user
 // approval. It lives only in memory — pending requests do not survive a daemon
 // restart (a device simply re-requests).
 type pendingPairing struct {
@@ -401,7 +401,7 @@ func (sm *SessionManager) RevokeDevice(deviceID string) (int, error) {
 		// The device is revoked in memory and its connections are being closed,
 		// but persistence failed — a restart would reload it. Surface loudly; the
 		// error is also returned so `gr remote pairings revoke` reports failure
-		// to the human.
+		// to the user.
 		sm.log.Error("pairing revocation persisted only in memory; retry revoke after a restart", "device", deviceID, "err", err)
 	}
 

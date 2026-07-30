@@ -64,7 +64,7 @@ struct ClientIntegrationTests {
         await conn.close()
     }
 
-    /// The high-level local client resolves the daemon-written human token when
+    /// The high-level local client resolves the daemon-written user token when
     /// each connection opens. This covers an app launched before `human.token`
     /// exists and token changes across later reconnects. Local transport sends
     /// NO auth_challenge.
@@ -454,7 +454,7 @@ struct ClientIntegrationTests {
             #expect(pair.type == "pair_request")
             let req = try decodePayload(pair, as: PairRequestMsg.self)
             #expect(req.deviceLabel == "bonnie-phone")
-            // Awaiting the local human's approval takes time — delay the reply.
+            // Awaiting the local user's approval takes time — delay the reply.
             try await Task.sleep(nanoseconds: 40_000_000)
             try await daemon.writeControl("pair_response", PairResponseMsg(
                 deviceID: "dev-braw-1", clientToken: "tok-braw",

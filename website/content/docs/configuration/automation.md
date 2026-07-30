@@ -146,7 +146,7 @@ trusted_author_associations = ["OWNER", "MEMBER", "COLLABORATOR"]
 
 # Surface a not-yet-trusted author to the orchestrator once, as metadata only
 # (login/type/association/PR + a `gh pr view` pointer) — NEVER the comment body,
-# so the human can decide whether to allowlist them.
+# so the user can decide whether to allowlist them.
 notify_untrusted_authors = true
 ```
 
@@ -163,11 +163,11 @@ gr msg jail release <id>                        # deliver it to its target sessi
 gr msg jail release --all --author <login>      # release everything from an author
 ```
 
-**Releasing is restricted to the human or the orchestrator** — a plain agent session is rejected, so it can't release its own untrusted content.
+**Releasing is restricted to the user or the orchestrator** — a plain agent session is rejected, so it can't release its own untrusted content.
 
-The **raw comment body is only ever shown to the human or the orchestrator**: `list` is metadata-only, and `show` returns the full body only to that release-authorized caller. An agent or read-only remote guest gets metadata (PR, author, association) with the body withheld, so it can't be fed the untrusted content through a graith channel.
+The **raw comment body is only ever shown to the user or the orchestrator**: `list` is metadata-only, and `show` returns the full body only to that release-authorized caller. An agent or read-only remote guest gets metadata (PR, author, association) with the body withheld, so it can't be fed the untrusted content through a graith channel.
 
-Adding an author to `comment_author_allowlist` (or widening `trusted_author_associations`) and reloading **releases their jailed comments automatically** — the reload is an authorized local-human action. Jailed comments respect the `[messages] max_age` retention window and don't accumulate forever.
+Adding an author to `comment_author_allowlist` (or widening `trusted_author_associations`) and reloading **releases their jailed comments automatically** — the reload is an authorized local-user action. Jailed comments respect the `[messages] max_age` retention window and don't accumulate forever.
 
 Two trust knobs, fail-closed:
 

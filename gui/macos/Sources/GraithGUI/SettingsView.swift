@@ -82,7 +82,7 @@ struct LocalDaemonSettings: View {
                         .textSelection(.enabled)
                         .lineLimit(2)
                 }
-                LabeledContent("Human token") {
+                LabeledContent("User token") {
                     Text(resolution.humanTokenPath)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)

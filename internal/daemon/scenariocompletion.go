@@ -1083,7 +1083,7 @@ func (sm *SessionManager) retryScenarioCompletionAction(fullName string) error {
 	return fmt.Errorf("completion action %q is not present in epoch %s", bare, strconv.Itoa(sc.Completion.Epoch))
 }
 
-// cancelScenarioCompletion is called for explicit human/orchestrator lifecycle
+// cancelScenarioCompletion is called for explicit user/orchestrator lifecycle
 // operations. Unlike daemon shutdown it makes pending/running work terminal and
 // cancels local commands before member lifecycle proceeds.
 func (sm *SessionManager) cancelScenarioCompletion(scenarioID, reason string) {

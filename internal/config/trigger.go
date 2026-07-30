@@ -43,15 +43,15 @@ type WatchConfig struct {
 }
 
 // GCXConfig is the Grafana Cloud event source. V1 polls OnCall alert groups
-// through an existing gcx context and can gate delivery on either a pinned human
-// being or, when OnCallUserID is GCXOnCallAnyUser, any current user in one of
-// the selected OnCall schedules.
+// through an existing gcx context and can gate delivery on either a pinned
+// on-call user or, when OnCallUserID is GCXOnCallAnyUser, any current user in
+// one of the selected OnCall schedules.
 type GCXConfig struct {
 	Event          string   `toml:"event"`           // oncall_alert_group (v1; default)
 	Context        string   `toml:"context"`         // gcx context (required; credentials remain owned by gcx)
 	Every          string   `toml:"every"`           // poll cadence; default 1m
 	Timeout        string   `toml:"timeout"`         // timeout for each gcx invocation; default 30s
-	OnCallUserID   string   `toml:"oncall_user_id"`  // stable human user PK or GCXOnCallAnyUser; paired with ScheduleIDs
+	OnCallUserID   string   `toml:"oncall_user_id"`  // stable OnCall user PK or GCXOnCallAnyUser; paired with ScheduleIDs
 	ScheduleIDs    []string `toml:"schedule_ids"`    // schedules used for the current-on-call gate
 	TeamIDs        []string `toml:"team_ids"`        // optional alert-group team filters
 	IntegrationIDs []string `toml:"integration_ids"` // optional alert-group integration filters

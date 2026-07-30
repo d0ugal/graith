@@ -173,7 +173,7 @@ func TestConversationEmpty(t *testing.T) {
 
 // TestConversationAuthRule locks the deliberate access decision for the
 // msg_conversation control message: it authorises with authSelfOrDescendant, so
-// the human CLI (unauthenticated), the session itself, and an ancestor reading a
+// the user CLI (unauthenticated), the session itself, and an ancestor reading a
 // descendant are all permitted, while a sibling is denied. If msg_conversation
 // is ever changed to a stricter rule (e.g. self-only), this test should fail —
 // the cross-inbox "to and from" view depends on this rule. Keep it in sync with
@@ -187,7 +187,7 @@ func TestConversationAuthRule(t *testing.T) {
 
 	const rule = authSelfOrDescendant // the rule handler.go uses for msg_conversation
 
-	// Human CLI (no token) may read any session's conversation.
+	// User CLI (no token) may read any session's conversation.
 	human := authContext{}
 	if err := human.checkTarget(sm, "ben", rule); err != nil {
 		t.Errorf("human reading ben: unexpected error %v", err)

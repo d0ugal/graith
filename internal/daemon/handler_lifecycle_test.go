@@ -25,7 +25,7 @@ func TestCoverAttachConvertInvalidPayload(t *testing.T) {
 }
 
 // TestCoverAttachConvertUnknownSession verifies attach_convert on an unknown
-// session passes the human auth gate then errors from ConvertToInteractive.
+// session passes the user auth gate then errors from ConvertToInteractive.
 func TestCoverAttachConvertUnknownSession(t *testing.T) {
 	h := newTestHarness(t)
 

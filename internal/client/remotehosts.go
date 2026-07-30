@@ -56,7 +56,7 @@ var saveRemoteHostStore = (*RemoteHostStore).Save
 // withRemoteHostStoreLock serializes one load/mutate/save transaction across CLI
 // processes. The callback receives a store loaded only after the advisory lock
 // is acquired, so it always merges against the latest published host map and
-// canonical device identity. Callers must keep human and network waits outside
+// canonical device identity. Callers must keep user and network waits outside
 // the callback so the lock is never held across a pairing round-trip.
 func withRemoteHostStoreLock(path string, fn func(*RemoteHostStore) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { //nolint:gosec // G703: path is the config-managed graith data file.
@@ -94,7 +94,7 @@ func withRemoteHostStoreLock(path string, fn func(*RemoteHostStore) error) error
 // EnsureRemoteDeviceKey establishes or reloads the one canonical device key
 // while holding the cross-process store lock, then durably republishes the
 // latest store before returning it. The lock is released before the caller
-// begins the potentially long human/network pairing wait (issue #1330).
+// begins the potentially long user/network pairing wait (issue #1330).
 func EnsureRemoteDeviceKey(path string) (ed25519.PrivateKey, string, error) {
 	var (
 		priv ed25519.PrivateKey

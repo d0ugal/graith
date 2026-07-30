@@ -1252,7 +1252,7 @@ func writeFileAtomic(path string, data []byte) error {
 
 // StateBackupPath returns the pre-migration backup path for a state file at a
 // given on-disk version. Backups sit next to the state file as
-// "<state>.v<version>.bak" so a human recovering a downgrade can see which
+// "<state>.v<version>.bak" so a user recovering a downgrade can see which
 // schema version a backup holds without opening it.
 func StateBackupPath(statePath string, version int) string {
 	return fmt.Sprintf("%s.v%d.bak", statePath, version)

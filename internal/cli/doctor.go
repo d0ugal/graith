@@ -778,17 +778,17 @@ func (dc *doctorContext) checkHumanToken() {
 	// would otherwise be reported healthy while startup rejects it).
 	info, err := os.Lstat(paths.HumanTokenFile)
 	if err != nil {
-		dc.failf("environment", "Human token unavailable: %s", paths.HumanTokenFile)
+		dc.failf("environment", "User token unavailable: %s", paths.HumanTokenFile)
 		return
 	}
 
 	if !info.Mode().IsRegular() {
-		dc.failf("environment", "Human token is not a regular file: %s", paths.HumanTokenFile)
+		dc.failf("environment", "User token is not a regular file: %s", paths.HumanTokenFile)
 		return
 	}
 
 	if info.Mode().Perm() != 0o600 {
-		dc.failf("environment", "Human token mode is %04o, want 0600: %s", info.Mode().Perm(), paths.HumanTokenFile)
+		dc.failf("environment", "User token mode is %04o, want 0600: %s", info.Mode().Perm(), paths.HumanTokenFile)
 		return
 	}
 
@@ -804,14 +804,14 @@ func (dc *doctorContext) checkHumanToken() {
 		for _, dir := range dirs {
 			for _, expanded := range expandDoctorGrant(dir) {
 				if pathWithin(paths.HumanTokenFile, expanded) {
-					dc.failf("environment", "Human token is exposed by sandbox directory grant %s", dir)
+					dc.failf("environment", "User token is exposed by sandbox directory grant %s", dir)
 					return
 				}
 			}
 		}
 	}
 
-	dc.passf("environment", "Human token exists with mode 0600")
+	dc.passf("environment", "User token exists with mode 0600")
 }
 
 func expandDoctorGrant(path string) []string {

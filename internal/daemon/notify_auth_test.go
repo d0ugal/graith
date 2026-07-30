@@ -14,9 +14,9 @@ func TestCheckNotifyOp(t *testing.T) {
 		t.Errorf("orchestrator should be allowed: %v", err)
 	}
 
-	// The local human may notify.
+	// The local user may notify.
 	if err := (authContext{role: roleLocalHuman}).checkNotifyOp(sm); err != nil {
-		t.Errorf("human caller should be allowed: %v", err)
+		t.Errorf("user caller should be allowed: %v", err)
 	}
 
 	// A plain descendant session is rejected (stricter than triggers) to prevent

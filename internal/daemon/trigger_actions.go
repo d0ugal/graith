@@ -460,7 +460,7 @@ func (sm *SessionManager) notifyOnComplete(t *config.TriggerConfig, fc fireConte
 	expanded, err := config.ExpandTrigger(msg, vars)
 	if err != nil {
 		// Suppress rather than push a half-expanded template (raw {unknown}
-		// tokens) at the human. Config validation should reject unknown vars, so
+		// tokens) at the user. Config validation should reject unknown vars, so
 		// this is defensive against reload/state drift.
 		sm.log.Warn("trigger: notify_message expansion failed, suppressing notification", "trigger", t.Name, "err", err)
 		return

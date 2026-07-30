@@ -247,7 +247,7 @@ func (rc *remoteConn) handshake(t *testing.T, sm *SessionManager) protocol.AuthC
 }
 
 // TestPairRequestDeliversTokenOnApproval covers the blocking pair_request flow:
-// a new remote device requests pairing, a local human approves it, and the
+// a new remote device requests pairing, a local user approves it, and the
 // device receives the minted token over its held-open connection.
 func TestPairRequestDeliversTokenOnApproval(t *testing.T) {
 	sm := newPairingSM(t)

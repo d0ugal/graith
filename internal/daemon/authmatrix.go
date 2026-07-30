@@ -12,7 +12,7 @@ package daemon
 type remotePolicy int
 
 const (
-	// remoteDenied: never allowed over the network, even for a paired human or a
+	// remoteDenied: never allowed over the network, even for a paired user or a
 	// session — local Unix socket only (e.g. upgrade, reload, pairing approval,
 	// and, until redaction lands, diagnostics). This is the zero value so any
 	// message missing from the table fails closed.
@@ -22,14 +22,14 @@ const (
 	// auth_proof).
 	remotePreAuth
 	// remoteReadOnly: observational; allowed for a read-only guest, a paired
-	// human, and sessions.
+	// user, and sessions.
 	remoteReadOnly
-	// remoteHumanRW: mutating/operator actions; allowed for a paired human and
+	// remoteHumanRW: mutating/operator actions; allowed for a paired user and
 	// sessions, but not a read-only guest.
 	remoteHumanRW
 	// remoteSessionOnly: session-originated messages (a session acting on
 	// itself — e.g. reporting hook status). Allowed for
-	// sessions/orchestrator only; NOT paired humans (who could otherwise
+	// sessions/orchestrator only; NOT paired users (who could otherwise
 	// impersonate a session) or guests.
 	remoteSessionOnly
 )
@@ -55,40 +55,40 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"screen_preview":  remoteReadOnly,
 	"screen_snapshot": remoteReadOnly,
 
-	// Session-originated (a session acting on itself); not humans/guests.
+	// Session-originated (a session acting on itself); not users/guests.
 	"status_report": remoteSessionOnly,
 	// Result publication derives the member from the authenticated session; a
-	// remote human must not gain a path that can claim a member's success.
+	// remote user must not gain a path that can claim a member's success.
 	"scenario_result_publish": remoteSessionOnly,
 
-	// Mutating / operator actions (paired human + sessions; not guests).
-	"msg_conversation": remoteHumanRW,  // reads private DMs — human, not guest
+	// Mutating / operator actions (paired user + sessions; not guests).
+	"msg_conversation": remoteHumanRW,  // reads private DMs — user, not guest
 	"msg_jail_list":    remoteReadOnly, // inspect quarantined comments — agents may see, not release
 	"msg_jail_show":    remoteReadOnly,
-	"msg_jail_release": remoteHumanRW, // releasing untrusted content: human/orchestrator only (handler re-checks)
+	"msg_jail_release": remoteHumanRW, // releasing untrusted content: user/orchestrator only (handler re-checks)
 	"scenario_status":  remoteHumanRW, // design denies scenario_* to guests
 	"scenario_list":    remoteHumanRW,
-	"trigger_list":     remoteHumanRW, // triggers gated to human + sessions, not guests
+	"trigger_list":     remoteHumanRW, // triggers gated to users + sessions, not guests
 	"trigger_status":   remoteHumanRW,
 	"trigger_run":      remoteHumanRW,
 	"trigger_pause":    remoteHumanRW,
-	"notify":           remoteHumanRW, // orchestrator/human only; the handler re-checks
+	"notify":           remoteHumanRW, // orchestrator/user only; the handler re-checks
 
-	// Read-only host introspection for the paired human/sessions only (not a
+	// Read-only host introspection for the paired user/sessions only (not a
 	// read-only guest). diagnostics carries only host-shaped detail (PIDs,
 	// worktree paths, token-*presence*, never token values). config's secret
 	// env-map values are redacted before they cross the wire (config.RedactSecrets),
-	// so neither serves a guest a secret the human/guest split would need to guard.
+	// so neither serves a guest a secret the user/guest split would need to guard.
 	"config":        remoteHumanRW, // effective config (env secrets redacted) + diff (GUI config viewer, #904)
 	"agent_catalog": remoteHumanRW, // configured agent names + default_agent (GUI agent pickers, #1234)
-	"agent_info":    remoteHumanRW, // executes configured provider info commands; human/sessions only
-	"search":        remoteHumanRW, // transcript bodies are sensitive; handler restricts to humans
+	"agent_info":    remoteHumanRW, // executes configured provider info commands; user/sessions only
+	"search":        remoteHumanRW, // transcript bodies are sensitive; handler restricts to users
 	"diagnostics":   remoteHumanRW, // health/doctor payload for the GUI diagnostics panel (#904)
 
 	"wait":            remoteHumanRW, // targets arbitrary sessions
 	"events_sub":      remoteHumanRW, // streams fleet status + public topic bodies
 	"repo_list":       remoteHumanRW, // only useful for create, which guests can't do
-	"store_list":      remoteHumanRW, // store contents may be sensitive: human + sessions, not guests
+	"store_list":      remoteHumanRW, // store contents may be sensitive: user + sessions, not guests
 	"store_get":       remoteHumanRW, // reads a document body; same sensitivity as store_list
 	"attach":          remoteHumanRW,
 	"attach_convert":  remoteHumanRW, // convert a headless session to interactive on attach (#1137)
@@ -118,9 +118,9 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"scenario_add":    remoteHumanRW,
 
 	// Task-list ops (issue #591). Reads and mutations carry item bodies (free text
-	// that may name sensitive work), so like store bodies they are human+session,
+	// that may name sensitive work), so like store bodies they are user+session,
 	// never a read-only guest. Claiming is session-initiated (a session grabbing
-	// work), so it is remoteSessionOnly — a remote human cannot claim as a
+	// work), so it is remoteSessionOnly — a remote user cannot claim as a
 	// session; the handler re-checks scope/ownership for every caller.
 	"todo_add":        remoteHumanRW,
 	"todo_list":       remoteHumanRW,
@@ -136,7 +136,7 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"upgrade_preflight": remoteDenied,
 	"reload":            remoteDenied,
 	"gc":                remoteDenied, // host-level data-dir maintenance; local Unix socket only
-	"pair_approve":      remoteDenied, // pairing approval is an out-of-band local human action
+	"pair_approve":      remoteDenied, // pairing approval is an out-of-band local user action
 	"pair_list":         remoteDenied,
 	"pair_revoke":       remoteDenied,
 }
@@ -159,8 +159,8 @@ func remoteAllowed(role authRole, msgType string) bool {
 	case roleRemoteGuest:
 		return pol == remotePreAuth || pol == remoteReadOnly
 	case roleRemoteHuman:
-		// Everything a human operator may do — but NOT session-only or
-		// local-only messages (so a paired human cannot impersonate a session).
+		// Everything a user may do — but NOT session-only or
+		// local-only messages (so a paired user cannot impersonate a session).
 		return pol == remotePreAuth || pol == remoteReadOnly || pol == remoteHumanRW
 	case roleSession, roleOrchestrator:
 		return pol != remoteDenied

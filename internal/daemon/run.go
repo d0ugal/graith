@@ -744,7 +744,7 @@ func run(
 
 			ReleasePIDFile(paths.PIDFile)
 
-			return fmt.Errorf("initialize human authentication: %w", err)
+			return fmt.Errorf("initialize user authentication: %w", err)
 		}
 
 		if err := sm.restoreUpgradeCleanup(); err != nil {

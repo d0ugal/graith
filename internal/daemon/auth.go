@@ -11,7 +11,7 @@ import (
 
 // authRole is the resolved privilege class of a connection (design §B.3). It
 // makes authorization origin-aware so that "no token" over the network is never
-// treated as the local human.
+// treated as the local user.
 type authRole int
 
 const (
@@ -44,9 +44,9 @@ type authContext struct {
 	origin ConnOrigin
 }
 
-// isHuman reports whether the caller is a human operator (local socket or a
-// PoP-verified paired remote human), as opposed to a session/agent.
-// roleRemoteGuest is intentionally excluded — it is read-only, not a full human.
+// isHuman reports whether the caller has user authority (local socket or a
+// PoP-verified paired remote user), as opposed to a session/agent.
+// roleRemoteGuest is intentionally excluded — it is read-only, not a full user.
 func (ac authContext) isHuman() bool {
 	return ac.role == roleLocalHuman || ac.role == roleRemoteHuman
 }
@@ -60,7 +60,9 @@ func (ac authContext) isLocalHuman() bool {
 // describe renders the caller's identity for audit logging (issue #1104): the
 // privilege class plus the session or device id that scopes it. It never
 // includes the token itself. Used by the lifecycle handlers to make "who asked
-// for this stop/delete/restart?" answerable from the daemon log.
+// for this stop/delete/restart?" answerable from the daemon log. The
+// local-human/remote-human literals are persisted audit labels; keep them
+// stable even though product copy now says "user".
 func (ac authContext) describe() string {
 	switch ac.role {
 	case roleLocalHuman:
@@ -105,7 +107,7 @@ func (ac authContext) mutationCaller() string {
 // that can replace or terminate the daemon. The caller description is bounded
 // and never contains the bearer credential.
 func denyDaemonLifecycle(sm *SessionManager, auth authContext, operation string, send func(string, any)) {
-	sm.log.Warn("daemon lifecycle mutation denied", "operation", operation, "caller", auth.describe(), "reason", "human-only authorization")
+	sm.log.Warn("daemon lifecycle mutation denied", "operation", operation, "caller", auth.describe(), "reason", "user-only authorization")
 	send("error", protocol.ErrorMsg{Message: "operation not permitted for agent sessions"})
 }
 
@@ -142,9 +144,9 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 	}
 
 	if !origin.Remote {
-		// When a human credential is provisioned, the local caller must present
+		// When a user credential is provisioned, the local caller must present
 		// it: this is the fail-closed boundary that stops a token-stripping agent
-		// from being treated as the human. A daemon started via Run always has one
+		// from being treated as the user. A daemon started via Run always has one
 		// (startup fails closed if it cannot be established), so a serving
 		// production daemon is always in this branch.
 		if sm.humanToken != "" {
@@ -155,10 +157,10 @@ func resolveAuth(sm *SessionManager, token string, origin ConnOrigin, poppedDevi
 			return authContext{role: roleNone, origin: origin}, errors.New("invalid token")
 		}
 
-		// No human credential provisioned. This is only reachable for a
+		// No user credential provisioned. This is only reachable for a
 		// SessionManager constructed without startup provisioning (tests,
 		// embedders) — never a served production daemon. Preserve the legacy
-		// 0700-socket trust boundary: an empty token is the local human, a stray
+		// 0700-socket trust boundary: an empty token is the local user, a stray
 		// token is invalid.
 		if token == "" {
 			return authContext{role: roleLocalHuman, origin: origin}, nil
@@ -283,7 +285,7 @@ func parseInboxStream(stream string) (string, bool) {
 }
 
 // checkScenarioOp validates that the caller is authorized to operate on a
-// scenario. A human operator — the local CLI or a paired remote human — may
+// scenario. A user — the local CLI or a paired remote user — may
 // manage any scenario. A session must be the scenario's orchestrator or a
 // descendant of it. roleNone / read-only guests are rejected (Gate A also
 // blocks them from scenario_* over the network).
@@ -316,7 +318,7 @@ func (ac authContext) checkScenarioOp(sm *SessionManager, scenarioName string) e
 
 // checkTriggerOp authorizes a mutating trigger op (run/pause/resume). Triggers
 // are daemon-owned (no per-trigger owner), so the rule is: the caller must be the
-// system orchestrator session or a descendant of it. Humans are always allowed.
+// system orchestrator session or a descendant of it. Users are always allowed.
 // Must be called with sm.mu at least RLocked.
 func (ac authContext) checkTriggerOp(sm *SessionManager) error {
 	if ac.isHuman() {
@@ -340,10 +342,10 @@ func (ac authContext) checkTriggerOp(sm *SessionManager) error {
 }
 
 // checkNotifyOp authorizes a proactive push notification (`gr notify`). To stop
-// individual agents spamming the human, only a human operator or the system
-// orchestrator session may send one — a plain agent session is rejected. (Note
+// individual agents spamming the user, only a user or the system orchestrator
+// session may send one — a plain agent session is rejected. (Note
 // this is stricter than triggers, which also allow orchestrator descendants:
-// the whole point of push is that it is a scarce, human-facing channel.)
+// the whole point of push is that it is a scarce, user-facing channel.)
 // Triggers fire notifications daemon-internally and never reach this gate.
 // Must be called with sm.mu at least RLocked.
 func (ac authContext) checkNotifyOp(sm *SessionManager) error {
@@ -355,15 +357,15 @@ func (ac authContext) checkNotifyOp(sm *SessionManager) error {
 		return nil
 	}
 
-	return errors.New("not authorized: only the orchestrator or the human may send notifications")
+	return errors.New("not authorized: only the orchestrator or the user may send notifications")
 }
 
 // checkJailRelease authorizes releasing a jailed PR comment (issue #1082).
 // Releasing delivers quarantined, untrusted content to a working agent, so it
-// must be restricted to a human operator or the system orchestrator — a plain
+// must be restricted to a user or the system orchestrator — a plain
 // agent session is rejected. If it weren't, a compromised agent could release
 // its own prompt-injection payload out of the jail, defeating the quarantine.
-// (This mirrors checkNotifyOp: human or orchestrator only, no descendants.)
+// (This mirrors checkNotifyOp: user or orchestrator only, no descendants.)
 // Must be called with sm.mu at least RLocked.
 func (ac authContext) checkJailRelease(sm *SessionManager) error {
 	if ac.isHuman() {
@@ -374,7 +376,7 @@ func (ac authContext) checkJailRelease(sm *SessionManager) error {
 		return nil
 	}
 
-	return errors.New("not authorized: only the orchestrator or the human may release jailed comments")
+	return errors.New("not authorized: only the orchestrator or the user may release jailed comments")
 }
 
 // isDescendantOf checks whether targetID is a transitive descendant of rootID.

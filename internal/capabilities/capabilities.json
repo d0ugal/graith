@@ -186,7 +186,7 @@
       "name": "List / approve / revoke paired devices",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
       "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
-      "notes": "Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list."
+      "notes": "Device-list administration is local-user-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list."
     },
     {
       "id": "messaging.send",
@@ -208,7 +208,7 @@
       "name": "Publish / subscribe to messaging topics",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
       "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
-      "notes": "Topics are an agent and orchestrator coordination primitive rather than a native human-chat surface."
+      "notes": "Topics are an agent and orchestrator coordination primitive rather than a native user-chat surface."
     },
     {
       "id": "messaging.jail",
@@ -290,7 +290,7 @@
     {
       "id": "notify.send",
       "category": "Notifications",
-      "name": "Send a desktop / push notification to the human",
+      "name": "Send a desktop / push notification to the user",
       "cli": "supported", "ios": "n/a", "macos": "n/a",
       "platform_decision": "docs/design/2026-07-17-native-gui-scope.md#platform-support",
       "notes": "Agents and scripts send notifications; native apps are notification recipients and presenters."

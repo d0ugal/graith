@@ -961,7 +961,7 @@ func readHumanToken(paths config.Paths) string {
 // resolveClientToken picks the credential the CLI presents to the daemon: an
 // in-session agent's GRAITH_TOKEN takes precedence, and only an unset/empty env
 // var falls back to the daemon-written human.token. This preserves cooperative
-// agent identity while letting the human CLI authenticate transparently.
+// agent identity while letting the user CLI authenticate transparently.
 func resolveClientToken(paths config.Paths) string {
 	if t := os.Getenv("GRAITH_TOKEN"); t != "" {
 		return t
@@ -1129,7 +1129,7 @@ func FetchScrollback(cfg *config.Config, paths config.Paths, configFile string, 
 
 // FetchConversation retrieves the full direct-message conversation (both
 // directions) for sessionID via a one-shot passive connection. It is safe for
-// the human CLI: msg_conversation authorises with the self-or-descendant rule,
+// the user CLI: msg_conversation authorises with the self-or-descendant rule,
 // which permits unauthenticated callers.
 func FetchConversation(cfg *config.Config, paths config.Paths, configFile string, sessionID string) ([]protocol.ConversationMessage, error) {
 	c, err := ConnectPassive(cfg, paths, configFile)

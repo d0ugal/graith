@@ -317,7 +317,7 @@ func TestBuildOrchestratorPrompt_Notifications(t *testing.T) {
 
 	// It is appended after an inline prompt with a blank-line separator.
 	got = mustBuildOrchPrompt(t, sm, "claude", config.OrchestratorConfig{Prompt: "ken this"}, nil, true, "")
-	if len(got) != 2 || !strings.HasPrefix(got[1], "ken this\n\n") || !strings.Contains(got[1], "Notifying the human") {
+	if len(got) != 2 || !strings.HasPrefix(got[1], "ken this\n\n") || !strings.Contains(got[1], "Notifying the user") {
 		t.Errorf("notifications section should follow the base prompt, got %q", got[1])
 	}
 }

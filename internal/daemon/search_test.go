@@ -43,8 +43,8 @@ func TestHandleSearchRequiresHuman(t *testing.T) {
 		}
 	}, protocol.Envelope{Type: "search", Payload: payload})
 
-	if gotType != "error" || !strings.Contains(got.Message, "human operator") {
-		t.Fatalf("handler response = %q %+v, want human-only error", gotType, got)
+	if gotType != "error" || !strings.Contains(got.Message, "requires a user") {
+		t.Fatalf("handler response = %q %+v, want user-only error", gotType, got)
 	}
 }
 

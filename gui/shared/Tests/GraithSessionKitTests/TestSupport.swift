@@ -276,7 +276,7 @@ actor MockHostClient: GraithHostClient {
         let existing = inbox[sessionID] ?? []
         let msg = ConversationMessage(
             id: "msg_\(existing.count)", seq: Int64(existing.count + 1),
-            stream: "inbox:\(sessionID)", senderID: "human", senderName: "human",
+            stream: "inbox:\(sessionID)", senderID: "user", senderName: "user",
             body: body, createdAt: "2026-07-14T00:00:00Z")
         inbox[sessionID] = existing + [msg]
         return msg

@@ -132,7 +132,7 @@ Expansion is one pass: introduced text isn't re-expanded. Unknown tokens and mal
 
 Trigger fire-time variables stay separate: `inbox = "{scenario}-{session_name}"` fixes the prefix at start but leaves `{session_name}` for the fire. When vocabularies overlap the instance token wins — `{date}`, `{datetime}`, and `{scenario_id}` in an inbox target are fixed at start, not re-evaluated on fire. Result `store` templates keep the result vocabulary below; `{session_name}` receives the already-rendered member name.
 
-`gr scenario start` returns the rendered scenario and member names — the selectors `status`, results, `stop`, `resume`, `delete`, and other lifecycle commands use; the authored template isn't an alias. `list` and `status --json` include the immutable identities, timestamp, and authored-to-rendered mappings; human `status` prints the authored name and caller/parent/initiator context. That metadata and the rendered graph persist across daemon restart and are never re-rendered.
+`gr scenario start` returns the rendered scenario and member names — the selectors `status`, results, `stop`, `resume`, `delete`, and other lifecycle commands use; the authored template isn't an alias. `list` and `status --json` include the immutable identities, timestamp, and authored-to-rendered mappings; plain `status` prints the authored name and caller/parent/initiator context. That metadata and the rendered graph persist across daemon restart and are never re-rendered.
 
 ### `[scenario.lifecycle]` section
 
@@ -211,7 +211,7 @@ Use `prompt` when the instructions are richer than the tracked work title, or wh
 
 `depends_on` references names in the same file. Both the dependent and every referenced member must have a non-empty `task`; unknown names, duplicates, self-dependencies, and cycles are rejected before sessions start. The daemon resolves names to the members' seeded assigned todo IDs. `gr scenario add` accepts repeatable `--depends-on <existing-member>` flags for the same behavior. Templated references render from the same snapshot before this validation.
 
-**Shared sessions:** `shared = true` references an existing running or stopped session instead of creating one. A stopped session stays stopped; start and resume don't relaunch it. Shared sessions participate (receive manifests, appear in status) but are never stopped, resumed, deleted, or cleaned up by scenario lifecycle operations. Soft-deleted, errored, creating, and deleting sessions are unavailable; an ambiguous name (more than one matching running/stopped session) fails startup. A shared entry can't declare a startup `prompt` (its effective prompt is empty in status and its self manifest) but can still declare tracked `task` work. That task and any required results still participate in completion even when the shared source is stopped; omit them unless the external session or a human will satisfy those obligations.
+**Shared sessions:** `shared = true` references an existing running or stopped session instead of creating one. A stopped session stays stopped; start and resume don't relaunch it. Shared sessions participate (receive manifests, appear in status) but are never stopped, resumed, deleted, or cleaned up by scenario lifecycle operations. Soft-deleted, errored, creating, and deleting sessions are unavailable; an ambiguous name (more than one matching running/stopped session) fails startup. A shared entry can't declare a startup `prompt` (its effective prompt is empty in status and its self manifest) but can still declare tracked `task` work. That task and any required results still participate in completion even when the shared source is stopped; omit them unless the external session or a user will satisfy those obligations.
 
 **Mirrored sessions:** `mirror` set to another `[[sessions]]` member's `name` creates a normal scenario-owned worker over that member's exact worktree. The worker sees committed and uncommitted files, but the sandbox denies writes to the source worktree and provides the usual writable `GRAITH_TMPDIR` scratch space. Several members can mirror one source without creating Git worktrees or branches.
 
@@ -312,7 +312,7 @@ Reopening an assigned todo creates a not-complete transition and cancels pending
 
 ### Completion examples
 
-Archive a deterministic report, require the store write, and keep the working sessions for an hour so a human can inspect the result:
+Archive a deterministic report, require the store write, and keep the working sessions for an hour so a user can inspect the result:
 
 ```toml
 [scenario.lifecycle]
@@ -371,7 +371,7 @@ Only the orchestrator session can start scenarios. The success output always sho
 gr scenario status tracing-pipeline
 ```
 
-Human output uses a labeled block for each member, with session names, IDs,
+Plain output uses a labeled block for each member, with session names, IDs,
 status, agent, role, each member's `done/total` task progress, and `name=status`
 result summaries. Lines adapt to the terminal width; long identifiers retain
 their distinguishing suffix after a middle ellipsis, and result entries stay on
@@ -397,7 +397,7 @@ jq '{components: $ARGS.positional}' --args api worker | \
   gr scenario result put changed-components
 ```
 
-The daemon derives the member from `GRAITH_TOKEN`; the request can't select a different member or destination. Use `--scenario <name>` only when a shared session belongs to multiple scenarios; ordinary members default to `GRAITH_SCENARIO_NAME`. A peer, local/remote human, misnamed result, or wrong scenario gets an explicit error. Direct `gr store put` still works, but writing the same key doesn't mark a declared result successful.
+The daemon derives the member from `GRAITH_TOKEN`; the request can't select a different member or destination. Use `--scenario <name>` only when a shared session belongs to multiple scenarios; ordinary members default to `GRAITH_SCENARIO_NAME`. A peer, local/remote user, misnamed result, or wrong scenario gets an explicit error. Direct `gr store put` still works, but writing the same key doesn't mark a declared result successful.
 
 When a runtime policy is configured, the status table also shows required/optional membership, attempt budget, immutable deadline, and any exhaustion reason. The scenario header shows successful and required counts, plus quorum when configured.
 
@@ -542,7 +542,7 @@ gr todo claim <its-task-item>                            # establish ownership
 gr todo done <its-task-item>                             # complete the claimed item
 ```
 
-Assigned items are reserved: another member can't claim or complete this work. The orchestrator stays the override authority and the human keeps transition authority.
+Assigned items are reserved: another member can't claim or complete this work. The orchestrator stays the override authority and the user keeps transition authority.
 
 Scenario-created members can substitute `$GRAITH_SCENARIO_NAME`; a shared member keeps its existing environment, so it uses the scenario name from the delivered manifest instead. A dependency-blocked seed is claimed only after its upstream items finish; members without a `task` receive no seeded item.
 
@@ -623,9 +623,9 @@ The macOS and iOS apps surface running scenarios through the shared session laye
 
 - **Scenarios view** — a toolbar button (badged with the running-scenario count) opens a list of every scenario on the connected daemons, showing each one's goal, status, and member sessions with role, task, and `done/total` progress.
 - **Sidebar grouping** — a **SCENARIOS** section at the top of the sidebar groups each scenario's members together, so a fleet reads as a unit rather than scattered across repo groups. Tapping a member selects it.
-- **Lifecycle actions** — the human-authorized **stop**, **resume**, and **delete** actions are available from the scenarios view and the sidebar context menu.
+- **Lifecycle actions** — the user-authorized **stop**, **resume**, and **delete** actions are available from the scenarios view and the sidebar context menu.
 
-`start` and `add` stay CLI-only: the daemon scopes them to the scenario's orchestrator *session*, which the GUI (a human client) isn't.
+`start` and `add` stay CLI-only: the daemon scopes them to the scenario's orchestrator *session*, which the GUI (a user client) isn't.
 
 ## Constraints
 

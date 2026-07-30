@@ -87,7 +87,7 @@ as live state.
 | Request device pairing | ✅ | ✅ | ✅ |
 | List / approve / revoke paired devices <sup>1</sup> | ✅ | — | — |
 
-<sup>1</sup> List / approve / revoke paired devices: Device-list administration is local-human-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>1</sup> List / approve / revoke paired devices: Device-list administration is local-user-only and remote-denied. Native apps pair with a daemon but deliberately do not manage its trust list. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Messaging
 
@@ -100,7 +100,7 @@ as live state.
 
 <sup>1</sup> Send direct messages: Native apps compose a direct message to a session's inbox from the session context menu.
 <sup>2</sup> Read direct-message conversations: Native apps show a session's direct-message conversation with mark-as-read.
-<sup>3</sup> Publish / subscribe to messaging topics: Topics are an agent and orchestrator coordination primitive rather than a native human-chat surface. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>3</sup> Publish / subscribe to messaging topics: Topics are an agent and orchestrator coordination primitive rather than a native user-chat surface. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 <sup>4</sup> Inspect / release jailed PR comments: Quarantined PR comments are an untrusted-input moderation workflow kept in the CLI. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Scenarios
@@ -148,9 +148,9 @@ as live state.
 
 | Capability | CLI | iOS | macOS |
 |------------|:---:|:---:|:---:|
-| Send a desktop / push notification to the human <sup>1</sup> | ✅ | — | — |
+| Send a desktop / push notification to the user <sup>1</sup> | ✅ | — | — |
 
-<sup>1</sup> Send a desktop / push notification to the human: Agents and scripts send notifications; native apps are notification recipients and presenters. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
+<sup>1</sup> Send a desktop / push notification to the user: Agents and scripts send notifications; native apps are notification recipients and presenters. [Platform decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-07-17-native-gui-scope.md#platform-support)
 
 ### Sandbox introspection
 

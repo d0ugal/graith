@@ -16,7 +16,7 @@ struct ErrorMappingTests {
 
     @Test func mapsControlErrors() {
         #expect(RealClientError.map(ControlError.daemon("invalid token"))
-            == .authenticationFailed("the local human token was rejected"))
+            == .authenticationFailed("the local user token was rejected"))
         #expect(RealClientError.map(ControlError.daemon("not authorized over remote")) == .notPaired)
         #expect(RealClientError.map(ControlError.daemon("rate limited")) == .daemon("rate limited"))
         #expect(RealClientError.map(ControlError.handshakeRejected("bad")) == .authenticationFailed("bad"))

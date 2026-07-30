@@ -79,7 +79,7 @@ converting, use `gr logs -f`.
 **Interrupts and permission errors.** Over Claude Code's stdin control protocol,
 graith cleanly `interrupt`s an in-flight turn instead of firing terminal signals.
 Native tool-permission requests are denied immediately and mark the driver
-degraded — no native TUI or human-response channel. Graith does not add a
+degraded — no native TUI or user-response channel. Graith does not add a
 semantic shell-command policy to headless or PTY sessions; configure an
 agent-native hook or external policy tool directly when one is required.
 
@@ -301,7 +301,7 @@ trigger, and mirror-created children. Supplying labels during creation replaces
 the inherited set instead of merging with it. Forks inherit a snapshot of the
 source labels. Later label changes on parent, child, source, or fork are
 independent. Labels never grant access: creation and update use the same
-local-human, remote-human, session/descendant, and system-session boundaries as
+local-user, remote-user, session/descendant, and system-session boundaries as
 the rest of session metadata.
 
 The Session Navigator has a **Labels** view, grouping matching sessions across repository

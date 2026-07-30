@@ -709,7 +709,7 @@ struct TerminalContainer: View {
             if store.isAttachedElsewhere(session.id, owner: window) {
                 // The daemon allows one attach per session; another window
                 // already owns this one. Show a placeholder rather than kicking
-                // it (which would ping-pong). "Open Here" is an explicit human
+                // it (which would ping-pong). "Open Here" is an explicit user
                 // takeover per the design's single-attach rule.
                 SessionBusyElsewhere(sessionName: session.name) {
                     store.forceClaimAttach(session.id, owner: window)

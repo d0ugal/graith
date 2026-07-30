@@ -73,7 +73,7 @@ public actor GraithProtocolClient {
     /// paired client token remotely. Nil before pairing.
     private var token: String?
     /// Optional late-bound credential source. The macOS local client uses this
-    /// to re-read the daemon's human token whenever it opens a connection, so
+    /// to re-read the daemon's user token whenever it opens a connection, so
     /// launching before the daemon creates the token recovers without an app
     /// restart. Remote clients keep using ``token``.
     private let tokenProvider: (@Sendable () -> String?)?
@@ -89,7 +89,7 @@ public actor GraithProtocolClient {
     ///   - profile: the daemon profile (empty string for the default profile).
     ///     The handshake carries this and the daemon rejects a mismatch.
     ///   - clientID: an identifier for logging (e.g. the app's instance id).
-    ///   - token: session/client bearer token, or nil (e.g. local human).
+    ///   - token: session/client bearer token, or nil (e.g. local user).
     ///   - signer: device key signer for remote PoP; nil for local transports.
     ///   - tokenProvider: optional late-bound token source, evaluated once for
     ///     each new connection before falling back to `token`.
@@ -407,8 +407,8 @@ public actor GraithProtocolClient {
     ///
     /// Publishes to the `inbox:<session-id>` stream and returns the published
     /// message the daemon echoes back (`msg_published`). The daemon forces the
-    /// sender identity by role: a local human's `senderName` is honoured, a
-    /// remote human's is replaced with its device identity.
+    /// sender identity by role: a local user's `senderName` is honoured, a
+    /// remote user's is replaced with its device identity.
     @discardableResult
     public func sendMessage(toSessionID sessionID: String, body: String,
                             senderName: String? = nil) async throws -> ConversationMessage {
@@ -459,7 +459,7 @@ public actor GraithProtocolClient {
     /// Send a `pair_request` and await the `pair_response`.
     ///
     /// This opens a fresh (token-less) remote connection. The daemon surfaces a
-    /// pending pairing to the local human; this call resolves once that human
+    /// pending pairing to the local user; this call resolves once that user
     /// runs `gr remote pairings approve` (or the daemon errors). On success the
     /// returned token is adopted for subsequent connections.
     ///
@@ -479,7 +479,7 @@ public actor GraithProtocolClient {
         // (a brand-new device has no daemon record yet), so that challenge is left
         // buffered on the connection. Send `pair_request`, then consume replies
         // until `pair_response` or `error`, skipping the `auth_challenge` — exactly
-        // as the Go client does (internal/client/remote.go). Awaiting local human
+        // as the Go client does (internal/client/remote.go). Awaiting local user
         // approval can take minutes; that is bounded by the transport's own
         // deadline, not here.
         try await conn.send(control: "pair_request",

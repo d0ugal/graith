@@ -43,11 +43,11 @@ public struct RealHostClientFactory: HostClientFactory {
     }
 
     public func makeLocalClient(transport: GraithTransport, profile: String) -> any GraithHostClient {
-        // Local human token, no PoP signer: this is the same transparent local
+        // Local user token, no PoP signer: this is the same transparent local
         // authentication the CLI uses outside a session. The composition root
         // reads human.token for each new connection rather than forwarding
         // GRAITH_TOKEN, whose per-session value would make the desktop app act
-        // as its launching agent instead of as the human operator.
+        // as its launching agent instead of as the user.
         let inner = GraithProtocolClient(
             transport: transport,
             profile: profile,

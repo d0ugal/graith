@@ -87,7 +87,7 @@ func TestConfigHandlerDiffReflectsCustomisation(t *testing.T) {
 
 // TestConfigHandlerRedactsEnvSecrets verifies the config response masks secret-bearing
 // agent env-map values so they never cross the control socket —
-// neither to a remote paired human nor to a local session reading via the daemon.
+// neither to a remote paired user nor to a local session reading via the daemon.
 func TestConfigHandlerRedactsEnvSecrets(t *testing.T) {
 	h := newTestHarness(t)
 

@@ -713,8 +713,8 @@ public struct StoreGetResponseMsg: Codable, Sendable {
 
 /// `msg_pub` — publish a message to a stream. The GUI addresses a session's
 /// inbox via `inbox:<session-id>`; the daemon forces the sender identity by
-/// role, so `senderID`/`senderName` are hints the local human may set and a
-/// remote human's are overridden server-side. Mirrors `protocol.MsgPubMsg`.
+/// role, so `senderID`/`senderName` are hints the local user may set and a
+/// remote user's are overridden server-side. Mirrors `protocol.MsgPubMsg`.
 public struct MsgPubMsg: Codable, Sendable {
     public var stream: String
     public var body: String
@@ -754,7 +754,7 @@ public struct MsgPubMsg: Codable, Sendable {
 
 /// `msg_conversation` — request the full direct-message conversation (both
 /// directions) for a session. Authorised by the self-or-descendant rule, so the
-/// local/remote human may read it. Mirrors `protocol.MsgConversationMsg`.
+/// local/remote user may read it. Mirrors `protocol.MsgConversationMsg`.
 public struct MsgConversationMsg: Codable, Sendable {
     public var sessionID: String
     /// When > 0, return only the most recent `limit` messages.
@@ -785,7 +785,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Hashable {
     public var noReply: Bool?
     public var createdAt: String
     /// Marks an automated daemon-authored notification (PR/CI notices) rather
-    /// than a session/human message (issue #887).
+    /// than a session/user message (issue #887).
     public var system: Bool?
 
     public init(id: String, seq: Int64, stream: String, senderID: String,

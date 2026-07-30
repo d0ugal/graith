@@ -266,13 +266,13 @@ func (sm *SessionManager) TodoAddOp(ac authContext, m protocol.TodoAddMsg) (prot
 	// is always allowed.
 	if m.Assignee != "" && m.Assignee != ac.sessionID {
 		if !sm.accessForItem(ac, TodoItem{Scope: scope}).override {
-			return protocol.TodoItemInfo{}, errors.New("only the scope's override authority or the human may assign an item to another session")
+			return protocol.TodoItemInfo{}, errors.New("only the scope's override authority or the user may assign an item to another session")
 		}
 	}
 
 	createdBy := ac.sessionID
 	if createdBy == "" {
-		createdBy = "human"
+		createdBy = "user"
 	}
 
 	item, err := sm.todos.Add(TodoAdd{
@@ -290,7 +290,7 @@ func (sm *SessionManager) TodoAddOp(ac authContext, m protocol.TodoAddMsg) (prot
 }
 
 // TodoListOp returns items in the resolved scope (or all scopes when
-// m.Scope.All is set by a human/orchestrator).
+// m.Scope.All is set by a user/orchestrator).
 func (sm *SessionManager) TodoListOp(ac authContext, m protocol.TodoListMsg) ([]protocol.TodoItemInfo, error) {
 	if sm.todos == nil {
 		return nil, errNoTodoStore
@@ -305,7 +305,7 @@ func (sm *SessionManager) TodoListOp(ac authContext, m protocol.TodoListMsg) ([]
 
 	if m.Scope.All {
 		if !ac.isHuman() && ac.role != roleOrchestrator {
-			return nil, errors.New("--all is restricted to the human or orchestrator")
+			return nil, errors.New("--all is restricted to the user or orchestrator")
 		}
 
 		items, err = sm.todos.ListAll(filter)
@@ -438,7 +438,7 @@ func (sm *SessionManager) TodoTransitionOp(ac authContext, m protocol.TodoTransi
 	}
 
 	if !acc.owner && !acc.override {
-		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the human may transition this item")
+		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the user may transition this item")
 	}
 
 	result, err := sm.todos.TransitionCascade(m.ID, m.Status, m.Note, ac.sessionID, acc.override)
@@ -479,7 +479,7 @@ func (sm *SessionManager) TodoUpdateOp(ac authContext, m protocol.TodoUpdateMsg)
 
 	acc := sm.accessForItem(ac, item)
 	if !acc.owner && !acc.override {
-		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the human may edit this item")
+		return protocol.TodoItemInfo{}, errors.New("only the owner, the scope's override authority, or the user may edit this item")
 	}
 
 	result, err := sm.todos.UpdateFieldsCascade(m.ID, m.Title, m.Note, m.Tags, m.Position, m.DependsOn)
@@ -501,7 +501,7 @@ func (sm *SessionManager) TodoUpdateOp(ac authContext, m protocol.TodoUpdateMsg)
 	return todoItemToWire(updated), nil
 }
 
-// TodoAssignOp sets an item's assignee (override authority / human only).
+// TodoAssignOp sets an item's assignee (override authority / user only).
 func (sm *SessionManager) TodoAssignOp(ac authContext, m protocol.TodoAssignMsg) (protocol.TodoItemInfo, error) {
 	if sm.todos == nil {
 		return protocol.TodoItemInfo{}, errNoTodoStore
@@ -513,7 +513,7 @@ func (sm *SessionManager) TodoAssignOp(ac authContext, m protocol.TodoAssignMsg)
 	}
 
 	if acc := sm.accessForItem(ac, item); !acc.override {
-		return protocol.TodoItemInfo{}, errors.New("only the scope's override authority or the human may assign this item")
+		return protocol.TodoItemInfo{}, errors.New("only the scope's override authority or the user may assign this item")
 	}
 
 	updated, err := sm.todos.Assign(m.ID, m.Assignee)
@@ -539,7 +539,7 @@ func (sm *SessionManager) TodoRemoveOp(ac authContext, m protocol.TodoRemoveMsg)
 
 	acc := sm.accessForItem(ac, item)
 	if !acc.owner && !acc.override {
-		return errors.New("only the owner, the scope's override authority, or the human may remove this item")
+		return errors.New("only the owner, the scope's override authority, or the user may remove this item")
 	}
 
 	if err := sm.todos.Remove(m.ID); err != nil {

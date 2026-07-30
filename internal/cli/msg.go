@@ -350,7 +350,7 @@ var msgJailCmd = &cobra.Command{
 	Short: "Inspect and release quarantined PR comments",
 	Long: "PR comments from untrusted authors are quarantined (\"jailed\") instead of\n" +
 		"discarded. Inspect them with list/show; release them (deliver to the target\n" +
-		"session) with release. Release is restricted to the human or the orchestrator.",
+		"session) with release. Release is restricted to the user or the orchestrator.",
 }
 
 var msgJailListReleased bool
@@ -463,7 +463,7 @@ var msgJailShowCmd = &cobra.Command{
 	},
 }
 
-// renderJailShow formats a single jailed comment's detail block for the human,
+// renderJailShow formats a single jailed comment's detail block for the user,
 // ending with the body (which the daemon only supplies to a release-authorized
 // caller; otherwise it's the withheld placeholder).
 func renderJailShow(j protocol.JailedCommentInfo) string {
@@ -498,7 +498,7 @@ var (
 
 var msgJailReleaseCmd = &cobra.Command{
 	Use:   "release [id]",
-	Short: "Release a quarantined comment to its target session (human/orchestrator only)",
+	Short: "Release a quarantined comment to its target session (user/orchestrator only)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		m, err := buildJailReleaseMsg(args, msgJailReleaseAll, msgJailReleaseAuthor)
@@ -559,7 +559,7 @@ func buildJailReleaseMsg(args []string, all bool, author string) (protocol.MsgJa
 	return m, nil
 }
 
-// renderJailReleased formats the outcome of a release for the human.
+// renderJailReleased formats the outcome of a release for the user.
 func renderJailReleased(released []protocol.JailedCommentInfo) string {
 	if len(released) == 0 {
 		return "No jailed comments released.\n"
@@ -920,7 +920,7 @@ func printMessage(payload json.RawMessage) {
 	}
 
 	// Mark automated daemon notifications so they read distinctly from
-	// session/human messages and don't imply a replyable sender — issue #887.
+	// session/user messages and don't imply a replyable sender — issue #887.
 	if m.System {
 		sender += " (automated notification)"
 	}

@@ -733,9 +733,9 @@ func TestScenarioResultPublishHandlerAuthenticationAndResponse(t *testing.T) {
 	h.sm.tokenIndex["tok-canny-result"] = "canny-id"
 	h.sm.mu.Unlock()
 
-	// A local human is not a member identity and cannot publish on behalf of one.
+	// A local user is not a member identity and cannot publish on behalf of one.
 	h.sendControl(t, "scenario_result_publish", protocol.ScenarioResultPublishMsg{
-		Scenario: "braw-fanout", Name: "review", Body: "human forgery",
+		Scenario: "braw-fanout", Name: "review", Body: "user forgery",
 	})
 	h.expectError(t, "authenticated session")
 

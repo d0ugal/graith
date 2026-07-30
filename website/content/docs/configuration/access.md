@@ -54,7 +54,7 @@ An optional control listener reaching the daemon from another device over your [
 enabled             = false          # expose the remote control listener over the tailnet
 mode                = "tsnet"         # transport: "tsnet" (embedded Tailscale) or "interface" (bind an existing tailnet IP)
 port                = 4823            # TCP port the listener binds
-require_pairing     = true           # require per-device pairing for human-level rights
+require_pairing     = true           # require per-device pairing for user-level rights
 # hostname          = "graith"       # tsnet node name / MagicDNS label (tsnet mode)
 # auth_key_file     = "~/.config/graith/tsnet.key"  # tsnet auth key path (tsnet mode)
 # tags              = ["tag:graith"] # tsnet ACL tags applied to the node (tsnet mode)
@@ -70,7 +70,7 @@ Pairing limits default to the historically-fixed values, clamped to safe bounds:
 
 `pending_pairing_ttl` is frozen when a request is created, so a hot reload affects only later requests — in-flight ones keep their original expiry, so device and daemon never disagree about when a request lapses.
 
-Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — who on the tailnet may connect at all) and per-device **pairing** (`require_pairing` — each device proves possession of a paired key before it gets human-level rights).
+Access is gated in two layers: a WhoIs **allowlist** (`allow_tailnet_users` — who on the tailnet may connect at all) and per-device **pairing** (`require_pairing` — each device proves possession of a paired key before it gets user-level rights).
 
 Initiate pairing on the client with `gr remote pair <host>`. On the daemon host,
 find the pending request with `gr remote pairings list`, then approve it with

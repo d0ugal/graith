@@ -335,7 +335,7 @@ gr update release-watch --add-label urgent --add-label release
 gr update release-watch --remove-label urgent
 ```
 
-Human output reports each requested property's resulting value; `--json` and
+Plain output reports each requested property's resulting value; `--json` and
 agent mode return one object with `session_id`, `name`, `parent_id`, and the
 explicit `starred` boolean plus the complete resulting `labels` array. Label
 additions and removals are applied in the same persisted metadata update as
