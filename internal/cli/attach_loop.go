@@ -42,6 +42,7 @@ type attachLoop struct {
 	pickerState client.PickerState
 
 	terminalHistory    protocol.TerminalHistoryMsg
+	terminalSnapshot   protocol.ScreenSnapshotResponseMsg
 	hasTerminalHistory bool
 
 	// opts is handed (by value) to RunPassthrough each iteration; opts.Info
@@ -107,17 +108,20 @@ func (l *attachLoop) setTerminalOwnedSeed(seed *protocol.TerminalOwnedAttachSeed
 	if seed == nil {
 		l.hasTerminalHistory = false
 		l.terminalHistory = protocol.TerminalHistoryMsg{}
+		l.terminalSnapshot = protocol.ScreenSnapshotResponseMsg{}
 
 		return
 	}
 
 	l.terminalHistory = seed.History
+	l.terminalSnapshot = seed.Snapshot
 	l.hasTerminalHistory = terminalHistoryPresent(seed.History)
 }
 
 func (l *attachLoop) clearTerminalHistory() {
 	l.hasTerminalHistory = false
 	l.terminalHistory = protocol.TerminalHistoryMsg{}
+	l.terminalSnapshot = protocol.ScreenSnapshotResponseMsg{}
 }
 
 func terminalHistoryPresent(history protocol.TerminalHistoryMsg) bool {
@@ -673,9 +677,13 @@ func (l *attachLoop) onScrollMode() (bool, error) {
 	scrollback := ""
 
 	if l.hasTerminalHistory {
-		if formatted := client.FormatTerminalHistory(l.terminalHistory); formatted != "" {
+		if formatted := client.FormatTerminalScrollback(l.terminalHistory, l.terminalSnapshot); formatted != "" {
 			scrollback = formatted
 		}
+	}
+
+	if scrollback == "" {
+		scrollback = l.fetchFreshTerminalHistory()
 	}
 
 	if scrollback == "" {
@@ -690,6 +698,27 @@ func (l *attachLoop) onScrollMode() (bool, error) {
 	}
 
 	return false, l.adoptCurrent(nc)
+}
+
+// fetchFreshTerminalHistory opens a short-lived terminal-owned attach to get a
+// current formatted history snapshot. It returns "" when the seed has no
+// history rows so callers can fall back to raw logs, whose depth is resolved
+// from the daemon's current [limits].log_lines setting.
+func (l *attachLoop) fetchFreshTerminalHistory() string {
+	nc, err := freshClient()
+	if err != nil {
+		return ""
+	}
+	defer nc.Close()
+
+	var info protocol.SessionInfo
+
+	seed, err := attachDecodeSeed(nc, l.sessionID, &info)
+	if err != nil || seed == nil {
+		return ""
+	}
+
+	return client.FormatTerminalScrollback(seed.History, seed.Snapshot)
 }
 
 // reattachAfterOverlayFailure reports a failed create/fork initiated from the
