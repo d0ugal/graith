@@ -134,6 +134,18 @@
       versioningTemplate: 'semver',
     },
     {
+      // Gitleaks runs directly from Docker in secret-scan.yml. Keep its version
+      // tag and OCI index digest in one managed value so regex/entropy secret
+      // scanning remains immutable while Renovate updates both together.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['GITLEAKS_IMAGE=(?<packageName>ghcr\\.io/gitleaks/gitleaks):(?<currentValue>v[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})'],
+      autoReplaceStringTemplate: 'GITLEAKS_IMAGE=ghcr.io/gitleaks/gitleaks:{{{newValue}}}@{{{newDigest}}}',
+      depNameTemplate: 'gitleaks/gitleaks',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
+    },
+    {
       // TruffleHog runs directly from Docker in secret-scan.yml. Keep its tag
       // and OCI index digest in one managed value so security scanning remains
       // immutable while Renovate updates both together.

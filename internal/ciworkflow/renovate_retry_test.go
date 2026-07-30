@@ -289,6 +289,20 @@ func renovateSuccessLog(t *testing.T) string {
 
 	ciToolDeps := []any{
 		map[string]any{
+			"depName":       "gitleaks/gitleaks",
+			"packageName":   "ghcr.io/gitleaks/gitleaks",
+			"datasource":    "docker",
+			"currentValue":  "v8.24.3",
+			"currentDigest": "sha256:" + strings.Repeat("e", 64),
+			"updates": []any{
+				map[string]any{
+					"branchName": "renovate/gitleaks-gitleaks-8.x",
+					"newValue":   "v8.25.1",
+					"newDigest":  "sha256:" + strings.Repeat("f", 64),
+				},
+			},
+		},
+		map[string]any{
 			"depName":      "gohugoio/hugo",
 			"datasource":   "github-releases",
 			"currentValue": "0.154.5",
