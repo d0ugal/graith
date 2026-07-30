@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.71.1](https://github.com/d0ugal/graith/compare/v0.71.0...v0.71.1) (2026-07-30)
+
+
+### Features
+
+* add conversation search ([c4680ba](https://github.com/d0ugal/graith/commit/c4680ba367e244521603beb4964316216ce69de9))
+* follow child session events ([b6ad501](https://github.com/d0ugal/graith/commit/b6ad501656f40d7248e4bb76f8341819105d48ab))
+* make conversation search limits configurable ([f00cb68](https://github.com/d0ugal/graith/commit/f00cb681f8b2532fb79e42d926b5c82b713257ad))
+* notify orchestrators about Graith updates ([06971c5](https://github.com/d0ugal/graith/commit/06971c555cdba4ee10c54f3a0a633be9dcaf02f4))
+* rename session picker to navigator ([332decd](https://github.com/d0ugal/graith/commit/332decd32423c78032575d5e172d1769fc069b92))
+* stream session events ([adb3e9d](https://github.com/d0ugal/graith/commit/adb3e9d471c5452913307634ad8aba44509b88f0))
+
+
+### Bug Fixes
+
+* **delete:** keep recovery tombstones until teardown is certain ([4740ed4](https://github.com/d0ugal/graith/commit/4740ed4573a66a4389c07b38333d3b1e4bb104c3))
+* harden configurable keybindings ([f6f80f1](https://github.com/d0ugal/graith/commit/f6f80f1ebbdb1645aa07fbbf456fb3967ba52c2f))
+* harden scenario activation rollback ([6ee205c](https://github.com/d0ugal/graith/commit/6ee205c1c37b47c1cb8b3e482183cd29110618ce))
+* pin safehouse CI install ([ebdb6e4](https://github.com/d0ugal/graith/commit/ebdb6e4ebc8ef1b4102c7a026e3009318231bd81))
+* recover interrupted scenario additions ([e9b1733](https://github.com/d0ugal/graith/commit/e9b1733431da7c963923e08d168efb65a333ea12))
+* serialize migration launch state ([e2fec29](https://github.com/d0ugal/graith/commit/e2fec29bf54e7e9f67fdbbcd32decfa82e32622c))
+* stabilize message store ordering ([ac43e68](https://github.com/d0ugal/graith/commit/ac43e682a9a5da66d1e56159765990852c77364d))
+* stabilize preserved daemon upgrade snapshot ([c589de7](https://github.com/d0ugal/graith/commit/c589de76f8c5daa43c67cdd63982e09675e45da6))
+* update github.com/charmbracelet/ultraviolet digest to d9e819d ([#1885](https://github.com/d0ugal/graith/issues/1885)) ([1ca862e](https://github.com/d0ugal/graith/commit/1ca862ed8bdb60fcea0781acf0a9e37844078b07))
+* update github.com/charmbracelet/ultraviolet digest to f2cf2bd ([#1883](https://github.com/d0ugal/graith/issues/1883)) ([1253cd3](https://github.com/d0ugal/graith/commit/1253cd3a2a1effdc9ce32a4e5f776a7822db8959))
+
+
+### Continuous Integration
+
+* install Commitsar from Go module pin ([0a19d7d](https://github.com/d0ugal/graith/commit/0a19d7d8fa3f6197fd8afafeb20ca6a1b46b0327))
+* pin Gitleaks image digest ([671ae65](https://github.com/d0ugal/graith/commit/671ae652ce3e190818d1ceb1d03d7c1395db93a4))
+* pin GoReleaser version ([852b3c6](https://github.com/d0ugal/graith/commit/852b3c6cb998d0d3295fa0b48f0ea47b60b7daca))
+* pin Scorecard image digest ([bb1bfad](https://github.com/d0ugal/graith/commit/bb1bfad563a6ceffa9a7d35259d4ade044120acb))
+* pin TruffleHog image digest ([5c15cd1](https://github.com/d0ugal/graith/commit/5c15cd1e09d2b3b9baa512d55386af0af12f92d7))
+* verify Hugo and Dart Sass downloads ([3d4cccf](https://github.com/d0ugal/graith/commit/3d4cccf8913808d09bca9f9216097a86f276f657))
+
+
+### Dependencies
+
+* **deps:** update actions/attest action to v4.2.1 ([#1881](https://github.com/d0ugal/graith/issues/1881)) ([64451ad](https://github.com/d0ugal/graith/commit/64451ad3060e2897ff5661b37f0e62252f700fe5))
+* **deps:** update gitleaks/gitleaks docker tag to v8.30.1 ([#1892](https://github.com/d0ugal/graith/issues/1892)) ([2e994d9](https://github.com/d0ugal/graith/commit/2e994d9581445d96b9a001b79997db61c300a79e))
+* **deps:** update renovate/renovate docker tag to v44.2.2 ([#1884](https://github.com/d0ugal/graith/issues/1884)) ([b2f0577](https://github.com/d0ugal/graith/commit/b2f057724af625303a1e6784057376e8bdaae6c8))
+* **deps:** update renovate/renovate docker tag to v44.2.3 ([#1886](https://github.com/d0ugal/graith/issues/1886)) ([528eae2](https://github.com/d0ugal/graith/commit/528eae24cd7a3a4979a7cb7ef305e7366e904228))
+* stop calling users Human ([28ee116](https://github.com/d0ugal/graith/commit/28ee116fcf054067215b16f6f797f55a78e3bade))
+
 ## [0.71.0](https://github.com/d0ugal/graith/compare/v0.70.6...v0.71.0) (2026-07-29)
 
 
