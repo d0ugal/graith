@@ -669,21 +669,58 @@ jobs:
               echo "max-cache-ttl 3600"
             } >"$GNUPGHOME/gpg-agent.conf"
             printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
-            key_id="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
-            test -n "$key_id"
-            signing_epoch="$(git show -s --format=%ct "$RELEASE_REVISION")"
-            [[ "$signing_epoch" =~ ^[1-9][0-9]*$ ]]
-            key_created_epoch="$(gpg --list-secret-keys --with-colons "$key_id" | \
-              awk -F: '/^(sec|ssb):/ && $12 ~ /[sS]/ { if (($6 + 0) > max) max = $6 + 0 } END { if (max) print max }')"
-            [[ "$key_created_epoch" =~ ^[1-9][0-9]*$ ]]
+            secret_keys=""
+            if ! secret_keys="$(gpg --list-secret-keys --with-colons 2>&1)"; then
+              printf '%s\n' "$secret_keys"
+              echo "::error::Could not list imported GPG secret keys"
+              exit 1
+            fi
+            key_id="$(awk -F: '/^sec:/ {print $5; exit}' <<<"$secret_keys")"
+            if [ -z "$key_id" ]; then
+              printf '%s\n' "$secret_keys" | sed 's/^/gpg-listing: /'
+              echo "::error::Imported GPG_PRIVATE_KEY did not expose a primary secret key record"
+              exit 1
+            fi
+            signing_epoch=""
+            if ! signing_epoch="$(git show -s --format=%ct "$RELEASE_REVISION" 2>&1)"; then
+              printf '%s\n' "$signing_epoch"
+              echo "::error::Could not resolve commit time for RELEASE_REVISION=$RELEASE_REVISION"
+              exit 1
+            fi
+            if ! [[ "$signing_epoch" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Commit time for RELEASE_REVISION=$RELEASE_REVISION is not a positive Unix epoch: $signing_epoch"
+              exit 1
+            fi
+            signing_key_metadata=""
+            if ! signing_key_metadata="$(gpg --list-secret-keys --with-colons "$key_id" 2>&1)"; then
+              printf '%s\n' "$signing_key_metadata"
+              echo "::error::Could not inspect imported GPG signing key metadata for key $key_id"
+              exit 1
+            fi
+            key_created_epoch="$(awk -F: '/^(sec|ssb):/ && $12 ~ /[sS]/ && $6 ~ /^[1-9][0-9]*$/ { if (($6 + 0) > max) max = $6 + 0 } END { if (max) print max }' <<<"$signing_key_metadata")"
+            if ! [[ "$key_created_epoch" =~ ^[1-9][0-9]*$ ]]; then
+              printf '%s\n' "$signing_key_metadata" | sed 's/^/gpg-listing: /'
+              echo "::error::Could not determine GPG signing key creation time from imported secret key metadata"
+              exit 1
+            fi
             if (( signing_epoch <= key_created_epoch )); then
               signing_epoch=$((key_created_epoch + 1))
             fi
             preset=/usr/lib/gnupg/gpg-preset-passphrase
             [ -x "$preset" ] || preset=/usr/libexec/gpg-preset-passphrase
-            gpg --with-keygrip --list-secret-keys --with-colons "$key_id" | \
-              GPG_PASSPHRASE="$GPG_PASSPHRASE" \
-                scripts/rpm-preset-keygrips.sh "$preset"
+            keygrip_listing=""
+            if ! keygrip_listing="$(gpg --with-keygrip --list-secret-keys --with-colons "$key_id" 2>&1)"; then
+              printf '%s\n' "$keygrip_listing"
+              echo "::error::Could not inspect GPG keygrips for imported signing key $key_id"
+              exit 1
+            fi
+            preset_output=""
+            if ! preset_output="$(printf '%s\n' "$keygrip_listing" | \
+                GPG_PASSPHRASE="$GPG_PASSPHRASE" scripts/rpm-preset-keygrips.sh "$preset" 2>&1)"; then
+              printf '%s\n' "$preset_output"
+              echo "::error::Could not preset GPG passphrase for imported signing key $key_id; verify gpg-preset-passphrase is available and GPG_PASSPHRASE matches GPG_PRIVATE_KEY"
+              exit 1
+            fi
             if ! preflight_output="$(gpg --batch --yes --pinentry-mode loopback \
                 --passphrase-file "$passphrase_file" \
                 --local-user "$key_id" --detach-sign \
@@ -707,13 +744,29 @@ jobs:
                 echo "::error::RPM signing failed for $(basename "$package"); inspect the rpm/gpg diagnostic above and verify the configured GPG_PRIVATE_KEY/GPG_PASSPHRASE pair"
                 exit 1
               fi
-              signature="$(rpm --checksig "$package")"
-              [[ "$signature" == *"signatures OK"* ]]
+              if ! signature="$(rpm --checksig "$package" 2>&1)"; then
+                printf '%s\n' "$signature"
+                echo "::error::Could not verify RPM signature for $(basename "$package")"
+                exit 1
+              fi
+              if [[ "$signature" != *"signatures OK"* ]]; then
+                printf '%s\n' "$signature"
+                echo "::error::RPM signature verification did not report signatures OK for $(basename "$package")"
+                exit 1
+              fi
             done
           fi
           mapfile -t artifacts < <(find dist -maxdepth 1 -type f -name 'graith_*' \
             -printf '%f\n' | sort)
-          test "${#artifacts[@]}" -eq 9
+          if [ "${#artifacts[@]}" -ne 9 ]; then
+            if [ "${#artifacts[@]}" -eq 0 ]; then
+              echo "artifact: <none>"
+            else
+              printf 'artifact: %s\n' "${artifacts[@]}"
+            fi
+            echo "::error::Expected 9 finalized release artifacts in dist, found ${#artifacts[@]}"
+            exit 1
+          fi
           (cd dist && sha256sum "${artifacts[@]}" >checksums.txt && \
             sha256sum --check checksums.txt)
 
@@ -926,8 +979,18 @@ jobs:
             echo "max-cache-ttl 3600"
           } >"$GNUPGHOME/gpg-agent.conf"
           printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
-          GPG_KEY_ID="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
-          test -n "$GPG_KEY_ID"
+          secret_keys=""
+          if ! secret_keys="$(gpg --list-secret-keys --with-colons 2>&1)"; then
+            printf '%s\n' "$secret_keys"
+            echo "::error::Could not list imported GPG secret keys for repository publication"
+            exit 1
+          fi
+          GPG_KEY_ID="$(awk -F: '/^sec:/ {print $5; exit}' <<<"$secret_keys")"
+          if [ -z "$GPG_KEY_ID" ]; then
+            printf '%s\n' "$secret_keys" | sed 's/^/gpg-listing: /'
+            echo "::error::Imported GPG_PRIVATE_KEY did not expose a primary secret key record for repository publication"
+            exit 1
+          fi
           export GPG_KEY_ID
           scripts/publish-linux-repositories.sh dist graith-repo "$RETAIN_RELEASES"
 

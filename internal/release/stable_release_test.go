@@ -230,6 +230,63 @@ func TestStableRPMBytesAreFinalBeforeChecksumAndAttestation(t *testing.T) {
 	}
 }
 
+func TestStableRPMSigningSetupFailuresAreDiagnostic(t *testing.T) {
+	workflow := loadStableReleaseWorkflow(t)
+	step := workflowStep(workflow.Jobs["attest-stable"], "Apply configured RPM signatures before checksums and provenance")
+	script := step.Run
+
+	if script == "" {
+		t.Fatal("stable RPM signing step not found")
+	}
+
+	for _, want := range []string{
+		`Could not list imported GPG secret keys`,
+		`Imported GPG_PRIVATE_KEY did not expose a primary secret key record`,
+		`Could not resolve commit time for RELEASE_REVISION=$RELEASE_REVISION`,
+		`Commit time for RELEASE_REVISION=$RELEASE_REVISION is not a positive Unix epoch`,
+		`signing_key_metadata="$(gpg --list-secret-keys --with-colons "$key_id"`,
+		`/^(sec|ssb):/ && $12 ~ /[sS]/ && $6 ~ /^[1-9][0-9]*$/`,
+		`Could not determine GPG signing key creation time from imported secret key metadata`,
+		`signing_epoch=$((key_created_epoch + 1))`,
+		`keygrip_listing="$(gpg --with-keygrip --list-secret-keys --with-colons "$key_id"`,
+		`Could not inspect GPG keygrips for imported signing key $key_id`,
+		`preset_output="$(printf '%s\n' "$keygrip_listing"`,
+		`Could not preset GPG passphrase for imported signing key $key_id`,
+		`Could not verify RPM signature for $(basename "$package")`,
+		`RPM signature verification did not report signatures OK for $(basename "$package")`,
+		`Expected 9 finalized release artifacts in dist, found ${#artifacts[@]}`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("RPM signing setup script missing %q", want)
+		}
+	}
+
+	publishStepScript := workflowStep(workflow.Jobs["publish-stable"], "Prepare signed apt/yum repository inputs").Run
+	if publishStepScript == "" {
+		t.Fatal("stable repository publication setup step not found")
+	}
+
+	for _, want := range []string{
+		`Could not list imported GPG secret keys for repository publication`,
+		`Imported GPG_PRIVATE_KEY did not expose a primary secret key record for repository publication`,
+	} {
+		if !strings.Contains(publishStepScript, want) {
+			t.Errorf("repository publication signing setup missing %q", want)
+		}
+	}
+
+	publishScript := string(mustReadReleaseFile(t, "scripts/publish-linux-repositories.sh"))
+	for _, want := range []string{
+		`signature="$(rpm --checksig "$package" 2>&1)"`,
+		`repository RPM signature verification failed`,
+		`repository RPM is not already signature-verified`,
+	} {
+		if !strings.Contains(publishScript, want) {
+			t.Errorf("repository publication script missing %q", want)
+		}
+	}
+}
+
 func TestStableLinuxArchiveAndPackagesCarryNativeEvidence(t *testing.T) {
 	data := string(mustReadReleaseFile(t, ".goreleaser-linux.yaml"))
 	for _, required := range []string{

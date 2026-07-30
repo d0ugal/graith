@@ -27,8 +27,13 @@ cp "$repository/gpg/graith.gpg" "$repository/gpg/graith-archive-keyring.gpg"
 
 rpm --import "$repository/gpg/graith.asc"
 for package in "${rpms[@]}"; do
-    signature="$(rpm --checksig "$package")"
+    if ! signature="$(rpm --checksig "$package" 2>&1)"; then
+        printf '%s\n' "$signature" >&2
+        echo "error: repository RPM signature verification failed: $package" >&2
+        exit 1
+    fi
     if [[ "$signature" != *"signatures OK"* ]]; then
+        printf '%s\n' "$signature" >&2
         echo "error: repository RPM is not already signature-verified: $package" >&2
         exit 1
     fi
