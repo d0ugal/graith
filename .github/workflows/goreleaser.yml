@@ -737,7 +737,13 @@ jobs:
               printf '%%_gpg_sign_cmd %%{__gpg} gpg --no-verbose --no-armor --batch --pinentry-mode loopback --passphrase-file %s --no-secmem-warning --faked-system-time %s! -u "%%{_gpg_name}" -sbo %%{__signature_filename} --digest-algo sha256 %%{__plaintext_filename}\n' "$passphrase_file" "$signing_epoch"
             } >"$HOME/.rpmmacros"
             gpg --armor --export "$key_id" >"${RUNNER_TEMP}/graith.asc"
-            sudo rpm --import "${RUNNER_TEMP}/graith.asc"
+            # Ubuntu's rpm stores imported keys in the invoking user's RPM
+            # database, so a root import is invisible to rpm --checksig below.
+            if ! import_output="$(rpm --import "${RUNNER_TEMP}/graith.asc" 2>&1)"; then
+              printf '%s\n' "$import_output"
+              echo "::error::Could not import the RPM verification key into the invoking user's RPM database"
+              exit 1
+            fi
             for package in dist/*.rpm; do
               if ! rpm_output="$(rpm --addsign "$package" 2>&1)"; then
                 printf '%s\n' "$rpm_output"
