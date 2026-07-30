@@ -289,6 +289,14 @@ func renovateSuccessLog(t *testing.T) string {
 
 	ciToolDeps := []any{
 		map[string]any{
+			"depName":      "github.com/aevea/commitsar",
+			"datasource":   "go",
+			"currentValue": "v1.0.3",
+			"updates": []any{
+				map[string]any{"branchName": "renovate/github.com-aevea-commitsar-1.x"},
+			},
+		},
+		map[string]any{
 			"depName":       "gitleaks/gitleaks",
 			"packageName":   "ghcr.io/gitleaks/gitleaks",
 			"datasource":    "docker",

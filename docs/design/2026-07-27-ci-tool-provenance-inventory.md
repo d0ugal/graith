@@ -131,7 +131,7 @@ disposition of each tool family.
 | Dependency Review action | `dependency-review.yml` | Platform-managed | GitHub-owned action is SHA-pinned. | No replacement. |
 | GitHub artifact attestation action | `goreleaser.yml`, `dev-release.yml` attest jobs | Platform-managed | `actions/attest` is GitHub-owned, SHA-pinned, and isolated to jobs with `attestations: write`. | No replacement; keep attestation write permission scoped to attest jobs. |
 | Release Please action | `release-please.yml` | Immutable/provenance-verified | Third-party action source is pinned to commit `45996ed...`. | No current material gap found. |
-| Commitsar action container build | `commits.yml` | Mutable | Third-party action source is pinned to commit `909c3ab...`, but its Docker action builds from `golang:1.25.5-alpine` and `alpine:3.18` tag-only base images with `apk` and `go mod download` during the action build. | New required-check follow-up: either replace with a digest/provenance-verified commitsar install or pin the Docker build inputs tightly enough that executed bytes cannot float independently. |
+| Commitsar Go module install | `commits.yml` | Immutable/provenance-verified | Workflow installs `github.com/aevea/commitsar` at `COMMITSAR_VERSION` from `.github/ci-tool-versions.env` using the SHA-pinned `actions/setup-go` action and `GOSUMDB=sum.golang.org`, then verifies the installed binary reports the selected version. | Required-check mutable Docker-build gap closed by #1888. Keep the version managed by Renovate's Go datasource. |
 | Scorecard image | `scorecard.yml` | Immutable/provenance-verified | Workflow runs the official `ghcr.io/ossf/scorecard-action` image directly by OCI digest selected from `SCORECARD_IMAGE` in `.github/ci-tool-versions.env`; SARIF upload and code-scanning upload remain SHA-pinned platform-managed actions. | Action-internal mutable image gap closed by #1888 while preserving `security-events` and `id-token` least privilege. Keep tag and digest managed together. |
 | TruffleHog image | `secret-scan.yml` | Immutable/provenance-verified | Workflow runs `ghcr.io/trufflesecurity/trufflehog` directly by OCI digest selected from `TRUFFLEHOG_IMAGE` in `.github/ci-tool-versions.env`; the same value retains the version tag for Renovate's Docker manager, and the workflow rejects values without a `sha256` digest before execution. | Action-internal mutable image gap closed by #1888. Keep tag and digest managed together. |
 | Gitleaks image | `secret-scan.yml` | Immutable/provenance-verified | Workflow runs `ghcr.io/gitleaks/gitleaks` directly by OCI digest selected from `GITLEAKS_IMAGE` in `.github/ci-tool-versions.env`; the workflow rejects values without a version tag and `sha256` digest before execution. | Action-internal release-download gap closed by #1888. Keep tag and digest managed together. |
@@ -161,17 +161,13 @@ disposition of each tool family.
 
 #### Follow-Up PR Queue
 
-1. Action-internal security and required-check tools: Commitsar.
-   Priority: required and security-adjacent
-   CI. Keep each PR small; pin executable bytes or prove the replacement path has
-   stronger integrity without broad workflow permission changes.
-2. Dart Sass pin or integrity verification for `docs.yml` and
+1. Dart Sass pin or integrity verification for `docs.yml` and
    `docs-preview.yml`. Priority: non-required docs tooling. Prefer grouping
    with the Hugo integrity work if #1764 already introduces a shared docs
    toolchain declaration.
-3. Hugo/k6/govulncheck version and digest management in #1764. Do not create
+2. Hugo/k6/govulncheck version and digest management in #1764. Do not create
    competing managers in this issue.
-4. Safehouse immutable install and verification in #1763. Do not change the
+3. Safehouse immutable install and verification in #1763. Do not change the
    sandbox jobs in this issue.
 5. Optional native dependency provenance hardening for Zig and SPDX tools-java.
    Treat this as lower priority because the current lock stores checksums

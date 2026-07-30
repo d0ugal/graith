@@ -206,12 +206,12 @@ update fixture locally with:
 scripts/verify-renovate-libghostty.sh
 ```
 
-Hugo, k6, govulncheck, GoReleaser, Gitleaks, Scorecard, and TruffleHog CI tool
-pins live in `.github/ci-tool-versions.env`. Workflows load that file instead
-of inlining tool versions, and Renovate manages those pins with narrowly scoped
-regex managers. k6, Gitleaks, Scorecard, and TruffleHog keep each image tag and
-digest in one value so Renovate updates the image reference as a single
-integrity unit.
+Commitsar, Hugo, k6, govulncheck, GoReleaser, Gitleaks, Scorecard, and
+TruffleHog CI tool pins live in `.github/ci-tool-versions.env`. Workflows load
+that file instead of inlining tool versions, and Renovate manages those pins
+with narrowly scoped regex managers. k6, Gitleaks, Scorecard, and TruffleHog
+keep each image tag and digest in one value so Renovate updates the image
+reference as a single integrity unit.
 
 The configuration temporarily suppresses only the unsupported Ghostty
 `d4ac93a` -> `15484b6` and Highway `1.2.0` -> `1.4.0` proposal. Remove that
