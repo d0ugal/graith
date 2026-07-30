@@ -42,6 +42,7 @@ type Config struct {
 	AgentInfo        AgentInfoConfig     `toml:"agent_info"`
 	GitPull          GitPullConfig       `toml:"git_pull"`
 	Launch           LaunchConfig        `toml:"launch"`
+	Logging          LoggingConfig       `toml:"logging"`
 	PRWatch          PRWatchConfig       `toml:"pr_watch"`
 	Overlay          Overlay             `toml:"overlay"`
 	Orchestrator     OrchestratorConfig  `toml:"orchestrator"`
@@ -93,6 +94,45 @@ type ConfigReload struct {
 	// write before reloading. Empty, unparseable, or non-positive uses the
 	// default (ConfigReloadDebounceDefault).
 	ReloadDebounce string `toml:"reload_debounce"`
+}
+
+// DaemonLogMaxBytesDefault is the structured daemon log rotation threshold.
+// Rotation keeps whole slog records and may exceed the threshold by one record
+// when a single log line is larger than the cap.
+const DaemonLogMaxBytesDefault int64 = 100 * 1024 * 1024
+
+// DaemonLogMaxBackupsDefault is how many rotated daemon.log.N files are retained.
+const DaemonLogMaxBackupsDefault = 3
+
+// LoggingConfig is the [logging] block for process-level daemon logs. Session
+// scrollback logs are controlled separately by [lifecycle] max_log_bytes.
+type LoggingConfig struct {
+	// DaemonMaxBytes caps daemon.log before it rotates. Values < 0 fall back to
+	// DaemonLogMaxBytesDefault; "0" disables rotation.
+	DaemonMaxBytes int64 `toml:"daemon_max_bytes"`
+	// DaemonMaxBackups is the number of daemon.log.N files to retain. Values < 0
+	// fall back to DaemonLogMaxBackupsDefault; "0" keeps no old daemon logs.
+	DaemonMaxBackups int `toml:"daemon_max_backups"`
+}
+
+// DaemonMaxBytesOrDefault returns the daemon.log rotation cap. A value < 0 means
+// "use the default"; "0" is honoured as unlimited.
+func (l LoggingConfig) DaemonMaxBytesOrDefault() int64 {
+	if l.DaemonMaxBytes < 0 {
+		return DaemonLogMaxBytesDefault
+	}
+
+	return l.DaemonMaxBytes
+}
+
+// DaemonMaxBackupsOrDefault returns how many rotated daemon.log.N files to keep.
+// A value < 0 means "use the default"; "0" is honoured as no retention.
+func (l LoggingConfig) DaemonMaxBackupsOrDefault() int {
+	if l.DaemonMaxBackups < 0 {
+		return DaemonLogMaxBackupsDefault
+	}
+
+	return l.DaemonMaxBackups
 }
 
 // ReloadDebounceDuration resolves the config-reload debounce. Empty, unparseable,

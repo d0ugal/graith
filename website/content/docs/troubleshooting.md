@@ -335,13 +335,15 @@ Default `~/.local/share/graith/daemon.log` (JSON/slog); with `data_dir`
 `~/.graith` it's `~/.graith/daemon.log`. Runtime stderr is separate at
 `daemon.stderr.log` in the same directory, so panic tracebacks and SIGQUIT
 goroutine dumps do not corrupt the structured JSON log. `gr doctor` prints both
-active paths. Tail the default structured log:
+active paths. The structured daemon log rotates by size using
+`[logging].daemon_max_bytes` and keeps `[logging].daemon_max_backups` old files
+such as `daemon.log.1`. Tail the default structured log:
 
 ```bash
 tail -f ~/.local/share/graith/daemon.log | jq .
 ```
 
-If either log grows large, `gr doctor --autofix` truncates it to ~1 MB.
+If either active log grows large, `gr doctor --autofix` truncates it to ~1 MB.
 
 #### Verify the terminal backend
 

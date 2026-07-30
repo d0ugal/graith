@@ -546,7 +546,11 @@ func run(
 		}
 	}
 
-	logFile, err := os.OpenFile(paths.DaemonLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logFile, err := openRotatingLogFile(
+		paths.DaemonLog,
+		cfg.Logging.DaemonMaxBytesOrDefault(),
+		cfg.Logging.DaemonMaxBackupsOrDefault(),
+	)
 	if err != nil {
 		if adoptFrom == "" {
 			ReleasePIDFile(paths.PIDFile)

@@ -115,6 +115,13 @@ Run `gr --help` for the full command list.\
 [config]
 reload_debounce = "200ms"  # quiet period after the last write before reloading ("" or non-positive => 200ms)
 
+# Process-level daemon logging. daemon.log rotates before append when it reaches
+# daemon_max_bytes; daemon_max_backups keeps daemon.log.1, daemon.log.2, etc.
+# Session scrollback log caps are controlled separately by [lifecycle].
+[logging]
+daemon_max_bytes = 104857600 # daemon.log rotation threshold in bytes (< 0 => default; "0" => unlimited)
+daemon_max_backups = 3       # number of rotated daemon.log.N files to retain (< 0 => default; "0" => none)
+
 # Background auto-pull to keep tracked git-maintenance repos current (NOT session
 # worktrees). Fast-forwards a repo only when it is on its default branch, clean,
 # has an upstream, and can fast-forward; skips detached HEADs, in-progress git

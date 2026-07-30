@@ -26,8 +26,18 @@ reload_debounce = "200ms"  # quiet period after the last write before reloading
 ```
 
 `reload_debounce` coalesces an editor's write-truncate-write burst into a single
-reload. Read at daemon start, so changing it takes effect only after a
-`gr daemon restart` (every other setting re-reads on reload).
+reload. It is read at daemon start, so changing it takes effect only after a
+`gr daemon restart`. Most other settings re-read on reload; startup-only settings
+call that out below.
+
+Daemon process logs rotate by size. These settings are read when the daemon
+starts, so restart after changing them:
+
+```toml
+[logging]
+daemon_max_bytes = 104857600 # rotate daemon.log at 100 MiB; 0 disables rotation
+daemon_max_backups = 3       # retain daemon.log.1 through daemon.log.3
+```
 
 A reload publishes one config generation. If an optional runtime cannot be
 prepared, the command reports the affected subsystem as degraded while

@@ -408,8 +408,8 @@ func (dc *doctorContext) checkEnvironment() {
 
 	dc.passf("environment", "Data dir: %s%s", paths.DataDir, dirSizeSuffix(paths.DataDir))
 
-	dc.checkEnvironmentLogFile("Daemon log", paths.DaemonLog)
-	dc.checkEnvironmentLogFile("Daemon stderr log", paths.DaemonStderrLogPath())
+	dc.checkEnvironmentDaemonLogFile(paths.DaemonLog)
+	dc.checkEnvironmentLogFile("Daemon stderr log", paths.DaemonStderrLogPath(), doctorLargeLogThreshold)
 
 	if info, err := os.Stat(paths.StateFile); err == nil {
 		dc.passf("environment", "State file: %s (%s)", paths.StateFile, formatBytes(info.Size()))
@@ -457,20 +457,44 @@ func (dc *doctorContext) checkEnvironment() {
 	}
 }
 
-func (dc *doctorContext) checkEnvironmentLogFile(label, path string) {
+func (dc *doctorContext) checkEnvironmentDaemonLogFile(path string) {
+	threshold := int64(doctorLargeLogThreshold)
+	if logCap := daemonLogRotationCap(); logCap > 0 {
+		threshold = logCap
+	}
+
+	dc.checkEnvironmentLogFile("Daemon log", path, threshold)
+}
+
+func daemonLogRotationCap() int64 {
+	if cfg == nil {
+		return 0
+	}
+
+	return cfg.Logging.DaemonMaxBytesOrDefault()
+}
+
+func (dc *doctorContext) checkEnvironmentLogFile(label, path string, threshold int64) {
 	if path == "" {
 		return
 	}
 
 	if info, err := os.Stat(path); err == nil {
 		size := info.Size()
-		if size > doctorLargeLogThreshold {
+		if size > threshold {
 			dc.warnf("environment", "%s: %s (%s)", label, path, formatBytes(size))
 
 			if doctorAutofix {
-				if err := truncateFileKeepTail(path, doctorLogTailKeep); err == nil {
-					dc.hintf("Truncated %s to ~1 MB", strings.ToLower(label))
+				keepBytes := doctorLogTailKeepFor(label, threshold)
+				if err := truncateFileKeepTail(path, keepBytes); err == nil {
+					if keepBytes == doctorLogTailKeep {
+						dc.hintf("Truncated %s to ~1 MB", strings.ToLower(label))
+					} else {
+						dc.hintf("Truncated %s to ~%s", strings.ToLower(label), formatBytes(keepBytes))
+					}
 				}
+			} else if label == "Daemon log" && daemonLogRotationCap() > 0 {
+				dc.hintf("Restart the daemon to rotate at the configured cap, or use --autofix to truncate")
 			} else {
 				dc.hintf("Use --autofix to truncate")
 			}
@@ -480,6 +504,14 @@ func (dc *doctorContext) checkEnvironmentLogFile(label, path string) {
 	} else {
 		dc.passf("environment", "%s: %s", label, path)
 	}
+}
+
+func doctorLogTailKeepFor(label string, threshold int64) int64 {
+	if label == "Daemon log" && threshold > 0 && threshold < doctorLogTailKeep {
+		return threshold
+	}
+
+	return doctorLogTailKeep
 }
 
 func (dc *doctorContext) checkDaemonService() {
