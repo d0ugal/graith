@@ -51,6 +51,33 @@ singletn = true
 			wantKey:  "repos.singletn",
 			wantSugg: "singleton",
 		},
+		{
+			name: "renamed session navigator table",
+			toml: `
+[overlay]
+shortcut_keys = "braw"
+`,
+			wantKey:  "overlay",
+			wantSugg: "session_navigator",
+		},
+		{
+			name: "renamed session navigator prefix key",
+			toml: `
+[keybindings]
+session_list = "w"
+`,
+			wantKey:  "keybindings.session_list",
+			wantSugg: "session_navigator",
+		},
+		{
+			name: "renamed shared tui key table",
+			toml: `
+[keybindings.overlay]
+cancel = "esc"
+`,
+			wantKey:  "keybindings.overlay",
+			wantSugg: "tui",
+		},
 	}
 
 	for _, tt := range tests {

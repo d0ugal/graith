@@ -147,7 +147,8 @@ func TestAgentChoicesCov(t *testing.T) {
 }
 
 // TestPassthroughKeysFromConfig verifies the [keybindings] config maps into
-// PassthroughKeys, including the detach/session_list/shell keys wired for #918.
+// PassthroughKeys, including the detach/session_navigator/shell keys wired for
+// #918.
 func TestPassthroughKeysFromConfig(t *testing.T) {
 	oldCfg := cfg
 
@@ -157,7 +158,7 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 		Keybindings: config.Keybindings{
 			Prefix:              "ctrl+a",
 			Detach:              "q",
-			SessionList:         "z",
+			SessionNavigator:    "z",
 			Shell:               "v",
 			NextSession:         "n",
 			PrevSession:         "p",
@@ -175,7 +176,7 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 	want := client.PassthroughKeys{
 		Prefix:              0x01, // ctrl+a
 		Detach:              client.NewPassthroughKey('q'),
-		SessionList:         client.NewPassthroughKey('z'),
+		SessionNavigator:    client.NewPassthroughKey('z'),
 		Shell:               client.NewPassthroughKey('v'),
 		NextSession:         client.NewPassthroughKey('n'),
 		PrevSession:         client.NewPassthroughKey('p'),
@@ -191,17 +192,17 @@ func TestPassthroughKeysFromConfig(t *testing.T) {
 	}
 }
 
-// TestOverlayKeysFromConfigOverrideAndDefault verifies the [keybindings.overlay]
+// TestSessionNavigatorKeysFromConfigOverrideAndDefault verifies the [keybindings.tui]
 // builders override a named key while falling back to the built-in default for
 // an unset one (issue #1233).
-func TestOverlayKeysFromConfigOverrideAndDefault(t *testing.T) {
+func TestSessionNavigatorKeysFromConfigOverrideAndDefault(t *testing.T) {
 	oldCfg := cfg
 
 	t.Cleanup(func() { cfg = oldCfg })
 
 	cfg = &config.Config{
 		Keybindings: config.Keybindings{
-			Overlay: config.OverlayKeybindings{
+			TUI: config.TUIKeybindings{
 				MessagePin:    "P",
 				MessageTopics: "T",
 			},
@@ -235,9 +236,9 @@ func TestDefaultOverlayCancelKeepsCtrlC(t *testing.T) {
 
 	cfg = config.Default()
 
-	picker := overlayKeysFromConfig()
-	if !slices.Contains(picker.Cancel, "ctrl+c") {
-		t.Errorf("picker cancel keys from config.Default() = %v, want ctrl+c", picker.Cancel)
+	navigator := sessionNavigatorKeysFromConfig()
+	if !slices.Contains(navigator.Cancel, "ctrl+c") {
+		t.Errorf("Navigator cancel keys from config.Default() = %v, want ctrl+c", navigator.Cancel)
 	}
 
 	msg := messageKeysFromConfig()
@@ -252,7 +253,7 @@ func TestDefaultOverlayCancelKeepsCtrlC(t *testing.T) {
 }
 
 // TestRemotePassthroughKeysFromConfig verifies remote attach still wires
-// session_list and shell (regression for the #918 review): without them,
+// session_navigator and shell (regression for the #918 review): without them,
 // prefix+w / prefix+s forward raw bytes to the remote agent instead of hitting
 // the "not yet supported — detaching" notice.
 func TestRemotePassthroughKeysFromConfig(t *testing.T) {
@@ -264,7 +265,7 @@ func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 		Keybindings: config.Keybindings{
 			Prefix:              "ctrl+b",
 			Detach:              "d",
-			SessionList:         "w",
+			SessionNavigator:    "w",
 			Shell:               "s",
 			NextSession:         "n",
 			PrevSession:         "p",
@@ -281,8 +282,8 @@ func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 
 	keys := remotePassthroughKeysFromConfig()
 
-	if keys.SessionList != client.NewPassthroughKey('w') {
-		t.Errorf("remote SessionList = %v, want 'w'", keys.SessionList)
+	if keys.SessionNavigator != client.NewPassthroughKey('w') {
+		t.Errorf("remote SessionNavigator = %v, want 'w'", keys.SessionNavigator)
 	}
 
 	if keys.Shell != client.NewPassthroughKey('s') {
@@ -312,8 +313,7 @@ func TestRemotePassthroughKeysFromConfig(t *testing.T) {
 	}
 }
 
-// TestOverlayKeysFromConfig verifies the picker keybindings map into OverlayKeys.
-func TestOverlayKeysFromConfig(t *testing.T) {
+func TestSessionNavigatorKeysFromConfigUsesTUIConfig(t *testing.T) {
 	oldCfg := cfg
 
 	t.Cleanup(func() { cfg = oldCfg })
@@ -323,21 +323,21 @@ func TestOverlayKeysFromConfig(t *testing.T) {
 			DeleteSession: " ",
 			ResumeSession: "Z",
 			Search:        "?",
-			Overlay: config.OverlayKeybindings{
+			TUI: config.TUIKeybindings{
 				Cancel: "q Esc CTRL+C",
 			},
 		},
 	}
 
-	keys := overlayKeysFromConfig()
+	keys := sessionNavigatorKeysFromConfig()
 
-	want := client.OverlayKeys{DeleteSession: "space", ResumeSession: "Z", Search: "?", Cancel: []string{"q", "esc", "ctrl+c"}}
+	want := client.SessionNavigatorKeys{DeleteSession: "space", ResumeSession: "Z", Search: "?", Cancel: []string{"q", "esc", "ctrl+c"}}
 	if !reflect.DeepEqual(keys, want) {
-		t.Errorf("overlayKeysFromConfig() = %+v, want %+v", keys, want)
+		t.Errorf("sessionNavigatorKeysFromConfig() = %+v, want %+v", keys, want)
 	}
 }
 
-func TestPickerActionKeyNormalizesSpace(t *testing.T) {
+func TestNavigatorActionKeyNormalizesSpace(t *testing.T) {
 	tests := map[string]struct {
 		input string
 		want  string
@@ -350,8 +350,8 @@ func TestPickerActionKeyNormalizesSpace(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := pickerActionKey(test.input); got != test.want {
-				t.Errorf("pickerActionKey(%q) = %q, want %q", test.input, got, test.want)
+			if got := navigatorActionKey(test.input); got != test.want {
+				t.Errorf("navigatorActionKey(%q) = %q, want %q", test.input, got, test.want)
 			}
 		})
 	}

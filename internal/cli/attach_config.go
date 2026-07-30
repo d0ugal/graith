@@ -53,7 +53,7 @@ func passthroughKeysFromKeybindings(keybindings config.Keybindings) client.Passt
 	return client.PassthroughKeys{
 		Prefix:              parsePrefixKey(keybindings.Prefix),
 		Detach:              parseKeyByte(keybindings.Detach),
-		SessionList:         parseKeyByte(keybindings.SessionList),
+		SessionNavigator:    parseKeyByte(keybindings.SessionNavigator),
 		Shell:               parseKeyByte(keybindings.Shell),
 		NextSession:         parseKeyByte(keybindings.NextSession),
 		PrevSession:         parseKeyByte(keybindings.PrevSession),
@@ -68,18 +68,18 @@ func passthroughKeysFromKeybindings(keybindings config.Keybindings) client.Passt
 	}
 }
 
-// overlayKeysFromConfig builds the Session Navigator keybindings from the
-// [keybindings] config table.
-func overlayKeysFromConfig() client.OverlayKeys {
-	return client.OverlayKeys{
-		DeleteSession: pickerActionKey(cfg.Keybindings.DeleteSession),
-		ResumeSession: pickerActionKey(cfg.Keybindings.ResumeSession),
-		Search:        pickerActionKey(cfg.Keybindings.Search),
-		Cancel:        splitTUIKeysFromConfig(cfg.Keybindings.Overlay.Cancel),
+// sessionNavigatorKeysFromConfig builds the Session Navigator keybindings from
+// the [keybindings] config table.
+func sessionNavigatorKeysFromConfig() client.SessionNavigatorKeys {
+	return client.SessionNavigatorKeys{
+		DeleteSession: navigatorActionKey(cfg.Keybindings.DeleteSession),
+		ResumeSession: navigatorActionKey(cfg.Keybindings.ResumeSession),
+		Search:        navigatorActionKey(cfg.Keybindings.Search),
+		Cancel:        splitTUIKeysFromConfig(cfg.Keybindings.TUI.Cancel),
 	}
 }
 
-func pickerActionKey(value string) string {
+func navigatorActionKey(value string) string {
 	return config.NormalizeTUIKeyName(value)
 }
 
@@ -93,7 +93,7 @@ func splitTUIKeysFromConfig(value string) []string {
 }
 
 // overrideKeys replaces def with the parsed config value when it names at least
-// one key, so an unset [keybindings.overlay] field keeps its built-in default.
+// one key, so an unset [keybindings.tui] field keeps its built-in default.
 func overrideKeys(cfgVal string, def []string) []string {
 	if ks := splitTUIKeysFromConfig(cfgVal); len(ks) > 0 {
 		return ks
@@ -104,33 +104,33 @@ func overrideKeys(cfgVal string, def []string) []string {
 
 // messageKeysFromConfig builds the message-viewer keybindings from config.
 func messageKeysFromConfig() client.MessageKeys {
-	ov := cfg.Keybindings.Overlay
+	tui := cfg.Keybindings.TUI
 	k := client.DefaultMessageKeys()
-	k.Up = overrideKeys(ov.Up, k.Up)
-	k.Down = overrideKeys(ov.Down, k.Down)
-	k.PageUp = overrideKeys(ov.PageUp, k.PageUp)
-	k.PageDown = overrideKeys(ov.PageDown, k.PageDown)
-	k.Top = overrideKeys(ov.Top, k.Top)
-	k.Bottom = overrideKeys(ov.Bottom, k.Bottom)
-	k.Pin = overrideKeys(ov.MessagePin, k.Pin)
-	k.ExpandAll = overrideKeys(ov.MessageExpandAll, k.ExpandAll)
-	k.CollapseAll = overrideKeys(ov.MessageCollapseAll, k.CollapseAll)
-	k.NextConv = overrideKeys(ov.MessageNextConv, k.NextConv)
-	k.PrevConv = overrideKeys(ov.MessagePrevConv, k.PrevConv)
-	k.Topics = overrideKeys(ov.MessageTopics, k.Topics)
-	k.Direct = overrideKeys(ov.MessageDirect, k.Direct)
-	k.Cancel = overrideKeys(ov.Cancel, k.Cancel)
+	k.Up = overrideKeys(tui.Up, k.Up)
+	k.Down = overrideKeys(tui.Down, k.Down)
+	k.PageUp = overrideKeys(tui.PageUp, k.PageUp)
+	k.PageDown = overrideKeys(tui.PageDown, k.PageDown)
+	k.Top = overrideKeys(tui.Top, k.Top)
+	k.Bottom = overrideKeys(tui.Bottom, k.Bottom)
+	k.Pin = overrideKeys(tui.MessagePin, k.Pin)
+	k.ExpandAll = overrideKeys(tui.MessageExpandAll, k.ExpandAll)
+	k.CollapseAll = overrideKeys(tui.MessageCollapseAll, k.CollapseAll)
+	k.NextConv = overrideKeys(tui.MessageNextConv, k.NextConv)
+	k.PrevConv = overrideKeys(tui.MessagePrevConv, k.PrevConv)
+	k.Topics = overrideKeys(tui.MessageTopics, k.Topics)
+	k.Direct = overrideKeys(tui.MessageDirect, k.Direct)
+	k.Cancel = overrideKeys(tui.Cancel, k.Cancel)
 
 	return k
 }
 
 // scrollKeysFromConfig builds the scroll-pager keybindings from config.
 func scrollKeysFromConfig() client.ScrollKeys {
-	ov := cfg.Keybindings.Overlay
+	tui := cfg.Keybindings.TUI
 	k := client.DefaultScrollKeys()
-	k.Top = overrideKeys(ov.Top, k.Top)
-	k.Bottom = overrideKeys(ov.Bottom, k.Bottom)
-	k.Cancel = overrideKeys(ov.Cancel, k.Cancel)
+	k.Top = overrideKeys(tui.Top, k.Top)
+	k.Bottom = overrideKeys(tui.Bottom, k.Bottom)
+	k.Cancel = overrideKeys(tui.Cancel, k.Cancel)
 
 	return k
 }

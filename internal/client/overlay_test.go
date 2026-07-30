@@ -1550,7 +1550,7 @@ func TestRefreshDeletedNowLoadsOwnershipBeforeInput(t *testing.T) {
 	m.refreshDeletedNow()
 
 	if !m.deletedReady {
-		t.Fatal("deleted ownership data should be ready before picker input")
+		t.Fatal("deleted ownership data should be ready before Navigator input")
 	}
 
 	if len(m.deletedSessions) != 1 || m.deletedSessions[0].ID != "bairn" {
@@ -1558,7 +1558,7 @@ func TestRefreshDeletedNowLoadsOwnershipBeforeInput(t *testing.T) {
 	}
 }
 
-func TestRestoreDeletedPickerStateAfterOwnershipLoad(t *testing.T) {
+func TestRestoreDeletedSessionNavigatorStateAfterOwnershipLoad(t *testing.T) {
 	deleted := protocol.SessionInfo{
 		ID:        "bairn",
 		Name:      "bairn",
@@ -1568,7 +1568,7 @@ func TestRestoreDeletedPickerStateAfterOwnershipLoad(t *testing.T) {
 	m.refreshDeleted = func() []protocol.SessionInfo { return []protocol.SessionInfo{deleted} }
 
 	m.refreshDeletedNow()
-	m.restorePickerState(PickerState{View: PickerViewDeleted, SessionID: deleted.ID})
+	m.restoreSessionNavigatorState(SessionNavigatorState{View: SessionNavigatorViewDeleted, SessionID: deleted.ID})
 
 	if m.view != viewDeleted {
 		t.Fatalf("restored view = %v, want Deleted", m.view)
@@ -2850,21 +2850,21 @@ func TestUpdate_FilterEscRestoresFullList(t *testing.T) {
 	}
 }
 
-// --- Update: configurable picker keybindings (issue #918) ---
+// --- Update: configurable Navigator keybindings (issue #918) ---
 
-// TestOverlayConfigurableKeys is the regression test for the picker side of
+// TestOverlayConfigurableKeys is the regression test for the Navigator side of
 // #918: delete_session, resume_session and search must honour the configured
 // keybinding instead of the old hardcoded x/R/ literals.
 func TestOverlayConfigurableKeys(t *testing.T) {
 	cases := []struct {
 		name  string
-		keys  OverlayKeys
+		keys  SessionNavigatorKeys
 		press string
 		want  overlayState
 	}{
-		{"delete", OverlayKeys{DeleteSession: "z"}, "z", stateConfirmDelete},
-		{"resume", OverlayKeys{ResumeSession: "Z"}, "Z", stateRestartMenu},
-		{"search", OverlayKeys{Search: "?"}, "?", stateFilter},
+		{"delete", SessionNavigatorKeys{DeleteSession: "z"}, "z", stateConfirmDelete},
+		{"resume", SessionNavigatorKeys{ResumeSession: "Z"}, "Z", stateRestartMenu},
+		{"search", SessionNavigatorKeys{Search: "?"}, "?", stateFilter},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2882,12 +2882,12 @@ func TestOverlayConfigurableKeys(t *testing.T) {
 
 func TestOverlayConfigurableSpaceKey(t *testing.T) {
 	cases := map[string]struct {
-		keys OverlayKeys
+		keys SessionNavigatorKeys
 		want overlayState
 	}{
-		"delete": {keys: OverlayKeys{DeleteSession: "space"}, want: stateConfirmDelete},
-		"resume": {keys: OverlayKeys{ResumeSession: "space"}, want: stateRestartMenu},
-		"search": {keys: OverlayKeys{Search: "space"}, want: stateFilter},
+		"delete": {keys: SessionNavigatorKeys{DeleteSession: "space"}, want: stateConfirmDelete},
+		"resume": {keys: SessionNavigatorKeys{ResumeSession: "space"}, want: stateRestartMenu},
+		"search": {keys: SessionNavigatorKeys{Search: "space"}, want: stateFilter},
 	}
 
 	for name, test := range cases {
@@ -2908,13 +2908,13 @@ func TestOverlayConfigurableSpaceKey(t *testing.T) {
 func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
 	cases := []struct {
 		name    string
-		keys    OverlayKeys
+		keys    SessionNavigatorKeys
 		oldKey  string
 		notWant overlayState
 	}{
-		{"delete", OverlayKeys{DeleteSession: "z"}, "x", stateConfirmDelete},
-		{"resume", OverlayKeys{ResumeSession: "Z"}, "R", stateRestartMenu},
-		{"search", OverlayKeys{Search: "?"}, "/", stateFilter},
+		{"delete", SessionNavigatorKeys{DeleteSession: "z"}, "x", stateConfirmDelete},
+		{"resume", SessionNavigatorKeys{ResumeSession: "Z"}, "R", stateRestartMenu},
+		{"search", SessionNavigatorKeys{Search: "?"}, "/", stateFilter},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2931,10 +2931,10 @@ func TestOverlayOldLiteralIgnoredAfterRemap(t *testing.T) {
 }
 
 // TestOverlayDefaultKeysWhenUnset confirms the built-in defaults still apply
-// when no keybindings are configured (empty OverlayKeys).
+// when no keybindings are configured (empty SessionNavigatorKeys).
 func TestOverlayDefaultKeysWhenUnset(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, func(string, bool) error { return nil }, nil, nil)
-	m.applyKeys(OverlayKeys{})
+	m.applyKeys(SessionNavigatorKeys{})
 
 	updated, _ := sendKey(m, "x")
 	if got := asOverlay(updated).state; got != stateConfirmDelete {
@@ -2947,7 +2947,7 @@ func TestOverlayDefaultCancelIncludesCtrlC(t *testing.T) {
 
 	_, cmd := sendKey(m, "ctrl+c")
 	if cmd == nil {
-		t.Fatal("ctrl+c should quit the picker by default")
+		t.Fatal("ctrl+c should quit the Navigator by default")
 	}
 
 	if _, ok := cmd().(tea.QuitMsg); !ok {
@@ -2957,7 +2957,7 @@ func TestOverlayDefaultCancelIncludesCtrlC(t *testing.T) {
 
 func TestOverlayCancelKeyRemapped(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	m.applyKeys(OverlayKeys{Cancel: []string{"z"}})
+	m.applyKeys(SessionNavigatorKeys{Cancel: []string{"z"}})
 
 	if _, cmd := sendKey(m, "q"); cmd != nil {
 		t.Fatal("old cancel key q should be inert after cancel remap")
@@ -3839,30 +3839,14 @@ func TestFetchPreviewCmd_GroupHeaderSelected(t *testing.T) {
 	}
 }
 
-// --- OverlayResult construction ---
+// --- SessionNavigatorResult construction ---
 
-func overlayResultFromModel(om *overlayModel) *OverlayResult {
-	if om.selected != nil {
-		action := "attach"
-		if om.state == stateConfirmDelete {
-			action = "delete"
-		}
-
-		return &OverlayResult{
-			Action:    action,
-			SessionID: om.selected.ID,
-		}
-	}
-
-	return nil
-}
-
-func TestOverlayResult_Attach(t *testing.T) {
+func TestSessionNavigatorResult_Attach(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
 	selected := m.list.SelectedItem().(sessionItem)
 
 	updated, _ := sendSpecialKey(m, tea.KeyEnter)
-	result := overlayResultFromModel(asOverlay(updated))
+	result := sessionNavigatorResultFromModel(asOverlay(updated))
 
 	if result == nil {
 		t.Fatal("result should not be nil after enter")
@@ -3877,7 +3861,7 @@ func TestOverlayResult_Attach(t *testing.T) {
 	}
 }
 
-func TestOverlayResult_Delete_StaysOpen(t *testing.T) {
+func TestSessionNavigatorResult_Delete_StaysOpen(t *testing.T) {
 	deletedID := ""
 	deleteFn := func(sid string, children bool) error {
 		deletedID = sid
@@ -3932,13 +3916,79 @@ func TestOverlayResult_Delete_StaysOpen(t *testing.T) {
 	}
 }
 
-func TestOverlayResult_Quit(t *testing.T) {
+func TestSessionNavigatorResultFromModel_Delete(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	updated, _ := sendKey(m, "q")
-	result := overlayResultFromModel(asOverlay(updated))
+	selected := m.list.SelectedItem().(sessionItem)
+	info := selected.info
 
-	if result != nil {
-		t.Error("quitting without selection should return nil result")
+	m.selected = &info
+	m.state = stateConfirmDelete
+
+	result := sessionNavigatorResultFromModel(m)
+	if result.Action != "delete" {
+		t.Fatalf("action = %q, want delete", result.Action)
+	}
+
+	if result.SessionID != selected.info.ID {
+		t.Fatalf("session ID = %q, want %q", result.SessionID, selected.info.ID)
+	}
+}
+
+func TestSessionNavigatorResult_Quit(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.collapsed["s1"] = true
+
+	updated, _ := sendKey(m, "q")
+	result := sessionNavigatorResultFromModel(asOverlay(updated))
+
+	if result == nil {
+		t.Fatal("quitting without selection should still return persisted Navigator state")
+	}
+
+	if result.Action != "" {
+		t.Errorf("action = %q, want empty dismissal action", result.Action)
+	}
+
+	if !result.Collapsed["s1"] {
+		t.Error("dismissed Navigator result should preserve collapsed state")
+	}
+}
+
+func TestSessionNavigatorResultFromModel_CreateCopiesLabels(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.createDone = true
+	m.createName = "braw"
+	m.createRepoPath = "/tmp/croft"
+	m.createAgent = "codex"
+	m.createLabels = []string{"canny"}
+
+	result := sessionNavigatorResultFromModel(m)
+	if result.Action != "create" {
+		t.Fatalf("action = %q, want create", result.Action)
+	}
+
+	if result.CreateName != "braw" || result.CreateRepoPath != "/tmp/croft" || result.CreateAgent != "codex" {
+		t.Fatalf("create result = %+v, want submitted create fields", result)
+	}
+
+	m.createLabels[0] = "mutated"
+
+	if got := strings.Join(result.CreateLabels, ","); got != "canny" {
+		t.Fatalf("create labels = %q, want defensive copy canny", got)
+	}
+}
+
+func TestSessionNavigatorResultFromModel_StoppedCurrent(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "s1", nil, nil, nil, nil)
+	m.stoppedCurrent = true
+
+	result := sessionNavigatorResultFromModel(m)
+	if result.Action != "stopped-current" {
+		t.Fatalf("action = %q, want stopped-current", result.Action)
+	}
+
+	if result.SessionID != "s1" {
+		t.Fatalf("session ID = %q, want current session s1", result.SessionID)
 	}
 }
 
@@ -4163,7 +4213,7 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 }
 
 // TestHighlightSelectedRow guards the core reset-reopen mechanism directly: a
-// picker row is built from columns that each end in a full SGR reset, which
+// Navigator row is built from columns that each end in a full SGR reset, which
 // would clear the background mid-row. highlightSelectedRow must re-open the
 // background after every reset so it spans the whole line. Asserting on the
 // full rendered row (as TestCompactDelegate_RenderSelectedVsUnselected does)
@@ -4563,7 +4613,7 @@ func TestOverlay_FilterEscRebuildsView(t *testing.T) {
 	updated, _ = sendKey(updated, "esc")
 
 	om := asOverlay(updated)
-	// The text filter clears without changing the selected picker view.
+	// The text filter clears without changing the selected Navigator view.
 	if om.view != viewStarred {
 		t.Errorf("view = %d after filter cancel, want viewStarred", om.view)
 	}

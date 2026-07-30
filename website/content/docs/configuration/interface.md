@@ -9,6 +9,12 @@ draft: false
 
 ## Keybindings
 
+When updating from older builds that used the Session Navigator's pre-rename
+config keys, migrate them with this release: `keybindings.session_list` is now
+`keybindings.session_navigator`, `[overlay]` is now `[session_navigator]`, and
+`[keybindings.overlay]` is now `[keybindings.tui]`. The old names are ignored by
+the renamed config schema; `gr doctor` reports them with the new names.
+
 ```toml
 [keybindings]
 prefix               = "ctrl+b"  # prefix key
@@ -16,7 +22,7 @@ new_session          = "c"       # create a session
 fork_session         = "f"       # fork the current session
 delete_session       = "x"       # delete a session in the Session Navigator
 detach               = "d"       # detach without stopping the agent
-session_list         = "w"       # open the Session Navigator
+session_navigator    = "w"       # open the Session Navigator
 next_session         = "n"       # next session
 prev_session         = "p"       # previous session
 last_session         = "l"       # last (most recently attached) session
@@ -34,7 +40,7 @@ The prefix key accepts `ctrl+a` through `ctrl+z`, or exactly one printable ASCII
 byte. Literal bytes are preserved: `A` is different from `a`, and a single space
 is a valid literal prefix. Prefix-command actions are exactly one printable
 ASCII byte pressed after the prefix; empty strings, multi-character values,
-multi-byte text, and NUL are rejected at config load. Picker action fields
+multi-byte text, and NUL are rejected at config load. Navigator action fields
 (`delete_session`, `resume_session`, and `search`) accept one supported Bubble
 Tea key name such as `x`, `space`, `ctrl+d`, or `f5`. graith handles both raw
 control bytes and Kitty keyboard protocol sequences, so it works in
@@ -44,19 +50,19 @@ If two prefix commands share a key, or a prefix command uses the same byte as th
 prefix itself, graith warns at load time and starts anyway. The warning names the
 action that wins in passthrough runtime order.
 
-### Overlay keys
+### TUI keys
 
 The message viewer and scroll pager read navigation and cancel aliases from
-`[keybindings.overlay]`. The session picker reads only `cancel` from this table;
+`[keybindings.tui]`. The Session Navigator reads only `cancel` from this table;
 its navigation keys are fixed, and its action keys are the top-level
-`delete_session`, `resume_session`, and `search` bindings. Each overlay-table
+`delete_session`, `resume_session`, and `search` bindings. Each TUI-table
 value is a space-separated list of
 [Bubble Tea](https://github.com/charmbracelet/bubbletea) key names; pressing any
 listed key triggers the action. A partial table overrides only the actions it
 names. A named action's aliases replace the default aliases for that action.
 
 ```toml
-[keybindings.overlay]
+[keybindings.tui]
 # Shared navigation.
 up        = "k up"
 down      = "j down"
@@ -64,7 +70,7 @@ page_up   = "pgup ctrl+u ctrl+b"
 page_down = "pgdown space ctrl+d ctrl+f"
 top       = "g home"
 bottom    = "G end"
-cancel    = "q esc ctrl+c"             # close the overlay / cancel
+cancel    = "q esc ctrl+c"             # close the TUI / cancel
 # Message viewer actions.
 message_pin               = "enter"
 message_expand_all        = "O"
@@ -83,10 +89,10 @@ Mouse-wheel reports expose only the typed gestures documented under `[input]`
 below. macOS menu shortcuts use native Command-key equivalents in the app;
 daemon config is not pushed into GUI shortcut definitions.
 
-## Overlay
+## Session Navigator
 
 ```toml
-[overlay]
+[session_navigator]
 shortcut_keys = "1234567890"  # keys that jump straight to the Nth session in the Navigator
 ```
 

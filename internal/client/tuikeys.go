@@ -5,7 +5,7 @@ import "strings"
 // This file carries the configurable keybindings for the full-screen terminal
 // overlays (message viewer and scroll pager). Each
 // action holds a list of bubbletea key names; pressing any listed key triggers
-// it. The cli layer builds these from the [keybindings.overlay] config table,
+// it. The cli layer builds these from the [keybindings.tui] config table,
 // falling back to the Default*Keys() values below when a key is unset. See #1233.
 
 // SplitKeys parses a space-separated key list (e.g. "j down ctrl+n") into its

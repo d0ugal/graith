@@ -22,51 +22,51 @@ import (
 var defaultConfigTOML []byte
 
 type Config struct {
-	DefaultAgent     string              `toml:"default_agent"`
-	GitHubUsername   string              `toml:"github_username"`
-	BranchPrefix     string              `toml:"branch_prefix"`
-	DataDir          string              `toml:"data_dir"`
-	FetchOnCreate    bool                `toml:"fetch_on_create"`
-	AgentPrompt      string              `toml:"agent_prompt"`
-	AllowedRepoPaths []string            `toml:"allowed_repo_paths"`
-	Repos            []RepoConfig        `toml:"repos"`
-	StatusBar        StatusBar           `toml:"status_bar"`
-	Keybindings      Keybindings         `toml:"keybindings"`
-	Notifications    Notifications       `toml:"notifications"`
-	Messages         Messages            `toml:"messages"`
-	Delete           Delete              `toml:"delete"`
-	GC               GCConfig            `toml:"gc"`
-	Todo             TodoConfig          `toml:"todo"`
-	Sandbox          SandboxConfig       `toml:"sandbox"`
-	Status           StatusConfig        `toml:"status"`
-	AgentInfo        AgentInfoConfig     `toml:"agent_info"`
-	GitPull          GitPullConfig       `toml:"git_pull"`
-	Launch           LaunchConfig        `toml:"launch"`
-	Logging          LoggingConfig       `toml:"logging"`
-	PRWatch          PRWatchConfig       `toml:"pr_watch"`
-	Overlay          Overlay             `toml:"overlay"`
-	Orchestrator     OrchestratorConfig  `toml:"orchestrator"`
-	Remote           RemoteConfig        `toml:"remote"`
-	Input            InputConfig         `toml:"input"`
-	Agents           map[string]Agent    `toml:"agents"`
-	Triggers         []TriggerConfig     `toml:"trigger"`          // [[trigger]] array
-	TriggersRuntime  TriggersRuntime     `toml:"triggers"`         // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig      `toml:"headless"`         // [headless] table (issue #1075)
-	Updates          UpdatesConfig       `toml:"updates"`          // [updates] table (issue #1253)
-	Detection        DetectionConfig     `toml:"detection"`        // [detection] table (issue #1241)
-	ConfigReload     ConfigReload        `toml:"config"`           // [config] table (issue #1237)
-	Tools            ToolsConfig         `toml:"tools"`            // [tools] table (issue #1238)
-	Git              GitConfig           `toml:"git"`              // [git] table (issue #1238)
-	Connection       ConnectionConfig    `toml:"connection"`       // [connection] table (issue #1242)
-	DaemonService    DaemonServiceConfig `toml:"daemon_service"`   // [daemon_service] table (issue #1473)
-	TokenAccounting  TokenAccounting     `toml:"token_accounting"` // [token_accounting] table (issue #1244)
-	ResourceMonitor  ResourceMonitor     `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
-	Migration        MigrationConfig     `toml:"migration"`        // [migration] table (issue #1250)
-	Transcript       TranscriptConfig    `toml:"transcript"`       // [transcript] table (issue #1250)
-	Search           SearchConfig        `toml:"search"`           // [search] table (issue #1455)
-	Limits           LimitsConfig        `toml:"limits"`           // [limits] table (issue #1252)
-	Lifecycle        LifecycleConfig     `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
-	Terminal         TerminalConfig      `toml:"terminal"`         // [terminal] table (issue #1254)
+	DefaultAgent     string                 `toml:"default_agent"`
+	GitHubUsername   string                 `toml:"github_username"`
+	BranchPrefix     string                 `toml:"branch_prefix"`
+	DataDir          string                 `toml:"data_dir"`
+	FetchOnCreate    bool                   `toml:"fetch_on_create"`
+	AgentPrompt      string                 `toml:"agent_prompt"`
+	AllowedRepoPaths []string               `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig           `toml:"repos"`
+	StatusBar        StatusBar              `toml:"status_bar"`
+	Keybindings      Keybindings            `toml:"keybindings"`
+	Notifications    Notifications          `toml:"notifications"`
+	Messages         Messages               `toml:"messages"`
+	Delete           Delete                 `toml:"delete"`
+	GC               GCConfig               `toml:"gc"`
+	Todo             TodoConfig             `toml:"todo"`
+	Sandbox          SandboxConfig          `toml:"sandbox"`
+	Status           StatusConfig           `toml:"status"`
+	AgentInfo        AgentInfoConfig        `toml:"agent_info"`
+	GitPull          GitPullConfig          `toml:"git_pull"`
+	Launch           LaunchConfig           `toml:"launch"`
+	Logging          LoggingConfig          `toml:"logging"`
+	PRWatch          PRWatchConfig          `toml:"pr_watch"`
+	SessionNavigator SessionNavigatorConfig `toml:"session_navigator"`
+	Orchestrator     OrchestratorConfig     `toml:"orchestrator"`
+	Remote           RemoteConfig           `toml:"remote"`
+	Input            InputConfig            `toml:"input"`
+	Agents           map[string]Agent       `toml:"agents"`
+	Triggers         []TriggerConfig        `toml:"trigger"`          // [[trigger]] array
+	TriggersRuntime  TriggersRuntime        `toml:"triggers"`         // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig         `toml:"headless"`         // [headless] table (issue #1075)
+	Updates          UpdatesConfig          `toml:"updates"`          // [updates] table (issue #1253)
+	Detection        DetectionConfig        `toml:"detection"`        // [detection] table (issue #1241)
+	ConfigReload     ConfigReload           `toml:"config"`           // [config] table (issue #1237)
+	Tools            ToolsConfig            `toml:"tools"`            // [tools] table (issue #1238)
+	Git              GitConfig              `toml:"git"`              // [git] table (issue #1238)
+	Connection       ConnectionConfig       `toml:"connection"`       // [connection] table (issue #1242)
+	DaemonService    DaemonServiceConfig    `toml:"daemon_service"`   // [daemon_service] table (issue #1473)
+	TokenAccounting  TokenAccounting        `toml:"token_accounting"` // [token_accounting] table (issue #1244)
+	ResourceMonitor  ResourceMonitor        `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
+	Migration        MigrationConfig        `toml:"migration"`        // [migration] table (issue #1250)
+	Transcript       TranscriptConfig       `toml:"transcript"`       // [transcript] table (issue #1250)
+	Search           SearchConfig           `toml:"search"`           // [search] table (issue #1455)
+	Limits           LimitsConfig           `toml:"limits"`           // [limits] table (issue #1252)
+	Lifecycle        LifecycleConfig        `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
+	Terminal         TerminalConfig         `toml:"terminal"`         // [terminal] table (issue #1254)
 
 	// Warnings collects non-fatal configuration problems detected at load time
 	// (e.g. conflicting keybindings). They are surfaced to the user but do not
@@ -762,7 +762,7 @@ func positiveIntOrDefault(n, def int) int {
 	return n
 }
 
-type Overlay struct {
+type SessionNavigatorConfig struct {
 	ShortcutKeys string `toml:"shortcut_keys"`
 }
 
@@ -3069,7 +3069,7 @@ type Keybindings struct {
 	ForkSession         string `toml:"fork_session"`
 	DeleteSession       string `toml:"delete_session"`
 	Detach              string `toml:"detach"`
-	SessionList         string `toml:"session_list"`
+	SessionNavigator    string `toml:"session_navigator"`
 	NextSession         string `toml:"next_session"`
 	PrevSession         string `toml:"prev_session"`
 	LastSession         string `toml:"last_session"`
@@ -3083,9 +3083,9 @@ type Keybindings struct {
 	// one of these). Previously hard-coded as m/r (issue #1233).
 	Messages       string `toml:"messages"`
 	RestartSession string `toml:"restart_session"`
-	// Overlay holds the keys used inside the full-screen terminal overlays
-	// (message viewer and scroll pager). See #1233.
-	Overlay OverlayKeybindings `toml:"overlay"`
+	// TUI holds the keys used inside the full-screen terminal TUIs (message
+	// viewer and scroll pager). See #1233.
+	TUI TUIKeybindings `toml:"tui"`
 }
 
 const DefaultPrefixByte byte = 0x02
@@ -3097,7 +3097,7 @@ type keybindingField struct {
 
 var passthroughKeybindingActionOrder = []keybindingField{
 	{"detach", func(k Keybindings) string { return k.Detach }},
-	{"session_list", func(k Keybindings) string { return k.SessionList }},
+	{"session_navigator", func(k Keybindings) string { return k.SessionNavigator }},
 	{"messages", func(k Keybindings) string { return k.Messages }},
 	{"shell", func(k Keybindings) string { return k.Shell }},
 	{"next_session", func(k Keybindings) string { return k.NextSession }},
@@ -3111,27 +3111,27 @@ var passthroughKeybindingActionOrder = []keybindingField{
 	{"scroll_mode", func(k Keybindings) string { return k.ScrollMode }},
 }
 
-var pickerKeybindingFields = []keybindingField{
+var sessionNavigatorKeybindingFields = []keybindingField{
 	{"delete_session", func(k Keybindings) string { return k.DeleteSession }},
 	{"resume_session", func(k Keybindings) string { return k.ResumeSession }},
 	{"search", func(k Keybindings) string { return k.Search }},
 }
 
-var overlayKeybindingFields = []keybindingField{
-	{"up", func(k Keybindings) string { return k.Overlay.Up }},
-	{"down", func(k Keybindings) string { return k.Overlay.Down }},
-	{"page_up", func(k Keybindings) string { return k.Overlay.PageUp }},
-	{"page_down", func(k Keybindings) string { return k.Overlay.PageDown }},
-	{"top", func(k Keybindings) string { return k.Overlay.Top }},
-	{"bottom", func(k Keybindings) string { return k.Overlay.Bottom }},
-	{"cancel", func(k Keybindings) string { return k.Overlay.Cancel }},
-	{"message_pin", func(k Keybindings) string { return k.Overlay.MessagePin }},
-	{"message_expand_all", func(k Keybindings) string { return k.Overlay.MessageExpandAll }},
-	{"message_collapse_all", func(k Keybindings) string { return k.Overlay.MessageCollapseAll }},
-	{"message_next_conversation", func(k Keybindings) string { return k.Overlay.MessageNextConv }},
-	{"message_prev_conversation", func(k Keybindings) string { return k.Overlay.MessagePrevConv }},
-	{"message_topics", func(k Keybindings) string { return k.Overlay.MessageTopics }},
-	{"message_direct", func(k Keybindings) string { return k.Overlay.MessageDirect }},
+var tuiKeybindingFields = []keybindingField{
+	{"up", func(k Keybindings) string { return k.TUI.Up }},
+	{"down", func(k Keybindings) string { return k.TUI.Down }},
+	{"page_up", func(k Keybindings) string { return k.TUI.PageUp }},
+	{"page_down", func(k Keybindings) string { return k.TUI.PageDown }},
+	{"top", func(k Keybindings) string { return k.TUI.Top }},
+	{"bottom", func(k Keybindings) string { return k.TUI.Bottom }},
+	{"cancel", func(k Keybindings) string { return k.TUI.Cancel }},
+	{"message_pin", func(k Keybindings) string { return k.TUI.MessagePin }},
+	{"message_expand_all", func(k Keybindings) string { return k.TUI.MessageExpandAll }},
+	{"message_collapse_all", func(k Keybindings) string { return k.TUI.MessageCollapseAll }},
+	{"message_next_conversation", func(k Keybindings) string { return k.TUI.MessageNextConv }},
+	{"message_prev_conversation", func(k Keybindings) string { return k.TUI.MessagePrevConv }},
+	{"message_topics", func(k Keybindings) string { return k.TUI.MessageTopics }},
+	{"message_direct", func(k Keybindings) string { return k.TUI.MessageDirect }},
 }
 
 var supportedTUIKeyNames = map[string]struct{}{
@@ -3277,16 +3277,16 @@ func (k Keybindings) Validate() error {
 		}
 	}
 
-	for _, field := range pickerKeybindingFields {
+	for _, field := range sessionNavigatorKeybindingFields {
 		if err := ValidateTUIKeyName(field.value(k)); err != nil {
 			errs = append(errs, fmt.Errorf("keybindings.%s %q: %w", field.name, field.value(k), err))
 		}
 	}
 
-	for _, field := range overlayKeybindingFields {
+	for _, field := range tuiKeybindingFields {
 		for _, key := range strings.Fields(field.value(k)) {
 			if err := ValidateTUIKeyName(key); err != nil {
-				errs = append(errs, fmt.Errorf("keybindings.overlay.%s %q: %w", field.name, key, err))
+				errs = append(errs, fmt.Errorf("keybindings.tui.%s %q: %w", field.name, key, err))
 			}
 		}
 	}
@@ -3297,11 +3297,11 @@ func (k Keybindings) Validate() error {
 // Conflicts reports keybinding collisions among the prefix-action commands —
 // the keys pressed after the prefix while attached to a session. Two commands
 // bound to the same key mean only the first (in the passthrough switch order)
-// ever fires, so the config is almost certainly a mistake. Picker/overlay keys
-// operate in a separate mode and may legitimately reuse a prefix-command key,
-// so they are not compared here. Each returned string names one collision; an
-// empty slice means no conflicts. The result feeds a warning, not an error, so
-// a misconfiguration is surfaced without refusing to start (issue #1233).
+// ever fires, so the config is almost certainly a mistake. Navigator/TUI keys
+// operate in separate modes and may legitimately reuse a prefix-command key, so
+// they are not compared here. Each returned string names one collision; an empty
+// slice means no conflicts. The result feeds a warning, not an error, so a
+// misconfiguration is surfaced without refusing to start (issue #1233).
 func (k Keybindings) Conflicts() []string {
 	var conflicts []string
 
@@ -3332,12 +3332,12 @@ func (k Keybindings) Conflicts() []string {
 		seen[b] = action.name
 	}
 
-	conflicts = append(conflicts, k.pickerConflicts()...)
+	conflicts = append(conflicts, k.sessionNavigatorConflicts()...)
 
 	return conflicts
 }
 
-func (k Keybindings) pickerConflicts() []string {
+func (k Keybindings) sessionNavigatorConflicts() []string {
 	var conflicts []string
 
 	seen := map[string]string{}
@@ -3350,7 +3350,7 @@ func (k Keybindings) pickerConflicts() []string {
 		if winner, ok := seen[key]; ok {
 			if winner != action {
 				conflicts = append(conflicts, fmt.Sprintf(
-					"picker key %q is bound to both %s and %s; %s wins in session picker list mode",
+					"Session Navigator key %q is bound to both %s and %s; %s wins in Navigator list mode",
 					key, winner, action, winner))
 			}
 
@@ -3360,39 +3360,39 @@ func (k Keybindings) pickerConflicts() []string {
 		seen[key] = action
 	}
 
-	for _, key := range strings.Fields(k.Overlay.Cancel) {
-		add("overlay.cancel", key)
+	for _, key := range strings.Fields(k.TUI.Cancel) {
+		add("tui.cancel", key)
 	}
 
-	add("picker view previous", "h")
-	add("picker view previous", "left")
-	add("picker view next", "l")
-	add("picker view next", "right")
-	add("picker attach/restore", "enter")
+	add("navigator view previous", "h")
+	add("navigator view previous", "left")
+	add("navigator view next", "l")
+	add("navigator view next", "right")
+	add("navigator attach/restore", "enter")
 	add("delete_session", k.DeleteSession)
-	add("picker restart session", "r")
+	add("navigator restart session", "r")
 	add("resume_session", k.ResumeSession)
 	add("search", k.Search)
-	add("picker stop", "S")
-	add("picker star", "s")
-	add("picker fold", "space")
-	add("picker fold all", "C")
-	add("picker move down", "j")
-	add("picker move down", "down")
-	add("picker move up", "k")
-	add("picker move up", "up")
-	add("picker next group", "tab")
+	add("navigator stop", "S")
+	add("navigator star", "s")
+	add("navigator fold", "space")
+	add("navigator fold all", "C")
+	add("navigator move down", "j")
+	add("navigator move down", "down")
+	add("navigator move up", "k")
+	add("navigator move up", "up")
+	add("navigator next group", "tab")
 
 	return conflicts
 }
 
-// OverlayKeybindings configures the keys used inside the terminal TUI overlays.
+// TUIKeybindings configures the keys used inside terminal TUIs.
 // Every value is a space-separated list of bubbletea key names (single letters,
 // "up", "down", "enter", "esc", "pgup", "ctrl+d", ...); pressing any listed key
 // triggers the action. Empty fields fall back to the built-in defaults, so a
-// partial [keybindings.overlay] table only overrides the keys it names.
-type OverlayKeybindings struct {
-	// Shared navigation, applied across the overlays.
+// partial [keybindings.tui] table only overrides the keys it names.
+type TUIKeybindings struct {
+	// Shared navigation, applied across TUIs.
 	Up       string `toml:"up"`
 	Down     string `toml:"down"`
 	PageUp   string `toml:"page_up"`
@@ -5415,6 +5415,12 @@ func unknownKeysFromTOML(data []byte) ([]UnknownKey, error) {
 	return out, nil
 }
 
+var renamedConfigKeySuggestions = map[string]string{
+	"overlay":                  "session_navigator",
+	"keybindings.overlay":      "tui",
+	"keybindings.session_list": "session_navigator",
+}
+
 // collectUnknownKeys walks a decoded TOML table against the struct type that
 // models it, recording keys that have no matching field and recursing into
 // nested tables, arrays of tables, and dynamic-key maps (e.g. [agents.<name>]).
@@ -5432,7 +5438,7 @@ func collectUnknownKeys(t reflect.Type, raw map[string]any, table string, out *[
 			*out = append(*out, UnknownKey{
 				Table:      table,
 				Name:       key,
-				Suggestion: closestKey(key, known),
+				Suggestion: configKeySuggestion(table, key, known),
 			})
 
 			continue
@@ -5440,6 +5446,14 @@ func collectUnknownKeys(t reflect.Type, raw map[string]any, table string, out *[
 
 		recurseUnknownKeys(ft, val, joinTable(table, key), out)
 	}
+}
+
+func configKeySuggestion(table, key string, known []string) string {
+	if suggestion, ok := renamedConfigKeySuggestions[joinTable(table, key)]; ok {
+		return suggestion
+	}
+
+	return closestKey(key, known)
 }
 
 func recurseUnknownKeys(ft reflect.Type, val any, table string, out *[]UnknownKey) {

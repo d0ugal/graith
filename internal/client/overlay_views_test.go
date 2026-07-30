@@ -9,7 +9,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
-func pickerViewSessions() []protocol.SessionInfo {
+func navigatorViewSessions() []protocol.SessionInfo {
 	return []protocol.SessionInfo{
 		{ID: "ben", Name: "ben", SystemKind: "orchestrator", Status: "running"},
 		{ID: "bairn", ParentID: "ben", Name: "bairn", RepoName: "croft", Status: "running"},
@@ -43,7 +43,7 @@ func assertSelectedSession(t *testing.T, m *overlayModel, want string) {
 }
 
 func TestAllViewBuildsOneGlobalCrossRepoTree(t *testing.T) {
-	m := newOverlayModel(pickerViewSessions(), "", nil, nil, nil, nil)
+	m := newOverlayModel(navigatorViewSessions(), "", nil, nil, nil, nil)
 
 	if m.view != viewAll {
 		t.Fatalf("initial view = %v, want viewAll", m.view)
@@ -87,7 +87,7 @@ func TestAllViewBuildsOneGlobalCrossRepoTree(t *testing.T) {
 }
 
 func TestRepoViewKeepsRepositoryGroupsAndSplitsCrossRepoEdges(t *testing.T) {
-	m := newOverlayModel(pickerViewSessions(), "", nil, nil, nil, nil)
+	m := newOverlayModel(navigatorViewSessions(), "", nil, nil, nil, nil)
 	updated, _ := sendKey(m, "right")
 	m = asOverlay(updated)
 
@@ -119,7 +119,7 @@ func TestRepoViewKeepsRepositoryGroupsAndSplitsCrossRepoEdges(t *testing.T) {
 }
 
 func TestAllRepoSwitchPreservesSelectionAndCollapseState(t *testing.T) {
-	sessions := pickerViewSessions()
+	sessions := navigatorViewSessions()
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
 	m.selectSessionByID("bairn")
 
@@ -153,7 +153,7 @@ func TestAllRepoSwitchPreservesSelectionAndCollapseState(t *testing.T) {
 }
 
 func TestAllViewRefreshPreservesSelectionAndCollapse(t *testing.T) {
-	sessions := pickerViewSessions()
+	sessions := navigatorViewSessions()
 	collapsed := map[string]bool{"ben": true}
 	m := newOverlayModel(sessions, "ben", nil, nil, collapsed, nil)
 
@@ -295,34 +295,34 @@ func TestAllRepoViewOrder(t *testing.T) {
 	}
 }
 
-func TestPickerStateRestoresViewAndSelection(t *testing.T) {
-	sessions := append(pickerViewSessions(), protocol.SessionInfo{ID: "labelled", Name: "labelled", Labels: []string{"braw"}, Starred: true})
+func TestSessionNavigatorStateRestoresViewAndSelection(t *testing.T) {
+	sessions := append(navigatorViewSessions(), protocol.SessionInfo{ID: "labelled", Name: "labelled", Labels: []string{"braw"}, Starred: true})
 
-	for _, view := range []PickerView{PickerViewAll, PickerViewRepo, PickerViewStarred, PickerViewLabels, PickerViewScenario, PickerViewDeleted} {
+	for _, view := range []SessionNavigatorView{SessionNavigatorViewAll, SessionNavigatorViewRepo, SessionNavigatorViewStarred, SessionNavigatorViewLabels, SessionNavigatorViewScenario, SessionNavigatorViewDeleted} {
 		t.Run(viewNames[view], func(t *testing.T) {
-			state := PickerState{View: view}
-			if view != PickerViewDeleted {
+			state := SessionNavigatorState{View: view}
+			if view != SessionNavigatorViewDeleted {
 				state.SessionID = "labelled"
 			}
 
-			if view == PickerViewLabels {
+			if view == SessionNavigatorViewLabels {
 				state.LabelGroup = "braw"
 			}
 
 			m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-			m.restorePickerState(state)
+			m.restoreSessionNavigatorState(state)
 
 			if m.view != viewMode(view) {
 				t.Fatalf("view = %v, want %v", m.view, view)
 			}
 
-			if view != PickerViewDeleted {
+			if view != SessionNavigatorViewDeleted {
 				item, ok := m.list.SelectedItem().(sessionItem)
 				if !ok || item.info.ID != "labelled" {
 					t.Fatalf("selected item = %#v, want session labelled", m.list.SelectedItem())
 				}
 
-				if view == PickerViewLabels && item.labelGroup != "braw" {
+				if view == SessionNavigatorViewLabels && item.labelGroup != "braw" {
 					t.Fatalf("label group = %q, want braw", item.labelGroup)
 				}
 			}
@@ -330,9 +330,9 @@ func TestPickerStateRestoresViewAndSelection(t *testing.T) {
 	}
 }
 
-func TestPickerStateFallsBackWhenSelectionDisappears(t *testing.T) {
-	m := newOverlayModel(pickerViewSessions(), "", nil, nil, nil, nil)
-	m.restorePickerState(PickerState{View: PickerViewLabels, SessionID: "dreich", LabelGroup: "missing"})
+func TestSessionNavigatorStateFallsBackWhenSelectionDisappears(t *testing.T) {
+	m := newOverlayModel(navigatorViewSessions(), "", nil, nil, nil, nil)
+	m.restoreSessionNavigatorState(SessionNavigatorState{View: SessionNavigatorViewLabels, SessionID: "dreich", LabelGroup: "missing"})
 
 	if m.view != viewLabels {
 		t.Fatalf("view = %v, want labels", m.view)
@@ -343,8 +343,8 @@ func TestPickerStateFallsBackWhenSelectionDisappears(t *testing.T) {
 	}
 }
 
-func TestNewOverlayModelStartsWithDefaultPickerState(t *testing.T) {
-	m := newOverlayModel(pickerViewSessions(), "", nil, nil, nil, nil)
+func TestNewOverlayModelStartsWithDefaultSessionNavigatorState(t *testing.T) {
+	m := newOverlayModel(navigatorViewSessions(), "", nil, nil, nil, nil)
 	if m.view != viewAll {
 		t.Fatalf("initial view = %v, want All", m.view)
 	}

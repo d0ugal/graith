@@ -14,7 +14,7 @@ Unlike an agent's in-context checklist, items **survive session end, resume,
 compaction, and daemon restart**, are visible across a session subtree or
 scenario, and are **claimed atomically** so parallel agents never double-work an
 item. Agents drive it with `gr todo`; the user sees "what's left" in `gr list`
-and the overlay.
+and the Session Navigator.
 
 ## Items
 

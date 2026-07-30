@@ -12,9 +12,11 @@ issue: https://github.com/d0ugal/graith/issues/1454
 
 Rename the `ctrl+b w` session-management surface to **Session Navigator** and
 polish the existing TUI instead of adding a separate Command Center. The v1
-implementation keeps the existing tree, view modes, columns, live preview,
-shortcuts, config keys, protocol, and daemon state model, while making the name
-and selected-session context clearer in the CLI and docs.
+implementation kept the existing tree, view modes, columns, live preview,
+shortcuts, protocol, and daemon state model, while making the name and
+selected-session context clearer in the CLI and docs. The follow-up cleanup for
+#1871 deliberately breaks the old internal Go/config names so Navigator-owned
+surfaces have one canonical namespace.
 
 ## Background
 
@@ -36,7 +38,7 @@ duplicate the same state projection with less operational context.
 
 - Pick one user-facing product name for `ctrl+b w`.
 - Inventory current terminology and capabilities before changing names.
-- Keep existing shortcuts and config keys compatible.
+- Give Navigator-owned internal Go APIs and config keys canonical names.
 - Improve selected-session context and discoverability without removing tree
   views, columns, or live preview.
 - Validate the v1 rendering at compact `80x24` and wide `160x40` sizes.
@@ -46,8 +48,6 @@ duplicate the same state projection with less operational context.
 - No separate Command Center, dashboard, or duplicate state model.
 - No new "Needs Attention" or "Active" view.
 - No daemon, protocol, persistence, iOS, or macOS work for the rename.
-- No hard break for `session_list`, `[overlay]`, `[keybindings.overlay]`, or
-  exported Go identifiers such as `RunOverlay`.
 
 ## Platform support
 
@@ -82,16 +82,18 @@ Comparison:
 | Command Center | Sounds like a dashboard/control plane and risks duplicating the overlay. |
 | Session Navigator | Clear, scoped to sessions, and broad enough for tree/view/action workflows. |
 
-Compatibility plan:
+Breaking cleanup plan:
 
 - User-facing docs and inline help say "Session Navigator".
-- `session_list = "w"` remains the prefix key config because renaming it would
-  break existing config for little value.
-- `[overlay]` and `[keybindings.overlay]` remain compatibility namespaces for
-  terminal overlays; docs can describe them as legacy/umbrella names.
-- Internal exported names (`RunOverlay`, `OverlayResult`) remain for now. A
-  later internal-only cleanup can add aliases such as `RunSessionNavigator`
-  before considering any deeper rename.
+- `session_navigator = "w"` is the prefix key config for opening the Navigator.
+- `[session_navigator]` owns Navigator options such as `shortcut_keys`.
+- `[keybindings.tui]` owns shared message-viewer and scroll-pager TUI keys; the
+  Navigator consumes only the shared `cancel` aliases from that table.
+- Internal exported Go names use `RunSessionNavigator`,
+  `RunSessionNavigatorOpts`, `SessionNavigatorResult`,
+  `SessionNavigatorState`, and `SessionNavigatorKeys`.
+- The old `session_list`, `[overlay]`, `[keybindings.overlay]`, `RunOverlay`,
+  `OverlayResult`, `PickerState`, and `OverlayKeys` names are not retained.
 
 ### Proposal 2: Command Center
 
@@ -107,9 +109,10 @@ one source of truth.
 | Area | Current names | V1 action |
 |------|---------------|-----------|
 | User docs | "session picker", "picker overlay", "overlay" | Rename the `ctrl+b w` surface to Session Navigator, while keeping generic "overlay" for message viewer and scroll pager. |
-| Prefix key | `session_list = "w"` | Keep config key; update comment/help text to "open the Session Navigator". |
-| Overlay config | `[overlay]`, `[keybindings.overlay]` | Keep namespaces; explain they configure terminal overlay keys and Navigator shortcut keys. |
-| Go client | `overlayModel`, `RunOverlay`, `OverlayResult`, `PickerState` | Keep exported/API names in v1; only comments and visible title change. |
+| Prefix key | `session_list = "w"` | Rename to `session_navigator = "w"` in #1871. |
+| Navigator config | `[overlay]` | Rename to `[session_navigator]` in #1871. |
+| Shared TUI config | `[keybindings.overlay]` | Rename to `[keybindings.tui]` in #1871. |
+| Go client | `RunOverlay`, `OverlayResult`, `PickerState`, `OverlayKeys` | Rename exported API names to `RunSessionNavigator`, `SessionNavigatorResult`, `SessionNavigatorState`, and `SessionNavigatorKeys` in #1871. |
 | Docs history/design | Existing design docs mention overlay/picker | Leave historical records unless a user-facing page is stale. |
 
 ### Current capability inventory
@@ -152,9 +155,10 @@ The remaining accepted work should stay split:
    preview but use spare width for a richer selected-session detail area instead
    of only centering the same panel.
 3. [**Internal naming cleanup**](https://github.com/d0ugal/graith/issues/1871):
-   add non-breaking `SessionNavigator` aliases and
-   gradually migrate unexported picker comments/types where the rename improves
-   code readability. Keep exported compatibility until a major cleanup.
+   implemented as a breaking Go/config cleanup so the Session Navigator owns
+   the `session_navigator` config namespace and exported client API names.
+   Unexported implementation details such as `overlayModel` and `overlay.go`
+   remain until a later refactor can split shared overlay machinery cleanly.
 
 ### Testing
 
