@@ -136,6 +136,9 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"upgrade_preflight": remoteDenied,
 	"reload":            remoteDenied,
 	"gc":                remoteDenied, // host-level data-dir maintenance; local Unix socket only
+	"event_follow":      remoteDenied, // local direct-parent/local-user relationship management
+	"event_unfollow":    remoteDenied,
+	"event_following":   remoteDenied,
 	"pair_approve":      remoteDenied, // pairing approval is an out-of-band local user action
 	"pair_list":         remoteDenied,
 	"pair_revoke":       remoteDenied,

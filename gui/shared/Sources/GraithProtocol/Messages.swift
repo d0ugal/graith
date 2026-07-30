@@ -73,11 +73,12 @@ public struct CreateMsg: Codable, Sendable {
     public var inPlace: Bool?
     public var allowConcurrent: Bool?
     public var skipModelValidation: Bool?
+    public var followEvents: [String]?
 
     public init(name: String, labels: [String]? = nil, agent: String, repoPath: String, base: String? = nil,
                 prompt: String? = nil, model: String? = nil, parentID: String? = nil,
                 noRepo: Bool? = nil, mirror: String? = nil, readOnly: Bool? = nil,
-                agentHooks: Bool? = nil, inPlace: Bool? = nil) {
+                agentHooks: Bool? = nil, inPlace: Bool? = nil, followEvents: [String]? = nil) {
         self.name = name
         self.labels = labels
         self.agent = agent
@@ -91,6 +92,7 @@ public struct CreateMsg: Codable, Sendable {
         self.readOnly = readOnly
         self.agentHooks = agentHooks
         self.inPlace = inPlace
+        self.followEvents = followEvents
     }
 
     enum CodingKeys: String, CodingKey {
@@ -109,6 +111,7 @@ public struct CreateMsg: Codable, Sendable {
         case inPlace = "in_place"
         case allowConcurrent = "allow_concurrent"
         case skipModelValidation = "skip_model_validation"
+        case followEvents = "follow_events"
     }
 }
 

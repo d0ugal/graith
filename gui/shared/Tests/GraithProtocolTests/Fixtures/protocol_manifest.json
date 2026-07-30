@@ -897,6 +897,16 @@
             "ref": "CodexOptions"
           },
           "optional": true
+        },
+        {
+          "name": "follow_events",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
         }
       ]
     },
@@ -1207,6 +1217,109 @@
       ]
     },
     {
+      "name": "EventFollowMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "child_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "events",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "EventFollowRuleInfo",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "child_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "child_session",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "parent_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "parent_session",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "events",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": false
+        },
+        {
+          "name": "created_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "updated_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "EventFollowingMsg",
+      "swift": "na",
+      "fields": []
+    },
+    {
+      "name": "EventFollowingResponseMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "rules",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "EventFollowRuleInfo"
+            }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
       "name": "EventMsg",
       "swift": "na",
       "fields": [
@@ -1305,6 +1418,130 @@
           "name": "body",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "forwarded",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "event_class",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "source_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "source_session",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "destination_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "destination_session",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "pr_number",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "pr_url",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "head_ref_oid",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "ci_state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "failing_checks",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "ci_pending",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "ci_passed",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "ci_total",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "EventUnfollowMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "child_session_id",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "events",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
           },
           "optional": true
         }

@@ -40,6 +40,7 @@ func createOptsFromMsg(c protocol.CreateMsg, agentName string, rows, cols uint16
 		NoFetch:             c.NoFetch,
 		Rows:                rows,
 		Cols:                cols,
+		FollowEvents:        append([]string{}, c.FollowEvents...),
 	}
 }
 

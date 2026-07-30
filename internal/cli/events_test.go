@@ -45,6 +45,19 @@ func TestPrintEvent(t *testing.T) {
 			},
 			want: "[2026-07-29T12:02:00Z] session deleted: dreich\n",
 		},
+		"forwarded ci": {
+			event: protocol.EventMsg{
+				Type:            "session_event",
+				At:              "2026-07-29T12:03:00Z",
+				Forwarded:       true,
+				EventClass:      "ci",
+				SourceSessionID: "bairn1",
+				SourceSession:   "bairn",
+				PRNumber:        1646,
+				CIState:         "failing",
+			},
+			want: "[2026-07-29T12:03:00Z] forwarded ci from bairn: failing on PR #1646\n",
+		},
 	}
 
 	for name, test := range tests {

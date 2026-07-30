@@ -17,6 +17,7 @@ Create a new agent session.
 | `--base <branch>` | Base branch to fork the worktree from, or branch to reference for `--read-only` (default: repo default branch) |
 | `-C, --repo <path>` | Path to git repo (default: current directory) |
 | `--label <label>` | Add a session label; repeat the flag for multiple labels |
+| `--follow-events <events>` | Ask the new session's direct parent to follow selected event classes from this child; comma-separate or repeat, currently `ci` |
 | `--no-repo` | Create session without a git repo or worktree |
 | `--in-place` | Run agent directly in the repo without creating a worktree |
 | `--allow-concurrent` | Allow multiple in-place sessions on the same repo (requires `--in-place`) |
@@ -81,6 +82,13 @@ and terminal query responses.
 When an existing session creates a child session, omitted labels inherit from
 the parent by default. Supplying `--label` sets the child's complete label set
 instead of merging with the inherited labels.
+
+`--follow-events=ci` creates the child and a durable direct-parent follow rule
+in the same daemon state update. It is valid only when the new session has a
+direct parent, and it is rejected if that parent is the config-managed system
+orchestrator. The rule survives daemon restarts and delivers daemon-authored
+forwarded CI notices to the parent without changing the parent's own PR or CI
+state. Use `gr events follow` for existing child sessions.
 
 In a repository with no commits, the default base is its unborn `HEAD` branch.
 Graith creates an empty orphan worktree on the generated session branch, leaving

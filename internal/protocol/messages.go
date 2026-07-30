@@ -120,6 +120,10 @@ type CreateMsg struct {
 	// effort, service tier, and web search — issue #1186). Nil when
 	// none were set; only meaningful for `--agent codex`.
 	Codex *CodexOptions `json:"codex,omitempty"`
+	// FollowEvents asks the daemon to create a follow rule atomically with this
+	// child session. The destination is the new session's direct parent; the
+	// daemon validates the event allowlist and parent boundary.
+	FollowEvents []string `json:"follow_events,omitempty"`
 }
 
 type ForkMsg struct {
@@ -436,6 +440,32 @@ type MsgInboxMsg struct {
 // envelopes until the client sends detach or disconnects.
 type EventsSubMsg struct{}
 
+type EventFollowMsg struct {
+	ChildSessionID string   `json:"child_session_id"`
+	Events         []string `json:"events"`
+}
+
+type EventUnfollowMsg struct {
+	ChildSessionID string   `json:"child_session_id"`
+	Events         []string `json:"events,omitempty"`
+}
+
+type EventFollowingMsg struct{}
+
+type EventFollowRuleInfo struct {
+	ChildSessionID  string   `json:"child_session_id"`
+	ChildSession    string   `json:"child_session,omitempty"`
+	ParentSessionID string   `json:"parent_session_id,omitempty"`
+	ParentSession   string   `json:"parent_session,omitempty"`
+	Events          []string `json:"events"`
+	CreatedAt       string   `json:"created_at,omitempty"`
+	UpdatedAt       string   `json:"updated_at,omitempty"`
+}
+
+type EventFollowingResponseMsg struct {
+	Rules []EventFollowRuleInfo `json:"rules"`
+}
+
 // EventMsg is one daemon event emitted by `gr events`.
 type EventMsg struct {
 	Type string `json:"type"`
@@ -455,6 +485,24 @@ type EventMsg struct {
 	Sender    string `json:"sender,omitempty"`
 	System    bool   `json:"system,omitempty"`
 	Body      string `json:"body,omitempty"`
+
+	// Forwarded marks a terminal, daemon-routed child session event. Forwarded
+	// events are observations for the destination parent and must not be treated
+	// as the parent's own session state.
+	Forwarded            bool     `json:"forwarded,omitempty"`
+	EventClass           string   `json:"event_class,omitempty"`
+	SourceSessionID      string   `json:"source_session_id,omitempty"`
+	SourceSession        string   `json:"source_session,omitempty"`
+	DestinationSessionID string   `json:"destination_session_id,omitempty"`
+	DestinationSession   string   `json:"destination_session,omitempty"`
+	PRNumber             int      `json:"pr_number,omitempty"`
+	PRURL                string   `json:"pr_url,omitempty"`
+	HeadRefOID           string   `json:"head_ref_oid,omitempty"`
+	CIState              string   `json:"ci_state,omitempty"`
+	FailingChecks        []string `json:"failing_checks,omitempty"`
+	CIPending            int      `json:"ci_pending,omitempty"`
+	CIPassed             int      `json:"ci_passed,omitempty"`
+	CITotal              int      `json:"ci_total,omitempty"`
 }
 
 type MsgAckMsg struct {

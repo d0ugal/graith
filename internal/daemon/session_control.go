@@ -375,6 +375,7 @@ func (sm *SessionManager) StopWithChildren(rootID string, excludeRoot bool) ([]s
 				// Remove placeholder so Phase 3 of Create detects the
 				// cancellation and cleans up the PTY/worktree.
 				delete(sm.state.Sessions, sid)
+				delete(sm.state.EventFollowRules, sid)
 				delete(sm.hookReports, sid)
 
 				progress = true

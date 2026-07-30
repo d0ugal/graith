@@ -310,6 +310,7 @@ func (sm *SessionManager) resumeTombstones() {
 				}
 
 				delete(sm.state.Sessions, t.ID)
+				delete(sm.state.EventFollowRules, t.ID)
 				delete(sm.hookReports, t.ID)
 			}
 

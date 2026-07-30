@@ -70,6 +70,11 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		return SessionState{}, err
 	}
 
+	followEvents, err := normalizeEventFollowClasses(opts.FollowEvents, false)
+	if err != nil {
+		return SessionState{}, err
+	}
+
 	preLockCfg := sm.Config()
 
 	agent, ok := preLockCfg.Agents[agentName]
@@ -225,6 +230,13 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			if !explicitLabels {
 				labels = append([]string{}, parent.Labels...)
 			}
+		}
+	}
+
+	if len(followEvents) > 0 {
+		if err := sm.validateEventFollowParentLocked(parentID); err != nil {
+			sm.mu.Unlock()
+			return SessionState{}, err
 		}
 	}
 
@@ -485,8 +497,26 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	sm.state.Sessions[id] = placeholder
+	if sm.state.EventFollowRules == nil {
+		sm.state.EventFollowRules = make(map[string]*EventFollowRuleState)
+	}
+
+	delete(sm.state.EventFollowRules, id)
+
+	if len(followEvents) > 0 {
+		now := time.Now().UTC()
+		sm.state.EventFollowRules[id] = &EventFollowRuleState{
+			SourceSessionID: id,
+			Events:          append([]string{}, followEvents...),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+			LastDelivered:   make(map[string]string),
+		}
+	}
+
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
+		delete(sm.state.EventFollowRules, id)
 
 		if noRepo {
 			_ = os.RemoveAll(worktreePath)
@@ -535,6 +565,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	rollbackState := func() {
 		sm.mu.Lock()
 		delete(sm.state.Sessions, id)
+		delete(sm.state.EventFollowRules, id)
 		_ = sm.saveState()
 		sm.mu.Unlock()
 	}
@@ -1144,6 +1175,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 	if err := sm.saveState(); err != nil {
 		delete(sm.state.Sessions, id)
+		delete(sm.state.EventFollowRules, id)
 		delete(sm.sessions, id)
 		delete(sm.tokenIndex, token)
 		sm.mu.Unlock()

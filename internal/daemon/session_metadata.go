@@ -184,12 +184,17 @@ func (sm *SessionManager) UpdateMetadata(id string, update SessionUpdate) (Sessi
 	}
 
 	before := cloneSessionState(s)
+	beforeFollowRule := cloneEventFollowRule(sm.state.EventFollowRules[id])
 
 	if update.Name != nil {
 		s.Name = *update.Name
 	}
 
 	s.ParentID = newParentValue
+	if update.ParentID != nil {
+		sm.handleReparentedEventFollowRuleLocked(id, newParentValue)
+	}
+
 	if update.Starred != nil {
 		s.Starred = *update.Starred
 	}
@@ -200,6 +205,13 @@ func (sm *SessionManager) UpdateMetadata(id string, update SessionUpdate) (Sessi
 
 	if err := sm.saveState(); err != nil {
 		*s = before
+
+		if beforeFollowRule == nil {
+			delete(sm.state.EventFollowRules, id)
+		} else {
+			sm.state.EventFollowRules[id] = beforeFollowRule
+		}
+
 		return SessionState{}, err
 	}
 
