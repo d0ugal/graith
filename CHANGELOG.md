@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.71.5](https://github.com/d0ugal/graith/compare/v0.71.4...v0.71.5) (2026-07-30)
+
+
+### Bug Fixes
+
+* allow Homebrew standalone daemon symlink ([b07400d](https://github.com/d0ugal/graith/commit/b07400d4d092487ed8b0127e13501561efb70ff2))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.3.3 ([#1903](https://github.com/d0ugal/graith/issues/1903)) ([19df63c](https://github.com/d0ugal/graith/commit/19df63c002cea34bf9c023ca148c717923be5748))
+
 ## [0.71.4](https://github.com/d0ugal/graith/compare/v0.71.3...v0.71.4) (2026-07-30)
 
 
