@@ -82,7 +82,7 @@ if ! run_renovate_lookup; then
     exit 1
 fi
 
-ci_expected='["gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6","trufflesecurity/trufflehog"]'
+ci_expected='["gitleaks/gitleaks","gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6","trufflesecurity/trufflehog"]'
 ci_actual="$(jq -sc '
     [
         .[] |
@@ -106,6 +106,15 @@ if ! jq -se '
         select(.packageFile == ".github/ci-tool-versions.env") |
         .deps[]?
     ] as $deps |
+    any($deps[];
+        .depName == "gitleaks/gitleaks" and
+        .packageName == "ghcr.io/gitleaks/gitleaks" and
+        .datasource == "docker" and
+        (.currentDigest | test("^sha256:[a-f0-9]{64}$")) and
+        all(.updates[]?;
+            .branchName != "renovate/pin-dependencies" and
+            (.newValue | test("^v[0-9]+[.][0-9]+[.][0-9]+$")) and
+            (.newDigest | test("^sha256:[a-f0-9]{64}$")))) and
     any($deps[];
         .depName == "grafana/k6" and
         .datasource == "docker" and
