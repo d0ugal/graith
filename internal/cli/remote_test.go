@@ -253,7 +253,7 @@ func TestRunRemoteAttachUsesTerminalOwnedSeed(t *testing.T) {
 		okResp(payloadEnv("session_list", protocol.SessionListMsg{
 			Sessions: []protocol.SessionInfo{{ID: "session-braw", Name: "braw"}},
 		})),
-		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "session-braw", Name: "braw"})),
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "session-braw", Name: "braw", Agent: "codex"})),
 	}}
 	connectRemoteForCLI = func(gotPaths config.Paths, rh *client.RemoteHost, signer ed25519.PrivateKey, cols, rows uint16) (remoteAttachConn, error) {
 		if rh.Host != "ben.tailnet.ts.net" {
@@ -292,6 +292,10 @@ func TestRunRemoteAttachUsesTerminalOwnedSeed(t *testing.T) {
 
 	if opts.SessionID != "session-braw" || opts.Info == nil || opts.Info.ID != "session-braw" {
 		t.Fatalf("passthrough session = %q info=%+v, want session-braw", opts.SessionID, opts.Info)
+	}
+
+	if opts.Input.MouseWheelPolicy != config.InputMouseWheelPolicyOff {
+		t.Fatalf("remote attach input policy = %q, want %q", opts.Input.MouseWheelPolicy, config.InputMouseWheelPolicyOff)
 	}
 }
 

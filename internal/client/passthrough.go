@@ -303,20 +303,22 @@ func (keys PassthroughKeys) matchAction(key byte) (PassthroughResult, bool) {
 }
 
 type PassthroughOpts struct {
-	Keys                  PassthroughKeys
-	SessionID             string
-	Info                  *protocol.SessionInfo
-	StatusBar             *StatusBarCfg
-	TerminalOwnedSeed     *protocol.TerminalOwnedAttachSeedMsg
-	TerminalOwned         bool
+	Keys              PassthroughKeys
+	SessionID         string
+	Info              *protocol.SessionInfo
+	StatusBar         *StatusBarCfg
+	TerminalOwnedSeed *protocol.TerminalOwnedAttachSeedMsg
+	TerminalOwned     bool
+	// Input is the effective, per-attached-session terminal gesture policy.
+	Input                 config.EffectiveInputConfig
 	OnTerminalOutput      func()
 	terminalOwnedChrome   *terminalOwnedAttachChrome
 	terminalOwnedViewport *terminalOwnedAttachViewport
 	terminalOwnedInput    *terminalOwnedInputRouter
 	terminalRefresh       chan struct{}
-	// LocalHistoryScroll is the terminal-owned attach hook for wheel events that
-	// are not routed to a child mouse-tracking or alternate-scroll mode. The
-	// #1827 local-history work will install the actual history view here.
+	// LocalHistoryScroll is a low-level terminal-owned hook for wheel events that
+	// are not routed to child mouse tracking, alternate scroll, or configured
+	// Graith input actions.
 	LocalHistoryScroll func(delta int) bool
 	// DragArrowKeys enables the touch/hold-and-drag gesture that translates
 	// left-button mouse drags into arrow-key presses. Off by default.
@@ -614,6 +616,19 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 		resultOnce.Do(func() { result = r })
 	}
 
+	if opts.terminalOwnedInput != nil {
+		opts.terminalOwnedInput.setLocalGestureAction(func(action string) bool {
+			switch action {
+			case config.InputActionScrollMode:
+				setResult(ResultScrollMode)
+
+				return true
+			default:
+				return false
+			}
+		})
+	}
+
 	demux := c.startDemux(innerCtx)
 
 	var snapshotRequester *terminalOwnedSnapshotRequester
@@ -803,9 +818,12 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 				n = len(input)
 			}
 
+			chromeTranslated := false
+
 			if opts.TerminalOwned && opts.terminalOwnedChrome != nil {
 				input = opts.terminalOwnedChrome.translateMouseInput(input)
 				n = len(input)
+				chromeTranslated = true
 			}
 
 			// Translate left-button drag gestures into arrow-key presses before
@@ -816,9 +834,27 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 				n = len(input)
 			}
 
+			localInputAction := false
+
 			if opts.terminalOwnedInput != nil {
-				input = opts.terminalOwnedInput.process(input)
+				var processed terminalOwnedInputProcessResult
+				if chromeTranslated {
+					processed = opts.terminalOwnedInput.processChildRelative(input)
+				} else {
+					processed = opts.terminalOwnedInput.processWithResult(input, false)
+				}
+
+				input = processed.input
 				n = len(input)
+				localInputAction = processed.localAction
+			}
+
+			if !localInputAction {
+				select {
+				case <-innerCtx.Done():
+					return
+				default:
+				}
 			}
 
 			sendStart := 0
@@ -905,6 +941,11 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 
 			if sendStart < n && !prefixSeen {
 				sendInput(input[sendStart:n])
+			}
+
+			if localInputAction {
+				cancel()
+				return
 			}
 		}
 	}()

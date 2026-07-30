@@ -180,6 +180,47 @@ func TestSwitchToTerminalOwnedSeedSkipsRestore(t *testing.T) {
 	}
 }
 
+func TestInputConfigFollowsAdoptedSessionAgent(t *testing.T) {
+	withLoopSeams(t, nil)
+
+	origCfg := cfg
+	cfg = config.Default()
+	cfg.Input.MouseWheelPolicy = config.InputMouseWheelPolicyOff
+	cfg.Agents["canny"] = config.Agent{
+		Command: "canny",
+		Input: config.AgentInputConfig{
+			MouseWheelPolicy: config.InputMouseWheelPolicyAlways,
+		},
+	}
+
+	t.Cleanup(func() { cfg = origCfg })
+
+	l := newLoop("braw", "")
+	first := &scriptedConn{responses: []scriptedResp{
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw", Name: "bonnie", Agent: "codex"})),
+	}}
+
+	if err := l.adoptCurrent(first); err != nil {
+		t.Fatalf("adoptCurrent: %v", err)
+	}
+
+	if got := l.opts.Input.MouseWheelPolicy; got != config.InputMouseWheelPolicyRespectTerminalModes {
+		t.Fatalf("adopted codex policy = %q, want %q", got, config.InputMouseWheelPolicyRespectTerminalModes)
+	}
+
+	second := &scriptedConn{responses: []scriptedResp{
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "dreich", Name: "dreich", Agent: "canny"})),
+	}}
+
+	if err := l.switchTo(second, "dreich"); err != nil {
+		t.Fatalf("switchTo: %v", err)
+	}
+
+	if got := l.opts.Input.MouseWheelPolicy; got != config.InputMouseWheelPolicyAlways {
+		t.Fatalf("switched canny policy = %q, want %q", got, config.InputMouseWheelPolicyAlways)
+	}
+}
+
 func TestSwitchToAttachErrorKeepsCurrentSession(t *testing.T) {
 	withLoopSeams(t, nil)
 

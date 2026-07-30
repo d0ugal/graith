@@ -132,7 +132,10 @@ ignored or stripped. Graith mirrors the child's mouse, focus, bracketed-paste,
 application cursor-key, and keypad modes from the same daemon-side terminal
 model. Wheel events go to child mouse tracking when requested, use
 alternate-scroll cursor keys for alternate-screen children without mouse
-tracking, and otherwise wait for the local terminal-aware history surface.
+tracking, or trigger a configured Graith input gesture such as
+`mouse_wheel_up = "scroll_mode"` when the effective
+[`[input]`]({{< relref "configuration/interface.md#input" >}}) policy allows
+it.
 Host-terminal scrollback is not the history surface in this mode; `ctrl+b [`
 can inspect the retained formatted attach seed until live output advances the
 screen, then falls back to raw logs. Pixel-coordinate mouse reporting is still

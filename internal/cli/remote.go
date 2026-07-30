@@ -227,6 +227,12 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 			SessionID:         sessionID,
 			Info:              &info,
 			TerminalOwnedSeed: seed,
+			// Remote attach cannot enter the local scrollback pager yet. Leave
+			// configured wheel gestures disabled so a bundled agent's default
+			// wheel-up binding cannot produce an unsupported ResultScrollMode.
+			Input: config.EffectiveInputConfig{
+				MouseWheelPolicy: config.InputMouseWheelPolicyOff,
+			},
 		}
 		opts.DragArrowKeys = cfg.Input.DragArrowKeys
 		opts.DragArrowThreshold = cfg.Input.DragArrowThreshold

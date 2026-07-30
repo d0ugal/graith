@@ -62,11 +62,13 @@ Window-title changes stay model-local, clipboard writes are denied, hyperlink
 labels remain visible but are not forwarded as host hyperlinks, and
 notification/image protocols are ignored or stripped. Wheel events go to child
 mouse tracking when requested, use alternate-scroll cursor keys for
-alternate-screen children without mouse tracking, and otherwise wait for the
-local terminal-aware history surface. The Graith status bar is composed inside
-the owned frame, host scrollback is not the primary history surface, and
-`ctrl+b [` uses the retained formatted attach seed until live output advances
-the screen before falling back to raw logs. Refreshes use dirty-row updates when
+alternate-screen children without mouse tracking, or trigger a configured
+Graith input gesture such as `mouse_wheel_up = "scroll_mode"` when the
+effective [`[input]`]({{< relref "/docs/configuration/interface.md#input" >}})
+policy allows it. The Graith status bar is composed inside the owned frame,
+host scrollback is not the primary history surface, and `ctrl+b [` uses the
+retained formatted attach seed until live output advances the screen before
+falling back to raw logs. Refreshes use dirty-row updates when
 the client and daemon share a compatible snapshot base, falling back to full
 snapshots when needed.
 When the status bar or read-only indicator is visible and the terminal has at

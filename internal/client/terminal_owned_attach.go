@@ -48,6 +48,7 @@ func (c *Client) runTerminalOwnedPassthrough(ctx context.Context, opts Passthrou
 
 	modeMirror := newTerminalOwnedTerminalModeMirror(stdout)
 	inputRouter := newTerminalOwnedInputRouter(chrome, modeMirror, opts.LocalHistoryScroll)
+	inputRouter.setInputConfig(opts.Input)
 	inputRouter.readOnly = opts.ReadOnly
 
 	refreshCh := make(chan struct{}, 1)

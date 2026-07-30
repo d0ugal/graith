@@ -27,6 +27,9 @@ headless_capable = false        # agent can run in headless (stream-json) mode (
 add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory (see Includes)
 headless_args  = []             # argv prefix prepended in headless mode (see below)
 
+[agents.claude.input]
+mouse_wheel_policy = "respect_terminal_modes" # off | respect_terminal_modes | always
+
 [agents.claude.info]
 # Optional provider info commands, run as: <command> <args...>
 # model = ["--list-models"]
@@ -42,6 +45,9 @@ Every agent-specific flag graith appends is defined here — a custom agent can 
 - **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 - **`info`** — provider-neutral info keys mapped to agent-native argv fragments (see [Provider info commands](#provider-info-commands)).
+- **`input`** — per-agent terminal input overrides. In v1 this controls
+  `mouse_wheel_policy` and semantic wheel gesture bindings; see
+  [TUI & input]({{< relref "interface.md#input" >}}).
 
 `inject_prompt` is the on/off switch for prompt injection; `prompt_injection` selects the *mechanism*. When `prompt_injection` is empty (the default), graith picks the mechanism from the agent name — `claude` → `append_system_prompt`, `cursor` → `cursor_rules`, `codex` → `developer_instructions`, and any other name → `none`. Set it explicitly to override that mapping, or — most usefully — to give a [custom agent](#custom-agents) a mechanism it wouldn't otherwise get. The values are:
 
@@ -267,8 +273,11 @@ defaults explicitly, so they show up in `gr config show`: `idle_timeout = "1h"`,
 `inject_prompt = true`, and `pre_trust_workspace = true`. Each also sets
 `prompt_injection` to its native mechanism — `append_system_prompt` (Claude),
 `developer_instructions` (Codex), `cursor_rules` (Cursor), and `none` (OpenCode,
-Agy). The blocks below omit these shared keys and show only the per-agent
-command, args, and resume/fork settings.
+Agy) — and sets
+`[agents.<name>.input] mouse_wheel_policy = "respect_terminal_modes"` so
+wheel-up can enter scroll mode only when the child has not claimed wheel input.
+The blocks below omit these shared keys and show only the per-agent command,
+args, and resume/fork settings.
 
 ### Claude
 

@@ -78,10 +78,10 @@ message_direct            = "d"
 See [Keybindings]({{< relref "/docs/keybindings.md" >}}) for the complete keybinding reference.
 
 Terminal control sequences such as Kitty keyboard protocol, paste markers, mouse
-reports, and viewport-owned pager navigation are fixed input handling, not
-remappable user-action bindings. macOS menu shortcuts use native Command-key
-equivalents in the app; daemon config is not pushed into GUI shortcut
-definitions.
+reports, and viewport-owned pager navigation are not raw remappable bindings.
+Mouse-wheel reports expose only the typed gestures documented under `[input]`
+below. macOS menu shortcuts use native Command-key equivalents in the app;
+daemon config is not pushed into GUI shortcut definitions.
 
 ## Overlay
 
@@ -96,11 +96,50 @@ In the Session Navigator (`ctrl+b w`), each key jumps straight to its session �
 
 ```toml
 [input]
+mouse_wheel_policy   = "off"  # off | respect_terminal_modes | always
 drag_arrow_keys      = false  # translate a left-click hold-and-drag into arrow-key presses
 drag_arrow_threshold = 2      # cells of drag movement per emitted arrow-key press (values < 1 use the default)
+
+[input.bindings]
+mouse_wheel_up = "scroll_mode"
+# mouse_wheel_down = "none"
+# shift_mouse_wheel_up = "scroll_mode"
+# shift_mouse_wheel_down = "none"
+
+[agents.codex.input]
+mouse_wheel_policy = "respect_terminal_modes"
 ```
 
-`drag_arrow_keys` lets you press-and-hold the left mouse button and drag to emit discrete arrow-key presses to the focused pane — handy on touch/mobile terminals. It's off by default because it repurposes left-drag, which terminals use for text selection. Mouse-wheel scrolling always passes through unchanged. It only takes effect when the focused app has SGR mouse reporting enabled (e.g. a TUI tracking the mouse); graith translates those reports, it doesn't enable mouse tracking itself.
+`mouse_wheel_policy` controls when configured wheel gestures trigger Graith
+actions. The global default is `off`, so unknown or custom agents keep current
+wheel behavior. Bundled coding agents set
+`mouse_wheel_policy = "respect_terminal_modes"` under `[agents.<name>.input]`:
+wheel-up opens `scroll_mode` only when Graith's terminal mode snapshot says the
+child has not enabled mouse tracking and is not using alternate-screen
+alternate-scroll. `always` makes the configured Graith action win even when a
+child app might otherwise receive wheel events, so use it only when you accept
+that trade-off. Enabling a wheel gesture makes Graith enable mouse reporting for
+the attach so it can observe wheel events; depending on the terminal, plain
+click-and-drag text selection may require Shift, Option, or another terminal
+modifier while attached.
+
+`[input.bindings]` maps semantic gestures to Graith actions. Supported gestures
+are `mouse_wheel_up`, `mouse_wheel_down`, `shift_mouse_wheel_up`, and
+`shift_mouse_wheel_down`. Supported actions are `scroll_mode` and `none`; use
+`none` in `[agents.<name>.input.bindings]` to disable a global binding for a
+specific agent. Shift-wheel depends on the terminal reporting the standard SGR
+Shift modifier.
+
+Remote attaches do not currently run configured wheel gestures; use the prefix
+keybinding for local attach scroll mode until the remote scrollback path is
+implemented.
+
+`drag_arrow_keys` lets you press-and-hold the left mouse button and drag to emit
+discrete arrow-key presses to the focused pane — handy on touch/mobile
+terminals. It's off by default because it repurposes left-drag, which terminals
+use for text selection. It only takes effect when the focused app has SGR mouse
+reporting enabled (e.g. a TUI tracking the mouse); graith translates those
+reports, it doesn't enable mouse tracking itself.
 
 ## Terminal & TUI presentation
 

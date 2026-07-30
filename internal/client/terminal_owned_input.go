@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -30,10 +31,17 @@ type terminalOwnedInputRouter struct {
 	modes              protocol.TerminalInputModes
 	childCols          int
 	childRows          int
+	inputConfig        config.EffectiveInputConfig
 	chrome             *terminalOwnedAttachChrome
 	modeMirror         *terminalOwnedTerminalModeMirror
 	localHistoryScroll func(delta int) bool
+	localGestureAction func(action string) bool
 	readOnly           bool
+}
+
+type terminalOwnedInputProcessResult struct {
+	input       []byte
+	localAction bool
 }
 
 func newTerminalOwnedInputRouter(
@@ -49,6 +57,26 @@ func newTerminalOwnedInputRouter(
 	}
 }
 
+func (r *terminalOwnedInputRouter) setInputConfig(inputConfig config.EffectiveInputConfig) {
+	if r == nil {
+		return
+	}
+
+	r.mu.Lock()
+	r.inputConfig = inputConfig
+	r.mu.Unlock()
+}
+
+func (r *terminalOwnedInputRouter) setLocalGestureAction(fn func(action string) bool) {
+	if r == nil {
+		return
+	}
+
+	r.mu.Lock()
+	r.localGestureAction = fn
+	r.mu.Unlock()
+}
+
 func (r *terminalOwnedInputRouter) updateSnapshot(snap *protocol.ScreenSnapshotResponseMsg) {
 	if r == nil || snap == nil {
 		return
@@ -60,7 +88,7 @@ func (r *terminalOwnedInputRouter) updateSnapshot(snap *protocol.ScreenSnapshotR
 	r.modes = modes
 	r.childCols = snap.Cols
 	r.childRows = snap.Rows
-	captureLocalHistory := r.localHistoryScroll != nil
+	captureLocalHistory := r.localHistoryScroll != nil || r.inputConfig.CapturesWheelGesture()
 	r.mu.Unlock()
 
 	if r.modeMirror != nil && !r.readOnly {
@@ -93,11 +121,22 @@ func (r *terminalOwnedInputRouter) keyboardLocked() bool {
 }
 
 func (r *terminalOwnedInputRouter) process(input []byte) []byte {
+	return r.processWithResult(input, false).input
+}
+
+func (r *terminalOwnedInputRouter) processChildRelative(input []byte) terminalOwnedInputProcessResult {
+	return r.processWithResult(input, true)
+}
+
+func (r *terminalOwnedInputRouter) processWithResult(input []byte, childRelative bool) terminalOwnedInputProcessResult {
 	if r == nil || len(input) == 0 {
-		return input
+		return terminalOwnedInputProcessResult{input: input}
 	}
 
-	modes, area, localHistoryScroll := r.snapshot()
+	modes, area, inputConfig, localGestureAction, localHistoryScroll := r.snapshot()
+	if childRelative {
+		area.topOffset = 0
+	}
 
 	var (
 		out   []byte
@@ -116,7 +155,13 @@ func (r *terminalOwnedInputRouter) process(input []byte) []byte {
 
 	for i := 0; i < len(input); i++ {
 		if ev, seqLen, ok := parseSGRMouse(input, i); ok {
-			replace(i, seqLen, routeTerminalOwnedMouse(ev, modes, area, localHistoryScroll))
+			replacement, localAction := routeTerminalOwnedMouse(ev, modes, area, inputConfig, localGestureAction, localHistoryScroll)
+			replace(i, seqLen, replacement)
+
+			if localAction {
+				return terminalOwnedInputProcessResult{input: out, localAction: true}
+			}
+
 			i += seqLen - 1
 
 			continue
@@ -170,28 +215,32 @@ func (r *terminalOwnedInputRouter) process(input []byte) []byte {
 	}
 
 	if out == nil {
-		return input
+		return terminalOwnedInputProcessResult{input: input}
 	}
 
 	out = append(out, input[start:]...)
 
-	return out
+	return terminalOwnedInputProcessResult{input: out}
 }
 
 func (r *terminalOwnedInputRouter) snapshot() (
 	protocol.TerminalInputModes,
 	terminalOwnedChildArea,
+	config.EffectiveInputConfig,
+	func(action string) bool,
 	func(delta int) bool,
 ) {
 	r.mu.Lock()
 	modes := r.modes
 	childCols := r.childCols
 	childRows := r.childRows
+	inputConfig := r.inputConfig
 	chrome := r.chrome
+	localGestureAction := r.localGestureAction
 	localHistoryScroll := r.localHistoryScroll
 	r.mu.Unlock()
 
-	return modes, terminalOwnedChromeChildArea(chrome, childCols, childRows), localHistoryScroll
+	return modes, terminalOwnedChromeChildArea(chrome, childCols, childRows), inputConfig, localGestureAction, localHistoryScroll
 }
 
 func normalizeTerminalInputModes(m *protocol.TerminalInputModes) protocol.TerminalInputModes {
@@ -261,34 +310,78 @@ func routeTerminalOwnedMouse(
 	ev sgrMouseEvent,
 	modes protocol.TerminalInputModes,
 	area terminalOwnedChildArea,
+	inputConfig config.EffectiveInputConfig,
+	localGestureAction func(action string) bool,
 	localHistoryScroll func(delta int) bool,
-) []byte {
+) ([]byte, bool) {
+	if ev.isWheel() && routeWheelGesture(ev, modes, inputConfig, localGestureAction) {
+		return nil, true
+	}
+
 	translated, ok := translateMouseToChild(ev, area)
 	if !ok {
-		return nil
+		return nil, false
 	}
 
 	if ev.isWheel() && modes.MouseTracking == protocol.TerminalMouseTrackingNone {
 		if modes.AlternateScreen && modes.AlternateScroll {
-			return alternateScrollSequence(translated, modes)
+			return alternateScrollSequence(translated, modes), false
 		}
 
 		if delta := translated.wheelDelta(); delta != 0 && localHistoryScroll != nil {
 			_ = localHistoryScroll(delta)
 		}
 
-		return nil
+		return nil, false
 	}
 
 	if modes.MouseTracking == protocol.TerminalMouseTrackingNone || !shouldForwardMouse(ev, modes.MouseTracking) {
-		return nil
+		return nil, false
 	}
 
 	if modes.MouseFormat == protocol.TerminalMouseFormatSGRPixels {
-		return nil
+		return nil, false
 	}
 
-	return encodeMouseForChild(translated, modes)
+	return encodeMouseForChild(translated, modes), false
+}
+
+func routeWheelGesture(
+	ev sgrMouseEvent,
+	modes protocol.TerminalInputModes,
+	inputConfig config.EffectiveInputConfig,
+	localGestureAction func(action string) bool,
+) bool {
+	if localGestureAction == nil {
+		return false
+	}
+
+	switch inputConfig.MouseWheelPolicy {
+	case config.InputMouseWheelPolicyRespectTerminalModes:
+		if terminalOwnsWheel(modes) {
+			return false
+		}
+	case config.InputMouseWheelPolicyAlways:
+	default:
+		return false
+	}
+
+	gesture := wheelGesture(ev)
+	if gesture == "" {
+		return false
+	}
+
+	action := inputConfig.ActionForGesture(gesture)
+	if action == config.InputActionNone {
+		return false
+	}
+
+	return localGestureAction(action)
+}
+
+func terminalOwnsWheel(modes protocol.TerminalInputModes) bool {
+	return (modes.MouseTracking != "" && modes.MouseTracking != protocol.TerminalMouseTrackingNone) ||
+		(modes.AlternateScreen && modes.AlternateScroll)
 }
 
 func canRouteChildMouse(modes protocol.TerminalInputModes) bool {
@@ -309,6 +402,36 @@ func (ev sgrMouseEvent) wheelDelta() int {
 		return 1
 	default:
 		return 0
+	}
+}
+
+func wheelGesture(ev sgrMouseEvent) string {
+	if !ev.isWheel() {
+		return ""
+	}
+
+	modifiers := ev.button & (mouseShiftBit | mouseAltBit | mouseCtrlBit)
+	shift := modifiers == mouseShiftBit
+
+	if modifiers != 0 && !shift {
+		return ""
+	}
+
+	switch ev.wheelDelta() {
+	case -1:
+		if shift {
+			return config.InputGestureShiftMouseWheelUp
+		}
+
+		return config.InputGestureMouseWheelUp
+	case 1:
+		if shift {
+			return config.InputGestureShiftMouseWheelDown
+		}
+
+		return config.InputGestureMouseWheelDown
+	default:
+		return ""
 	}
 }
 
