@@ -326,6 +326,20 @@ func renovateSuccessLog(t *testing.T) string {
 				map[string]any{"branchName": "renovate/goreleaser-goreleaser-2.x"},
 			},
 		},
+		map[string]any{
+			"depName":       "trufflesecurity/trufflehog",
+			"packageName":   "ghcr.io/trufflesecurity/trufflehog",
+			"datasource":    "docker",
+			"currentValue":  "3.96.0",
+			"currentDigest": "sha256:" + strings.Repeat("c", 64),
+			"updates": []any{
+				map[string]any{
+					"branchName": "renovate/trufflesecurity-trufflehog-3.x",
+					"newValue":   "3.97.0",
+					"newDigest":  "sha256:" + strings.Repeat("d", 64),
+				},
+			},
+		},
 	}
 
 	sandboxDeps := []any{

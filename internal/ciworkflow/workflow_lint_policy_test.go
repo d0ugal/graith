@@ -552,6 +552,7 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertRegexp(t, pins, `(?m)^K6_IMAGE=grafana/k6:\d+\.\d+\.\d+-with-browser@sha256:[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^GOVULNCHECK_VERSION=v\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^GORELEASER_VERSION=v\d+\.\d+\.\d+$`)
+	assertRegexp(t, pins, `(?m)^TRUFFLEHOG_IMAGE=ghcr\.io/trufflesecurity/trufflehog:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$`)
 
 	for _, workflowPath := range []string{
 		".github/workflows/ci.yml",
@@ -559,6 +560,7 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 		".github/workflows/docs-preview.yml",
 		".github/workflows/dev-release.yml",
 		".github/workflows/goreleaser.yml",
+		".github/workflows/secret-scan.yml",
 	} {
 		path := filepath.Join(repoRoot, workflowPath)
 		workflow := readPolicyFile(t, path)
@@ -574,6 +576,29 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertContains(t, renovate, "packageNameTemplate: 'golang.org/x/vuln'")
 	assertContains(t, renovate, "GORELEASER_VERSION=(?<currentValue>v[\\\\d.]+)")
 	assertContains(t, renovate, "depNameTemplate: 'goreleaser/goreleaser'")
+	assertContains(t, renovate, "TRUFFLEHOG_IMAGE=(?<packageName>ghcr\\\\.io/trufflesecurity/trufflehog):(?<currentValue>[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
+	assertContains(t, renovate, "autoReplaceStringTemplate: 'TRUFFLEHOG_IMAGE=ghcr.io/trufflesecurity/trufflehog:{{{newValue}}}@{{{newDigest}}}',")
+	assertContains(t, renovate, "depNameTemplate: 'trufflesecurity/trufflehog'")
+
+	secretScan, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/secret-scan.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	trufflehog := p11WorkflowStep(t, p11WorkflowJob(t, secretScan, "trufflehog"), "TruffleHog (verified secrets only)")
+	for _, want := range []string{
+		`[[ ! "$TRUFFLEHOG_IMAGE" =~ ^ghcr[.]io/trufflesecurity/trufflehog:`,
+		`immutable_image="${image_repo}@${image_digest}"`,
+		`Missing TruffleHog range`,
+		`docker run --rm -v "$PWD:/repo:ro" -w /repo "$immutable_image" "${args[@]}"`,
+		`--fail`,
+		`--no-update`,
+		`--only-verified`,
+		`args+=(--since-commit "$base")`,
+		`args+=(--branch "$head")`,
+	} {
+		assertContains(t, trufflehog.Run, want)
+	}
 
 	for _, workflowPath := range []string{
 		".github/workflows/dev-release.yml",
@@ -672,7 +697,7 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 }
 
 func stepConsumesCIToolVersion(step P11WorkflowStep) bool {
-	for _, name := range []string{"HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION"} {
+	for _, name := range []string{"HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "TRUFFLEHOG_IMAGE"} {
 		if strings.Contains(step.Run, name) {
 			return true
 		}
