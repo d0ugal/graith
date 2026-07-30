@@ -397,14 +397,12 @@ func (s *MsgStore) Publish(opts PublishOpts) (Message, error) {
 	subs := make([]chan Message, len(s.subs[stream]))
 	copy(subs, s.subs[stream])
 
-	go func() {
-		for _, ch := range subs {
-			select {
-			case ch <- msg:
-			default:
-			}
+	for _, ch := range subs {
+		select {
+		case ch <- msg:
+		default:
 		}
-	}()
+	}
 
 	return msg, nil
 }
@@ -459,8 +457,9 @@ func (s *MsgStore) Read(stream, subscriber string, onlyUnread bool, threadID str
 // messages delivered to self's inbox (stream = "inbox:"+self) and messages self
 // sent to any peer's inbox (sender_id = self AND an inbox: stream other than
 // self's own). Topic messages are excluded — a "conversation" is direct
-// messages only. Results are ordered by created_at, with id as a deterministic
-// tie-breaker (seq is per-stream, so it is not a usable cross-stream order key).
+// messages only. Results are ordered by database insertion order, which is the
+// store-owned chronology across inbox streams (seq is per-stream, so it is not a
+// usable cross-stream order key).
 //
 // When limit > 0, the most recent `limit` messages are returned (still in
 // ascending order). The query reads inbox streams the caller may not own; the
@@ -476,7 +475,7 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 	const cols = `id, seq, stream, sender_id, sender_name, body, thread_id, reply_to, no_reply, created_at`
 
 	inner := `
-		SELECT id, seq, stream, sender_id, sender_name, body,
+		SELECT rowid AS message_order, id, seq, stream, sender_id, sender_name, body,
 		       COALESCE(thread_id, '') AS thread_id, COALESCE(reply_to, '') AS reply_to,
 		       no_reply, created_at
 		FROM messages
@@ -489,14 +488,14 @@ func (s *MsgStore) Conversation(self string, limit int) ([]Message, error) {
 		// Take the most recent `limit` rows, then re-sort ascending so the
 		// client renders oldest-to-newest.
 		q = `SELECT ` + cols + ` FROM (` + inner + `
-			ORDER BY created_at DESC, id DESC
+			ORDER BY message_order DESC
 			LIMIT ?
-		) ORDER BY created_at ASC, id ASC`
+		) ORDER BY message_order ASC`
 
 		args = append(args, limit)
 	} else {
-		q = inner + `
-		ORDER BY created_at ASC, id ASC`
+		q = `SELECT ` + cols + ` FROM (` + inner + `
+		) ORDER BY message_order ASC`
 	}
 
 	rows, err := s.db.Query(q, args...)
