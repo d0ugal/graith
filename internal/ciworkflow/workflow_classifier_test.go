@@ -542,7 +542,7 @@ var (
 
 	legacyCIWorkflowMatcher = regexp.MustCompile(`^\.github/(actions|workflows)/|^cmd/ciclassify/|^internal/ciworkflow/`)
 
-	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$`)
+	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/install-(dart-sass|hugo)\.sh$`)
 
 	legacyDocsPreviewGlobalMatcher = regexp.MustCompile(`^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)`)
 )

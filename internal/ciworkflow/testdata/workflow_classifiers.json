@@ -333,6 +333,15 @@
       }
     },
     {
+      "name": "docs installer scripts",
+      "event": "pull_request",
+      "files": ["scripts/install-hugo.sh", "scripts/install-dart-sass.sh"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
       "name": "docs global input",
       "event": "pull_request",
       "files": ["website/data/package_dependencies.json"],

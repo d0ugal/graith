@@ -312,8 +312,16 @@ func renovateSuccessLog(t *testing.T) string {
 		},
 		map[string]any{
 			"depName":      "gohugoio/hugo",
+			"depType":      "ci-checksum-tool",
 			"datasource":   "github-releases",
 			"currentValue": "0.154.5",
+			"updates":      []any{},
+		},
+		map[string]any{
+			"depName":      "sass/dart-sass",
+			"depType":      "ci-checksum-tool",
+			"datasource":   "github-releases",
+			"currentValue": "1.102.0",
 			"updates":      []any{},
 		},
 		map[string]any{
@@ -452,6 +460,14 @@ func renovateSuccessLog(t *testing.T) string {
 						"dependencyDashboardApproval": true,
 						"prBodyNotes": []string{
 							"Review the Safehouse release and update SAFEHOUSE_SHA256 before merge.",
+						},
+					},
+					map[string]any{
+						"matchDepTypes":               []string{"ci-checksum-tool"},
+						"automerge":                   false,
+						"dependencyDashboardApproval": true,
+						"prBodyNotes": []string{
+							"Review the docs tool release and update the matching SHA-256 before merge.",
 						},
 					},
 					map[string]any{

@@ -170,6 +170,8 @@ var (
 			"go.mod",
 			"go.sum",
 			"Makefile",
+			"scripts/install-dart-sass.sh",
+			"scripts/install-hugo.sh",
 		},
 		Prefixes: []string{
 			"cmd/ciclassify/",

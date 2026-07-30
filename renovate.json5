@@ -28,6 +28,16 @@
       ],
     },
     {
+      // Docs tool version bumps must be paired with reviewed release-asset
+      // digests in .github/ci-tool-versions.env before CI can install them.
+      matchDepTypes: ['ci-checksum-tool'],
+      automerge: false,
+      dependencyDashboardApproval: true,
+      prBodyNotes: [
+        'Docs tool CI installs are checksum-verified. Review the upstream release, update the matching SHA-256 in .github/ci-tool-versions.env, and run the docs workflows before merge.',
+      ],
+    },
+    {
       matchDepTypes: ['libghostty-native'],
       groupName: 'libghostty native dependency unit',
       groupSlug: 'libghostty-native',
@@ -99,13 +109,25 @@
   customManagers: [
     {
       // CI workflows consume these pins from one checked-in env file. Keep
-      // version-only tools here so workflow-local env blocks do not drift.
+      // version and image tool pins here so workflow-local env blocks do not
+      // drift. Checksum-paired tools use manual dashboard approval because
+      // Renovate proposes versions but maintainers rotate asset hashes.
       customType: 'regex',
       managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
       matchStrings: ['HUGO_VERSION=(?<currentValue>[\\d.]+)'],
       depNameTemplate: 'gohugoio/hugo',
+      depTypeTemplate: 'ci-checksum-tool',
       datasourceTemplate: 'github-releases',
       extractVersionTemplate: '^v(?<version>.+)$',
+      versioningTemplate: 'semver',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['DART_SASS_VERSION=(?<currentValue>[\\d.]+)'],
+      depNameTemplate: 'sass/dart-sass',
+      depTypeTemplate: 'ci-checksum-tool',
+      datasourceTemplate: 'github-releases',
       versioningTemplate: 'semver',
     },
     {

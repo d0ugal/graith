@@ -82,7 +82,7 @@ if ! run_renovate_lookup; then
     exit 1
 fi
 
-ci_expected='["github.com/aevea/commitsar","gitleaks/gitleaks","gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6","ossf/scorecard-action","trufflesecurity/trufflehog"]'
+ci_expected='["github.com/aevea/commitsar","gitleaks/gitleaks","gohugoio/hugo","golang.org/x/vuln/cmd/govulncheck","goreleaser/goreleaser","grafana/k6","ossf/scorecard-action","sass/dart-sass","trufflesecurity/trufflehog"]'
 ci_actual="$(jq -sc '
     [
         .[] |
@@ -142,7 +142,13 @@ if ! jq -se '
         (.replaceString | test("^GORELEASER_VERSION=v[0-9]+[.][0-9]+[.][0-9]+$"))) and
     any($deps[];
         .depName == "gohugoio/hugo" and
+        .depType == "ci-checksum-tool" and
         .datasource == "github-releases") and
+    any($deps[];
+        .depName == "sass/dart-sass" and
+        .depType == "ci-checksum-tool" and
+        .datasource == "github-releases" and
+        (.currentValue | test("^[0-9]+[.][0-9]+[.][0-9]+$"))) and
     any($deps[];
         .depName == "ossf/scorecard-action" and
         .packageName == "ghcr.io/ossf/scorecard-action" and
@@ -258,6 +264,11 @@ if ! jq -se '
         .dependencyDashboardApproval == true and
         ((.prBodyNotes // []) | length) > 0) and
     any($config.packageRules[];
+        .matchDepTypes == ["ci-checksum-tool"] and
+        .automerge == false and
+        .dependencyDashboardApproval == true and
+        ((.prBodyNotes // []) | length) > 0) and
+    any($config.packageRules[];
         .matchDepTypes == ["libghostty-native"] and
         .groupSlug == "libghostty-native" and
         .automerge == false and
@@ -276,7 +287,7 @@ if ! jq -se '
         .enabled == false and
         .automerge == false)
     ' "$log" >/dev/null; then
-    echo "error: Safehouse review gate, native grouping, or go-libghostty automerge protection is missing" >&2
+    echo "error: Safehouse review gate, docs checksum review gate, native grouping, or go-libghostty automerge protection is missing" >&2
     exit 1
 fi
 

@@ -544,13 +544,16 @@ func TestGolangciLintUsesGomodguardV2(t *testing.T) {
 	}
 }
 
-func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
+func TestCIToolVersionsArePinnedAndManaged(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	pins := readPolicyFile(t, filepath.Join(repoRoot, ".github/ci-tool-versions.env"))
 	renovate := readPolicyFile(t, filepath.Join(repoRoot, "renovate.json5"))
 
 	assertRegexp(t, pins, `(?m)^COMMITSAR_VERSION=v\d+\.\d+\.\d+$`)
+	assertRegexp(t, pins, `(?m)^DART_SASS_VERSION=\d+\.\d+\.\d+$`)
+	assertRegexp(t, pins, `(?m)^DART_SASS_LINUX_X64_SHA256=[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^HUGO_VERSION=\d+\.\d+\.\d+$`)
+	assertRegexp(t, pins, `(?m)^HUGO_LINUX_AMD64_DEB_SHA256=[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^K6_IMAGE=grafana/k6:\d+\.\d+\.\d+-with-browser@sha256:[a-f0-9]{64}$`)
 	assertRegexp(t, pins, `(?m)^GOVULNCHECK_VERSION=v\d+\.\d+\.\d+$`)
 	assertRegexp(t, pins, `(?m)^GORELEASER_VERSION=v\d+\.\d+\.\d+$`)
@@ -577,6 +580,11 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertContains(t, renovate, "COMMITSAR_VERSION=(?<currentValue>v[\\\\d.]+)")
 	assertContains(t, renovate, "depNameTemplate: 'github.com/aevea/commitsar'")
 	assertContains(t, renovate, "HUGO_VERSION=(?<currentValue>[\\\\d.]+)")
+	assertContains(t, renovate, "DART_SASS_VERSION=(?<currentValue>[\\\\d.]+)")
+	assertContains(t, renovate, "depNameTemplate: 'sass/dart-sass'")
+	assertRegexp(t, renovate, `(?s)HUGO_VERSION.*depNameTemplate: 'gohugoio/hugo'.*depTypeTemplate: 'ci-checksum-tool'`)
+	assertRegexp(t, renovate, `(?s)DART_SASS_VERSION.*depNameTemplate: 'sass/dart-sass'.*depTypeTemplate: 'ci-checksum-tool'`)
+	assertRegexp(t, renovate, `(?s)matchDepTypes: \['ci-checksum-tool'\].*automerge: false.*dependencyDashboardApproval: true`)
 	assertContains(t, renovate, "K6_IMAGE=(?<packageName>grafana/k6):(?<currentValue>[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
 	assertContains(t, renovate, "autoReplaceStringTemplate: 'K6_IMAGE=grafana/k6:{{{newValue}}}@{{{newDigest}}}',")
 	assertContains(t, renovate, "GOVULNCHECK_VERSION=(?<currentValue>v[\\\\d.]+)")
@@ -593,6 +601,52 @@ func TestCIToolVersionsAreRenovateManaged(t *testing.T) {
 	assertContains(t, renovate, "TRUFFLEHOG_IMAGE=(?<packageName>ghcr\\\\.io/trufflesecurity/trufflehog):(?<currentValue>[\\\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})")
 	assertContains(t, renovate, "autoReplaceStringTemplate: 'TRUFFLEHOG_IMAGE=ghcr.io/trufflesecurity/trufflehog:{{{newValue}}}@{{{newDigest}}}',")
 	assertContains(t, renovate, "depNameTemplate: 'trufflesecurity/trufflehog'")
+
+	dartSassInstaller := readPolicyFile(t, filepath.Join(repoRoot, "scripts/install-dart-sass.sh"))
+	for _, want := range []string{
+		`--proto '=https'`,
+		`--tlsv1.2`,
+		`--fail`,
+		`--retry 4`,
+		`dart-sass-${version}-linux-x64.tar.gz`,
+		`sha256sum -c -`,
+		`shasum -a 256 -c -`,
+		`tar -xzf "$archive" -C "$extract"`,
+		`"$extract/dart-sass/sass"`,
+		`"$extract/dart-sass/src/dart"`,
+		`"$dest/sass" --version | grep -F "$version"`,
+		`printf '%s\n' "$dest" >> "$GITHUB_PATH"`,
+	} {
+		assertContains(t, dartSassInstaller, want)
+	}
+
+	hugoInstaller := readPolicyFile(t, filepath.Join(repoRoot, "scripts/install-hugo.sh"))
+	for _, want := range []string{
+		`--proto '=https'`,
+		`--tlsv1.2`,
+		`--fail`,
+		`--retry 4`,
+		`hugo_extended_${version}_linux-amd64.deb`,
+		`sha256sum -c -`,
+		`shasum -a 256 -c -`,
+		`sudo dpkg -i "$archive"`,
+		`hugo version | grep -F "v${version}"`,
+	} {
+		assertContains(t, hugoInstaller, want)
+	}
+
+	for _, workflowPath := range []string{
+		".github/workflows/docs.yml",
+		".github/workflows/docs-preview.yml",
+	} {
+		workflow := readPolicyFile(t, filepath.Join(repoRoot, workflowPath))
+		assertContains(t, workflow, "DART_SASS_VERSION|DART_SASS_LINUX_X64_SHA256")
+		assertContains(t, workflow, "HUGO_VERSION|HUGO_LINUX_AMD64_DEB_SHA256")
+		assertContains(t, workflow, `scripts/install-hugo.sh "$HUGO_VERSION" "$HUGO_LINUX_AMD64_DEB_SHA256"`)
+		assertContains(t, workflow, `scripts/install-dart-sass.sh "$DART_SASS_VERSION" "$DART_SASS_LINUX_X64_SHA256"`)
+		assertNotContains(t, workflow, "hugo_extended_${HUGO_VERSION}_linux-amd64.deb")
+		assertNotContains(t, workflow, "snap install dart-sass")
+	}
 
 	scorecard, err := ReadP11WorkflowSummary(filepath.Join(repoRoot, ".github/workflows/scorecard.yml"))
 	if err != nil {
@@ -931,7 +985,7 @@ func assertCIToolVersionsLoadOrder(t *testing.T, workflowPath string) {
 }
 
 func stepConsumesCIToolVersion(step P11WorkflowStep) bool {
-	for _, name := range []string{"COMMITSAR_VERSION", "HUGO_VERSION", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "GITLEAKS_IMAGE", "SCORECARD_IMAGE", "TRUFFLEHOG_IMAGE"} {
+	for _, name := range []string{"COMMITSAR_VERSION", "DART_SASS_VERSION", "DART_SASS_LINUX_X64_SHA256", "HUGO_VERSION", "HUGO_LINUX_AMD64_DEB_SHA256", "K6_IMAGE", "GOVULNCHECK_VERSION", "GORELEASER_VERSION", "GITLEAKS_IMAGE", "SCORECARD_IMAGE", "TRUFFLEHOG_IMAGE"} {
 		if strings.Contains(step.Run, name) {
 			return true
 		}
