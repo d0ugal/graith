@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.71.3](https://github.com/d0ugal/graith/compare/v0.71.2...v0.71.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* keep stable rpm signing diagnostics reachable ([dde92c5](https://github.com/d0ugal/graith/commit/dde92c5aeb8178c6bd16f4ab5499f67d722de722))
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.4 ([#1893](https://github.com/d0ugal/graith/issues/1893)) ([3718f5b](https://github.com/d0ugal/graith/commit/3718f5b32cf1af3e87c5066fe141b2d2eddc4688))
+* **deps:** update renovate/renovate docker tag to v44.3.0 ([#1897](https://github.com/d0ugal/graith/issues/1897)) ([b26d36f](https://github.com/d0ugal/graith/commit/b26d36f03e2f4bf2d7fa37f59dd7b3a876827eb0))
+
 ## [0.71.2](https://github.com/d0ugal/graith/compare/v0.71.1...v0.71.2) (2026-07-30)
 
 
