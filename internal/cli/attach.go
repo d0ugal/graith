@@ -111,6 +111,7 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 		Agents:           agents,
 		DefaultAgent:     defaultAgent,
 		Keys:             sessionNavigatorKeysFromConfig(),
+		Help:             sessionNavigatorHelpFromConfig(),
 	})
 	if result == nil || result.Action == "" {
 		return nil

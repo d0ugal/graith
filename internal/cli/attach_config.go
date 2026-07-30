@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/config"
@@ -77,6 +78,31 @@ func sessionNavigatorKeysFromConfig() client.SessionNavigatorKeys {
 		Search:        navigatorActionKey(cfg.Keybindings.Search),
 		Cancel:        splitTUIKeysFromConfig(cfg.Keybindings.TUI.Cancel),
 	}
+}
+
+func sessionNavigatorHelpFromConfig() client.SessionNavigatorHelp {
+	help := cfg.SessionNavigator.Help
+	out := client.SessionNavigatorHelp{
+		CompactActions:    cloneStringSlicePreserveEmpty(help.CompactActions),
+		ExpandedActions:   cloneStringSlicePreserveEmpty(help.ExpandedActions),
+		ExpandedByDefault: help.ExpandedByDefault,
+	}
+
+	if strings.TrimSpace(help.ToggleKeys) != "" {
+		out.ToggleKeys = splitTUIKeysFromConfig(help.ToggleKeys)
+	} else if help.CompactActions != nil || help.ExpandedActions != nil {
+		out.ToggleKeys = []string{}
+	}
+
+	return out
+}
+
+func cloneStringSlicePreserveEmpty(values []string) []string {
+	if values == nil {
+		return nil
+	}
+
+	return append(make([]string, 0, len(values)), values...)
 }
 
 func navigatorActionKey(value string) string {

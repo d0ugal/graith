@@ -491,6 +491,16 @@ inbox_detached_delay = "5s"   # settle delay before notifying a session with no 
 # Keys that jump straight to the Nth session in the Navigator (1st key → session 1, …).
 shortcut_keys = "1234567890"
 
+# Session Navigator action help. Action lists are ordered semantic IDs; labels
+# are rendered from the active keybindings. Supported IDs: attach, delete,
+# filter, fold, fold_all, group, help, jump, move, new, quit, restart,
+# restart_menu, star, stop, top_bottom, view.
+[session_navigator.help]
+compact_actions = ["attach", "new", "view", "group", "filter", "help", "quit"]
+expanded_actions = ["move", "top_bottom", "view", "group", "jump", "attach", "new", "star", "fold", "fold_all", "delete", "stop", "restart", "restart_menu", "filter", "help", "quit"]
+toggle_keys = "? f1"          # keys that toggle expanded help; existing Navigator actions win on conflict
+expanded_by_default = false   # start the Navigator with expanded help open
+
 # Prefix key plus a command key trigger these actions while attached.
 # NOTE: all keys below are read from config (passthrough keys via
 # passthroughKeysFromConfig, Navigator keys via sessionNavigatorKeysFromConfig).

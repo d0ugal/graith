@@ -65,6 +65,10 @@ graith also understands the Kitty keyboard protocol: extended terminals (e.g. Gh
 
 The Session Navigator is a full-screen TUI for browsing, managing, and attaching
 to sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
+Its footer shows a compact set of common actions; press `?` for expanded help
+inside the Navigator. If `?` is configured for another Navigator action, use
+F1 for expanded help. The visible footer actions and expanded help list are
+configurable with `[session_navigator.help]`.
 
 ### Navigation
 
@@ -78,6 +82,7 @@ to sessions. Open it with `ctrl+b w`, or run `gr attach` with no arguments.
 | `l` / Right | Next view mode |
 | Tab | Jump to the next group in grouped views |
 | Enter | Attach to the highlighted session |
+| `?` / F1 | Toggle expanded Navigator help |
 | `q` / Esc / Ctrl-C | Close the Navigator |
 
 ### View modes

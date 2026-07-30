@@ -94,9 +94,29 @@ daemon config is not pushed into GUI shortcut definitions.
 ```toml
 [session_navigator]
 shortcut_keys = "1234567890"  # keys that jump straight to the Nth session in the Navigator
+
+[session_navigator.help]
+compact_actions     = ["attach", "new", "view", "group", "filter", "help", "quit"]
+expanded_actions    = ["move", "top_bottom", "view", "group", "jump", "attach", "new", "star", "fold", "fold_all", "delete", "stop", "restart", "restart_menu", "filter", "help", "quit"]
+toggle_keys         = "? f1"
+expanded_by_default = false
 ```
 
 In the Session Navigator (`ctrl+b w`), each key jumps straight to its session — the 1st key selects session 1, and so on.
+
+`[session_navigator.help]` controls the Navigator footer and expanded help
+state. The action lists are ordered semantic IDs; labels are rendered from the
+active keybindings, so remapping `search` or `delete_session` also updates the
+help text. `compact_actions` is the first-line footer. `expanded_actions` is
+shown when expanded help is open. `toggle_keys` is a space-separated list of
+Bubble Tea key names that toggle expanded help; existing Navigator actions win
+on conflict. `expanded_by_default` starts the Navigator with expanded help
+open. Set either action list to `[]` to hide all help entries for that state.
+
+Supported action IDs are `attach`, `delete`, `filter`, `fold`, `fold_all`,
+`group`, `help`, `jump`, `move`, `new`, `quit`, `restart`, `restart_menu`,
+`star`, `stop`, `top_bottom`, and `view`. Unknown action IDs, duplicate action
+IDs within one list, and invalid `toggle_keys` names fail config validation.
 
 ## Input
 

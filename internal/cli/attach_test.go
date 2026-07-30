@@ -337,6 +337,69 @@ func TestSessionNavigatorKeysFromConfigUsesTUIConfig(t *testing.T) {
 	}
 }
 
+func TestSessionNavigatorHelpFromConfig(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = &config.Config{
+		SessionNavigator: config.SessionNavigatorConfig{
+			Help: config.SessionNavigatorHelp{
+				CompactActions:    []string{"attach", "help"},
+				ExpandedActions:   []string{"delete", "stop"},
+				ToggleKeys:        "? F1",
+				ExpandedByDefault: true,
+			},
+		},
+	}
+
+	help := sessionNavigatorHelpFromConfig()
+	want := client.SessionNavigatorHelp{
+		CompactActions:    []string{"attach", "help"},
+		ExpandedActions:   []string{"delete", "stop"},
+		ToggleKeys:        []string{"?", "f1"},
+		ExpandedByDefault: true,
+	}
+
+	if !reflect.DeepEqual(help, want) {
+		t.Errorf("sessionNavigatorHelpFromConfig() = %+v, want %+v", help, want)
+	}
+}
+
+func TestSessionNavigatorHelpFromConfigPreservesEmptyActionLists(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = &config.Config{
+		SessionNavigator: config.SessionNavigatorConfig{
+			Help: config.SessionNavigatorHelp{
+				CompactActions:  []string{},
+				ExpandedActions: []string{},
+				ToggleKeys:      "? f1",
+			},
+		},
+	}
+
+	help := sessionNavigatorHelpFromConfig()
+
+	if help.CompactActions == nil {
+		t.Fatal("compact actions should preserve explicit empty list")
+	}
+
+	if len(help.CompactActions) != 0 {
+		t.Fatalf("compact actions = %v, want empty", help.CompactActions)
+	}
+
+	if help.ExpandedActions == nil {
+		t.Fatal("expanded actions should preserve explicit empty list")
+	}
+
+	if len(help.ExpandedActions) != 0 {
+		t.Fatalf("expanded actions = %v, want empty", help.ExpandedActions)
+	}
+}
+
 func TestNavigatorActionKeyNormalizesSpace(t *testing.T) {
 	tests := map[string]struct {
 		input string
