@@ -289,6 +289,23 @@ max_tool_output_bytes = 4096       # cap on each rendered tool-output block (4 K
 max_line_bytes = 16777216          # scanner buffer cap for a transcript line when reading turns/usage (16 MiB)
 max_metadata_line_bytes = 4194304  # scanner buffer cap for Codex rollout metadata scans (cwd/id) (4 MiB)
 
+# Conversation search (`gr search`) request, parse, snippet, and cache limits.
+# These bounds are read for each query, so reload applies to subsequent searches.
+# Values less than 1 fall back to the defaults below. Lowering max_window also
+# lowers the effective max/default result limit; snippet_context is clamped to
+# snippet_runes; max_cache_entry_bytes is clamped to max_cache_bytes.
+[search]
+default_limit = 20              # result count when --limit is omitted
+max_limit = 200                 # largest result count one request can ask for
+max_window = 1000               # max ordered result window behind pagination
+snippet_runes = 240             # max snippet length in runes
+snippet_context = 80            # preferred runes of context before first match
+max_turn_runes = 131072         # sanitized text retained per transcript turn (128 Ki runes)
+max_source_bytes = 16777216     # cold read cap per transcript source (16 MiB)
+max_source_turns = 10000        # cold parsed-turn cap per transcript source
+max_cache_bytes = 33554432      # in-memory parsed-text search cache cap (32 MiB)
+max_cache_entry_bytes = 16777216 # max size of one cached session/generation entry (16 MiB)
+
 # Soft delete: `gr delete` marks a session deleted and keeps its worktree and
 # state for the retention window so it can be recovered with `gr restore`. The
 # daemon purges soft-deleted sessions after the window elapses. `gr purge`

@@ -62,6 +62,7 @@ type Config struct {
 	ResourceMonitor  ResourceMonitor     `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
 	Migration        MigrationConfig     `toml:"migration"`        // [migration] table (issue #1250)
 	Transcript       TranscriptConfig    `toml:"transcript"`       // [transcript] table (issue #1250)
+	Search           SearchConfig        `toml:"search"`           // [search] table (issue #1455)
 	Limits           LimitsConfig        `toml:"limits"`           // [limits] table (issue #1252)
 	Lifecycle        LifecycleConfig     `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
 	Terminal         TerminalConfig      `toml:"terminal"`         // [terminal] table (issue #1254)
@@ -593,6 +594,122 @@ func (t TranscriptConfig) MaxLineBytesOrDefault() int {
 // default when unset or non-positive.
 func (t TranscriptConfig) MaxMetadataLineBytesOrDefault() int {
 	return positiveIntOrDefault(t.MaxMetadataLineBytes, TranscriptMaxMetadataBytesDefault)
+}
+
+// SearchConfig is the [search] block tuning local conversation search. These
+// values bound request sizes, cold transcript parsing, snippets, and the
+// process-local parsed-text cache used by `gr search`. Every field is optional:
+// a zero/non-positive value falls back to the matching default.
+type SearchConfig struct {
+	// DefaultLimit is used when a search request does not provide --limit.
+	DefaultLimit int `toml:"default_limit"`
+	// MaxLimit caps a single page of search results.
+	MaxLimit int `toml:"max_limit"`
+	// MaxWindow caps the ordered result window behind pagination.
+	MaxWindow int `toml:"max_window"`
+	// SnippetRunes caps each returned snippet, counted in runes.
+	SnippetRunes int `toml:"snippet_runes"`
+	// SnippetContext is the preferred runes of context before the first match.
+	SnippetContext int `toml:"snippet_context"`
+	// MaxTurnRunes caps the sanitized text retained per transcript turn.
+	MaxTurnRunes int `toml:"max_turn_runes"`
+	// MaxSourceBytes caps cold reads from one transcript source.
+	MaxSourceBytes int `toml:"max_source_bytes"`
+	// MaxSourceTurns caps cold parsed turns retained from one transcript source.
+	MaxSourceTurns int `toml:"max_source_turns"`
+	// MaxCacheBytes caps the in-memory parsed-text cache.
+	MaxCacheBytes int `toml:"max_cache_bytes"`
+	// MaxCacheEntryBytes caps one cached session/generation entry.
+	MaxCacheEntryBytes int `toml:"max_cache_entry_bytes"`
+}
+
+// SearchLimits is the runtime-resolved [search] configuration. Relationship
+// clamps make partial configs useful: lowering max_window also lowers the
+// effective max/default page size, snippet context cannot exceed snippet length,
+// and one cache entry cannot exceed the whole cache.
+type SearchLimits struct {
+	DefaultLimit       int
+	MaxLimit           int
+	MaxWindow          int
+	SnippetRunes       int
+	SnippetContext     int
+	MaxTurnRunes       int
+	MaxSourceBytes     int
+	MaxSourceTurns     int
+	MaxCacheBytes      int
+	MaxCacheEntryBytes int
+}
+
+// Search defaults mirror the fixed literals used by the first conversation
+// search implementation before issue #1455 follow-up made them configurable.
+const (
+	SearchDefaultLimitDefault       = 20
+	SearchMaxLimitDefault           = 200
+	SearchMaxWindowDefault          = 1000
+	SearchSnippetRunesDefault       = 240
+	SearchSnippetContextDefault     = 80
+	SearchMaxTurnRunesDefault       = 128 * 1024
+	SearchMaxSourceBytesDefault     = 16 * 1024 * 1024
+	SearchMaxSourceTurnsDefault     = 10000
+	SearchMaxCacheBytesDefault      = 32 * 1024 * 1024
+	SearchMaxCacheEntryBytesDefault = SearchMaxSourceBytesDefault
+)
+
+// Search safety ceilings keep a config typo from requesting an absurd result
+// window or cache. They are deliberately above the defaults while preserving a
+// finite daemon-side resource boundary.
+const (
+	SearchMaxLimitCeiling           = 100_000
+	SearchMaxWindowCeiling          = 1_000_000
+	SearchSnippetRunesCeiling       = 100_000
+	SearchSnippetContextCeiling     = 100_000
+	SearchMaxTurnRunesCeiling       = 4 * 1024 * 1024
+	SearchMaxSourceBytesCeiling     = 1024 * 1024 * 1024
+	SearchMaxSourceTurnsCeiling     = 1_000_000
+	SearchMaxCacheBytesCeiling      = 1024 * 1024 * 1024
+	SearchMaxCacheEntryBytesCeiling = 1024 * 1024 * 1024
+)
+
+// Limits resolves [search] with defaults and relationship clamps.
+func (s SearchConfig) Limits() SearchLimits {
+	maxWindow := positiveIntOrDefault(s.MaxWindow, SearchMaxWindowDefault)
+
+	maxLimit := positiveIntOrDefault(s.MaxLimit, SearchMaxLimitDefault)
+	if maxLimit > maxWindow {
+		maxLimit = maxWindow
+	}
+
+	defaultLimit := positiveIntOrDefault(s.DefaultLimit, SearchDefaultLimitDefault)
+	if defaultLimit > maxLimit {
+		defaultLimit = maxLimit
+	}
+
+	snippetRunes := positiveIntOrDefault(s.SnippetRunes, SearchSnippetRunesDefault)
+
+	snippetContext := positiveIntOrDefault(s.SnippetContext, SearchSnippetContextDefault)
+	if snippetContext > snippetRunes {
+		snippetContext = snippetRunes
+	}
+
+	maxCacheBytes := positiveIntOrDefault(s.MaxCacheBytes, SearchMaxCacheBytesDefault)
+
+	maxCacheEntryBytes := positiveIntOrDefault(s.MaxCacheEntryBytes, SearchMaxCacheEntryBytesDefault)
+	if maxCacheEntryBytes > maxCacheBytes {
+		maxCacheEntryBytes = maxCacheBytes
+	}
+
+	return SearchLimits{
+		DefaultLimit:       defaultLimit,
+		MaxLimit:           maxLimit,
+		MaxWindow:          maxWindow,
+		SnippetRunes:       snippetRunes,
+		SnippetContext:     snippetContext,
+		MaxTurnRunes:       positiveIntOrDefault(s.MaxTurnRunes, SearchMaxTurnRunesDefault),
+		MaxSourceBytes:     positiveIntOrDefault(s.MaxSourceBytes, SearchMaxSourceBytesDefault),
+		MaxSourceTurns:     positiveIntOrDefault(s.MaxSourceTurns, SearchMaxSourceTurnsDefault),
+		MaxCacheBytes:      maxCacheBytes,
+		MaxCacheEntryBytes: maxCacheEntryBytes,
+	}
 }
 
 // positiveIntOrDefault returns def when n is zero or negative; otherwise n. Used
@@ -4217,6 +4334,38 @@ func (c *Config) validateTodoLimits() []error {
 	return errs
 }
 
+// validateSearchLimits checks the [search] resource bounds. Non-positive values
+// are left to the runtime default accessors; values above the hard ceilings are
+// rejected so a typo cannot request an unbounded result window or cache.
+func (c *Config) validateSearchLimits() []error {
+	var errs []error
+
+	s := c.Search
+
+	for _, f := range []struct {
+		name    string
+		val     int
+		ceiling int
+	}{
+		{"search.default_limit", s.DefaultLimit, SearchMaxLimitCeiling},
+		{"search.max_limit", s.MaxLimit, SearchMaxLimitCeiling},
+		{"search.max_window", s.MaxWindow, SearchMaxWindowCeiling},
+		{"search.snippet_runes", s.SnippetRunes, SearchSnippetRunesCeiling},
+		{"search.snippet_context", s.SnippetContext, SearchSnippetContextCeiling},
+		{"search.max_turn_runes", s.MaxTurnRunes, SearchMaxTurnRunesCeiling},
+		{"search.max_source_bytes", s.MaxSourceBytes, SearchMaxSourceBytesCeiling},
+		{"search.max_source_turns", s.MaxSourceTurns, SearchMaxSourceTurnsCeiling},
+		{"search.max_cache_bytes", s.MaxCacheBytes, SearchMaxCacheBytesCeiling},
+		{"search.max_cache_entry_bytes", s.MaxCacheEntryBytes, SearchMaxCacheEntryBytesCeiling},
+	} {
+		if f.val > f.ceiling {
+			errs = append(errs, fmt.Errorf("%s %d: must be at most %d", f.name, f.val, f.ceiling))
+		}
+	}
+
+	return errs
+}
+
 func (c *Config) Validate() error {
 	var errs []error
 	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) && !strings.HasPrefix(c.DataDir, "~/") {
@@ -4380,6 +4529,7 @@ func (c *Config) Validate() error {
 
 	errs = append(errs, c.validateMessagesLimits()...)
 	errs = append(errs, c.validateTodoLimits()...)
+	errs = append(errs, c.validateSearchLimits()...)
 
 	for _, f := range []struct {
 		name, val string

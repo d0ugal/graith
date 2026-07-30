@@ -176,6 +176,26 @@ inbox_preview_bytes    = 1000     # unread-inbox preview injected into a session
 
 `log_lines` is the shared default when a `--lines`/`-n` count is omitted: `gr logs` and attach scroll mode send `0`, so the daemon applies its current value per request — reconnecting attach sessions and graphical clients' log peeks pick up the same server-side default after a reload. Interactive PTY sessions also use this value as their initial daemon-owned terminal history depth for terminal-owned attach; that retention is fixed when the PTY backend is created and is clamped by the native terminal model to at most 2,000 rows and about 256 Ki cells. `last_message_runes` and `inbox_preview_bytes` cap what's shown; the full message stays available via `gr msg inbox --all`. Byte caps never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
 
+## Conversation search limits
+
+`gr search` reads agent transcripts on demand and caches sanitized text in the daemon process. The `[search]` block tunes request size, cold transcript parse bounds, snippet shape, and cache size. Values are read for each query, so a reload applies to subsequent searches without a daemon restart. A value less than 1 falls back to the default shown.
+
+```toml
+[search]
+default_limit = 20               # result count when --limit is omitted
+max_limit = 200                  # largest result count one request can ask for
+max_window = 1000                # max ordered result window behind pagination
+snippet_runes = 240              # max snippet length in runes
+snippet_context = 80             # preferred runes of context before first match
+max_turn_runes = 131072          # sanitized text retained per transcript turn (128 Ki runes)
+max_source_bytes = 16777216      # cold read cap per transcript source (16 MiB)
+max_source_turns = 10000         # cold parsed-turn cap per transcript source
+max_cache_bytes = 33554432       # in-memory parsed-text search cache cap (32 MiB)
+max_cache_entry_bytes = 16777216 # max size of one cached session/generation entry (16 MiB)
+```
+
+Lowering `max_window` also lowers the effective `max_limit` and `default_limit` if needed. `snippet_context` is clamped to `snippet_runes`, and `max_cache_entry_bytes` is clamped to `max_cache_bytes`, so partial configs such as `max_window = 50` remain valid. Very large positive values above the built-in safety ceilings are rejected at config load.
+
 ## Update check
 
 `gr list` and `gr doctor` check GitHub for a newer graith release and cache the result. The `[updates]` block makes this configurable — turn it off for downstream forks, packaged or offline installs, or to avoid the network call.
