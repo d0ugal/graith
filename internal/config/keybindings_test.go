@@ -28,37 +28,37 @@ func TestDefaultKeybindingsIncludePrefixCommands(t *testing.T) {
 	}
 }
 
-// TestDefaultOverlayKeybindings verifies the embedded default config populates
-// the [keybindings.overlay] table.
-func TestDefaultOverlayKeybindings(t *testing.T) {
-	ov := Default().Keybindings.Overlay
+// TestDefaultTUIKeybindings verifies the embedded default config populates the
+// [keybindings.tui] table.
+func TestDefaultTUIKeybindings(t *testing.T) {
+	tui := Default().Keybindings.TUI
 
 	cases := map[string]string{
-		"up":                ov.Up,
-		"down":              ov.Down,
-		"message_pin":       ov.MessagePin,
-		"message_next_conv": ov.MessageNextConv,
-		"message_topics":    ov.MessageTopics,
-		"message_direct":    ov.MessageDirect,
+		"up":                tui.Up,
+		"down":              tui.Down,
+		"message_pin":       tui.MessagePin,
+		"message_next_conv": tui.MessageNextConv,
+		"message_topics":    tui.MessageTopics,
+		"message_direct":    tui.MessageDirect,
 	}
 	for name, got := range cases {
 		if got == "" {
-			t.Errorf("Keybindings.Overlay.%s is empty; expected a default", name)
+			t.Errorf("Keybindings.TUI.%s is empty; expected a default", name)
 		}
 	}
 
-	if !strings.Contains(ov.Cancel, "ctrl+c") {
-		t.Errorf("Keybindings.Overlay.cancel = %q, want ctrl+c clean-exit binding", ov.Cancel)
+	if !strings.Contains(tui.Cancel, "ctrl+c") {
+		t.Errorf("Keybindings.TUI.cancel = %q, want ctrl+c clean-exit binding", tui.Cancel)
 	}
 }
 
-// TestOverlayKeybindingPartialOverride confirms that naming only some overlay
+// TestTUIKeybindingPartialOverride confirms that naming only some TUI
 // keys in a config file keeps the built-in defaults for the rest.
-func TestOverlayKeybindingPartialOverride(t *testing.T) {
+func TestTUIKeybindingPartialOverride(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
-[keybindings.overlay]
+[keybindings.tui]
 message_pin = "space"
 `
 
@@ -71,13 +71,85 @@ message_pin = "space"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Keybindings.Overlay.MessagePin != "space" {
-		t.Errorf("message_pin = %q, want overridden %q", cfg.Keybindings.Overlay.MessagePin, "space")
+	if cfg.Keybindings.TUI.MessagePin != "space" {
+		t.Errorf("message_pin = %q, want overridden %q", cfg.Keybindings.TUI.MessagePin, "space")
 	}
 
 	// An unspecified key keeps its default from the embedded config.
-	if cfg.Keybindings.Overlay.MessageExpandAll != "O" {
-		t.Errorf("message_expand_all = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.Overlay.MessageExpandAll, "O")
+	if cfg.Keybindings.TUI.MessageExpandAll != "O" {
+		t.Errorf("message_expand_all = %q, want default %q (partial table must not zero other keys)", cfg.Keybindings.TUI.MessageExpandAll, "O")
+	}
+}
+
+func TestLegacyNavigatorConfigNamesAreIgnored(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[overlay]
+shortcut_keys = "abc"
+
+[keybindings]
+session_list = "z"
+
+[keybindings.overlay]
+cancel = "x"
+`
+
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.SessionNavigator.ShortcutKeys != "1234567890" {
+		t.Errorf("legacy [overlay] changed SessionNavigator.ShortcutKeys to %q", cfg.SessionNavigator.ShortcutKeys)
+	}
+
+	if cfg.Keybindings.SessionNavigator != "w" {
+		t.Errorf("legacy session_list changed SessionNavigator key to %q", cfg.Keybindings.SessionNavigator)
+	}
+
+	if cfg.Keybindings.TUI.Cancel != "q esc ctrl+c" {
+		t.Errorf("legacy [keybindings.overlay] changed TUI cancel to %q", cfg.Keybindings.TUI.Cancel)
+	}
+}
+
+func TestSessionNavigatorConfigNamesLoad(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	toml := `
+[session_navigator]
+shortcut_keys = "canny"
+
+[keybindings]
+session_navigator = "z"
+
+[keybindings.tui]
+cancel = "esc"
+`
+
+	if err := os.WriteFile(cfgPath, []byte(toml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if cfg.SessionNavigator.ShortcutKeys != "canny" {
+		t.Errorf("SessionNavigator.ShortcutKeys = %q, want %q", cfg.SessionNavigator.ShortcutKeys, "canny")
+	}
+
+	if cfg.Keybindings.SessionNavigator != "z" {
+		t.Errorf("Keybindings.SessionNavigator = %q, want %q", cfg.Keybindings.SessionNavigator, "z")
+	}
+
+	if cfg.Keybindings.TUI.Cancel != "esc" {
+		t.Errorf("Keybindings.TUI.Cancel = %q, want %q", cfg.Keybindings.TUI.Cancel, "esc")
 	}
 }
 
@@ -141,31 +213,31 @@ func TestKeybindingsConflicts(t *testing.T) {
 		}
 	})
 
-	t.Run("picker cancel shadows picker action", func(t *testing.T) {
+	t.Run("navigator cancel shadows navigator action", func(t *testing.T) {
 		k := Default().Keybindings
-		k.Overlay.Cancel = "q esc ctrl+c x"
+		k.TUI.Cancel = "q esc ctrl+c x"
 
 		got := k.Conflicts()
 		if len(got) != 1 {
-			t.Fatalf("Conflicts() = %v, want exactly one picker collision", got)
+			t.Fatalf("Conflicts() = %v, want exactly one Navigator collision", got)
 		}
 
-		if !strings.Contains(got[0], "overlay.cancel") || !strings.Contains(got[0], "delete_session") {
-			t.Errorf("picker collision message %q should name cancel and delete_session", got[0])
+		if !strings.Contains(got[0], "tui.cancel") || !strings.Contains(got[0], "delete_session") {
+			t.Errorf("Navigator collision message %q should name cancel and delete_session", got[0])
 		}
 	})
 
-	t.Run("picker configured action shadows fixed action", func(t *testing.T) {
+	t.Run("navigator configured action shadows fixed action", func(t *testing.T) {
 		k := Default().Keybindings
 		k.Search = "s"
 
 		got := k.Conflicts()
 		if len(got) != 1 {
-			t.Fatalf("Conflicts() = %v, want exactly one picker collision", got)
+			t.Fatalf("Conflicts() = %v, want exactly one Navigator collision", got)
 		}
 
-		if !strings.Contains(got[0], "search wins") || !strings.Contains(got[0], "picker star") {
-			t.Errorf("picker collision message %q should name search as the winner over star", got[0])
+		if !strings.Contains(got[0], "search wins") || !strings.Contains(got[0], "navigator star") {
+			t.Errorf("Navigator collision message %q should name search as the winner over star", got[0])
 		}
 	})
 }
@@ -187,7 +259,7 @@ func TestKeybindingValidationRejectsInvalidPassthroughActions(t *testing.T) {
 	}
 }
 
-func TestKeybindingValidationAcceptsPickerTUIKeyNames(t *testing.T) {
+func TestKeybindingValidationAcceptsNavigatorTUIKeyNames(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	toml := `
@@ -202,11 +274,11 @@ search = " "
 	}
 
 	if _, err := Load(cfgPath); err != nil {
-		t.Fatalf("Load rejected picker TUI key names: %v", err)
+		t.Fatalf("Load rejected Navigator TUI key names: %v", err)
 	}
 }
 
-func TestOverlayKeybindingValidationRejectsInvalidNames(t *testing.T) {
+func TestTUIKeybindingValidationRejectsInvalidNames(t *testing.T) {
 	tests := map[string]string{
 		"unknown_cancel": `cancel = "escape"`,
 		"bad_ctrl":       `cancel = "ctrl-c"`,
@@ -215,7 +287,7 @@ func TestOverlayKeybindingValidationRejectsInvalidNames(t *testing.T) {
 
 	for name, line := range tests {
 		t.Run(name, func(t *testing.T) {
-			assertLoadRejectsKeybinding(t, "[keybindings.overlay]", line, "keybindings.overlay.")
+			assertLoadRejectsKeybinding(t, "[keybindings.tui]", line, "keybindings.tui.")
 		})
 	}
 }

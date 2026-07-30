@@ -93,7 +93,7 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 	repos := client.DiscoverRepos(cfg.AllowedRepoPaths, sessions)
 	agents, defaultAgent := agentChoices()
 
-	result := client.RunOverlay(client.RunOverlayOpts{
+	result := client.RunSessionNavigator(client.RunSessionNavigatorOpts{
 		Sessions:         sessions,
 		CurrentSessionID: "",
 		FetchPreview:     previewFetcher(),
@@ -107,10 +107,10 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 		Profile:          paths.Profile,
 		Collapsed:        nil,
 		RepoSuggestions:  repos,
-		ShortcutKeys:     cfg.Overlay.ShortcutKeys,
+		ShortcutKeys:     cfg.SessionNavigator.ShortcutKeys,
 		Agents:           agents,
 		DefaultAgent:     defaultAgent,
-		Keys:             overlayKeysFromConfig(),
+		Keys:             sessionNavigatorKeysFromConfig(),
 	})
 	if result == nil || result.Action == "" {
 		return nil
@@ -138,10 +138,10 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 
 		_ = protocol.DecodePayload(createResp, &newInfo)
 
-		return runAttachByID(c, newInfo.ID, result.Collapsed, result.PickerState)
+		return runAttachByID(c, newInfo.ID, result.Collapsed, result.State)
 	}
 
-	return runAttachByID(c, result.SessionID, result.Collapsed, result.PickerState)
+	return runAttachByID(c, result.SessionID, result.Collapsed, result.State)
 }
 
 // terminalResetSequence is the escape-sequence blob that undoes terminal state

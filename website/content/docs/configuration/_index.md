@@ -59,7 +59,7 @@ This reference is organized by area:
 - **[Session behavior]({{< relref "sessions.md" >}})** — headless sessions, delete retention, launch throttle, git pull.
 - **[Notifications & messages]({{< relref "notifications.md" >}})** — status bar, notifications, messages.
 - **[Automation & PR awareness]({{< relref "automation.md" >}})** — PR/CI watching, author-trust gate, triggers.
-- **[TUI & input]({{< relref "interface.md" >}})** — keybindings, overlay, input handling.
+- **[TUI & input]({{< relref "interface.md" >}})** — keybindings, Session Navigator, input handling.
 - **[Orchestrator & remote access]({{< relref "access.md" >}})** — orchestrator session, tailnet remote listener.
 
 ## Global settings

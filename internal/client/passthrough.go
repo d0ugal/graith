@@ -19,7 +19,7 @@ type PassthroughResult int
 
 const (
 	ResultDetached PassthroughResult = iota
-	ResultOverlay
+	ResultSessionNavigator
 	ResultShell
 	ResultQuit
 	ResultDisconnected
@@ -201,7 +201,7 @@ func showHelpBar(w io.Writer, keys PassthroughKeys) {
 	help := fmt.Sprintf(
 		"\x1b[7m %s detach  %s navigator  %s messages  %s orch  %s last  %s/%s next/prev  %s new  %s fork  %s rename  %s scroll  %s shell  %s restart \x1b[0m",
 		keyLabel(keys.Detach),
-		keyLabel(keys.SessionList),
+		keyLabel(keys.SessionNavigator),
 		keyLabel(keys.Messages),
 		keyLabel(keys.OrchestratorSession),
 		keyLabel(keys.LastSession),
@@ -236,7 +236,7 @@ func (sw *syncWriter) Write(p []byte) (int, error) {
 type PassthroughKeys struct {
 	Prefix              byte
 	Detach              PassthroughKey
-	SessionList         PassthroughKey
+	SessionNavigator    PassthroughKey
 	Shell               PassthroughKey
 	NextSession         PassthroughKey
 	PrevSession         PassthroughKey
@@ -262,8 +262,8 @@ func (keys PassthroughKeys) actionBindings() []passthroughActionBinding {
 		switch name {
 		case "detach":
 			bindings = append(bindings, passthroughActionBinding{key: keys.Detach, result: ResultDetached})
-		case "session_list":
-			bindings = append(bindings, passthroughActionBinding{key: keys.SessionList, result: ResultOverlay})
+		case "session_navigator":
+			bindings = append(bindings, passthroughActionBinding{key: keys.SessionNavigator, result: ResultSessionNavigator})
 		case "messages":
 			bindings = append(bindings, passthroughActionBinding{key: keys.Messages, result: ResultMessageOverlay})
 		case "shell":

@@ -47,23 +47,24 @@ var viewNames = []string{"All", "Repo", "Starred", "Labels", "Scenarios", "Delet
 
 const sessionNavigatorTitle = "Session Navigator"
 
-// PickerView identifies the Session Navigator view to restore within one attach
-// client. It is deliberately a client-local value; it is never persisted.
-type PickerView int
+// SessionNavigatorView identifies the Session Navigator view to restore within
+// one attach client. It is deliberately a client-local value; it is never
+// persisted.
+type SessionNavigatorView int
 
 const (
-	PickerViewAll PickerView = iota
-	PickerViewRepo
-	PickerViewStarred
-	PickerViewLabels
-	PickerViewScenario
-	PickerViewDeleted
+	SessionNavigatorViewAll SessionNavigatorView = iota
+	SessionNavigatorViewRepo
+	SessionNavigatorViewStarred
+	SessionNavigatorViewLabels
+	SessionNavigatorViewScenario
+	SessionNavigatorViewDeleted
 )
 
-// PickerState is the minimal navigation state carried between overlay opens.
-// Search and other transient overlay modes are intentionally excluded.
-type PickerState struct {
-	View       PickerView
+// SessionNavigatorState is the minimal navigation state carried between
+// Navigator opens. Search and other transient modes are intentionally excluded.
+type SessionNavigatorState struct {
+	View       SessionNavigatorView
 	SessionID  string
 	LabelGroup string
 }
@@ -980,8 +981,9 @@ type overlayModel struct {
 	restartErrors []error
 
 	// stoppedCurrent is set when the user stops the session they are currently
-	// attached to. RunOverlay turns this into a distinct result action so the
-	// attach loop exits instead of reattaching (and auto-resuming) it.
+	// attached to. The Navigator runner turns this into a distinct result
+	// action so the attach loop exits instead of reattaching (and auto-resuming)
+	// it.
 	stoppedCurrent bool
 
 	createModel     *createSessionModel
@@ -995,16 +997,17 @@ type overlayModel struct {
 	defaultAgent    string
 
 	// Configurable list-mode keybindings. Populated with defaults by
-	// newOverlayModel and overridden from config by RunOverlay.
+	// newOverlayModel and overridden from Navigator config.
 	keyDelete string
 	keyResume string
 	keySearch string
 	keyCancel []string
 }
 
-// OverlayKeys carries the configurable Navigator keybindings from [keybindings].
-// Empty fields fall back to the built-in defaults (see newOverlayModel).
-type OverlayKeys struct {
+// SessionNavigatorKeys carries the configurable Navigator keybindings from
+// [keybindings]. Empty fields fall back to the built-in defaults (see
+// newOverlayModel).
+type SessionNavigatorKeys struct {
 	DeleteSession string
 	ResumeSession string
 	Search        string
@@ -1013,7 +1016,7 @@ type OverlayKeys struct {
 
 // applyKeys overrides the model's list-mode keybindings with any non-empty
 // values from keys, leaving the built-in defaults in place otherwise.
-func (m *overlayModel) applyKeys(keys OverlayKeys) {
+func (m *overlayModel) applyKeys(keys SessionNavigatorKeys) {
 	if keys.DeleteSession != "" {
 		m.keyDelete = keys.DeleteSession
 	}
@@ -1050,8 +1053,8 @@ func (m *overlayModel) resizeList() {
 	m.resizeFilterInput()
 }
 
-// OverlayResult holds the outcome of the overlay interaction.
-type OverlayResult struct {
+// SessionNavigatorResult holds the outcome of the Session Navigator interaction.
+type SessionNavigatorResult struct {
 	Action         string
 	SessionID      string
 	CreateName     string
@@ -1059,7 +1062,7 @@ type OverlayResult struct {
 	CreateAgent    string
 	CreateLabels   []string
 	Collapsed      map[string]bool
-	PickerState    PickerState
+	State          SessionNavigatorState
 }
 
 func SortSessions(sessions []protocol.SessionInfo) {
@@ -1792,7 +1795,7 @@ func (m *overlayModel) switchView(view viewMode) {
 	}
 }
 
-func (m *overlayModel) restorePickerState(state PickerState) {
+func (m *overlayModel) restoreSessionNavigatorState(state SessionNavigatorState) {
 	view := viewMode(state.View)
 	if view < viewAll || view > viewDeleted {
 		view = viewAll
@@ -1808,8 +1811,8 @@ func (m *overlayModel) restorePickerState(state PickerState) {
 	}
 }
 
-func (m *overlayModel) pickerState() PickerState {
-	state := PickerState{View: PickerView(m.view)}
+func (m *overlayModel) sessionNavigatorState() SessionNavigatorState {
+	state := SessionNavigatorState{View: SessionNavigatorView(m.view)}
 	if item, ok := m.list.SelectedItem().(sessionItem); ok {
 		state.SessionID = item.info.ID
 		state.LabelGroup = item.labelGroup
@@ -3023,11 +3026,11 @@ func (m *overlayModel) View() tea.View {
 	return v
 }
 
-// RunOverlayOpts configures the Session Navigator overlay. It replaces the long
-// positional parameter list of RunOverlay — several of its fields are
-// structurally identical callbacks (five `func(sessionID string) error`) that
-// were trivially transposable when passed positionally.
-type RunOverlayOpts struct {
+// RunSessionNavigatorOpts configures the Session Navigator. It replaces the
+// earlier long positional parameter list; several fields are structurally
+// identical callbacks (five `func(sessionID string) error`) that were trivially
+// transposable when passed positionally.
+type RunSessionNavigatorOpts struct {
 	// Sessions is the initial list rendered in the overlay.
 	Sessions []protocol.SessionInfo
 	// CurrentSessionID highlights the session the user was just attached to.
@@ -3054,9 +3057,9 @@ type RunOverlayOpts struct {
 	Profile string
 	// Collapsed is the initial fold state, keyed by session ID.
 	Collapsed map[string]bool
-	// PickerState restores navigation from an earlier overlay opening in the
-	// same attach client. Zero value starts in the All view.
-	PickerState PickerState
+	// State restores navigation from an earlier Navigator opening in the same
+	// attach client. Zero value starts in the All view.
+	State SessionNavigatorState
 	// RepoSuggestions seeds the create-session repo picker.
 	RepoSuggestions []RepoSuggestion
 	// ShortcutKeys is the set of quick-jump shortcut runes.
@@ -3065,17 +3068,17 @@ type RunOverlayOpts struct {
 	Agents []string
 	// DefaultAgent is the pre-selected agent for create-session.
 	DefaultAgent string
-	// Keys is the resolved overlay keybinding set.
-	Keys OverlayKeys
+	// Keys is the resolved Navigator keybinding set.
+	Keys SessionNavigatorKeys
 }
 
-// RunOverlay launches the Bubble Tea Session Navigator.
-func RunOverlay(opts RunOverlayOpts) *OverlayResult {
+// RunSessionNavigator launches the Bubble Tea Session Navigator.
+func RunSessionNavigator(opts RunSessionNavigatorOpts) *SessionNavigatorResult {
 	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
 	m.refreshSessions = opts.RefreshSessions
 	m.refreshDeleted = opts.RefreshDeleted
 	m.refreshDeletedNow()
-	m.restorePickerState(opts.PickerState)
+	m.restoreSessionNavigatorState(opts.State)
 	m.restartSession = opts.RestartSession
 	m.stopSession = opts.StopSession
 	m.toggleStar = opts.ToggleStar
@@ -3097,44 +3100,48 @@ func RunOverlay(opts RunOverlayOpts) *OverlayResult {
 		return nil
 	}
 
-	overlayResult := &OverlayResult{
-		Collapsed:   result.collapsed,
-		PickerState: result.pickerState(),
+	return sessionNavigatorResultFromModel(result)
+}
+
+func sessionNavigatorResultFromModel(result *overlayModel) *SessionNavigatorResult {
+	navigatorResult := &SessionNavigatorResult{
+		Collapsed: result.collapsed,
+		State:     result.sessionNavigatorState(),
 	}
 
 	if result.createDone {
-		overlayResult.Action = "create"
-		overlayResult.CreateName = result.createName
-		overlayResult.CreateRepoPath = result.createRepoPath
-		overlayResult.CreateAgent = result.createAgent
+		navigatorResult.Action = "create"
+		navigatorResult.CreateName = result.createName
+		navigatorResult.CreateRepoPath = result.createRepoPath
+		navigatorResult.CreateAgent = result.createAgent
 
 		if result.createLabels != nil {
-			overlayResult.CreateLabels = append([]string{}, result.createLabels...)
+			navigatorResult.CreateLabels = append([]string{}, result.createLabels...)
 		}
 
-		return overlayResult
+		return navigatorResult
 	}
 
 	if result.selected != nil {
-		overlayResult.SessionID = result.selected.ID
+		navigatorResult.SessionID = result.selected.ID
 
-		overlayResult.Action = "attach"
+		navigatorResult.Action = "attach"
 		if result.state == stateConfirmDelete {
-			overlayResult.Action = "delete"
+			navigatorResult.Action = "delete"
 		}
 
-		return overlayResult
+		return navigatorResult
 	}
 
-	// The user stopped the session they were attached to and left the overlay
+	// The user stopped the session they were attached to and left the Navigator
 	// without picking another. Signal the attach loop to exit rather than
 	// reattach (which would auto-resume the session it just stopped).
 	if result.stoppedCurrent {
-		overlayResult.Action = "stopped-current"
-		overlayResult.SessionID = result.currentSessionID
+		navigatorResult.Action = "stopped-current"
+		navigatorResult.SessionID = result.currentSessionID
 
-		return overlayResult
+		return navigatorResult
 	}
 
-	return overlayResult
+	return navigatorResult
 }

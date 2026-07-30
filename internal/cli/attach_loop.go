@@ -34,12 +34,12 @@ type attachLoop struct {
 	sessionID     string
 	prevSessionID string
 
-	// collapsed persists the overlay's collapsed-repo state between openings.
+	// collapsed persists the Navigator's collapsed-repo state between openings.
 	collapsed map[string]bool
 
-	// pickerState persists only the overlay's navigation state for this attach
-	// client. Search and other transient overlay modes are not retained.
-	pickerState client.PickerState
+	// navigatorState persists only the Navigator's navigation state for this
+	// attach client. Search and other transient Navigator modes are not retained.
+	navigatorState client.SessionNavigatorState
 
 	terminalHistory    protocol.TerminalHistoryMsg
 	terminalSnapshot   protocol.ScreenSnapshotResponseMsg
@@ -52,7 +52,7 @@ type attachLoop struct {
 	info protocol.SessionInfo
 }
 
-func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]bool, initialPickerState ...client.PickerState) error {
+func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]bool, initialNavigatorState ...client.SessionNavigatorState) error {
 	if isInsideGraith() {
 		return errors.New("cannot attach from inside a graith session (nested sessions are not supported)")
 	}
@@ -67,18 +67,18 @@ func runAttachByID(c attachConn, sessionID string, initialCollapsed map[string]b
 		return nil
 	}
 
-	pickerState := client.PickerState{}
-	if len(initialPickerState) > 0 {
-		pickerState = initialPickerState[0]
+	navigatorState := client.SessionNavigatorState{}
+	if len(initialNavigatorState) > 0 {
+		navigatorState = initialNavigatorState[0]
 	}
 
 	l := &attachLoop{
-		ctx:         context.Background(),
-		c:           c,
-		sessionID:   sessionID,
-		collapsed:   initialCollapsed,
-		pickerState: pickerState,
-		info:        info,
+		ctx:            context.Background(),
+		c:              c,
+		sessionID:      sessionID,
+		collapsed:      initialCollapsed,
+		navigatorState: navigatorState,
+		info:           info,
 	}
 
 	l.opts = client.PassthroughOpts{
@@ -165,7 +165,7 @@ func (l *attachLoop) run() error {
 // fall-through.
 func (l *attachLoop) dispatch(result client.PassthroughResult) (bool, error) {
 	switch result {
-	case client.ResultOverlay:
+	case client.ResultSessionNavigator:
 		return l.onOverlay()
 	case client.ResultMessageOverlay:
 		return l.onMessageOverlay()
@@ -253,7 +253,7 @@ func (l *attachLoop) onOverlay() (bool, error) {
 	repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 	agents, defaultAgent := agentChoices()
 
-	overlayResult := client.RunOverlay(client.RunOverlayOpts{
+	navigatorResult := client.RunSessionNavigator(client.RunSessionNavigatorOpts{
 		Sessions:         list.Sessions,
 		CurrentSessionID: l.sessionID,
 		FetchPreview:     previewFetcher(),
@@ -266,19 +266,19 @@ func (l *attachLoop) onOverlay() (bool, error) {
 		RestoreSession:   restoreSession,
 		Profile:          paths.Profile,
 		Collapsed:        l.collapsed,
-		PickerState:      l.pickerState,
+		State:            l.navigatorState,
 		RepoSuggestions:  repos,
-		ShortcutKeys:     cfg.Overlay.ShortcutKeys,
+		ShortcutKeys:     cfg.SessionNavigator.ShortcutKeys,
 		Agents:           agents,
 		DefaultAgent:     defaultAgent,
-		Keys:             overlayKeysFromConfig(),
+		Keys:             sessionNavigatorKeysFromConfig(),
 	})
-	if overlayResult != nil {
-		l.collapsed = overlayResult.Collapsed
-		l.pickerState = overlayResult.PickerState
+	if navigatorResult != nil {
+		l.collapsed = navigatorResult.Collapsed
+		l.navigatorState = navigatorResult.State
 	}
 
-	if overlayResult != nil && overlayResult.Action == "stopped-current" {
+	if navigatorResult != nil && navigatorResult.Action == "stopped-current" {
 		// The user stopped the session they were attached to. Exit instead of
 		// reattaching, which would auto-resume it.
 		nc.Close()
@@ -287,25 +287,25 @@ func (l *attachLoop) onOverlay() (bool, error) {
 		return true, nil
 	}
 
-	if overlayResult == nil || overlayResult.Action == "" {
+	if navigatorResult == nil || navigatorResult.Action == "" {
 		return false, l.adoptCurrent(nc)
 	}
 
-	if overlayResult.Action == "create" {
-		return l.overlayCreate(nc, overlayResult)
+	if navigatorResult.Action == "create" {
+		return l.overlayCreate(nc, navigatorResult)
 	}
 
-	return l.overlaySwitch(nc, overlayResult.SessionID)
+	return l.overlaySwitch(nc, navigatorResult.SessionID)
 }
 
-// overlayCreate handles the overlay's "create" action: create the session, then
-// switch to it (or recover to the current session on failure).
-func (l *attachLoop) overlayCreate(nc attachConn, overlayResult *client.OverlayResult) (bool, error) {
+// overlayCreate handles the Navigator's "create" action: create the session,
+// then switch to it (or recover to the current session on failure).
+func (l *attachLoop) overlayCreate(nc attachConn, navigatorResult *client.SessionNavigatorResult) (bool, error) {
 	_ = nc.SendControl("create", protocol.CreateMsg{
-		Name:     overlayResult.CreateName,
-		RepoPath: overlayResult.CreateRepoPath,
-		Agent:    overlayResult.CreateAgent,
-		Labels:   createMsgLabels(overlayResult.CreateLabels),
+		Name:     navigatorResult.CreateName,
+		RepoPath: navigatorResult.CreateRepoPath,
+		Agent:    navigatorResult.CreateAgent,
+		Labels:   createMsgLabels(navigatorResult.CreateLabels),
 	})
 
 	createResp, err := nc.ReadControlResponse()

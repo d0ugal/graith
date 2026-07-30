@@ -259,7 +259,7 @@ type sessionColumn struct {
 }
 
 // trailingColumns returns every column after NAME in display order, built from
-// the shared client.SessionColumns registry so `gr ls` and the TUI picker stay
+// the shared client.SessionColumns registry so `gr ls` and the Session Navigator stay
 // in sync. Only registry columns flagged ShowCLI appear here; the compact
 // default hides the wide columns (model, branch, attached) and --wide shows
 // all. Cells with a CLIColor are colourised via colorize; renderRows keeps the

@@ -11,6 +11,11 @@ draft: false
 
 When attached, your terminal is in raw passthrough mode: all input goes straight to the agent's PTY unless the prefix key intercepts it.
 
+When updating from older builds, migrate `keybindings.session_list` to
+`keybindings.session_navigator` and `[keybindings.overlay]` to
+`[keybindings.tui]`. The old names are ignored; `gr doctor` reports them with
+the new names.
+
 ### Prefix key
 
 Default `ctrl+b`, configurable via `keybindings.prefix`.
@@ -23,7 +28,7 @@ multi-byte text, and NUL are rejected at config load.
 
 | Key | Action | Config key |
 |-----|--------|-----------|
-| `w` | Open the Session Navigator | `session_list` |
+| `w` | Open the Session Navigator | `session_navigator` |
 | `d` | Detach (leave the agent running) | `detach` |
 | `s` | Open a shell in the session's worktree | `shell` |
 | `c` | Create a new session | `new_session` |
@@ -44,9 +49,9 @@ is a valid literal prefix. If a prefix command collides with another command or
 with the prefix byte, graith starts but warns at load time and names the action
 that wins in passthrough runtime order — pick distinct keys.
 
-Picker action keys (`delete_session`, `resume_session`, and `search`) accept one
+Navigator action keys (`delete_session`, `resume_session`, and `search`) accept one
 supported Bubble Tea key name such as `x`, `space`, `ctrl+d`, or `f5`; they are
-matched inside the session picker rather than after the passthrough prefix.
+matched inside the Session Navigator rather than after the passthrough prefix.
 
 ### Literal prefix
 
@@ -140,21 +145,21 @@ Each session row shows:
 The message viewer (`ctrl+b m`) and scrollback pager (`ctrl+b [`) share a
 configurable navigation vocabulary and add their own action keys.
 
-| Overlay | Keys | Config keys |
+| TUI | Keys | Config keys |
 |---------|------|-------------|
-| Message viewer | `j`/`k` older/newer message · `pgdn`/`pgup` scroll a long message · `g`/`G` first/latest · `h`/`l` conversation/topic · `t` topics · `d` direct messages · `enter` pin message or toggle topic namespace · `O`/`C` expand/collapse all messages · `q`/Esc/Ctrl-C close | `overlay.up`/`down`, `overlay.page_down`/`page_up`, `overlay.top`/`bottom`, `overlay.message_prev_conversation`/`message_next_conversation`, `overlay.message_topics`/`message_direct`, `overlay.message_pin`, `overlay.message_expand_all`/`message_collapse_all`, `overlay.cancel` |
-| Scroll pager | `g`/`G` top/bottom · `q`/Esc/Ctrl-C quit (up/down/page keys are handled by the pager) | `overlay.top`/`bottom`, `overlay.cancel` |
+| Message viewer | `j`/`k` older/newer message · `pgdn`/`pgup` scroll a long message · `g`/`G` first/latest · `h`/`l` conversation/topic · `t` topics · `d` direct messages · `enter` pin message or toggle topic namespace · `O`/`C` expand/collapse all messages · `q`/Esc/Ctrl-C close | `tui.up`/`down`, `tui.page_down`/`page_up`, `tui.top`/`bottom`, `tui.message_prev_conversation`/`message_next_conversation`, `tui.message_topics`/`message_direct`, `tui.message_pin`, `tui.message_expand_all`/`message_collapse_all`, `tui.cancel` |
+| Scroll pager | `g`/`G` top/bottom · `q`/Esc/Ctrl-C quit (up/down/page keys are handled by the pager) | `tui.top`/`bottom`, `tui.cancel` |
 
-## Configuring overlay keys
+## Configuring TUI keys
 
 The message viewer and scroll pager read navigation and cancel aliases from the
-`[keybindings.overlay]` config table. The session picker reads only
-`overlay.cancel` from that table; its navigation keys are fixed, and its action
+`[keybindings.tui]` config table. The Session Navigator reads only
+`tui.cancel` from that table; its navigation keys are fixed, and its action
 keys (`delete_session`, `resume_session`, and `search`) are the top-level
-single-byte bindings. Each overlay-table value is a space-separated list of
+bindings. Each TUI-table value is a space-separated list of
 [Bubble Tea](https://github.com/charmbracelet/bubbletea) key names (single
 letters, `up`, `down`, `enter`, `esc`, `pgup`, `ctrl+d`, …); any listed key
-triggers the action. Picker filter mode keeps Esc/Ctrl-C as the clear/cancel
+triggers the action. Navigator filter mode keeps Esc/Ctrl-C as the clear/cancel
 keys so printable aliases can still be typed into the search field. A partial
 table overrides only the actions it names, and a named action's aliases replace
 the default aliases for that action. See [interface configuration]({{< relref "configuration/interface.md" >}})

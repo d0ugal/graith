@@ -316,7 +316,7 @@ label fields when creating or editing a session.
 
 ## Scrollback
 
-Each session's PTY output is appended to `<data_dir>/logs/<session-id>.log`, for tail reads by `gr logs` and preview rendering in the overlay.
+Each session's PTY output is appended to `<data_dir>/logs/<session-id>.log`, for tail reads by `gr logs` and preview rendering in the Session Navigator.
 
 `gr doctor` warns on oversized scrollback files; `gr doctor --autofix` truncates them.
 

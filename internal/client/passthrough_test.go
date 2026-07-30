@@ -17,12 +17,12 @@ import (
 
 var testOpts = PassthroughOpts{
 	Keys: PassthroughKeys{
-		Prefix:      0x02,
-		Detach:      NewPassthroughKey('d'),
-		SessionList: NewPassthroughKey('w'),
-		Shell:       NewPassthroughKey('s'),
-		NextSession: NewPassthroughKey('n'),
-		PrevSession: NewPassthroughKey('p'),
+		Prefix:           0x02,
+		Detach:           NewPassthroughKey('d'),
+		SessionNavigator: NewPassthroughKey('w'),
+		Shell:            NewPassthroughKey('s'),
+		NextSession:      NewPassthroughKey('n'),
+		PrevSession:      NewPassthroughKey('p'),
 	},
 }
 
@@ -112,8 +112,8 @@ func TestPrefixKeyOverlay(t *testing.T) {
 	ctx := context.Background()
 	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
-	if result != ResultOverlay {
-		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+	if result != ResultSessionNavigator {
+		t.Fatalf("expected ResultSessionNavigator (%d), got %d", ResultSessionNavigator, result)
 	}
 }
 
@@ -751,8 +751,8 @@ func TestPrefixKeyOverlayKittyProtocol(t *testing.T) {
 	ctx := context.Background()
 	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
-	if result != ResultOverlay {
-		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+	if result != ResultSessionNavigator {
+		t.Fatalf("expected ResultSessionNavigator (%d), got %d", ResultSessionNavigator, result)
 	}
 }
 
@@ -973,8 +973,8 @@ func TestKittyEncodedFollowUpKey(t *testing.T) {
 	ctx := context.Background()
 	result := c.runPassthroughLoop(ctx, testOpts, stdinR, stdout, nil)
 
-	if result != ResultOverlay {
-		t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+	if result != ResultSessionNavigator {
+		t.Fatalf("expected ResultSessionNavigator (%d), got %d", ResultSessionNavigator, result)
 	}
 }
 
@@ -1152,8 +1152,8 @@ func TestOverlayUnderHeavyOutput(t *testing.T) {
 
 	select {
 	case result := <-done:
-		if result != ResultOverlay {
-			t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+		if result != ResultSessionNavigator {
+			t.Fatalf("expected ResultSessionNavigator (%d), got %d", ResultSessionNavigator, result)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runPassthroughLoop did not return within 5s (deadlock)")
@@ -1199,8 +1199,8 @@ func TestOverlayUnderHeavyOutputKittyProtocol(t *testing.T) {
 
 	select {
 	case result := <-done:
-		if result != ResultOverlay {
-			t.Fatalf("expected ResultOverlay (%d), got %d", ResultOverlay, result)
+		if result != ResultSessionNavigator {
+			t.Fatalf("expected ResultSessionNavigator (%d), got %d", ResultSessionNavigator, result)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runPassthroughLoop did not return within 5s (deadlock)")
@@ -1491,7 +1491,7 @@ var prefixKeyOpts = PassthroughOpts{
 	Keys: PassthroughKeys{
 		Prefix:              0x02, // ctrl+b
 		Detach:              NewPassthroughKey('d'),
-		SessionList:         NewPassthroughKey('w'),
+		SessionNavigator:    NewPassthroughKey('w'),
 		Shell:               NewPassthroughKey('s'),
 		NextSession:         NewPassthroughKey('n'),
 		PrevSession:         NewPassthroughKey('p'),
@@ -1509,7 +1509,7 @@ var prefixKeyOpts = PassthroughOpts{
 func TestPassthroughActionBindingsCoverConfigOrder(t *testing.T) {
 	want := map[string]passthroughActionBinding{
 		"detach":               {key: NewPassthroughKey('d'), result: ResultDetached},
-		"session_list":         {key: NewPassthroughKey('w'), result: ResultOverlay},
+		"session_navigator":    {key: NewPassthroughKey('w'), result: ResultSessionNavigator},
 		"messages":             {key: NewPassthroughKey('m'), result: ResultMessageOverlay},
 		"shell":                {key: NewPassthroughKey('s'), result: ResultShell},
 		"next_session":         {key: NewPassthroughKey('n'), result: ResultNextSession},
@@ -1682,15 +1682,15 @@ func runPrefixSequenceWithOptsAndData(t *testing.T, opts PassthroughOpts, keys [
 }
 
 // TestPrefixKeyConfigurable is the regression test for issue #918: the detach,
-// session_list and shell prefix keys must honour the configured keybinding
+// session_navigator and shell prefix keys must honour the configured keybinding
 // instead of the old hardcoded d/w/s literals. Rebinding them to q/z/v and
 // pressing those keys must trigger the corresponding action.
 func TestPrefixKeyConfigurable(t *testing.T) {
 	opts := PassthroughOpts{Keys: PassthroughKeys{
-		Prefix:      0x02,
-		Detach:      NewPassthroughKey('q'),
-		SessionList: NewPassthroughKey('z'),
-		Shell:       NewPassthroughKey('v'),
+		Prefix:           0x02,
+		Detach:           NewPassthroughKey('q'),
+		SessionNavigator: NewPassthroughKey('z'),
+		Shell:            NewPassthroughKey('v'),
 	}}
 
 	cases := []struct {
@@ -1699,7 +1699,7 @@ func TestPrefixKeyConfigurable(t *testing.T) {
 		want PassthroughResult
 	}{
 		{"detach", 'q', ResultDetached},
-		{"session_list", 'z', ResultOverlay},
+		{"session_navigator", 'z', ResultSessionNavigator},
 		{"shell", 'v', ResultShell},
 	}
 	for _, tc := range cases {
@@ -1788,7 +1788,7 @@ func TestShowHelpBarReflectsConfiguredKeys(t *testing.T) {
 
 	showHelpBar(&buf, PassthroughKeys{
 		Detach:              NewPassthroughKey('Q'),
-		SessionList:         NewPassthroughKey('Z'),
+		SessionNavigator:    NewPassthroughKey('Z'),
 		Shell:               NewPassthroughKey(' '),
 		OrchestratorSession: NewPassthroughKey('O'),
 		LastSession:         NewPassthroughKey('L'),
