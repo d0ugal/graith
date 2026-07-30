@@ -47,6 +47,102 @@ var viewNames = []string{"All", "Repo", "Starred", "Labels", "Scenarios", "Delet
 
 const sessionNavigatorTitle = "Session Navigator"
 
+const (
+	SelectedDetailLayoutSidePanel = "side_panel"
+
+	wideDetailDefaultMinTerminalWidth  = 150
+	wideDetailDefaultMinTerminalHeight = 24
+	wideDetailMinPanelWidth            = 38
+	wideDetailDefaultMaxPanelWidth     = 54
+	wideDetailGap                      = 2
+)
+
+var defaultSelectedDetailFields = []string{
+	"summary",
+	"agent",
+	"model",
+	"branch",
+	"mode",
+	"base",
+	"git",
+	"worktree",
+	"pr",
+	"review",
+	"labels",
+	"created",
+	"attached",
+	"changed",
+	"deleted",
+	"purges",
+	"config",
+	"id",
+}
+
+// SelectedDetailConfig configures the optional wide-terminal selected-session
+// metadata panel in the Session Navigator. A nil RunSessionNavigator option uses
+// DefaultSelectedDetailConfig; setting Enabled false disables the panel.
+type SelectedDetailConfig struct {
+	Enabled           bool
+	Layout            string
+	MinTerminalWidth  int
+	MinTerminalHeight int
+	MaxWidth          int
+	Fields            []string
+}
+
+func DefaultSelectedDetailConfig() SelectedDetailConfig {
+	return SelectedDetailConfig{
+		Enabled:           true,
+		Layout:            SelectedDetailLayoutSidePanel,
+		MinTerminalWidth:  wideDetailDefaultMinTerminalWidth,
+		MinTerminalHeight: wideDetailDefaultMinTerminalHeight,
+		MaxWidth:          wideDetailDefaultMaxPanelWidth,
+		Fields:            cloneSelectedDetailFields(defaultSelectedDetailFields),
+	}
+}
+
+func selectedDetailConfigOrDefault(cfg *SelectedDetailConfig) SelectedDetailConfig {
+	if cfg == nil {
+		return DefaultSelectedDetailConfig()
+	}
+
+	out := *cfg
+	if out.Layout == "" {
+		out.Layout = SelectedDetailLayoutSidePanel
+	}
+
+	if out.MinTerminalWidth <= 0 {
+		out.MinTerminalWidth = wideDetailDefaultMinTerminalWidth
+	}
+
+	if out.MinTerminalHeight <= 0 {
+		out.MinTerminalHeight = wideDetailDefaultMinTerminalHeight
+	}
+
+	if out.MaxWidth <= 0 {
+		out.MaxWidth = wideDetailDefaultMaxPanelWidth
+	}
+
+	if out.MaxWidth < wideDetailMinPanelWidth {
+		out.MaxWidth = wideDetailMinPanelWidth
+	}
+
+	if out.Fields == nil {
+		out.Fields = defaultSelectedDetailFields
+	}
+
+	out.Fields = cloneSelectedDetailFields(out.Fields)
+
+	return out
+}
+
+func cloneSelectedDetailFields(fields []string) []string {
+	out := make([]string, len(fields))
+	copy(out, fields)
+
+	return out
+}
+
 // SessionNavigatorView identifies the Session Navigator view to restore within
 // one attach client. It is deliberately a client-local value; it is never
 // persisted.
@@ -650,6 +746,28 @@ func (m *overlayModel) minPanelInnerWidth() int {
 	return width
 }
 
+func (m *overlayModel) wideDetailPanelWidth(primaryRenderedWidth int) int {
+	detail := selectedDetailConfigOrDefault(&m.selectedDetail)
+	if !detail.Enabled || detail.Layout != SelectedDetailLayoutSidePanel {
+		return 0
+	}
+
+	if m.width < detail.MinTerminalWidth || m.height < detail.MinTerminalHeight {
+		return 0
+	}
+
+	if len(m.list.Items()) == 0 {
+		return 0
+	}
+
+	available := m.width - primaryRenderedWidth - wideDetailGap - 2
+	if available < wideDetailMinPanelWidth {
+		return 0
+	}
+
+	return min(detail.MaxWidth, available)
+}
+
 func (m *overlayModel) resizeFilterInput() {
 	prefixWidth := lipgloss.Width(sessionNavigatorTitle + "  Filter: ")
 	promptWidth := lipgloss.Width(m.filterInput.Prompt)
@@ -1070,6 +1188,267 @@ func wrapHelpLines(parts []string, width int) []string {
 	return lines
 }
 
+func renderSelectedSessionDetailPanel(item sessionItem, currentSessionID string, panelWidth int, detail SelectedDetailConfig) string {
+	innerWidth := max(1, panelWidth-4)
+	content := renderSelectedSessionDetailContent(item, currentSessionID, innerWidth, detail.Fields)
+
+	return lipgloss.NewStyle().
+		Width(panelWidth).
+		Background(colorPanel).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorFaint).
+		Padding(0, 1).
+		Render(content)
+}
+
+func renderSelectedGroupDetailPanel(header groupHeader, panelWidth int) string {
+	innerWidth := max(1, panelWidth-4)
+	content := renderSelectedGroupDetailContent(header, innerWidth)
+
+	return lipgloss.NewStyle().
+		Width(panelWidth).
+		Background(colorPanel).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorFaint).
+		Padding(0, 1).
+		Render(content)
+}
+
+func renderSelectedSessionDetailContent(item sessionItem, currentSessionID string, width int, fields []string) string {
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+	nameStyle := lipgloss.NewStyle().Bold(true)
+
+	var b strings.Builder
+	b.WriteString(fitStyledLine(titleStyle.Render("Selected Session"), width))
+	b.WriteString("\n")
+	b.WriteString(fitStyledLine(nameStyle.Render(item.displayName()), width))
+
+	if context := selectedSessionContext(item, currentSessionID); context != "" {
+		b.WriteString("\n")
+		b.WriteString(fitStyledLine(dim.Render(context), width))
+	}
+
+	for _, field := range fields {
+		appendSelectedDetailField(&b, item, field, width)
+	}
+
+	return b.String()
+}
+
+func renderSelectedGroupDetailContent(header groupHeader, width int) string {
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+	nameStyle := lipgloss.NewStyle().Bold(true)
+
+	var b strings.Builder
+	b.WriteString(fitStyledLine(titleStyle.Render("Session Group"), width))
+	b.WriteString("\n")
+	b.WriteString(fitStyledLine(nameStyle.Render(header.name), width))
+
+	if header.count > 0 {
+		b.WriteString("\n")
+		b.WriteString(fitStyledLine(dim.Render(sessionCountLabel(header.count)), width))
+	}
+
+	return b.String()
+}
+
+func appendSelectedDetailField(b *strings.Builder, item sessionItem, field string, width int) {
+	s := item.info
+
+	switch field {
+	case "summary":
+		appendDetailLine(b, "Summary", s.SummaryText, width, lipgloss.NewStyle(), false)
+	case "agent":
+		appendDetailLine(b, "Agent", s.Agent, width, lipgloss.NewStyle(), false)
+	case "model":
+		appendDetailLine(b, "Model", s.Model, width, lipgloss.NewStyle(), false)
+	case "branch":
+		if !s.Mirror && s.Branch != "" {
+			appendDetailLine(b, "Branch", displayBranch(s.Branch, s.Name), width, lipgloss.NewStyle(), false)
+		}
+	case "base":
+		if !s.Mirror {
+			appendDetailLine(b, "Base", s.BaseBranch, width, lipgloss.NewStyle(), false)
+		}
+	case "git":
+		if !s.Mirror {
+			appendDetailLine(b, "Git", displayGit(s.Dirty, s.UnpushedCount), width, tuiGitStyle(s), false)
+		}
+	case "mode":
+		switch {
+		case s.Mirror:
+			appendDetailLine(b, "Mode", "mirror", width, lipgloss.NewStyle(), false)
+		case s.InPlace:
+			appendDetailLine(b, "Mode", "in-place", width, lipgloss.NewStyle(), false)
+		}
+	case "worktree":
+		appendDetailLine(b, "Worktree", shortenPath(s.WorktreePath), width, lipgloss.NewStyle(), true)
+	case "cwd":
+		appendDetailLine(b, "CWD", shortenPath(s.CWD), width, lipgloss.NewStyle(), true)
+	case "pr":
+		appendDetailLine(b, "PR", cliPR(s), width, lipgloss.NewStyle().Foreground(prColor(s)), false)
+	case "review":
+		appendDetailLine(b, "Review", cliReview(s), width, lipgloss.NewStyle().Foreground(reviewColor(s)), false)
+	case "labels":
+		appendDetailLine(b, "Labels", strings.Join(s.Labels, ", "), width, lipgloss.NewStyle(), false)
+	case "created":
+		appendDetailLine(b, "Created", detailTimestamp(s.CreatedAt), width, lipgloss.NewStyle(), false)
+	case "attached":
+		appendDetailLine(b, "Attached", detailTimestamp(s.LastAttachedAt), width, lipgloss.NewStyle(), false)
+	case "changed":
+		appendDetailLine(b, "Changed", detailTimestamp(s.StatusChangedAt), width, lipgloss.NewStyle(), false)
+	case "deleted":
+		appendDetailLine(b, "Deleted", detailTimestamp(s.DeletedAt), width, lipgloss.NewStyle(), false)
+	case "purges":
+		appendDetailLine(b, "Purges", detailTimestamp(s.DeleteExpiresAt), width, lipgloss.NewStyle(), false)
+	case "config":
+		if s.ConfigStale {
+			appendDetailLine(b, "Config", "restart to apply changes", width, lipgloss.NewStyle().Foreground(colorYellow), false)
+		}
+	case "id":
+		appendDetailLine(b, "ID", s.ID, width, lipgloss.NewStyle().Foreground(colorDim), false)
+	}
+}
+
+func appendDetailLine(b *strings.Builder, label, value string, width int, valueStyle lipgloss.Style, preserveTail bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+
+	labelText := label + ":"
+	labelWidth := max(9, lipgloss.Width(labelText))
+	prefix := pad(labelText, labelWidth) + " "
+	valueWidth := width - lipgloss.Width(prefix)
+
+	if valueWidth > 0 {
+		if preserveTail {
+			value = fitDetailTail(value, valueWidth)
+		} else {
+			value = ansi.Truncate(value, valueWidth, "…")
+		}
+	}
+
+	line := lipgloss.NewStyle().Foreground(colorDim).Render(prefix) + valueStyle.Render(value)
+
+	b.WriteString("\n")
+	b.WriteString(fitStyledLine(line, width))
+}
+
+func fitDetailTail(value string, width int) string {
+	if width <= 0 || ansi.StringWidth(value) <= width {
+		return value
+	}
+
+	if width == 1 {
+		return "…"
+	}
+
+	return ansi.TruncateLeft(value, ansi.StringWidth(value)-width+1, "…")
+}
+
+func detailTimestamp(value string) string {
+	if value == "" {
+		return ""
+	}
+
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return value
+	}
+
+	now := time.Now()
+	delta := now.Sub(t)
+	suffix := " ago"
+
+	if delta < 0 {
+		delta = t.Sub(now)
+		suffix = " from now"
+	}
+
+	layout := "Jan 2 15:04"
+	if t.Local().Year() != now.Local().Year() {
+		layout = "Jan 2 2006 15:04"
+	}
+
+	return fmt.Sprintf("%s (%s%s)", t.Local().Format(layout), ShortDuration(delta), suffix)
+}
+
+func renderedBlockWidth(lines []string) int {
+	width := 0
+	for _, line := range lines {
+		if lineWidth := lipgloss.Width(line); lineWidth > width {
+			width = lineWidth
+		}
+	}
+
+	return width
+}
+
+func previewBackgroundLines(content string, width, height int) []string {
+	dimStyle := lipgloss.NewStyle().Foreground(colorPreview)
+	lines := make([]string, height)
+
+	if content == "" {
+		for i := range lines {
+			lines[i] = strings.Repeat(" ", width)
+		}
+
+		return lines
+	}
+
+	raw := strings.Split(content, "\n")
+
+	start := 0
+	if len(raw) > height {
+		start = len(raw) - height
+	}
+
+	for i := 0; i < height; i++ {
+		idx := start + i
+		if idx < len(raw) {
+			line := raw[idx]
+			if vis := lipgloss.Width(line); vis < width {
+				line += strings.Repeat(" ", width-vis)
+			} else if vis > width {
+				line = ansi.Truncate(line, width, "")
+			}
+
+			lines[i] = dimStyle.Render(line)
+		} else {
+			lines[i] = strings.Repeat(" ", width)
+		}
+	}
+
+	return lines
+}
+
+func overlayBlock(bgLines, blockLines []string, offsetX, offsetY, blockWidth int) {
+	for i, line := range blockLines {
+		row := offsetY + i
+		if row < 0 || row >= len(bgLines) {
+			continue
+		}
+
+		line = pad(line, blockWidth)
+		bg := bgLines[row]
+		left := ansi.Truncate(bg, offsetX, "")
+		right := ansi.TruncateLeft(bg, offsetX+blockWidth, "")
+		bgLines[row] = left + line + right
+	}
+}
+
+func centeredOffset(outer, inner int) int {
+	offset := (outer - inner) / 2
+	if offset < 0 {
+		return 0
+	}
+
+	return offset
+}
+
 // compactDelegate renders each item on a single line with aligned columns.
 type compactDelegate struct {
 	cols             columnWidths
@@ -1323,6 +1702,7 @@ type overlayModel struct {
 	helpCompactActions  []string
 	helpExpandedActions []string
 	helpToggleKeys      []string
+	selectedDetail      SelectedDetailConfig
 
 	restartQueue  []string
 	restartIdx    int
@@ -1946,6 +2326,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		helpCompactActions:  help.CompactActions,
 		helpExpandedActions: help.ExpandedActions,
 		helpToggleKeys:      help.ToggleKeys,
+		selectedDetail:      DefaultSelectedDetailConfig(),
 		keyDelete:           "x",
 		keyResume:           "R",
 		keySearch:           "/",
@@ -3044,373 +3425,401 @@ func (m *overlayModel) View() tea.View {
 	panelInnerWidth := m.panelInnerWidth()
 	dim := lipgloss.NewStyle().Foreground(colorDim)
 
-	var panelContent strings.Builder
+	renderPrimaryPanel := func(wideDetailActive bool) string {
+		var panelContent strings.Builder
 
-	if m.state == stateFilter {
-		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
-		line := titleStyle.Render(sessionNavigatorTitle) + dim.Render("  Filter: ") + m.filterInput.View()
-		panelContent.WriteString(fitStyledLine(line, panelInnerWidth))
-		panelContent.WriteString("\n")
-	} else {
-		panelContent.WriteString(renderSessionNavigatorTitle(m.view, len(m.visibleSessions()), m.profile, panelInnerWidth))
-		panelContent.WriteString("\n")
-	}
-
-	headerPrefix := "         "
-	nameColWidth := m.cols.treeIndent + m.cols.name
-
-	// Build the header and separator rows from the shared column registry so
-	// they always match the cells rendered per row. The Session/name column is
-	// special (tree indentation), so it is prepended here; the trailing header
-	// is padded to its width except for the last column, which flows freely.
-	headerCells := []string{pad("Session", nameColWidth)}
-	sepCells := []string{strings.Repeat("─", nameColWidth)}
-
-	tuiCols := tuiColumns()
-	for i, c := range tuiCols {
-		w := m.cols.col(c.Key)
-		if i == len(tuiCols)-1 {
-			headerCells = append(headerCells, c.Header)
+		if m.state == stateFilter {
+			titleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+			line := titleStyle.Render(sessionNavigatorTitle) + dim.Render("  Filter: ") + m.filterInput.View()
+			panelContent.WriteString(fitStyledLine(line, panelInnerWidth))
+			panelContent.WriteString("\n")
 		} else {
-			headerCells = append(headerCells, pad(c.Header, w))
+			panelContent.WriteString(renderSessionNavigatorTitle(m.view, len(m.visibleSessions()), m.profile, panelInnerWidth))
+			panelContent.WriteString("\n")
 		}
 
-		sepCells = append(sepCells, strings.Repeat("─", w))
-	}
+		headerPrefix := "         "
+		nameColWidth := m.cols.treeIndent + m.cols.name
 
-	headerLine := headerPrefix + strings.Join(headerCells, "  ")
-	panelContent.WriteString(dim.Render(headerLine))
-	panelContent.WriteString("\n")
+		// Build the header and separator rows from the shared column registry so
+		// they always match the cells rendered per row. The Session/name column is
+		// special (tree indentation), so it is prepended here; the trailing header
+		// is padded to its width except for the last column, which flows freely.
+		headerCells := []string{pad("Session", nameColWidth)}
+		sepCells := []string{strings.Repeat("─", nameColWidth)}
 
-	sepLine := headerPrefix + strings.Join(sepCells, "  ")
-	panelContent.WriteString(dim.Render(sepLine))
-	panelContent.WriteString("\n")
+		tuiCols := tuiColumns()
+		for i, c := range tuiCols {
+			w := m.cols.col(c.Key)
+			if i == len(tuiCols)-1 {
+				headerCells = append(headerCells, c.Header)
+			} else {
+				headerCells = append(headerCells, pad(c.Header, w))
+			}
 
-	if len(m.list.Items()) == 0 {
-		emptyStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
-		emptyMsg := "No sessions"
-
-		switch m.view {
-		case viewStarred:
-			emptyMsg = "No starred sessions"
-		case viewLabels:
-			emptyMsg = "No labelled sessions"
-		case viewDeleted:
-			emptyMsg = "No deleted sessions"
+			sepCells = append(sepCells, strings.Repeat("─", w))
 		}
 
-		panelContent.WriteString("\n  ")
-		panelContent.WriteString(emptyStyle.Render(emptyMsg))
-		panelContent.WriteString("\n")
-	} else {
-		panelContent.WriteString(m.list.View())
-	}
-
-	if item, ok := m.list.SelectedItem().(sessionItem); ok {
-		s := item.info
-
+		headerLine := headerPrefix + strings.Join(headerCells, "  ")
+		panelContent.WriteString(dim.Render(headerLine))
 		panelContent.WriteString("\n")
 
-		selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+		sepLine := headerPrefix + strings.Join(sepCells, "  ")
+		panelContent.WriteString(dim.Render(sepLine))
+		panelContent.WriteString("\n")
 
-		selectedLine := dim.Render("Selected: ") + selectedStyle.Render(item.displayName())
-		if context := selectedSessionContext(item, m.currentSessionID); context != "" {
-			selectedLine += dim.Render("  " + context)
-		}
+		if len(m.list.Items()) == 0 {
+			emptyStyle := lipgloss.NewStyle().Foreground(colorDim).Italic(true)
+			emptyMsg := "No sessions"
 
-		panelContent.WriteString(fitStyledLine(selectedLine, panelInnerWidth))
-
-		var line1 []string
-
-		if !s.Mirror {
-			if s.Branch != "" {
-				branch := s.Branch
-				if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
-					branch = p[2]
-				}
-
-				line1 = append(line1, "branch: "+branch)
-			} else if s.InPlace {
-				line1 = append(line1, "mode: in-place")
+			switch m.view {
+			case viewStarred:
+				emptyMsg = "No starred sessions"
+			case viewLabels:
+				emptyMsg = "No labelled sessions"
+			case viewDeleted:
+				emptyMsg = "No deleted sessions"
 			}
 
-			if s.BaseBranch != "" {
-				line1 = append(line1, "base: "+s.BaseBranch)
-			}
-		}
-
-		if s.Agent != "" {
-			line1 = append(line1, "agent: "+s.Agent)
-		}
-
-		if len(line1) > 0 {
+			panelContent.WriteString("\n  ")
+			panelContent.WriteString(emptyStyle.Render(emptyMsg))
 			panelContent.WriteString("\n")
-			panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
+		} else {
+			panelContent.WriteString(m.list.View())
 		}
 
-		if s.ConfigStale {
-			panelContent.WriteString("\n")
-			panelContent.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("config stale — restart to apply changes"))
-		}
-
-		if s.PullRequest != nil {
-			pr := s.PullRequest
-			prLine := fmt.Sprintf("PR #%d %s", pr.Number, pr.State)
-			lineColor := lipgloss.NewStyle().Foreground(prColor(s))
-
-			// A merged/closed PR is terminal: its conflict/CI badges are stale
-			// (resolvePR stops fetching checks once a PR leaves open/draft and
-			// writePRState keeps the last-known values), so suppress them here just
-			// as displayPR/cliPR do — otherwise the preview shows a stale
-			// "CI: pending 16/22" on a PR the row already reports as merged (#773).
-			if pr.State != "merged" && pr.State != "closed" {
-				if pr.Conflicting {
-					prLine += "  ⚠ merge conflict"
-				}
-
-				if s.CI != nil {
-					counts, haveCounts := ciCounts(s.CI)
-					switch s.CI.State {
-					case "passing":
-						prLine += "  CI: passing"
-					case "failing":
-						prLine += "  CI: failing"
-						if haveCounts {
-							prLine += " " + counts
-							if len(s.CI.FailingChecks) > 0 {
-								prLine += fmt.Sprintf(" %d✗", len(s.CI.FailingChecks))
-							}
-						}
-					case "pending":
-						prLine += "  CI: pending"
-						if haveCounts {
-							prLine += " " + counts
-						}
-					}
-				}
-			}
-
-			panelContent.WriteString("\n")
-			panelContent.WriteString(lineColor.Render(prLine))
-		}
-
-		var line2 []string
-		if s.WorktreePath != "" {
-			line2 = append(line2, shortenPath(s.WorktreePath))
-		}
-
-		if len(s.ID) >= 7 {
-			line2 = append(line2, "id: "+s.ID[:7])
-		}
-
-		if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-			line2 = append(line2, "created "+ShortDuration(time.Since(t))+" ago")
-		}
-
-		if len(line2) > 0 {
-			panelContent.WriteString("\n")
-			panelContent.WriteString(dim.Render(strings.Join(line2, "  ")))
-		}
-	}
-
-	switch m.state {
-	case stateConfirmDelete:
 		if item, ok := m.list.SelectedItem().(sessionItem); ok {
 			s := item.info
 
-			descendants := m.knownDescendantCount(s.ID)
-			if !s.Mirror && (s.Dirty || s.UnpushedCount > 0) {
-				warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+			panelContent.WriteString("\n")
 
-				panelContent.WriteString("\n")
-				panelContent.WriteString(warnStyle.Render("⚠ Session has unsaved work:"))
+			selectedStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
 
-				if s.Dirty {
-					panelContent.WriteString("\n")
-					panelContent.WriteString(warnStyle.Render("  • Uncommitted changes"))
-				}
+			selectedLine := dim.Render("Selected: ") + selectedStyle.Render(item.displayName())
+			if context := selectedSessionContext(item, m.currentSessionID); context != "" && !wideDetailActive {
+				selectedLine += dim.Render("  " + context)
+			}
 
-				if s.UnpushedCount > 0 {
-					panelContent.WriteString("\n")
+			panelContent.WriteString(fitStyledLine(selectedLine, panelInnerWidth))
 
-					label := "commits"
-					if s.UnpushedCount == 1 {
-						label = "commit"
+			if !wideDetailActive {
+				var line1 []string
+
+				if !s.Mirror {
+					if s.Branch != "" {
+						branch := s.Branch
+						if p := strings.SplitN(branch, "/", 3); len(p) == 3 {
+							branch = p[2]
+						}
+
+						line1 = append(line1, "branch: "+branch)
+					} else if s.InPlace {
+						line1 = append(line1, "mode: in-place")
 					}
 
-					panelContent.WriteString(warnStyle.Render(fmt.Sprintf("  • %d unpushed %s", s.UnpushedCount, label)))
+					if s.BaseBranch != "" {
+						line1 = append(line1, "base: "+s.BaseBranch)
+					}
+				}
+
+				if s.Agent != "" {
+					line1 = append(line1, "agent: "+s.Agent)
+				}
+
+				if len(line1) > 0 {
+					panelContent.WriteString("\n")
+					panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
+				}
+
+				if s.ConfigStale {
+					panelContent.WriteString("\n")
+					panelContent.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("config stale — restart to apply changes"))
+				}
+
+				if s.PullRequest != nil {
+					pr := s.PullRequest
+					prLine := fmt.Sprintf("PR #%d %s", pr.Number, pr.State)
+					lineColor := lipgloss.NewStyle().Foreground(prColor(s))
+
+					// A merged/closed PR is terminal: its conflict/CI badges are stale
+					// (resolvePR stops fetching checks once a PR leaves open/draft and
+					// writePRState keeps the last-known values), so suppress them here just
+					// as displayPR/cliPR do — otherwise the preview shows a stale
+					// "CI: pending 16/22" on a PR the row already reports as merged (#773).
+					if pr.State != "merged" && pr.State != "closed" {
+						if pr.Conflicting {
+							prLine += "  ⚠ merge conflict"
+						}
+
+						if s.CI != nil {
+							counts, haveCounts := ciCounts(s.CI)
+							switch s.CI.State {
+							case "passing":
+								prLine += "  CI: passing"
+							case "failing":
+								prLine += "  CI: failing"
+								if haveCounts {
+									prLine += " " + counts
+									if len(s.CI.FailingChecks) > 0 {
+										prLine += fmt.Sprintf(" %d✗", len(s.CI.FailingChecks))
+									}
+								}
+							case "pending":
+								prLine += "  CI: pending"
+								if haveCounts {
+									prLine += " " + counts
+								}
+							}
+						}
+					}
+
+					panelContent.WriteString("\n")
+					panelContent.WriteString(lineColor.Render(prLine))
+				}
+
+				var line2 []string
+				if s.WorktreePath != "" {
+					line2 = append(line2, shortenPath(s.WorktreePath))
+				}
+
+				if len(s.ID) >= 7 {
+					line2 = append(line2, "id: "+s.ID[:7])
+				}
+
+				if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
+					line2 = append(line2, "created "+ShortDuration(time.Since(t))+" ago")
+				}
+
+				if len(line2) > 0 {
+					panelContent.WriteString("\n")
+					panelContent.WriteString(dim.Render(strings.Join(line2, "  ")))
 				}
 			}
+		}
 
-			panelContent.WriteString("\n")
+		switch m.state {
+		case stateConfirmDelete:
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				s := item.info
 
-			if m.deleteError != "" {
+				descendants := m.knownDescendantCount(s.ID)
+				if !s.Mirror && (s.Dirty || s.UnpushedCount > 0) {
+					warnStyle := lipgloss.NewStyle().Foreground(colorRed).Bold(true)
+
+					panelContent.WriteString("\n")
+					panelContent.WriteString(warnStyle.Render("⚠ Session has unsaved work:"))
+
+					if s.Dirty {
+						panelContent.WriteString("\n")
+						panelContent.WriteString(warnStyle.Render("  • Uncommitted changes"))
+					}
+
+					if s.UnpushedCount > 0 {
+						panelContent.WriteString("\n")
+
+						label := "commits"
+						if s.UnpushedCount == 1 {
+							label = "commit"
+						}
+
+						panelContent.WriteString(warnStyle.Render(fmt.Sprintf("  • %d unpushed %s", s.UnpushedCount, label)))
+					}
+				}
+
 				panelContent.WriteString("\n")
-				panelContent.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render("⚠ Delete failed: " + m.deleteError))
-			}
 
-			prompt := fmt.Sprintf("Delete '%s'? [y/N]", s.Name)
-			if m.refreshDeleted != nil && !m.deletedReady {
-				prompt = "Delete unavailable: waiting for session ownership data"
-			} else if descendants > 0 {
-				noun := "descendant"
-				if descendants != 1 {
-					noun = "descendants"
+				if m.deleteError != "" {
+					panelContent.WriteString("\n")
+					panelContent.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render("⚠ Delete failed: " + m.deleteError))
 				}
 
-				prompt = fmt.Sprintf("'%s' has %d %s. Delete the entire subtree? [y/N]", s.Name, descendants, noun)
+				prompt := fmt.Sprintf("Delete '%s'? [y/N]", s.Name)
+				if m.refreshDeleted != nil && !m.deletedReady {
+					prompt = "Delete unavailable: waiting for session ownership data"
+				} else if descendants > 0 {
+					noun := "descendant"
+					if descendants != 1 {
+						noun = "descendants"
+					}
+
+					prompt = fmt.Sprintf("'%s' has %d %s. Delete the entire subtree? [y/N]", s.Name, descendants, noun)
+				}
+
+				panelContent.WriteString(lipgloss.NewStyle().
+					Foreground(colorRed).
+					Render(prompt))
+			}
+		case stateConfirmStop:
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				panelContent.WriteString("\n")
+				panelContent.WriteString(lipgloss.NewStyle().
+					Foreground(colorYellow).
+					Render(fmt.Sprintf("Stop '%s'? [y/N]", item.info.Name)))
+			}
+		case stateConfirmRestart:
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				panelContent.WriteString("\n")
+				panelContent.WriteString(lipgloss.NewStyle().
+					Foreground(colorGreen).
+					Render(fmt.Sprintf("Restart '%s'? [y/N]", item.info.Name)))
+			}
+		case stateRestartMenu:
+			sessions := m.visibleSessions()
+			all := len(sessions)
+			outdated, stopped := 0, 0
+
+			for _, s := range sessions {
+				if s.ConfigStale {
+					outdated++
+				}
+
+				if s.Status == "stopped" {
+					stopped++
+				}
 			}
 
-			panelContent.WriteString(lipgloss.NewStyle().
-				Foreground(colorRed).
-				Render(prompt))
-		}
-	case stateConfirmStop:
-		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			green := lipgloss.NewStyle().Foreground(colorGreen)
+
 			panelContent.WriteString("\n")
-			panelContent.WriteString(lipgloss.NewStyle().
-				Foreground(colorYellow).
-				Render(fmt.Sprintf("Stop '%s'? [y/N]", item.info.Name)))
-		}
-	case stateConfirmRestart:
-		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			panelContent.WriteString(green.Render("Restart:"))
+			panelContent.WriteString(green.Render(fmt.Sprintf("  [a]ll (%d)   [o]utdated (%d)   [s]topped (%d)   esc cancel", all, outdated, stopped)))
+		case stateRestartingAll:
 			panelContent.WriteString("\n")
+
+			progress := min(m.restartIdx+1, len(m.restartQueue))
 			panelContent.WriteString(lipgloss.NewStyle().
 				Foreground(colorGreen).
-				Render(fmt.Sprintf("Restart '%s'? [y/N]", item.info.Name)))
-		}
-	case stateRestartMenu:
-		sessions := m.visibleSessions()
-		all := len(sessions)
-		outdated, stopped := 0, 0
+				Render(fmt.Sprintf("Restarting %d/%d sessions…", progress, len(m.restartQueue))))
 
-		for _, s := range sessions {
-			if s.ConfigStale {
-				outdated++
-			}
-
-			if s.Status == "stopped" {
-				stopped++
+			if len(m.restartErrors) > 0 {
+				panelContent.WriteString(lipgloss.NewStyle().
+					Foreground(colorRed).
+					Render(fmt.Sprintf("  (%d failed)", len(m.restartErrors))))
 			}
 		}
 
-		green := lipgloss.NewStyle().Foreground(colorGreen)
+		// The global key hints describe list-mode keys. While a confirm prompt or
+		// the restart menu is open those keys are remapped (e.g. S = "restart
+		// stopped" in the menu), so only show them in the list/filter states.
+		if m.state == stateList || m.state == stateFilter {
+			helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
 
-		panelContent.WriteString("\n")
-		panelContent.WriteString(green.Render("Restart:"))
-		panelContent.WriteString(green.Render(fmt.Sprintf("  [a]ll (%d)   [o]utdated (%d)   [s]topped (%d)   esc cancel", all, outdated, stopped)))
-	case stateRestartingAll:
-		panelContent.WriteString("\n")
+			panelContent.WriteString("\n")
 
-		progress := min(m.restartIdx+1, len(m.restartQueue))
-		panelContent.WriteString(lipgloss.NewStyle().
-			Foreground(colorGreen).
-			Render(fmt.Sprintf("Restarting %d/%d sessions…", progress, len(m.restartQueue))))
+			if m.state == stateFilter {
+				panelContent.WriteString(helpStyle.Render(m.filterHelpLine(panelInnerWidth)))
+			} else if m.helpExpanded {
+				lines := m.expandedNavigatorHelpLines(panelInnerWidth)
 
-		if len(m.restartErrors) > 0 {
-			panelContent.WriteString(lipgloss.NewStyle().
-				Foreground(colorRed).
-				Render(fmt.Sprintf("  (%d failed)", len(m.restartErrors))))
-		}
-	}
+				lines = clampHelpLines(lines, m.height-12-m.list.Height(), panelInnerWidth)
+				for i, line := range lines {
+					if i > 0 {
+						panelContent.WriteString("\n")
+					}
 
-	// The global key hints describe list-mode keys. While a confirm prompt or
-	// the restart menu is open those keys are remapped (e.g. S = "restart
-	// stopped" in the menu), so only show them in the list/filter states.
-	if m.state == stateList || m.state == stateFilter {
-		helpStyle := lipgloss.NewStyle().Foreground(colorFaint)
-
-		panelContent.WriteString("\n")
-
-		if m.state == stateFilter {
-			panelContent.WriteString(helpStyle.Render(m.filterHelpLine(panelInnerWidth)))
-		} else if m.helpExpanded {
-			lines := m.expandedNavigatorHelpLines(panelInnerWidth)
-
-			lines = clampHelpLines(lines, m.height-12-m.list.Height(), panelInnerWidth)
-			for i, line := range lines {
-				if i > 0 {
-					panelContent.WriteString("\n")
+					panelContent.WriteString(helpStyle.Render(line))
 				}
-
-				panelContent.WriteString(helpStyle.Render(line))
+			} else {
+				panelContent.WriteString(helpStyle.Render(m.compactNavigatorHelpLine(panelInnerWidth)))
 			}
-		} else {
-			panelContent.WriteString(helpStyle.Render(m.compactNavigatorHelpLine(panelInnerWidth)))
 		}
+
+		return lipgloss.NewStyle().
+			Width(panelWidth).
+			Background(colorPanel).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorFaint).
+			Padding(0, 1).
+			Render(panelContent.String())
 	}
 
-	panel := lipgloss.NewStyle().
-		Width(panelWidth).
-		Background(colorPanel).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorFaint).
-		Padding(0, 1).
-		Render(panelContent.String())
+	renderWideDetail := func(primaryRenderedWidth int) ([]string, int) {
+		detailPanelWidth := m.wideDetailPanelWidth(primaryRenderedWidth)
+		if detailPanelWidth == 0 {
+			return nil, 0
+		}
+
+		detail := selectedDetailConfigOrDefault(&m.selectedDetail)
+
+		var detailPanel string
+
+		switch item := m.list.SelectedItem().(type) {
+		case sessionItem:
+			detailPanel = renderSelectedSessionDetailPanel(item, m.currentSessionID, detailPanelWidth, detail)
+		case groupHeader:
+			detailPanel = renderSelectedGroupDetailPanel(item, detailPanelWidth)
+		default:
+			return nil, 0
+		}
+
+		if detailPanel == "" {
+			return nil, 0
+		}
+
+		candidateLines := strings.Split(detailPanel, "\n")
+		if len(candidateLines) > h {
+			return nil, 0
+		}
+
+		candidateWidth := renderedBlockWidth(candidateLines)
+
+		if primaryRenderedWidth+wideDetailGap+candidateWidth > w-2 {
+			return nil, 0
+		}
+
+		return candidateLines, candidateWidth
+	}
+
+	panel := renderPrimaryPanel(false)
 
 	// --- Build background from preview scrollback ---
-	dimStyle := lipgloss.NewStyle().Foreground(colorPreview)
-	bgLines := make([]string, h)
+	bgLines := previewBackgroundLines(m.previewContent, w, h)
 
-	if m.previewContent != "" {
-		raw := strings.Split(m.previewContent, "\n")
-
-		start := 0
-		if len(raw) > h {
-			start = len(raw) - h
-		}
-
-		for i := 0; i < h; i++ {
-			idx := start + i
-			if idx < len(raw) {
-				line := raw[idx]
-				if vis := lipgloss.Width(line); vis < w {
-					line += strings.Repeat(" ", w-vis)
-				} else if vis > w {
-					line = ansi.Truncate(line, w, "")
-				}
-
-				bgLines[i] = dimStyle.Render(line)
-			} else {
-				bgLines[i] = strings.Repeat(" ", w)
-			}
-		}
-	} else {
-		for i := range bgLines {
-			bgLines[i] = strings.Repeat(" ", w)
-		}
-	}
-
-	// --- Overlay panel on background ---
+	// --- Overlay panel(s) on background ---
 	panelLines := strings.Split(panel, "\n")
-	panelH := len(panelLines)
+	panelRenderedW := renderedBlockWidth(panelLines)
 
-	panelRenderedW := 0
-	for _, pl := range panelLines {
-		if lw := lipgloss.Width(pl); lw > panelRenderedW {
-			panelRenderedW = lw
+	detailLines, detailRenderedW := renderWideDetail(panelRenderedW)
+	if detailRenderedW > 0 {
+		widePanel := renderPrimaryPanel(true)
+		widePanelLines := strings.Split(widePanel, "\n")
+		widePanelRenderedW := renderedBlockWidth(widePanelLines)
+		wideDetailLines, wideDetailRenderedW := renderWideDetail(widePanelRenderedW)
+
+		if wideDetailRenderedW > 0 {
+			panelLines = widePanelLines
+			panelRenderedW = widePanelRenderedW
+			detailLines = wideDetailLines
+			detailRenderedW = wideDetailRenderedW
+		} else {
+			detailLines = nil
+			detailRenderedW = 0
 		}
 	}
 
-	offsetY := (h - panelH) / 2
-	offsetX := (w - panelRenderedW) / 2
+	layoutWidth := panelRenderedW
 
-	if offsetY < 0 {
-		offsetY = 0
+	if detailRenderedW > 0 {
+		layoutWidth += wideDetailGap + detailRenderedW
 	}
+
+	offsetX := (w - layoutWidth) / 2
 
 	if offsetX < 0 {
 		offsetX = 0
 	}
 
-	for i, pl := range panelLines {
-		row := offsetY + i
-		if row >= 0 && row < h {
-			bg := bgLines[row]
-			left := ansi.Truncate(bg, offsetX, "")
-			right := ansi.TruncateLeft(bg, offsetX+panelRenderedW, "")
-			bgLines[row] = left + pl + right
-		}
+	layoutHeight := len(panelLines)
+	if len(detailLines) > 0 {
+		layoutHeight = max(layoutHeight, len(detailLines))
+	}
+
+	offsetY := centeredOffset(h, layoutHeight)
+
+	overlayBlock(bgLines, panelLines, offsetX, offsetY, panelRenderedW)
+
+	if detailRenderedW > 0 && len(detailLines) > 0 {
+		overlayBlock(bgLines, detailLines, offsetX+panelRenderedW+wideDetailGap, offsetY, detailRenderedW)
 	}
 
 	v := tea.NewView(strings.Join(bgLines, "\n"))
@@ -3463,8 +3872,11 @@ type RunSessionNavigatorOpts struct {
 	DefaultAgent string
 	// Keys is the resolved Navigator keybinding set.
 	Keys SessionNavigatorKeys
-	// Help is the resolved Navigator help/action presentation.
+	// Help is the resolved Navigator help/action footer configuration.
 	Help SessionNavigatorHelp
+	// SelectedDetail configures the optional wide selected-session detail panel.
+	// Nil preserves the built-in default behaviour.
+	SelectedDetail *SelectedDetailConfig
 }
 
 // RunSessionNavigator launches the Bubble Tea Session Navigator.
@@ -3482,6 +3894,7 @@ func RunSessionNavigator(opts RunSessionNavigatorOpts) *SessionNavigatorResult {
 	m.repoSuggestions = opts.RepoSuggestions
 	m.agents = opts.Agents
 	m.defaultAgent = opts.DefaultAgent
+	m.selectedDetail = selectedDetailConfigOrDefault(opts.SelectedDetail)
 	m.applyKeys(opts.Keys)
 	m.applyHelp(opts.Help)
 	p := tea.NewProgram(m)

@@ -137,10 +137,13 @@ The existing TUI already supports:
 | Docs accuracy | Keybinding docs missed the stop action and described `R` as a direct restart-all shortcut. | Docs list `S` stop and `R` restart menu, matching the implementation. | Improves discoverability of existing actions without adding new state. |
 
 Compact validation: `go test ./internal/client -run 'TestView_(SessionNavigatorContextAtCompactAndWideSizes|SessionNavigatorCompactRichDetailsKeepHelpVisible|SelectedContextAddsRepoInGroupedView)|TestShowHelpBarReflectsConfiguredKeys'`
-locks the title, selected context, rich-detail footer, and prefix help label at
-`80x24` and `160x40`. The wide case keeps the current live preview background
-and column set; the compact cases keep the key context visible before truncating
-the right side of the title or list body.
+locks the title, selected context, compact rich-detail footer, and prefix help
+label across compact and wide sizes. The wide case keeps the current live
+preview background and column set; the compact cases keep the key context
+visible before truncating the right side of the title or list body. Wide-detail
+validation also covers the `160x40` side panel, compact `80x24` omission,
+short-height and spare-width fallback, group-header layout stability, and
+configurable field lists.
 
 ### Follow-up implementation issues
 
@@ -151,9 +154,8 @@ The remaining accepted work should stay split:
    actions plus an expanded in-overlay help state, improving discoverability
    without changing views or adding a dashboard.
 2. [**Wide Navigator layout**](https://github.com/d0ugal/graith/issues/1870):
-   for very wide terminals, keep the tree and live
-   preview but use spare width for a richer selected-session detail area instead
-   of only centering the same panel.
+   implemented by keeping the tree, columns, and live preview primary while
+   using spare width for a richer selected-session detail side panel.
 3. [**Internal naming cleanup**](https://github.com/d0ugal/graith/issues/1871):
    implemented as a breaking Go/config cleanup so the Session Navigator owns
    the `session_navigator` config namespace and exported client API names.

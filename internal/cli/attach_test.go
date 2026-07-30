@@ -400,6 +400,37 @@ func TestSessionNavigatorHelpFromConfigPreservesEmptyActionLists(t *testing.T) {
 	}
 }
 
+func TestSessionNavigatorSelectedDetailFromConfig(t *testing.T) {
+	oldCfg := cfg
+
+	t.Cleanup(func() { cfg = oldCfg })
+
+	cfg = config.Default()
+
+	if got, want := sessionNavigatorSelectedDetailFromConfig(), client.DefaultSelectedDetailConfig(); !reflect.DeepEqual(got, want) {
+		t.Errorf("default sessionNavigatorSelectedDetailFromConfig() = %+v, want %+v", got, want)
+	}
+
+	cfg.SessionNavigator.SelectedDetail.Enabled = false
+	cfg.SessionNavigator.SelectedDetail.MinTerminalWidth = 180
+	cfg.SessionNavigator.SelectedDetail.MaxWidth = 42
+	cfg.SessionNavigator.SelectedDetail.Fields = []string{"branch", "worktree", "pr"}
+
+	got := sessionNavigatorSelectedDetailFromConfig()
+	want := client.SelectedDetailConfig{
+		Enabled:           false,
+		Layout:            client.SelectedDetailLayoutSidePanel,
+		MinTerminalWidth:  180,
+		MinTerminalHeight: config.SessionNavigatorSelectedDetailMinTerminalHeightDefault,
+		MaxWidth:          42,
+		Fields:            []string{"branch", "worktree", "pr"},
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sessionNavigatorSelectedDetailFromConfig() = %+v, want %+v", got, want)
+	}
+}
+
 func TestNavigatorActionKeyNormalizesSpace(t *testing.T) {
 	tests := map[string]struct {
 		input string
