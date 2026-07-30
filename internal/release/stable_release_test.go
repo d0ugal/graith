@@ -167,7 +167,7 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 		draftRead, `case "$draft" in true|false)`, "unexpected=", "cmp \"$existing/$name\" \"dist/$name\"",
 		"gh attestation verify", "--source-digest", "gh release upload",
 		"render-stable-homebrew.sh", "publish-linux-repositories.sh",
-		"render-stable-aur.sh", "gh release download", "--draft=false",
+		"render-stable-aur.sh", "gh release download", "--draft=false", "homebrew-tap/graith.rb",
 		releaseLookup, targetCommitCheck,
 		`test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 10`,
 		"if [ \"$draft\" = false ]", "Publish prepared Homebrew formula",
@@ -195,6 +195,10 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 
 	if strings.Contains(text, "releases/tags/$RELEASE_TAG") {
 		t.Fatal("stable publisher uses a REST tag lookup that cannot see draft releases before publication")
+	}
+
+	if strings.Contains(text, "homebrew-tap/Formula/graith.rb") {
+		t.Fatal("stable publisher renders to a Formula/ subdirectory that does not exist in d0ugal/homebrew-tap")
 	}
 
 	if strings.Contains(text, `test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 11`) {
