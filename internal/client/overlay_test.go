@@ -95,6 +95,34 @@ func asOverlay(m tea.Model) *overlayModel {
 	return m.(*overlayModel)
 }
 
+func columnOfText(t *testing.T, content, needle string) int {
+	t.Helper()
+
+	for _, line := range strings.Split(ansi.Strip(content), "\n") {
+		if col := strings.Index(line, needle); col >= 0 {
+			return col
+		}
+	}
+
+	t.Fatalf("content missing %q:\n%s", needle, ansi.Strip(content))
+
+	return -1
+}
+
+func rowOfText(t *testing.T, content, needle string) int {
+	t.Helper()
+
+	for i, line := range strings.Split(ansi.Strip(content), "\n") {
+		if strings.Contains(line, needle) {
+			return i
+		}
+	}
+
+	t.Fatalf("content missing %q:\n%s", needle, ansi.Strip(content))
+
+	return -1
+}
+
 // sizedModel builds an overlay model with the common nil callbacks and the
 // standard 120x40 dimensions used across most overlay tests.
 func sizedModel(t *testing.T, sessions []protocol.SessionInfo, current string) *overlayModel {
@@ -3314,6 +3342,386 @@ func TestView_SessionNavigatorContextAtCompactAndWideSizes(t *testing.T) {
 	}
 }
 
+func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
+	now := time.Now()
+	sessions := []protocol.SessionInfo{
+		{
+			ID:              "braw-wide-detail",
+			Name:            "braw-detail",
+			RepoName:        "graith",
+			Branch:          "d0ugal/graith/issue-1870-wide-details",
+			BaseBranch:      "main",
+			Agent:           "codex",
+			Model:           "gpt-5",
+			Status:          "running",
+			SummaryText:     "polishing navigator detail",
+			WorktreePath:    "/tmp/graith/strath/braw-detail",
+			Labels:          []string{"cli", "polish"},
+			CreatedAt:       now.Add(-2 * time.Hour).Format(time.RFC3339),
+			LastAttachedAt:  now.Add(-20 * time.Minute).Format(time.RFC3339),
+			StatusChangedAt: now.Add(-5 * time.Minute).Format(time.RFC3339),
+			PullRequest:     &protocol.PRInfo{Number: 1870, State: "open", ReviewDecision: "review_required"},
+			CI:              &protocol.CIInfo{State: "pending", Passed: 16, Total: 22},
+		},
+	}
+
+	m := newOverlayModel(sessions, "braw-wide-detail", noopFetchPreview, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 160, 40)
+	om := asOverlay(updated)
+	updated, _ = om.Update(previewMsg{
+		sessionID: "braw-wide-detail",
+		content:   "UNIQUE_PREVIEW_LINE_1\nUNIQUE_PREVIEW_LINE_2",
+	})
+
+	view := asOverlay(updated).View().Content
+	plain := ansi.Strip(view)
+
+	for _, want := range []string{
+		"Selected Session",
+		"Summary:  polishing navigator detail",
+		"Branch:   issue-1870-wide-details",
+		"Base:     main",
+		"Worktree:",
+		"braw-detail",
+		"PR:       #1870 open CI:16/22",
+		"Review:   needed",
+		"Labels:   cli, polish",
+		"Created:",
+		"Attached:",
+		"Changed:",
+		"UNIQUE_PREVIEW_LINE_2",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("wide detail view should contain %q:\n%s", want, plain)
+		}
+	}
+
+	for _, absent := range []string{
+		"branch: issue-1870-wide-details",
+		"PR #1870 open",
+		"/tmp/graith/strath/braw-detail  id:",
+	} {
+		if strings.Contains(plain, absent) {
+			t.Errorf("wide detail view should not duplicate footer metadata %q:\n%s", absent, plain)
+		}
+	}
+
+	for i, line := range strings.Split(view, "\n") {
+		if width := ansi.StringWidth(line); width > 160 {
+			t.Errorf("line %d width = %d, want <= 160: %q", i+1, width, line)
+		}
+	}
+}
+
+func TestView_CompactOmitsWideSelectedSessionDetailPanel(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:           "braw-compact-detail",
+			Name:         "braw-detail",
+			RepoName:     "graith",
+			Branch:       "d0ugal/graith/issue-1870-wide-details",
+			Agent:        "codex",
+			Status:       "running",
+			Labels:       []string{"cli", "polish"},
+			WorktreePath: "/tmp/graith/strath/braw-detail",
+			CreatedAt:    time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+		},
+	}
+
+	m := newOverlayModel(sessions, "braw-compact-detail", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 80, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if strings.Contains(view, "Selected Session") {
+		t.Fatalf("compact view should not show the wide-only detail panel:\n%s", view)
+	}
+
+	for _, want := range []string{
+		"Selected: graith/braw-detail",
+		"attached",
+		"enter attach",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("compact view should retain existing footer detail %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailMinHeightFallbackKeepsFooter(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:           "braw-short-detail",
+			Name:         "braw-detail",
+			RepoName:     "graith",
+			Branch:       "d0ugal/graith/issue-1870-wide-details",
+			Agent:        "codex",
+			Status:       "running",
+			WorktreePath: "/tmp/graith/strath/braw-detail",
+			CreatedAt:    time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+		},
+	}
+
+	m := newOverlayModel(sessions, "braw-short-detail", nil, nil, nil, nil)
+	m.selectedDetail.MinTerminalHeight = 40
+
+	updated, _ := sendWindowSize(m, 160, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if strings.Contains(view, "Selected Session") {
+		t.Fatalf("short terminal should not show the wide-only detail panel:\n%s", view)
+	}
+
+	for _, want := range []string{
+		"Selected: graith/braw-detail  attached",
+		"branch: issue-1870-wide-details",
+		"agent: codex",
+		"/tmp/graith/strath/braw-detail  id:",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("short terminal should retain compact footer detail %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailSpareWidthFallbackKeepsFooter(t *testing.T) {
+	longName := "braw-" + strings.Repeat("strath-", 18)
+	sessions := []protocol.SessionInfo{
+		{
+			ID:           "braw-spare-detail",
+			Name:         longName,
+			RepoName:     "graith",
+			Branch:       "d0ugal/graith/issue-1870-wide-details",
+			Agent:        "codex",
+			Status:       "running",
+			WorktreePath: "/tmp/graith/strath/braw-spare-detail",
+			CreatedAt:    time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+		},
+	}
+
+	m := newOverlayModel(sessions, "braw-spare-detail", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 160, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if strings.Contains(view, "Selected Session") {
+		t.Fatalf("wide terminal without spare width should not show selected detail panel:\n%s", view)
+	}
+
+	for _, want := range []string{
+		"branch: issue-1870-wide-details",
+		"agent: codex",
+		"/tmp/graith/strath/braw-spare-detail  id:",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("spare-width fallback should retain compact footer detail %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailTooTallFallbackKeepsFooter(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:              "braw-tall-detail",
+			Name:            "braw-detail",
+			RepoName:        "graith",
+			Branch:          "d0ugal/graith/issue-1870-wide-details",
+			BaseBranch:      "main",
+			Agent:           "codex",
+			Model:           "gpt-5",
+			Status:          "running",
+			SummaryText:     "polishing navigator detail",
+			WorktreePath:    "/tmp/graith/strath/braw-detail",
+			CWD:             "/tmp/graith/strath/braw-detail",
+			Labels:          []string{"cli", "polish"},
+			CreatedAt:       time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+			LastAttachedAt:  time.Now().Add(-20 * time.Minute).Format(time.RFC3339),
+			StatusChangedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
+			PullRequest:     &protocol.PRInfo{Number: 1870, State: "open", ReviewDecision: "review_required"},
+			CI:              &protocol.CIInfo{State: "pending", Passed: 16, Total: 22},
+		},
+	}
+
+	m := newOverlayModel(sessions, "braw-tall-detail", nil, nil, nil, nil)
+
+	m.selectedDetail.Fields = append(cloneSelectedDetailFields(defaultSelectedDetailFields),
+		"cwd", "summary", "summary", "summary", "summary", "summary", "summary",
+	)
+
+	updated, _ := sendWindowSize(m, 160, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if strings.Contains(view, "Selected Session") {
+		t.Fatalf("detail panel taller than the terminal should fall back to inline footer:\n%s", view)
+	}
+
+	for _, want := range []string{
+		"Selected: graith/braw-detail  attached",
+		"branch: issue-1870-wide-details  base: main  agent: codex",
+		"PR #1870 open",
+		"/tmp/graith/strath/braw-detail  id:",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("too-tall fallback should retain compact footer detail %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_DisablesWideSelectedSessionDetailPanel(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:        "braw-disabled-detail",
+		Name:      "braw-detail",
+		RepoName:  "graith",
+		Branch:    "d0ugal/graith/issue-1870-wide-details",
+		Status:    "running",
+		CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	m := newOverlayModel(sessions, "braw-disabled-detail", nil, nil, nil, nil)
+	m.selectedDetail.Enabled = false
+
+	updated, _ := sendWindowSize(m, 160, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if strings.Contains(view, "Selected Session") {
+		t.Fatalf("disabled selected-detail config should hide the wide panel:\n%s", view)
+	}
+
+	if !strings.Contains(view, "Selected: graith/braw-detail") {
+		t.Fatalf("disabled selected-detail config should preserve the compact footer:\n%s", view)
+	}
+}
+
+func TestView_WideSelectedSessionDetailMaxWidthClampsToMinimum(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:        "braw-narrow-detail",
+		Name:      "braw-detail",
+		RepoName:  "graith",
+		Branch:    "d0ugal/graith/issue-1870-wide-details",
+		Status:    "running",
+		CreatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	m := newOverlayModel(sessions, "braw-narrow-detail", nil, nil, nil, nil)
+	m.selectedDetail.MaxWidth = 10
+
+	updated, _ := sendWindowSize(m, 160, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if !strings.Contains(view, "Selected Session") {
+		t.Fatalf("small direct max width should clamp instead of hiding the wide panel:\n%s", view)
+	}
+}
+
+func TestView_WideSelectedSessionDetailKeepsGroupedPanelPosition(t *testing.T) {
+	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
+	m.view = viewRepo
+	m.rebuildForView()
+
+	updated, _ := sendWindowSize(m, 200, 40)
+	om := asOverlay(updated)
+
+	om.list.Select(0)
+	headerView := om.View().Content
+	headerCol := columnOfText(t, headerView, sessionNavigatorTitle)
+
+	if !strings.Contains(ansi.Strip(headerView), "Session Group") {
+		t.Fatalf("group header selection should render a stable side placeholder:\n%s", ansi.Strip(headerView))
+	}
+
+	if got, want := rowOfText(t, headerView, "Session Group"), rowOfText(t, headerView, sessionNavigatorTitle); got != want {
+		t.Fatalf("group detail panel row = %d, want aligned with Navigator row %d", got, want)
+	}
+
+	om.list.Select(1)
+	sessionView := om.View().Content
+	sessionCol := columnOfText(t, sessionView, sessionNavigatorTitle)
+
+	if !strings.Contains(ansi.Strip(sessionView), "Selected Session") {
+		t.Fatalf("session selection should render selected-session details:\n%s", ansi.Strip(sessionView))
+	}
+
+	if got, want := rowOfText(t, sessionView, "Selected Session"), rowOfText(t, sessionView, sessionNavigatorTitle); got != want {
+		t.Fatalf("selected detail panel row = %d, want aligned with Navigator row %d", got, want)
+	}
+
+	if headerCol != sessionCol {
+		t.Fatalf("Navigator column changed from %d on group header to %d on session row", headerCol, sessionCol)
+	}
+}
+
+func TestView_WideSelectedSessionDetailFieldsConfig(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:           "braw-field-detail",
+		Name:         "braw-detail",
+		RepoName:     "graith",
+		Branch:       "d0ugal/graith/issue-1870-wide-details",
+		Agent:        "codex",
+		Status:       "running",
+		SummaryText:  "should be hidden from wide panel",
+		WorktreePath: "/tmp/graith/strath/braw-detail",
+		Labels:       []string{"cli", "polish"},
+		CreatedAt:    time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+		PullRequest:  &protocol.PRInfo{Number: 1870, State: "open"},
+	}}
+	m := newOverlayModel(sessions, "braw-field-detail", nil, nil, nil, nil)
+	m.selectedDetail.Fields = []string{"branch", "labels"}
+
+	updated, _ := sendWindowSize(m, 160, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{
+		"Selected Session",
+		"Branch:   issue-1870-wide-details",
+		"Labels:   cli, polish",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("custom detail fields should contain %q:\n%s", want, view)
+		}
+	}
+
+	for _, absent := range []string{
+		"Summary:  should be hidden from wide panel",
+		"Agent:    codex",
+		"PR:       #1870 open",
+	} {
+		if strings.Contains(view, absent) {
+			t.Errorf("custom detail fields should omit %q:\n%s", absent, view)
+		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailEmptyFieldsKeepHeaderOnly(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:          "braw-empty-detail",
+		Name:        "braw-detail",
+		RepoName:    "graith",
+		Branch:      "d0ugal/graith/issue-1870-wide-details",
+		Status:      "running",
+		SummaryText: "should not render as metadata",
+		CreatedAt:   time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	m := newOverlayModel(sessions, "braw-empty-detail", nil, nil, nil, nil)
+	m.selectedDetail.Fields = []string{}
+
+	updated, _ := sendWindowSize(m, 160, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{
+		"Selected Session",
+		"braw-detail",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("empty detail fields should preserve header %q:\n%s", want, view)
+		}
+	}
+
+	for _, absent := range []string{
+		"Summary:  should not render as metadata",
+		"Branch:   issue-1870-wide-details",
+	} {
+		if strings.Contains(view, absent) {
+			t.Errorf("empty detail fields should omit %q:\n%s", absent, view)
+		}
+	}
+}
+
 func TestView_SessionNavigatorCompactRichDetailsKeepHelpVisible(t *testing.T) {
 	sessions := make([]protocol.SessionInfo, 18)
 	for i := range sessions {
@@ -3446,7 +3854,7 @@ func TestView_PreviewPanelCICounts(t *testing.T) {
 				PullRequest: c.pr, CI: c.ci,
 			}}
 			m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-			updated, _ := sendWindowSize(m, 150, 40)
+			updated, _ := sendWindowSize(m, 120, 40)
 			view := asOverlay(updated).View().Content
 
 			for _, want := range c.wantContain {
@@ -3776,7 +4184,7 @@ func TestView_ShowsDetailLine(t *testing.T) {
 	sessions[0].BaseBranch = "main"
 	sessions[0].WorktreePath = "/tmp/test-worktree"
 	m := newOverlayModel(sessions, "s1", nil, nil, nil, nil)
-	updated, _ := sendWindowSize(m, 150, 40)
+	updated, _ := sendWindowSize(m, 120, 40)
 	view := asOverlay(updated).View().Content
 
 	if !strings.Contains(view, "agent: claude") {
@@ -3800,7 +4208,7 @@ func TestView_MirrorOmitsBranchAndBase(t *testing.T) {
 		},
 	}
 	m := newOverlayModel(sessions, "", nil, nil, nil, nil)
-	updated, _ := sendWindowSize(m, 150, 40)
+	updated, _ := sendWindowSize(m, 120, 40)
 	view := asOverlay(updated).View().Content
 
 	if strings.Contains(view, "branch: feature") {

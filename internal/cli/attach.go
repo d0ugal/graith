@@ -92,6 +92,7 @@ func runAttach(cmd *cobra.Command, name string) error {
 func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) error {
 	repos := client.DiscoverRepos(cfg.AllowedRepoPaths, sessions)
 	agents, defaultAgent := agentChoices()
+	selectedDetail := sessionNavigatorSelectedDetailFromConfig()
 
 	result := client.RunSessionNavigator(client.RunSessionNavigatorOpts{
 		Sessions:         sessions,
@@ -112,6 +113,7 @@ func runAttachFromOverlay(c *client.Client, sessions []protocol.SessionInfo) err
 		DefaultAgent:     defaultAgent,
 		Keys:             sessionNavigatorKeysFromConfig(),
 		Help:             sessionNavigatorHelpFromConfig(),
+		SelectedDetail:   &selectedDetail,
 	})
 	if result == nil || result.Action == "" {
 		return nil

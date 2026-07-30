@@ -501,6 +501,37 @@ expanded_actions = ["move", "top_bottom", "view", "group", "jump", "attach", "ne
 toggle_keys = "? f1"          # keys that toggle expanded help; existing Navigator actions win on conflict
 expanded_by_default = false   # start the Navigator with expanded help open
 
+[session_navigator.selected_detail]
+# Wide-terminal selected-session metadata panel in the Session Navigator. The
+# Navigator tree/columns and live terminal preview remain the primary surface;
+# this panel appears only when the terminal is wide enough. Set enabled=false
+# to hide it.
+enabled = true
+layout = "side_panel"
+min_terminal_width = 150
+min_terminal_height = 24
+max_width = 54
+fields = [
+  "summary",
+  "agent",
+  "model",
+  "branch",
+  "mode",
+  "base",
+  "git",
+  "worktree",
+  "pr",
+  "review",
+  "labels",
+  "created",
+  "attached",
+  "changed",
+  "deleted",
+  "purges",
+  "config",
+  "id",
+]
+
 # Prefix key plus a command key trigger these actions while attached.
 # NOTE: all keys below are read from config (passthrough keys via
 # passthroughKeysFromConfig, Navigator keys via sessionNavigatorKeysFromConfig).

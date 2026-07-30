@@ -97,6 +97,19 @@ func sessionNavigatorHelpFromConfig() client.SessionNavigatorHelp {
 	return out
 }
 
+func sessionNavigatorSelectedDetailFromConfig() client.SelectedDetailConfig {
+	detail := cfg.SessionNavigator.SelectedDetail
+
+	return client.SelectedDetailConfig{
+		Enabled:           detail.Enabled,
+		Layout:            detail.LayoutOrDefault(),
+		MinTerminalWidth:  detail.MinTerminalWidthOrDefault(),
+		MinTerminalHeight: detail.MinTerminalHeightOrDefault(),
+		MaxWidth:          detail.MaxWidthOrDefault(),
+		Fields:            detail.FieldsOrDefault(),
+	}
+}
+
 func cloneStringSlicePreserveEmpty(values []string) []string {
 	if values == nil {
 		return nil

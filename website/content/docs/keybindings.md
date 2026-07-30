@@ -131,6 +131,11 @@ The Navigator keeps a live preview of the selected session's terminal screen
 behind the management panel. The daemon maintains the screen model, and clients
 request snapshots while the session produces output.
 
+On very wide terminals, the Navigator also shows a selected-session detail panel
+beside the session tree with branch, worktree, labels, PR/CI/review state, and
+lifecycle timestamps when that extra panel fits. Configure or disable it with
+`[session_navigator.selected_detail]`.
+
 ### Session display
 
 Each session row shows:

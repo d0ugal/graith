@@ -151,6 +151,33 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 			t.Errorf("Default().Terminal.RefreshIntervalDuration() = %v, want %v", got, TerminalRefreshIntervalDefault)
 		}
 	})
+
+	t.Run("session navigator selected detail", func(t *testing.T) {
+		detail := d.SessionNavigator.SelectedDetail
+		if !detail.Enabled {
+			t.Fatal("Default().SessionNavigator.SelectedDetail.Enabled = false, want true")
+		}
+
+		if detail.Layout != SessionNavigatorSelectedDetailLayoutSidePanel {
+			t.Errorf("Default().SessionNavigator.SelectedDetail.Layout = %q, want %q", detail.Layout, SessionNavigatorSelectedDetailLayoutSidePanel)
+		}
+
+		if detail.MinTerminalWidth != SessionNavigatorSelectedDetailMinTerminalWidthDefault {
+			t.Errorf("Default().SessionNavigator.SelectedDetail.MinTerminalWidth = %d, want %d", detail.MinTerminalWidth, SessionNavigatorSelectedDetailMinTerminalWidthDefault)
+		}
+
+		if detail.MinTerminalHeight != SessionNavigatorSelectedDetailMinTerminalHeightDefault {
+			t.Errorf("Default().SessionNavigator.SelectedDetail.MinTerminalHeight = %d, want %d", detail.MinTerminalHeight, SessionNavigatorSelectedDetailMinTerminalHeightDefault)
+		}
+
+		if detail.MaxWidth != SessionNavigatorSelectedDetailMaxWidthDefault {
+			t.Errorf("Default().SessionNavigator.SelectedDetail.MaxWidth = %d, want %d", detail.MaxWidth, SessionNavigatorSelectedDetailMaxWidthDefault)
+		}
+
+		if got, want := detail.Fields, DefaultSessionNavigatorSelectedDetailFields(); !reflect.DeepEqual(got, want) {
+			t.Errorf("Default().SessionNavigator.SelectedDetail.Fields = %v, want %v", got, want)
+		}
+	})
 }
 
 // TestEmbeddedDefaultAgentPolicies guards that the built-in agents carry their

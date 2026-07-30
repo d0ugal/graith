@@ -252,6 +252,7 @@ func (l *attachLoop) onOverlay() (bool, error) {
 
 	repos := client.DiscoverRepos(cfg.AllowedRepoPaths, list.Sessions)
 	agents, defaultAgent := agentChoices()
+	selectedDetail := sessionNavigatorSelectedDetailFromConfig()
 
 	navigatorResult := client.RunSessionNavigator(client.RunSessionNavigatorOpts{
 		Sessions:         list.Sessions,
@@ -273,6 +274,7 @@ func (l *attachLoop) onOverlay() (bool, error) {
 		DefaultAgent:     defaultAgent,
 		Keys:             sessionNavigatorKeysFromConfig(),
 		Help:             sessionNavigatorHelpFromConfig(),
+		SelectedDetail:   &selectedDetail,
 	})
 	if navigatorResult != nil {
 		l.collapsed = navigatorResult.Collapsed

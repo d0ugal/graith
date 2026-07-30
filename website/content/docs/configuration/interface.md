@@ -100,6 +100,14 @@ compact_actions     = ["attach", "new", "view", "group", "filter", "help", "quit
 expanded_actions    = ["move", "top_bottom", "view", "group", "jump", "attach", "new", "star", "fold", "fold_all", "delete", "stop", "restart", "restart_menu", "filter", "help", "quit"]
 toggle_keys         = "? f1"
 expanded_by_default = false
+
+[session_navigator.selected_detail]
+enabled = true
+layout = "side_panel"
+min_terminal_width = 150
+min_terminal_height = 24
+max_width = 54
+fields = ["summary", "agent", "model", "branch", "mode", "base", "git", "worktree", "pr", "review", "labels", "created", "attached", "changed", "deleted", "purges", "config", "id"]
 ```
 
 In the Session Navigator (`ctrl+b w`), each key jumps straight to its session — the 1st key selects session 1, and so on.
@@ -117,6 +125,20 @@ Supported action IDs are `attach`, `delete`, `filter`, `fold`, `fold_all`,
 `group`, `help`, `jump`, `move`, `new`, `quit`, `restart`, `restart_menu`,
 `star`, `stop`, `top_bottom`, and `view`. Unknown action IDs, duplicate action
 IDs within one list, and invalid `toggle_keys` names fail config validation.
+
+`[session_navigator.selected_detail]` controls the optional wide-terminal
+detail panel for the highlighted session. It never replaces the session tree,
+columns, or live terminal preview. When it is shown, default footer metadata
+moves into the side panel; rows omitted from `fields` are hidden. Set
+`enabled = false` to hide it, raise `min_terminal_width`/`min_terminal_height`
+if you want it only on larger terminals, adjust `max_width` to cap the side
+panel at 38 columns or wider, or trim/reorder `fields` to choose which metadata
+rows are shown. Set `fields = []` to keep only the selected-session heading and
+context line. Supported field IDs are `summary`, `agent`, `model`, `branch`,
+`mode`, `base`, `git`, `worktree`, `cwd`, `pr`, `review`, `labels`, `created`,
+`attached`, `changed`, `deleted`, `purges`, `config`, and `id`. The only
+supported layout today is `side_panel`; the key exists so future Navigator
+customization can grow inside the same Session Navigator namespace.
 
 ## Input
 

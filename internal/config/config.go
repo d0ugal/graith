@@ -763,12 +763,145 @@ func positiveIntOrDefault(n, def int) int {
 }
 
 type SessionNavigatorConfig struct {
-	ShortcutKeys string               `toml:"shortcut_keys"`
-	Help         SessionNavigatorHelp `toml:"help"`
+	ShortcutKeys   string                         `toml:"shortcut_keys"`
+	Help           SessionNavigatorHelp           `toml:"help"`
+	SelectedDetail SessionNavigatorSelectedDetail `toml:"selected_detail"`
 }
 
 func (s SessionNavigatorConfig) Validate() error {
-	return s.Help.Validate()
+	return errors.Join(s.Help.Validate(), s.SelectedDetail.Validate())
+}
+
+// SessionNavigatorSelectedDetail configures the optional wide-terminal
+// selected-session metadata panel in the Session Navigator. The regular tree,
+// columns, and live terminal preview remain the primary surface; these values
+// only decide whether and how the extra detail panel appears when there is
+// enough room.
+type SessionNavigatorSelectedDetail struct {
+	Enabled           bool     `toml:"enabled"`
+	Layout            string   `toml:"layout"`
+	MinTerminalWidth  int      `toml:"min_terminal_width"`
+	MinTerminalHeight int      `toml:"min_terminal_height"`
+	MaxWidth          int      `toml:"max_width"`
+	Fields            []string `toml:"fields"`
+}
+
+const (
+	SessionNavigatorSelectedDetailLayoutSidePanel = "side_panel"
+
+	SessionNavigatorSelectedDetailMinTerminalWidthDefault  = 150
+	SessionNavigatorSelectedDetailMinTerminalHeightDefault = 24
+	SessionNavigatorSelectedDetailMaxWidthMin              = 38
+	SessionNavigatorSelectedDetailMaxWidthDefault          = 54
+)
+
+var sessionNavigatorSelectedDetailDefaultFields = []string{
+	"summary",
+	"agent",
+	"model",
+	"branch",
+	"mode",
+	"base",
+	"git",
+	"worktree",
+	"pr",
+	"review",
+	"labels",
+	"created",
+	"attached",
+	"changed",
+	"deleted",
+	"purges",
+	"config",
+	"id",
+}
+
+var sessionNavigatorSelectedDetailFieldSet = map[string]bool{
+	"summary":  true,
+	"agent":    true,
+	"model":    true,
+	"branch":   true,
+	"base":     true,
+	"git":      true,
+	"mode":     true,
+	"worktree": true,
+	"cwd":      true,
+	"pr":       true,
+	"review":   true,
+	"labels":   true,
+	"created":  true,
+	"attached": true,
+	"changed":  true,
+	"deleted":  true,
+	"purges":   true,
+	"config":   true,
+	"id":       true,
+}
+
+func DefaultSessionNavigatorSelectedDetailFields() []string {
+	out := make([]string, len(sessionNavigatorSelectedDetailDefaultFields))
+	copy(out, sessionNavigatorSelectedDetailDefaultFields)
+
+	return out
+}
+
+func (d SessionNavigatorSelectedDetail) LayoutOrDefault() string {
+	if strings.TrimSpace(d.Layout) == "" {
+		return SessionNavigatorSelectedDetailLayoutSidePanel
+	}
+
+	return strings.TrimSpace(d.Layout)
+}
+
+func (d SessionNavigatorSelectedDetail) MinTerminalWidthOrDefault() int {
+	return positiveIntOrDefault(d.MinTerminalWidth, SessionNavigatorSelectedDetailMinTerminalWidthDefault)
+}
+
+func (d SessionNavigatorSelectedDetail) MinTerminalHeightOrDefault() int {
+	return positiveIntOrDefault(d.MinTerminalHeight, SessionNavigatorSelectedDetailMinTerminalHeightDefault)
+}
+
+func (d SessionNavigatorSelectedDetail) MaxWidthOrDefault() int {
+	return positiveIntOrDefault(d.MaxWidth, SessionNavigatorSelectedDetailMaxWidthDefault)
+}
+
+func (d SessionNavigatorSelectedDetail) FieldsOrDefault() []string {
+	if d.Fields == nil {
+		return DefaultSessionNavigatorSelectedDetailFields()
+	}
+
+	out := make([]string, len(d.Fields))
+	for i, field := range d.Fields {
+		out[i] = strings.TrimSpace(field)
+	}
+
+	return out
+}
+
+func (d SessionNavigatorSelectedDetail) Validate() error {
+	var errs []error
+
+	if layout := d.LayoutOrDefault(); layout != SessionNavigatorSelectedDetailLayoutSidePanel {
+		errs = append(errs, fmt.Errorf("session_navigator.selected_detail.layout %q: must be %q", layout, SessionNavigatorSelectedDetailLayoutSidePanel))
+	}
+
+	if width := d.MaxWidth; width > 0 && width < SessionNavigatorSelectedDetailMaxWidthMin {
+		errs = append(errs, fmt.Errorf("session_navigator.selected_detail.max_width %d: must be at least %d", width, SessionNavigatorSelectedDetailMaxWidthMin))
+	}
+
+	for _, field := range d.Fields {
+		name := strings.TrimSpace(field)
+		if name == "" {
+			errs = append(errs, errors.New("session_navigator.selected_detail.fields: field names must be non-empty"))
+			continue
+		}
+
+		if !sessionNavigatorSelectedDetailFieldSet[name] {
+			errs = append(errs, fmt.Errorf("session_navigator.selected_detail.fields: unknown field %q", name))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // SessionNavigatorHelp configures the Session Navigator help/action footer. The
