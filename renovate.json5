@@ -146,6 +146,18 @@
       versioningTemplate: 'docker',
     },
     {
+      // Scorecard runs the official action image directly from scorecard.yml.
+      // Keep its version tag and manifest digest in one managed value while
+      // preserving the workflow's existing SARIF upload and OIDC publication.
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github\\/ci-tool-versions\\.env$/'],
+      matchStrings: ['SCORECARD_IMAGE=(?<packageName>ghcr\\.io/ossf/scorecard-action):(?<currentValue>v[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})'],
+      autoReplaceStringTemplate: 'SCORECARD_IMAGE=ghcr.io/ossf/scorecard-action:{{{newValue}}}@{{{newDigest}}}',
+      depNameTemplate: 'ossf/scorecard-action',
+      datasourceTemplate: 'docker',
+      versioningTemplate: 'docker',
+    },
+    {
       // TruffleHog runs directly from Docker in secret-scan.yml. Keep its tag
       // and OCI index digest in one managed value so security scanning remains
       // immutable while Renovate updates both together.

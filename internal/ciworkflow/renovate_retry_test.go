@@ -341,6 +341,20 @@ func renovateSuccessLog(t *testing.T) string {
 			},
 		},
 		map[string]any{
+			"depName":       "ossf/scorecard-action",
+			"packageName":   "ghcr.io/ossf/scorecard-action",
+			"datasource":    "docker",
+			"currentValue":  "v2.4.4",
+			"currentDigest": "sha256:" + strings.Repeat("0", 64),
+			"updates": []any{
+				map[string]any{
+					"branchName": "renovate/ossf-scorecard-action-2.x",
+					"newValue":   "v2.5.0",
+					"newDigest":  "sha256:" + strings.Repeat("1", 64),
+				},
+			},
+		},
+		map[string]any{
 			"depName":       "trufflesecurity/trufflehog",
 			"packageName":   "ghcr.io/trufflesecurity/trufflehog",
 			"datasource":    "docker",
