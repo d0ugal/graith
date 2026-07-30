@@ -183,6 +183,106 @@ func TestDaemonFDGrowthExceeded(t *testing.T) {
 	}
 }
 
+func TestWaitForHelperCountResultRetriesTransientInspectionErrors(t *testing.T) {
+	identity := nativeProcessIdentity{PID: 42, StartTime: 99}
+	attempts := 0
+
+	processes, err := waitForHelperCountResultWith(
+		func() ([]nativeProcessIdentity, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, nativeProcessObservationChurn("read executable path for live daemon child")
+			}
+
+			return []nativeProcessIdentity{identity}, nil
+		},
+		1,
+		time.Second,
+		t.Logf,
+	)
+	if err != nil {
+		t.Fatalf("wait for helper count returned unexpected error: %v", err)
+	}
+
+	if len(processes) != 1 || processes[0] != identity {
+		t.Fatalf("helper processes = %#v, want %#v", processes, []nativeProcessIdentity{identity})
+	}
+	if attempts != 2 {
+		t.Fatalf("helper inspection attempts = %d, want 2", attempts)
+	}
+}
+
+func TestWaitForHelperCountResultReportsPersistentInspectionErrors(t *testing.T) {
+	attempts := 0
+
+	_, err := waitForHelperCountResultWith(
+		func() ([]nativeProcessIdentity, error) {
+			attempts++
+
+			return nil, nativeProcessObservationChurn("dreich")
+		},
+		0,
+		50*time.Millisecond,
+		t.Logf,
+	)
+	if err == nil || !strings.Contains(err.Error(), "dreich") {
+		t.Fatalf("wait for helper count error = %v, want dreich inspection error", err)
+	}
+	if attempts == 0 {
+		t.Fatal("helper inspection was never attempted")
+	}
+}
+
+func TestWaitForHelperCountResultReportsPersistentInspectionErrorsAfterSuccess(t *testing.T) {
+	identity := nativeProcessIdentity{PID: 42, StartTime: 99}
+	attempts := 0
+
+	processes, err := waitForHelperCountResultWith(
+		func() ([]nativeProcessIdentity, error) {
+			attempts++
+			if attempts == 1 {
+				return []nativeProcessIdentity{identity}, nil
+			}
+
+			return nil, nativeProcessObservationChurn("dreich")
+		},
+		0,
+		50*time.Millisecond,
+		t.Logf,
+	)
+	if err == nil || !strings.Contains(err.Error(), "dreich") {
+		t.Fatalf("wait for helper count error = %v, want dreich inspection error", err)
+	}
+	if len(processes) != 1 || processes[0] != identity {
+		t.Fatalf("helper processes = %#v, want last successful %#v", processes, []nativeProcessIdentity{identity})
+	}
+}
+
+func TestWaitForHelperCountResultReportsTerminalInspectionErrorAfterSuccess(t *testing.T) {
+	identity := nativeProcessIdentity{PID: 42, StartTime: 99}
+	attempts := 0
+
+	processes, err := waitForHelperCountResultWith(
+		func() ([]nativeProcessIdentity, error) {
+			attempts++
+			if attempts == 1 {
+				return []nativeProcessIdentity{identity}, nil
+			}
+
+			return nil, errors.New("dreich")
+		},
+		0,
+		time.Second,
+		t.Logf,
+	)
+	if err == nil || !strings.Contains(err.Error(), "dreich") {
+		t.Fatalf("wait for helper count error = %v, want dreich inspection error", err)
+	}
+	if len(processes) != 1 || processes[0] != identity {
+		t.Fatalf("helper processes = %#v, want last successful %#v", processes, []nativeProcessIdentity{identity})
+	}
+}
+
 func TestIsolatedNativeEnvironmentAllowlist(t *testing.T) {
 	values := map[string]string{
 		"PATH": "/bothy/bin", "HOME": "/croft", "TMPDIR": "/tmp/braw",
@@ -582,8 +682,8 @@ func TestLibghosttyDaemonSoak(t *testing.T) {
 		}
 
 		if cycle%4 == 3 {
-			helpers := waitForHelperCountResult(h, 1, nativeOpTimeout)
-			if len(helpers) != 1 {
+			helpers, helperErr := waitForHelperCountResult(h, 1, nativeOpTimeout)
+			if helperErr != nil || len(helpers) != 1 {
 				failures["crash"]++
 			} else {
 				crashedHelper := helpers[0]
@@ -620,12 +720,14 @@ func TestLibghosttyDaemonSoak(t *testing.T) {
 			failures["purge"]++
 		}
 
-		if helpers := waitForHelperCountResult(h, 0, nativeOpTimeout); len(helpers) != 0 {
+		if helpers, helperErr := waitForHelperCountResult(h, 0, nativeOpTimeout); helperErr != nil || len(helpers) != 0 {
 			failures["helper-reap"]++
 		}
 	}
 
-	waitForHelperCountResult(h, helperBefore, nativeOpTimeout)
+	if helpers, helperErr := waitForHelperCountResult(h, helperBefore, nativeOpTimeout); helperErr != nil || len(helpers) != helperBefore {
+		failures["helper-baseline"]++
+	}
 	waitForNoFDGrowth(t, h.identity, fdBefore)
 	fdAfter := daemonFDCount(t, h.identity)
 	helperAfter := len(h.helperProcesses())
@@ -1102,12 +1204,16 @@ func (h *nativeDaemonHarness) runCLI(args ...string) []byte {
 func (h *nativeDaemonHarness) helperProcesses() []nativeProcessIdentity {
 	h.t.Helper()
 
-	processes, err := nativeHelperChildProcesses(h.identity)
+	processes, err := h.helperProcessesResult()
 	if err != nil {
-		h.t.Fatalf("inspect native screen helper processes failed (%T)", err)
+		h.t.Fatalf("inspect native screen helper processes failed: %v", err)
 	}
 
 	return processes
+}
+
+func (h *nativeDaemonHarness) helperProcessesResult() ([]nativeProcessIdentity, error) {
+	return nativeHelperChildProcesses(h.identity)
 }
 
 func signalNativeProcess(identity nativeProcessIdentity, signal syscall.Signal) (bool, error) {
@@ -1478,7 +1584,10 @@ func purgeNativeSessionBestEffort(client *nativeControlClient, sessionID string)
 func waitForHelperCount(t *testing.T, h *nativeDaemonHarness, want int) []nativeProcessIdentity {
 	t.Helper()
 
-	processes := waitForHelperCountResult(h, want, nativeOpTimeout)
+	processes, err := waitForHelperCountResult(h, want, nativeOpTimeout)
+	if err != nil {
+		t.Fatalf("inspect native helper process count failed while waiting for %d helpers: %v", want, err)
+	}
 	if len(processes) != want {
 		t.Fatalf("native helper process count = %d, want %d", len(processes), want)
 	}
@@ -1490,21 +1599,54 @@ func waitForHelperCountResult(
 	h *nativeDaemonHarness,
 	want int,
 	timeout time.Duration,
-) []nativeProcessIdentity {
+) ([]nativeProcessIdentity, error) {
+	return waitForHelperCountResultWith(h.helperProcessesResult, want, timeout, h.t.Logf)
+}
+
+func waitForHelperCountResultWith(
+	observe func() ([]nativeProcessIdentity, error),
+	want int,
+	timeout time.Duration,
+	logf func(string, ...any),
+) ([]nativeProcessIdentity, error) {
 	deadline := time.Now().Add(timeout)
 
-	var processes []nativeProcessIdentity
+	var (
+		processes []nativeProcessIdentity
+		blindErr  error
+	)
 
-	for time.Now().Before(deadline) {
-		processes = h.helperProcesses()
-		if len(processes) == want {
-			return processes
+	for {
+		current, err := observe()
+		if err != nil {
+			if !errors.Is(err, errNativeProcessObservationChurn) {
+				return processes, fmt.Errorf("inspect native helper processes while waiting for %d helpers: %w", want, err)
+			}
+			blindErr = err
+		} else {
+			processes = current
+			blindErr = nil
+			if len(processes) == want {
+				return processes, nil
+			}
+		}
+
+		if !time.Now().Before(deadline) {
+			break
 		}
 
 		time.Sleep(25 * time.Millisecond)
 	}
 
-	return processes
+	if blindErr != nil {
+		if logf != nil {
+			logf("native helper process inspection last error while waiting for %d helpers: %v", want, blindErr)
+		}
+
+		return processes, fmt.Errorf("inspect native helper processes while waiting for %d helpers: %w", want, blindErr)
+	}
+
+	return processes, nil
 }
 
 func daemonFDCount(t *testing.T, identity nativeProcessIdentity) int {

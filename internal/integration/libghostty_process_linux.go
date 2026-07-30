@@ -177,7 +177,7 @@ func nativeChildPIDs(parent nativeProcessIdentity) ([]int, error) {
 		return children, nil
 	}
 
-	return nil, errors.New("daemon child process list did not stabilize")
+	return nil, nativeProcessObservationChurn("daemon child process list did not stabilize")
 }
 
 func nativeHelperChildProcesses(parent nativeProcessIdentity) ([]nativeProcessIdentity, error) {
@@ -208,7 +208,15 @@ func nativeHelperChildProcesses(parent nativeProcessIdentity) ([]nativeProcessId
 					return nil, currentErr
 				}
 				if current {
-					return nil, errors.New("read executable path for live daemon child")
+					parentCurrent, parentErr := nativeProcessIsCurrent(parent)
+					if parentErr != nil {
+						return nil, parentErr
+					}
+					if !parentCurrent {
+						return nil, errors.New("daemon process identity changed during helper inspection")
+					}
+
+					return nil, nativeProcessObservationChurn("read executable path for live daemon child")
 				}
 
 				churned = true
@@ -250,7 +258,7 @@ func nativeHelperChildProcesses(parent nativeProcessIdentity) ([]nativeProcessId
 		return helpers, nil
 	}
 
-	return nil, errors.New("daemon helper process list did not stabilize")
+	return nil, nativeProcessObservationChurn("daemon helper process list did not stabilize")
 }
 
 func nativeDaemonFDCount(identity nativeProcessIdentity) (int, error) {
