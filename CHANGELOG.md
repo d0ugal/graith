@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.71.7](https://github.com/d0ugal/graith/compare/v0.71.6...v0.71.7) (2026-07-30)
+
+
+### Features
+
+* configure terminal input gestures per agent ([#1910](https://github.com/d0ugal/graith/issues/1910)) ([116677c](https://github.com/d0ugal/graith/commit/116677c5495235b8440ee7d85c2c30e0bd64e923))
+
+
+### Bug Fixes
+
+* read draft releases before stable publish ([972a6b0](https://github.com/d0ugal/graith/commit/972a6b0c2a43f76146ac7dd4da161b4cecc4e783))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.4.0 ([#1911](https://github.com/d0ugal/graith/issues/1911)) ([67f8a77](https://github.com/d0ugal/graith/commit/67f8a774ba6e2fe7b42bdb7a1dbb5037401fd635))
+
 ## [0.71.6](https://github.com/d0ugal/graith/compare/v0.71.5...v0.71.6) (2026-07-30)
 
 
