@@ -159,11 +159,16 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 
 	text := strings.Join(combined, "\n")
 
+	targetCommitCheck := `test "$(jq -er '.target_commitish' <<<"$release")" = "$RELEASE_REVISION"`
+	draftRead := `draft="$(jq -r '.draft' <<<"$release")"`
+	releaseLookup := `gh release view "$RELEASE_TAG"`
+
 	for _, required := range []string{
-		`draft="$(jq -er '.draft'`, "unexpected=", "cmp \"$existing/$name\" \"dist/$name\"",
+		draftRead, `case "$draft" in true|false)`, "unexpected=", "cmp \"$existing/$name\" \"dist/$name\"",
 		"gh attestation verify", "--source-digest", "gh release upload",
 		"render-stable-homebrew.sh", "publish-linux-repositories.sh",
 		"render-stable-aur.sh", "gh release download", "--draft=false",
+		releaseLookup, targetCommitCheck,
 		`test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 10`,
 		"if [ \"$draft\" = false ]", "Publish prepared Homebrew formula",
 	} {
@@ -172,8 +177,24 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 		}
 	}
 
+	if count := strings.Count(text, releaseLookup); count != 4 {
+		t.Errorf("stable publisher should read the release before verification, staging, post-upload confirmation, and exposure, got %d reads", count)
+	}
+
+	if count := strings.Count(text, targetCommitCheck); count != 4 {
+		t.Errorf("stable publisher should bind every release read to the release revision, got %d checks", count)
+	}
+
+	if strings.Contains(text, `draft="$(jq -er '.draft'`) {
+		t.Fatal("stable publisher treats draft=false as a jq failure instead of a supported rerun state")
+	}
+
 	if strings.Contains(text, "gh release create") || strings.Contains(text, "--clobber") {
 		t.Fatal("stable publisher can replace or create an uncontrolled release")
+	}
+
+	if strings.Contains(text, "releases/tags/$RELEASE_TAG") {
+		t.Fatal("stable publisher uses a REST tag lookup that cannot see draft releases before publication")
 	}
 
 	if strings.Contains(text, `test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 11`) {

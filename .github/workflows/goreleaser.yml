@@ -890,8 +890,12 @@ jobs:
           fi
           test "$tag_sha" = "$RELEASE_REVISION"
 
-          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
-          draft="$(jq -er '.draft' <<<"$release")"
+          release="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets,isDraft,tagName,targetCommitish \
+            --jq '{draft:.isDraft,tag_name:.tagName,target_commitish:.targetCommitish,assets:[.assets[]|{name:.name}]}')"
+          test "$(jq -er '.tag_name' <<<"$release")" = "$RELEASE_TAG"
+          test "$(jq -er '.target_commitish' <<<"$release")" = "$RELEASE_REVISION"
+          draft="$(jq -r '.draft' <<<"$release")"
           case "$draft" in true|false) ;; *) exit 1 ;; esac
           expected_assets="$(find dist -maxdepth 1 -type f -exec basename {} \; | sort)"
           existing_assets="$(jq -r '.assets[].name' <<<"$release" | sort)"
@@ -919,10 +923,13 @@ jobs:
         run: |
           set -euo pipefail
           expected="$(find dist -maxdepth 1 -type f -exec basename {} \; | sort)"
-          actual="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '.assets[].name' | sort)"
-          draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '.draft')"
+          release="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets,isDraft,tagName,targetCommitish \
+            --jq '{draft:.isDraft,tag_name:.tagName,target_commitish:.targetCommitish,assets:[.assets[]|{name:.name}]}')"
+          test "$(jq -er '.tag_name' <<<"$release")" = "$RELEASE_TAG"
+          test "$(jq -er '.target_commitish' <<<"$release")" = "$RELEASE_REVISION"
+          actual="$(jq -r '.assets[].name' <<<"$release" | sort)"
+          draft="$(jq -r '.draft' <<<"$release")"
           if [ "$draft" = false ]; then
             test "$actual" = "$expected"
             exit 0
@@ -933,8 +940,12 @@ jobs:
               gh release upload "$RELEASE_TAG" "dist/$name" --repo "$GITHUB_REPOSITORY"
             fi
           done <<<"$expected"
-          actual="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '.assets[].name' | sort)"
+          release="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets,isDraft,tagName,targetCommitish \
+            --jq '{draft:.isDraft,tag_name:.tagName,target_commitish:.targetCommitish,assets:[.assets[]|{name:.name}]}')"
+          test "$(jq -er '.tag_name' <<<"$release")" = "$RELEASE_TAG"
+          test "$(jq -er '.target_commitish' <<<"$release")" = "$RELEASE_REVISION"
+          actual="$(jq -r '.assets[].name' <<<"$release" | sort)"
           test "$actual" = "$expected"
 
       - name: Check out Homebrew tap
@@ -1038,8 +1049,12 @@ jobs:
           test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 10
           cmp "$remote/checksums.txt" dist/checksums.txt
           (cd "$remote" && sha256sum --check checksums.txt)
-          draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
-            --jq '.draft')"
+          release="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets,isDraft,tagName,targetCommitish \
+            --jq '{draft:.isDraft,tag_name:.tagName,target_commitish:.targetCommitish,assets:[.assets[]|{name:.name}]}')"
+          test "$(jq -er '.tag_name' <<<"$release")" = "$RELEASE_TAG"
+          test "$(jq -er '.target_commitish' <<<"$release")" = "$RELEASE_REVISION"
+          draft="$(jq -r '.draft' <<<"$release")"
           if [ "$draft" = true ]; then
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
           else
