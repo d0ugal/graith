@@ -56,7 +56,7 @@ gr notify "CI failing on main after 3 retries" --priority high
 
 Priority levels: `low`, `normal` (default), and `high`. `high` plays a sound and
 **bypasses quiet hours and the rate limit**; `low`/`normal` are subject to both.
-Only the orchestrator session and the human can send notifications — plain agent
+Only the orchestrator session and the user can send notifications — plain agent
 sessions are rejected to prevent spam. Identical notifications within the
 [coalesce window](#timing) (30s by default) are coalesced. Other backends (ntfy,
 Pushover, Slack) are planned.

@@ -213,7 +213,7 @@ The macOS and iOS apps send to and read a session's inbox without the CLI:
 The Messages view shows the direct-message conversation (received and sent), a
 compose field, and a **mark-as-read** action that acks the inbox. System notices
 (PR/CI notifications) are marked *automated* so they read distinctly from
-session/human messages.
+session/user messages.
 
 Topic publish/subscribe (`gr msg pub` / `gr msg sub`) stays CLI-only for now.
 

@@ -19,7 +19,7 @@ const RedactedMask = "***"
 // with RedactedMask. cfg is not mutated.
 //
 // The daemon renders this — not the raw config — over the control protocol, so
-// a remote paired human, or a local session reading via the socket, sees the
+// a remote paired user, or a local session reading via the socket, sees the
 // configuration structure without its secrets. `gr config show`/`diff` also use
 // the same redacted rendering.
 func RedactSecrets(cfg *Config) *Config {

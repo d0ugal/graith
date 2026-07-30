@@ -131,7 +131,7 @@ func handleAttachConvert(sm *SessionManager, auth authContext, send func(string,
 
 // authorizeUpdate checks that the caller may update the target session — and,
 // when adopting a new parent, over that parent too — under sm.mu. Clearing the
-// parent ("") is a privileged reparent: only the orchestrator and the human CLI
+// parent ("") is a privileged reparent: only the orchestrator and the user CLI
 // may orphan a session, otherwise a child could orphan itself to escape its
 // parent's control.
 func authorizeUpdate(sm *SessionManager, auth authContext, u protocol.UpdateMsg) error {
@@ -350,7 +350,7 @@ func handleInterrupt(sm *SessionManager, auth authContext, send func(string, any
 	}{in.SessionID})
 }
 
-// handleType injects input into a session's PTY. When a human is attached it
+// handleType injects input into a session's PTY. When a user is attached it
 // waits for the user to go idle first, so injected input doesn't collide with
 // active typing.
 func handleType(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope, log *slog.Logger) {

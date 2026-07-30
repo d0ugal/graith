@@ -126,6 +126,23 @@ func TestTodoOpAddListRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTodoOpAddFromUserRecordsUserCreator(t *testing.T) {
+	sm := newTodoSM(t)
+	putTodoSession(sm, "braw", "", "")
+
+	added, err := sm.TodoAddOp(authContext{role: roleLocalHuman}, protocol.TodoAddMsg{
+		Scope: protocol.TodoScope{Session: "braw"},
+		Title: "thatch the bothy",
+	})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	if added.CreatedBy != "user" {
+		t.Fatalf("CreatedBy = %q, want user", added.CreatedBy)
+	}
+}
+
 // TestTodoOpClaimAuthorization verifies an in-scope session may claim, an
 // out-of-scope session is rejected, and the owner is always the caller.
 func TestTodoOpClaimAuthorization(t *testing.T) {
@@ -171,7 +188,7 @@ func TestTodoOpClaimAuthorization(t *testing.T) {
 }
 
 // TestTodoOpTransitionAuthorization verifies the owner, the subtree-root
-// override authority, and the human may transition; a non-owner sibling may not.
+// override authority, and the user may transition; a non-owner sibling may not.
 func TestTodoOpTransitionAuthorization(t *testing.T) {
 	sm := newTodoSM(t)
 
@@ -222,18 +239,18 @@ func TestTodoOpTransitionAuthorization(t *testing.T) {
 		t.Errorf("override done status = %q", done.Status)
 	}
 
-	// The human can mark another's item done.
+	// The user can mark another's item done.
 	it3 := newClaimed()
 	if done, err := sm.TodoTransitionOp(humanAC, protocol.TodoTransitionMsg{ID: it3.ID, Status: TodoStatusDone}); err != nil {
-		t.Errorf("human done: %v", err)
+		t.Errorf("user done: %v", err)
 	} else if done.Status != TodoStatusDone {
-		t.Errorf("human done status = %q", done.Status)
+		t.Errorf("user done status = %q", done.Status)
 	}
 }
 
 // TestTodoOpAssignedOwnershipTransitions is the regression for #1421. Scenario-
 // seeded work is assigned before it is owned: the assignee must claim it before
-// completion, peers cannot take the reservation, and existing override/human
+// completion, peers cannot take the reservation, and existing override/user
 // transition authority remains intact after a claim.
 func TestTodoOpAssignedOwnershipTransitions(t *testing.T) {
 	sm := newTodoSM(t)
@@ -481,7 +498,7 @@ func TestTodoOpScenarioScope(t *testing.T) {
 	}
 }
 
-// TestTodoOpAssignAuthorization verifies only the override authority (or human)
+// TestTodoOpAssignAuthorization verifies only the override authority (or user)
 // may assign, and a plain member is rejected.
 func TestTodoOpAssignAuthorization(t *testing.T) {
 	sm := newTodoSM(t)
@@ -525,13 +542,13 @@ func TestTodoOpAssignAuthorization(t *testing.T) {
 		t.Errorf("assignee = %q, want braw-member", up.Assignee)
 	}
 
-	// The human can (re)assign.
+	// The user can (re)assign.
 	if _, err := sm.TodoAssignOp(humanAC, protocol.TodoAssignMsg{ID: item.ID, Assignee: ""}); err != nil {
-		t.Errorf("human assign: %v", err)
+		t.Errorf("user assign: %v", err)
 	}
 }
 
-// TestTodoOpRemoveAuthorization verifies owner/override/human may remove, but a
+// TestTodoOpRemoveAuthorization verifies owner/override/user may remove, but a
 // stranger cannot.
 func TestTodoOpRemoveAuthorization(t *testing.T) {
 	sm := newTodoSM(t)

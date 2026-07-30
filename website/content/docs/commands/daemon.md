@@ -22,7 +22,7 @@ Graith waits for the daemon's normal shutdown budget rather than the shorter
 startup budget. If the daemon still does not exit, the error includes the daemon
 PID and exact recovery commands.
 Stopping a daemon is not the same as removing its background-item registration.
-Daemon stop, restart, service removal, and replacement are human-only controls;
+Daemon stop, restart, service removal, and replacement are user-only controls;
 commands run from an agent session are refused. Session agents can still use
 ordinary commands such as `gr stop <session>`.
 Managed nono sandboxes restrict signalling to the sandbox, so clearing session
@@ -276,12 +276,12 @@ structured fields, and per-result errors are separate fields:
 
 Unknown agents, unknown info keys, and agents without `info` configuration fail
 the request. Provider command failures and timeouts are returned on the specific
-result, then the CLI exits non-zero after printing the human or JSON output.
+result, then the CLI exits non-zero after printing the plain or JSON output.
 
 Configuration and lookup errors are returned before running probes. Each info
 command has a 30 second daemon timeout. Captured stdout and stderr are capped at
 1 MiB each; JSON results set `stdout_truncated` or `stderr_truncated` when a
-stream exceeds that cap, and human output prints a truncation marker. Cleanup
+stream exceeds that cap, and plain output prints a truncation marker. Cleanup
 diagnostics that do not invalidate successful provider output are returned as
 `warnings`.
 

@@ -230,7 +230,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			// Gating it broke the tokenless liveness probe in EnsureDaemon
 			// (daemonResponds), which read the "error" reply as "not a graith
 			// daemon" and triggered a doomed autostart — wedging every CLI
-			// command except `gr doctor` once a human token was provisioned.
+			// command except `gr doctor` once a user token was provisioned.
 			if authErr != nil && msg.Type != "handshake" {
 				sendControl("error", protocol.ErrorMsg{Message: authErr.Error()})
 				continue
@@ -336,7 +336,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 				sendControl("auth_ok", protocol.HandshakeOkMsg{Version: protocol.Version, DaemonVersion: version.Version, DaemonInstanceID: sm.InstanceID()})
 
 			case "pair_request":
-				// A device requests pairing. Queue it for local human approval;
+				// A device requests pairing. Queue it for local user approval;
 				// a background waiter delivers the minted token when approved.
 				// The read loop is NOT blocked — so a client disconnect is
 				// noticed promptly (connDone) and the waiter is cleaned up.
@@ -1220,7 +1220,7 @@ func (ac authContext) authorizeJailRelease(sm *SessionManager, send func(string,
 }
 
 // mayReadJailBody reports whether the caller may see a jailed comment's raw
-// body — the same release-authorized set (human/orchestrator). An ordinary
+// body — the same release-authorized set (user/orchestrator). An ordinary
 // agent or a read-only guest gets metadata with the body withheld.
 func (ac authContext) mayReadJailBody(sm *SessionManager) bool {
 	sm.mu.RLock()

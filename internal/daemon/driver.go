@@ -175,7 +175,7 @@ func resolveDriverKind(explicit bool, agent config.Agent, hc config.HeadlessConf
 // graith delivers the prompt as an initial user message (not a positional arg),
 // issues `interrupt` control requests. A bundled non_interactive_args prefix
 // normally prevents native prompts; if one arrives, the headless driver must
-// deny it because there is no TUI in which a human can respond. The CLI still
+// deny it because there is no TUI in which a user can respond. The CLI still
 // runs one turn to a terminal result; graith closes stdin on that result so the
 // process exits (one-shot semantics preserved). agentArgs carries the agent's
 // own template-expanded args (e.g. --session-id <id>) and follows the prefix.

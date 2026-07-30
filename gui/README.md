@@ -121,7 +121,7 @@ and hand-assembles an ad-hoc-signed `.app`; `simctl` installs + launches it
 
 On macOS, the built-in **This Mac** host connects directly over the local Unix
 socket. The app reads the daemon-written `human.token` from the active profile's
-data directory, just like a human running the CLI, so the local host never
+data directory, just like a user running the CLI, so the local host never
 requires device pairing. The steps below apply only to additional remote hosts.
 
 The apps (and `gr remote`) reach a daemon over the tailnet. There is **no
@@ -156,17 +156,17 @@ tailnet. v1 relies on the system tunnel — the app surfaces a "Checking tailnet
 connection…" / "not connected to tailnet" banner (the state you see on first
 launch) and does not embed its own tunnel.
 
-### 3. Pair the device (one-time, human-approved)
+### 3. Pair the device (one-time, user-approved)
 
 A brand-new device has no token; the only thing it may do after Gate 1 (WhoIs)
-is send a `pair_request`. Approval is a deliberate, out-of-band human action on
+is send a `pair_request`. Approval is a deliberate, out-of-band user action on
 the host.
 
 ```bash
 # On the device / client:
 gr remote pair graith-ben            # sends a pair_request over the tailnet
 
-# On the host (local human):
+# On the host (local user):
 gr remote pairings list                         # show pending requests + paired devices
 gr remote pairings approve <request-id>         # mint a client token, return the TLS SPKI pin
 # gr remote pairings revoke <device-id>         # revoke a device (force-closes its connections)

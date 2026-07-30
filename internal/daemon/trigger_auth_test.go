@@ -24,9 +24,9 @@ func TestCheckTriggerOp(t *testing.T) {
 		t.Error("unrelated session should be rejected")
 	}
 
-	// A human caller (local socket) is always allowed.
+	// A user caller (local socket) is always allowed.
 	if err := (authContext{role: roleLocalHuman}).checkTriggerOp(sm); err != nil {
-		t.Errorf("human caller should be allowed: %v", err)
+		t.Errorf("user caller should be allowed: %v", err)
 	}
 }
 
@@ -43,7 +43,7 @@ func TestCheckTriggerOp_NonSessionRoleRejected(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
 		"orch": {ID: "orch", SystemKind: SystemKindOrchestrator},
 	})
-	// A paired read-only guest is neither a human nor a session, so it is
+	// A paired read-only guest is neither a user nor a session, so it is
 	// rejected before any orchestrator lookup happens.
 	if err := (authContext{role: roleRemoteGuest, deviceID: "dreich"}).checkTriggerOp(sm); err == nil {
 		t.Error("read-only guest must not manage triggers")

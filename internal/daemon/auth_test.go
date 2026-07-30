@@ -61,7 +61,7 @@ func TestResolveAuth_LocalTokens(t *testing.T) {
 // TestResolveAuth_LocalNoHumanTokenFallback documents that a SessionManager
 // with no provisioned human credential (only reachable for a non-Run test or
 // embedder daemon) preserves the legacy 0700-socket boundary: an empty local
-// token is the human, a stray token is rejected. A served production daemon
+// token is the local user, a stray token is rejected. A served production daemon
 // always has a human token (Run fails closed otherwise), so it never lands here.
 func TestResolveAuth_LocalNoHumanTokenFallback(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
@@ -398,7 +398,7 @@ func TestResolveAuth_LocalHumanRole(t *testing.T) {
 	}
 
 	if !auth.isLocalHuman() || !auth.isHuman() {
-		t.Error("local human should satisfy isLocalHuman() and isHuman()")
+		t.Error("local user should satisfy isLocalHuman() and isHuman()")
 	}
 }
 
@@ -446,7 +446,7 @@ func TestResolveAuth_RemoteHuman(t *testing.T) {
 	}
 
 	if !auth.isHuman() || auth.isLocalHuman() {
-		t.Error("remote human: isHuman() true, isLocalHuman() false")
+		t.Error("remote user: isHuman() true, isLocalHuman() false")
 	}
 
 	if auth.deviceID != deviceID {
@@ -514,7 +514,7 @@ func TestResolveAuth_RequirePairingReloadSemantics(t *testing.T) {
 	}
 
 	if got := resolveRole(); got != roleRemoteHuman {
-		t.Fatalf("initial role = %d, want remote human", got)
+		t.Fatalf("initial role = %d, want remote user", got)
 	}
 
 	downgraded := *sm.Config()
@@ -538,7 +538,7 @@ func TestResolveAuth_RequirePairingReloadSemantics(t *testing.T) {
 	}
 
 	if got := resolveRole(); got != roleRemoteHuman {
-		t.Fatalf("full device role after require_pairing restore = %d, want remote human", got)
+		t.Fatalf("full device role after require_pairing restore = %d, want remote user", got)
 	}
 
 	// Pairing-time ReadOnly is persistent: enabling pairing is not an implicit
@@ -724,8 +724,8 @@ func TestCheckScenarioOp(t *testing.T) {
 		scenario string
 		wantErr  bool
 	}{
-		{"local human may manage any scenario", authContext{role: roleLocalHuman}, "strath", false},
-		{"remote human may manage any scenario", authContext{role: roleRemoteHuman}, "strath", false},
+		{"local user may manage any scenario", authContext{role: roleLocalHuman}, "strath", false},
+		{"remote user may manage any scenario", authContext{role: roleRemoteHuman}, "strath", false},
 		{"scenario orchestrator allowed", authContext{sessionID: "ben", authenticated: true, role: roleOrchestrator}, "strath", false},
 		{"descendant of orchestrator allowed", authContext{sessionID: "wee-bairn", authenticated: true, role: roleSession}, "strath", false},
 		{"unrelated session rejected", authContext{sessionID: "thrawn", authenticated: true, role: roleSession}, "strath", true},

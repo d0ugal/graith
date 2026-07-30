@@ -27,7 +27,7 @@ type Message struct {
 	NoReply    bool   `json:"no_reply,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	// System marks a daemon-authored automated notification (PR/CI notices,
-	// etc.) as distinct from an LLM/session/human message. It is derived from
+	// etc.) as distinct from an LLM/session/user message. It is derived from
 	// the sender ID rather than stored, so it is set when messages are read or
 	// published, not persisted as a column. See issue #887.
 	System bool `json:"system,omitempty"`
@@ -204,7 +204,7 @@ func initSchema(db *sql.DB) error {
 
 		-- jailed_comments holds PR comments that pr_watch blocked as untrusted
 		-- (issue #1082). Rather than discard the content, it is quarantined here
-		-- with its metadata so the human/orchestrator can inspect and release it.
+		-- with its metadata so the user/orchestrator can inspect and release it.
 		-- The UNIQUE(comment_id, surface, target_session) constraint makes jailing
 		-- idempotent: a re-fetch of the same comment (e.g. a degraded re-prime)
 		-- can't create a duplicate row.

@@ -145,6 +145,28 @@ struct RealHostClientTests {
         await client.disconnect()
     }
 
+    @Test func sendMessageLabelsLocalSenderAsUser() async throws {
+        let (client, server) = make { d in
+            try await self.handshake(d)
+            let req = try await d.readControl()
+            #expect(req.type == "msg_pub")
+            let pub = try decodePayload(req, as: MsgPubMsg.self)
+            #expect(pub.stream == "inbox:braw")
+            #expect(pub.body == "thatch the bothy")
+            #expect(pub.senderName == "user")
+            try await d.writeControl("msg_published", ConversationMessage(
+                id: "msg_01", seq: 1, stream: "inbox:braw", senderID: "",
+                senderName: "user", body: "thatch the bothy",
+                createdAt: "2026-07-30T00:00:00Z"
+            ))
+        }
+        try await client.connect()
+        let sent = try await client.sendMessage(toSessionID: "braw", body: "thatch the bothy")
+        #expect(sent.senderName == "user")
+        _ = await server.result
+        await client.disconnect()
+    }
+
     @Test func stopMutationRoundTrips() async throws {
         let (client, server) = make { d in
             try await self.handshake(d)

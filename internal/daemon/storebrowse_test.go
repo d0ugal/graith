@@ -367,7 +367,7 @@ func TestStoreListHandlerRejectsAgent(t *testing.T) {
 	// read across the sandbox's per-repo store isolation via the daemon.
 	h.sendControlWithToken(t, "store_list", protocol.StoreListMsg{}, "tok-thrawn")
 
-	h.expectError(t, "human operator")
+	h.expectError(t, "requires a user")
 }
 
 func TestStoreGetHandlerRejectsAgent(t *testing.T) {
@@ -377,7 +377,7 @@ func TestStoreGetHandlerRejectsAgent(t *testing.T) {
 	h.sendControlWithToken(t, "store_get",
 		protocol.StoreGetMsg{Repo: "croft-abc", Key: "loch/notes.md"}, "tok-fash")
 
-	h.expectError(t, "human operator")
+	h.expectError(t, "requires a user")
 }
 
 func TestStoreGetHandlerUnknownStore(t *testing.T) {

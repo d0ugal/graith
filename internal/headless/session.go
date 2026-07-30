@@ -274,7 +274,7 @@ func (s *Session) handleLine(line []byte) {
 
 // handlePermission diagnoses and immediately denies a native permission prompt.
 // Headless sessions have no agent TUI in which a user could respond, so they
-// never enter a workflow state or wait for a human.
+// never enter a workflow state or wait for a user.
 //
 // The reply shape is the nested control_response form verified against claude
 // 2.1.211: the protocol-level subtype ("success") and request_id wrap an inner

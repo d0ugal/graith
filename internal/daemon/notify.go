@@ -67,7 +67,7 @@ const (
 )
 
 // isSystemSender reports whether a sender ID identifies an automated,
-// non-replyable graith notification (rather than a session or human). Display
+// non-replyable graith notification (rather than a session or user). Display
 // and notification code uses this to mark such messages as system-sourced and
 // to avoid suggesting a reply path to a session that does not exist.
 func isSystemSender(senderID string) bool {

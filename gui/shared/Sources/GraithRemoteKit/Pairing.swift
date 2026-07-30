@@ -3,12 +3,12 @@ import Combine
 import GraithProtocol
 
 /// The pairing seam: opens a pre-auth (token-less) connection to a daemon and
-/// runs the `pair_request` exchange, blocking until the local human approves.
+/// runs the `pair_request` exchange, blocking until the local user approves.
 /// Abstracted so ``PairingCoordinator`` can be driven by a mock in tests
 /// (the real conformer needs a live daemon over the tailnet).
 public protocol GraithPairing: Sendable {
     /// Send `pair_request` to the daemon at `transport` and await the
-    /// `pair_response`. Resolves once the local human runs
+    /// `pair_response`. Resolves once the local user runs
     /// `gr remote pairings approve`, or throws if the daemon rejects. The client
     /// cryptographically binds the TLS pin to the presented certificate before
     /// returning (TOFU binding).
@@ -59,7 +59,7 @@ public struct RealPairing: GraithPairing {
 ///   1. The user enters a MagicDNS host + label and taps Pair.
 ///   2. We open a pre-auth connection and send `pair_request` with the device
 ///      label + ed25519 public key (via ``GraithPairing``).
-///   3. The **local human** approves out-of-band with
+///   3. The **local user** approves out-of-band with
 ///      `gr remote pairings approve <request-id>`.
 ///   4. The daemon returns a `PairResponseMsg` once: client token + profile +
 ///      TLS SPKI pin. Nothing is persisted yet.
@@ -71,7 +71,7 @@ public struct RealPairing: GraithPairing {
 public final class PairingCoordinator: ObservableObject {
     public enum Phase: Equatable, Sendable {
         case idle
-        /// Sending `pair_request` and waiting for the local human to approve.
+        /// Sending `pair_request` and waiting for the local user to approve.
         case awaitingApproval
         /// The daemon returned a token, but nothing is persisted yet: the user
         /// must confirm the SPKI fingerprint matches
@@ -111,7 +111,7 @@ public final class PairingCoordinator: ObservableObject {
     }
 
     /// Kick off pairing with a daemon at `magicDNSName:port`, labelled `label`.
-    /// `deviceLabel` is what the local human sees in
+    /// `deviceLabel` is what the local user sees in
     /// `gr remote pairings list`.
     public func pair(
         hostID: String = UUID().uuidString,
@@ -146,7 +146,7 @@ public final class PairingCoordinator: ObservableObject {
             )
 
             // If the attempt was cancelled/superseded while we awaited the local
-            // human's approval, discard the result: drop the placeholder and do
+            // user's approval, discard the result: drop the placeholder and do
             // not touch the (now unrelated) coordinator state.
             guard myGen == generation else {
                 registry.remove(hostID: hostID)

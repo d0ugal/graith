@@ -91,7 +91,7 @@ Detected at: %s
 Transition: %s
 Event ID: %s
 
-Inspect release notes, configuration changes, and new capabilities when useful. Proactively suggest applicable configuration, workflow, trigger, or skill updates to the human.`,
+Inspect release notes, configuration changes, and new capabilities when useful. Proactively suggest applicable configuration, workflow, trigger, or skill updates to the user.`,
 		formatGraithBuildField(notice.Previous.Version),
 		formatGraithBuildField(notice.Previous.CommitSHA),
 		formatGraithBuildField(notice.Current.Version),

@@ -363,7 +363,7 @@ func TestPrintMessageNoReplyExpected(t *testing.T) {
 
 	got := captureMsgStdout(t, func() { printMessage(payload) })
 	if !strings.Contains(got, "No reply expected") {
-		t.Errorf("human message output missing no-reply expectation: %q", got)
+		t.Errorf("plain message output missing no-reply expectation: %q", got)
 	}
 }
 

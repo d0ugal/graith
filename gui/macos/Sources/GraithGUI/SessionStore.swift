@@ -126,7 +126,7 @@ enum GraithLocalSocket {
         )
     }
 
-    /// Read the daemon-written local-human credential, mirroring the CLI's
+    /// Read the daemon-written local-user credential, mirroring the CLI's
     /// `resolveClientToken` fallback outside a graith session. The macOS app
     /// deliberately ignores `GRAITH_TOKEN`: if it was launched from an agent
     /// shell, that session credential must not narrow the desktop UI to the

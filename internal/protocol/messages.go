@@ -205,7 +205,7 @@ type TerminalInputModes struct {
 // into an interactive PTY session so it can be attached to (headless phase 5,
 // issue #1137). The daemon stops the headless process, flips the session's
 // driver to PTY, and relaunches it via `claude --resume`, preserving the
-// conversation. The client sends this after the human confirms the convert
+// conversation. The client sends this after the user confirms the convert
 // prompt the daemon surfaces via ConvertRequiredMsg.
 type AttachConvertMsg struct {
 	SessionID string `json:"session_id"`
@@ -213,7 +213,7 @@ type AttachConvertMsg struct {
 
 // ConvertRequiredMsg is the daemon's reply to an attach targeting a headless
 // session: attaching converts it to interactive first, so the client must
-// confirm with the human before proceeding. The client answers with an
+// confirm with the user before proceeding. The client answers with an
 // AttachConvertMsg (or aborts).
 type ConvertRequiredMsg struct {
 	SessionID string `json:"session_id"`
@@ -469,7 +469,7 @@ type MsgTopicsMsg struct {
 
 // MsgConversationMsg requests the full direct-message conversation (both
 // directions) for SessionID. Authorisation uses the self-or-descendant rule, so
-// a human CLI, the session itself, an ancestor, or the orchestrator may read it.
+// a user CLI, the session itself, an ancestor, or the orchestrator may read it.
 type MsgConversationMsg struct {
 	SessionID string `json:"session_id"`
 	Limit     int    `json:"limit,omitempty"`
@@ -489,7 +489,7 @@ type ConversationMessage struct {
 	NoReply    bool   `json:"no_reply,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	// System marks an automated daemon-authored notification rather than a
-	// session/human message. See issue #887.
+	// session/user message. See issue #887.
 	System bool `json:"system,omitempty"`
 }
 
@@ -544,7 +544,7 @@ type MsgJailShowResponse struct {
 }
 
 // MsgJailReleaseMsg releases a jailed comment (or all from an author). Gated to
-// the human or the orchestrator — a plain agent session is rejected. Exactly one
+// the user or the orchestrator — a plain agent session is rejected. Exactly one
 // of ID, or (All && Author), is expected.
 type MsgJailReleaseMsg struct {
 	ID     string `json:"id,omitempty"`
@@ -559,7 +559,7 @@ type MsgJailReleaseResponse struct {
 }
 
 // NotifyMsg is a client request (`gr notify`) to send a proactive push
-// notification to the human via the configured [notifications] backend.
+// notification to the user via the configured [notifications] backend.
 type NotifyMsg struct {
 	Message  string `json:"message"`
 	Title    string `json:"title,omitempty"`
@@ -1624,7 +1624,7 @@ type TodoItemInfo struct {
 // TodoScope selects which list a todo op targets. All fields optional: if
 // Scenario is set it names a scenario; else if Session is set it anchors to that
 // session's subtree; else the caller's own subtree is used. All spans every
-// scope (human/orchestrator reads only).
+// scope (user/orchestrator reads only).
 type TodoScope struct {
 	Scenario string `json:"scenario,omitempty"`
 	Session  string `json:"session,omitempty"`
@@ -1688,7 +1688,7 @@ type TodoTransitionMsg struct {
 	Note   string `json:"note,omitempty"`
 }
 
-// TodoAssignMsg sets an item's assignee (override authority / human).
+// TodoAssignMsg sets an item's assignee (override authority / user).
 type TodoAssignMsg struct {
 	ID       string `json:"id"`
 	Assignee string `json:"assignee"`

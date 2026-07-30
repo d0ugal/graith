@@ -186,9 +186,9 @@ public actor RealHostClient: GraithHostClient {
 
     public func sendMessage(toSessionID sessionID: String, body: String) async throws -> ConversationMessage {
         do {
-            // Label local-human sends "human" so the recipient sees a sensible
-            // sender; a remote human's identity is forced daemon-side regardless.
-            return try await inner.sendMessage(toSessionID: sessionID, body: body, senderName: "human")
+            // Label local-user sends "user" so the recipient sees a sensible
+            // sender; a remote user's identity is forced daemon-side regardless.
+            return try await inner.sendMessage(toSessionID: sessionID, body: body, senderName: "user")
         } catch {
             throw RealClientError.map(error)
         }

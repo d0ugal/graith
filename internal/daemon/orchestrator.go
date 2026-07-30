@@ -411,12 +411,12 @@ func (sm *SessionManager) buildOrchestratorPrompt(agentName string, orchCfg conf
 }
 
 // orchestratorNotificationsSection tells the orchestrator it can proactively
-// get the human's attention with `gr notify`, and when it is (and isn't)
+// get the user's attention with `gr notify`, and when it is (and isn't)
 // appropriate — the orchestrator is the primary sender, so this belongs in its
 // system prompt rather than being left for it to discover.
 func orchestratorNotificationsSection() string {
-	return "## Notifying the human\n\n" +
-		"You can send a desktop/push notification to the human with " +
+	return "## Notifying the user\n\n" +
+		"You can send a desktop/push notification to the user with " +
 		"`gr notify \"<message>\" --priority low|normal|high`. Unlike an inbox " +
 		"message, this proactively interrupts them, so use it sparingly and only " +
 		"for things genuinely worth their attention — a finished briefing, a CI " +
@@ -825,7 +825,7 @@ const (
 // StopReason constants, returning ok=false when the reason is not proof of a
 // clean process exit. Only process-ending reasons map:
 //
-//   - logout / prompt_input_exit -> StopReasonUser (the human ended the session)
+//   - logout / prompt_input_exit -> StopReasonUser (the user ended the session)
 //   - clear / resume             -> ("", false): these are logical-session
 //     transitions that do NOT terminate the PTY process, so they set no reason
 //   - other / anything else      -> ("", false): not proof of a clean exit, so

@@ -17,13 +17,13 @@ var (
 
 var notifyCmd = &cobra.Command{
 	Use:   "notify <message>",
-	Short: "Send a proactive desktop/push notification to the human",
+	Short: "Send a proactive desktop/push notification to the user",
 	Long: `Send a proactive push notification via the configured [notifications] backend.
 
 Unlike an inbox message (which waits to be read), a notification proactively
-gets the human's attention — a morning briefing, a CI failure, a review needed.
+gets the user's attention — a morning briefing, a CI failure, a review needed.
 
-Only the orchestrator session and the human may send notifications; plain agent
+Only the orchestrator session and the user may send notifications; plain agent
 sessions are rejected to prevent notification spam.
 
 Priority levels:

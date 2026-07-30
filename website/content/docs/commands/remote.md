@@ -14,18 +14,18 @@ listener first — see [Orchestrator & remote access]({{< relref "/docs/configur
 
 ### `gr remote pair <host>`
 
-Request pairing with a remote daemon; blocks until a local human on the host runs
+Request pairing with a remote daemon; blocks until a local user on the host runs
 `gr remote pairings approve <request-id>`.
 
 | Flag | Description |
 |------|-------------|
 | `--port <port>` | Remote daemon port (default `4823`) |
 | `--profile <name>` | Named profile used by the remote daemon |
-| `--label <label>` | Device label shown to the approving human |
+| `--label <label>` | Device label shown to the approving user |
 
 ## Administer paired devices
 
-These connect through the local Unix socket and need the local-human credential;
+These connect through the local Unix socket and need the local user credential;
 the daemon rejects them remotely.
 
 ### `gr remote pairings list`

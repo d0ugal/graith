@@ -6,7 +6,7 @@ import GraithRemoteKit
 /// one-time device pairing (design §B.2).
 ///
 ///   1. The user enters the daemon's MagicDNS name + a label and taps Pair.
-///   2. The app sends `pair_request` and waits — the local human approves
+///   2. The app sends `pair_request` and waits — the local user approves
 ///      out-of-band with `gr remote pairings approve <request-id>` on the host.
 ///   3. The daemon returns a token + TLS pin; the user confirms the SPKI
 ///      fingerprint matches what `gr remote pairings approve` printed (TOFU),

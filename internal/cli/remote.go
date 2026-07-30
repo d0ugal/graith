@@ -46,7 +46,7 @@ var remotePairCmd = &cobra.Command{
 
 		// Establish or reload the canonical device key under the cross-process
 		// store lock. EnsureRemoteDeviceKey durably saves and releases that lock
-		// before the human/network pairing wait below begins (issue #1330).
+		// before the user/network pairing wait below begins (issue #1330).
 		_, pubB64, err := client.EnsureRemoteDeviceKey(client.RemoteHostsPath(paths.DataDir))
 		if err != nil {
 			return err
@@ -250,7 +250,7 @@ func runRemoteAttach(rh *client.RemoteHost, signer ed25519.PrivateKey, sessionAr
 func registerRemoteCmd() {
 	remotePairCmd.Flags().IntVar(&remotePairPort, "port", config.DefaultRemotePort, "remote daemon port")
 	remotePairCmd.Flags().StringVar(&remotePairProfile, "profile", "", "remote daemon profile (if it runs a named profile)")
-	remotePairCmd.Flags().StringVar(&remotePairLabel, "label", "", "device label shown to the remote human (default: hostname)")
+	remotePairCmd.Flags().StringVar(&remotePairLabel, "label", "", "device label shown to the approving user (default: hostname)")
 
 	remoteCmd.AddCommand(remotePairCmd)
 	registerRemotePairingsCmd()

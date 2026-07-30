@@ -81,7 +81,7 @@ type SessionManager struct {
 	attachedClients   map[string]*attachedClient
 	hookReports       map[string]hookReport
 	tokenIndex        map[string]string            // token → session ID (reverse lookup)
-	humanToken        string                       // local human credential, loaded at startup
+	humanToken        string                       // local user credential, loaded at startup
 	saveStateFault    func() error                 // test-only saveState fault injection; nil in production
 	sandboxResolver   func(string) (bool, error)   // test-only sandbox-availability override; nil in production
 	pendingPairings   map[string]*pendingPairing   // requestID → pending device pairing (in-memory; not persisted)
@@ -737,7 +737,7 @@ func (sm *SessionManager) reconcileSessionCWDs(state *State) {
 	}
 }
 
-// loadOrCreateHumanToken loads the stable local-human credential, creating it
+// loadOrCreateHumanToken loads the stable local-user credential, creating it
 // crash-safely on first startup. It must never silently replace an existing
 // credential, even when that credential cannot be read.
 func (sm *SessionManager) loadOrCreateHumanToken() error {
@@ -749,7 +749,7 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 		if !errors.Is(err, os.ErrNotExist) {
 			// Includes ELOOP (symlink) and any other open failure: fail closed
 			// rather than fall back to permissive behaviour.
-			return fmt.Errorf("open human token: %w", err)
+			return fmt.Errorf("open user token: %w", err)
 		}
 
 		token, genErr := generateToken()
@@ -758,7 +758,7 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 		}
 
 		if writeErr := atomicfile.Write(sm.paths.HumanTokenFile, []byte(token+"\n"), 0o600); writeErr != nil {
-			return fmt.Errorf("write human token: %w", writeErr)
+			return fmt.Errorf("write user token: %w", writeErr)
 		}
 
 		sm.setHumanToken(token)
@@ -772,25 +772,25 @@ func (sm *SessionManager) loadOrCreateHumanToken() error {
 	// the open descriptor (not a pre-open stat) so there is no check/use race.
 	info, err := f.Stat()
 	if err != nil {
-		return fmt.Errorf("stat human token: %w", err)
+		return fmt.Errorf("stat user token: %w", err)
 	}
 
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("human token %s is not a regular file", sm.paths.HumanTokenFile)
+		return fmt.Errorf("user token %s is not a regular file", sm.paths.HumanTokenFile)
 	}
 
 	if perm := info.Mode().Perm(); perm != 0o600 {
-		return fmt.Errorf("human token %s has insecure mode %04o, want 0600", sm.paths.HumanTokenFile, perm)
+		return fmt.Errorf("user token %s has insecure mode %04o, want 0600", sm.paths.HumanTokenFile, perm)
 	}
 
 	data, err := io.ReadAll(f)
 	if err != nil {
-		return fmt.Errorf("read human token: %w", err)
+		return fmt.Errorf("read user token: %w", err)
 	}
 
 	token := strings.TrimSpace(string(data))
 	if token == "" {
-		return errors.New("read human token: token is empty")
+		return errors.New("read user token: token is empty")
 	}
 
 	sm.setHumanToken(token)
@@ -804,7 +804,7 @@ func (sm *SessionManager) setHumanToken(token string) {
 	sm.mu.Unlock()
 }
 
-// EnsureHumanToken loads or creates the local human credential. It is exported
+// EnsureHumanToken loads or creates the local user credential. It is exported
 // for tests and embedders that construct a SessionManager without going through
 // Run (which calls loadOrCreateHumanToken during startup).
 func (sm *SessionManager) EnsureHumanToken() error {

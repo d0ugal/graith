@@ -105,7 +105,7 @@ func decodeAttachResponse(resp protocol.Envelope, info *protocol.SessionInfo) (*
 	}
 }
 
-// confirmConvert asks the human whether to convert a headless session to
+// confirmConvert asks the user whether to convert a headless session to
 // interactive. --yes (attachYes) skips the prompt. A non-terminal stdin is
 // treated as a decline (fail-safe: don't restart a session unattended).
 func confirmConvert(name string) bool {

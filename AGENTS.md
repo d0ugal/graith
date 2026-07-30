@@ -118,7 +118,7 @@ See [`internal/protocol/AGENTS.md`](internal/protocol/AGENTS.md).
 Every new case dispatched by `internal/daemon/handler.go` must have an explicit
 `remoteMessagePolicy` entry in `internal/daemon/authmatrix.go`; the default is deny.
 `TestRemoteMatrixCompleteness` fails on missing or stale rows. Preserve existing
-local, remote, session, descendant, and human authorization boundaries.
+local, remote, session, descendant, and user authorization boundaries.
 
 See [`internal/daemon/AGENTS.md`](internal/daemon/AGENTS.md).
 

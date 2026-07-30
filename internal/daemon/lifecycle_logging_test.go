@@ -97,8 +97,8 @@ func TestAuthContextDescribe(t *testing.T) {
 		ac   authContext
 		want string
 	}{
-		{"local human", authContext{role: roleLocalHuman}, "local-human"},
-		{"remote human", authContext{role: roleRemoteHuman, deviceID: "dev-canny"}, "remote-human(dev-canny)"},
+		{"local user", authContext{role: roleLocalHuman}, "local-human"},
+		{"remote user", authContext{role: roleRemoteHuman, deviceID: "dev-canny"}, "remote-human(dev-canny)"},
 		{"remote guest", authContext{role: roleRemoteGuest, deviceID: "dev-haar"}, "remote-guest(dev-haar)"},
 		{"orchestrator", authContext{role: roleOrchestrator, sessionID: "ben-01"}, "orchestrator(ben-01)"},
 		{"session", authContext{role: roleSession, sessionID: "braw-02"}, "session(braw-02)"},

@@ -12,7 +12,7 @@ import (
 
 // JailedComment is a PR comment that pr_watch blocked as untrusted and
 // quarantined instead of discarding (issue #1082). It carries enough metadata
-// for the human/orchestrator to inspect the comment and decide whether to
+// for the user/orchestrator to inspect the comment and decide whether to
 // release it (deliver it to the target session) or leave it jailed.
 type JailedComment struct {
 	ID            string `json:"id"`

@@ -328,7 +328,7 @@ Set a status summary, shown in the Session Navigator and `gr list`. Run inside a
 
 ### `gr notify <message>`
 
-Send a desktop/push notification via the configured `[notifications]` backend — unlike an inbox message, it grabs the human's attention. Only the orchestrator session and the human can send them; plain agent sessions are rejected.
+Send a desktop/push notification via the configured `[notifications]` backend — unlike an inbox message, it grabs the user's attention. Only the orchestrator session and the user can send them; plain agent sessions are rejected.
 
 | Flag | Description |
 |------|-------------|

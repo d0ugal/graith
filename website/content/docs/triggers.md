@@ -171,7 +171,7 @@ event            = "oncall_alert_group" # v1 value; also the default
 context          = "oncall-automation"  # required gcx context name
 every            = "1m"                 # default 1m
 timeout          = "30s"                # per gcx call; default 30s
-oncall_user_id   = "U..."               # stable human OnCall user ID, or "*" for testing
+oncall_user_id   = "U..."               # stable OnCall user ID, or "*" for testing
 schedule_ids     = ["S..."]             # schedules that gate this trigger
 team_ids         = ["T..."]             # optional alert filters
 integration_ids  = ["I..."]             # optional alert filters
@@ -189,9 +189,9 @@ auto_cleanup = true
 Configure and test the gcx context separately before starting graith. Graith
 stores only the context name and invokes the `gcx` executable, so credentials and
 tokens stay in gcx configuration. A long-lived service-account context works even
-though `oncall_user_id` names a human: the identities are separate, so `--mine`
-semantics would wrongly target the service account, not the human whose shift gates
-the trigger.
+though `oncall_user_id` names the on-call user record: the identities are
+separate, so `--mine` semantics would wrongly target the service-account user,
+not the on-call user whose shift gates the trigger.
 
 Discover stable IDs with gcx, without copying credentials into graith:
 

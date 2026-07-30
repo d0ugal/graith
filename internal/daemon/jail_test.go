@@ -129,7 +129,7 @@ func TestJail_RetentionByAge(t *testing.T) {
 	}
 }
 
-// --- auth gating (agent denied, human/orchestrator allowed) ---
+// --- auth gating (agent denied, user/orchestrator allowed) ---
 
 func TestCheckJailRelease_Gating(t *testing.T) {
 	sm := newTestSMWithSessions(map[string]*SessionState{
@@ -139,7 +139,7 @@ func TestCheckJailRelease_Gating(t *testing.T) {
 
 	// Local human: allowed.
 	if err := (authContext{role: roleLocalHuman}).checkJailRelease(sm); err != nil {
-		t.Errorf("local human should be allowed to release, got: %v", err)
+		t.Errorf("local user should be allowed to release, got: %v", err)
 	}
 
 	// Orchestrator session: allowed.
@@ -186,7 +186,7 @@ func TestMayReadJailBody(t *testing.T) {
 	})
 
 	if !(authContext{role: roleLocalHuman}).mayReadJailBody(sm) {
-		t.Error("human should be allowed to read jailed bodies")
+		t.Error("user should be allowed to read jailed bodies")
 	}
 
 	if !(authContext{sessionID: "orch", authenticated: true, role: roleOrchestrator}).mayReadJailBody(sm) {

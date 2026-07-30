@@ -474,7 +474,7 @@ func TestTodoTransitionOverride(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	// Override (orchestrator/human) can complete another's item.
+	// Override (orchestrator/user) can complete another's item.
 	done, err := s.Transition(it.ID, TodoStatusDone, "orchestrator", true)
 	if err != nil {
 		t.Fatalf("override done: %v", err)

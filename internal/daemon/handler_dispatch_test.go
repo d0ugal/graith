@@ -47,7 +47,7 @@ func TestCoverTriggerStatusInvalidPayload(t *testing.T) {
 	h.expectError(t, "invalid trigger_status")
 }
 
-// TestCoverTriggerRunNotFound verifies the human CLI passes the trigger-op auth
+// TestCoverTriggerRunNotFound verifies the user CLI passes the trigger-op auth
 // gate but an unknown trigger still errors.
 func TestCoverTriggerRunNotFound(t *testing.T) {
 	h := newTestHarness(t)
@@ -80,7 +80,7 @@ func TestCoverTriggerPauseNotFound(t *testing.T) {
 
 // --- notify dispatch ------------------------------------------------------
 
-// TestCoverNotifyHumanDeliversResponse verifies the human CLI passes the notify
+// TestCoverNotifyHumanDeliversResponse verifies the user CLI passes the notify
 // auth gate and receives a notify_response (delivery disabled by default config).
 func TestCoverNotifyHumanDeliversResponse(t *testing.T) {
 	h := newTestHarness(t)
@@ -91,7 +91,7 @@ func TestCoverNotifyHumanDeliversResponse(t *testing.T) {
 }
 
 // TestCoverNotifyRejectsPlainSession verifies a plain agent session is rejected
-// from sending notifications (orchestrator/human only).
+// from sending notifications (orchestrator/user only).
 func TestCoverNotifyRejectsPlainSession(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "thrawn-id", "thrawn", "tok-thrawn")
@@ -122,7 +122,7 @@ func TestCoverScenarioStatusNotFound(t *testing.T) {
 	h.expectError(t, "not found")
 }
 
-// TestCoverScenarioStopNotFound verifies scenario_stop passes the human auth
+// TestCoverScenarioStopNotFound verifies scenario_stop passes the user auth
 // gate then errors on an unknown scenario.
 func TestCoverScenarioStopNotFound(t *testing.T) {
 	h := newTestHarness(t)
@@ -401,28 +401,28 @@ func TestCoverScenarioAddInvalidPayload(t *testing.T) {
 
 // --- store dispatch -------------------------------------------------------
 
-// TestCoverStoreListRejectsAgent verifies store browsing requires a human
-// operator — an authenticated session is refused.
+// TestCoverStoreListRejectsAgent verifies store browsing requires a user; an
+// authenticated session is refused.
 func TestCoverStoreListRejectsAgent(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "thrawn-id", "thrawn", "tok-thrawn")
 
 	h.sendControlWithToken(t, "store_list", protocol.StoreListMsg{Shared: true}, "tok-thrawn")
 
-	h.expectError(t, "store browsing requires a human operator")
+	h.expectError(t, "store browsing requires a user")
 }
 
-// TestCoverStoreGetRejectsAgent verifies store_get is likewise human-only.
+// TestCoverStoreGetRejectsAgent verifies store_get is likewise user-only.
 func TestCoverStoreGetRejectsAgent(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "thrawn-id", "thrawn", "tok-thrawn")
 
 	h.sendControlWithToken(t, "store_get", protocol.StoreGetMsg{Shared: true, Key: "loch/notes.md"}, "tok-thrawn")
 
-	h.expectError(t, "store browsing requires a human operator")
+	h.expectError(t, "store browsing requires a user")
 }
 
-// TestCoverStoreListHumanEmpty verifies the human CLI can list an empty store.
+// TestCoverStoreListHumanEmpty verifies the user CLI can list an empty store.
 func TestCoverStoreListHumanEmpty(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -462,7 +462,7 @@ func TestCoverJailShowNotFound(t *testing.T) {
 }
 
 // TestCoverJailReleaseNeedsArgs verifies msg_jail_release with neither an id nor
-// --all --author errors (after passing the human release gate).
+// --all --author errors (after passing the user release gate).
 func TestCoverJailReleaseNeedsArgs(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -513,9 +513,9 @@ func TestCoverScreenSnapshotNotFound(t *testing.T) {
 	h.expectError(t, "session not found")
 }
 
-// --- pair dispatch (local human) ------------------------------------------
+// --- pair dispatch (local user) -------------------------------------------
 
-// TestCoverPairListLocalHuman verifies the local human can list pairings (empty).
+// TestCoverPairListLocalHuman verifies the local user can list pairings (empty).
 func TestCoverPairListLocalHuman(t *testing.T) {
 	h := newTestHarness(t)
 
@@ -554,7 +554,7 @@ func TestCoverPairApproveRejectsSession(t *testing.T) {
 	h.expectError(t, "local-only")
 }
 
-// TestCoverPairApproveUnknownRequest verifies pair_approve by the local human
+// TestCoverPairApproveUnknownRequest verifies pair_approve by the local user
 // errors on an unknown request id.
 func TestCoverPairApproveUnknownRequest(t *testing.T) {
 	h := newTestHarness(t)
@@ -574,7 +574,7 @@ func TestCoverPairRevokeRejectsSession(t *testing.T) {
 	h.expectError(t, "local-only")
 }
 
-// TestCoverPairRevokeUnknownDevice verifies pair_revoke by the local human
+// TestCoverPairRevokeUnknownDevice verifies pair_revoke by the local user
 // errors on an unknown device id.
 func TestCoverPairRevokeUnknownDevice(t *testing.T) {
 	h := newTestHarness(t)

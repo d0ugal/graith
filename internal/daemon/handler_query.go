@@ -121,10 +121,10 @@ func handleAgentCatalog(sm *SessionManager, send func(string, any)) {
 }
 
 // handleSearch returns local conversation-search results. Transcript bodies can
-// contain sensitive user content, so v1 restricts this to human operators.
+// contain sensitive user content, so v1 restricts this to users.
 func handleSearch(ctx context.Context, sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	if !auth.isHuman() {
-		send("error", protocol.ErrorMsg{Message: "conversation search requires a human operator"})
+		send("error", protocol.ErrorMsg{Message: "conversation search requires a user"})
 
 		return
 	}
@@ -181,11 +181,11 @@ func handleRepoList(sm *SessionManager, send func(string, any)) {
 }
 
 // handleStoreList returns a read-only document-store listing for the GUI browser
-// (#902). Human-only: a session must not use the unsandboxed daemon to read
+// (#902). User-only: a session must not use the unsandboxed daemon to read
 // across the per-repo store isolation the sandbox enforces.
 func handleStoreList(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	if !auth.isHuman() {
-		send("error", protocol.ErrorMsg{Message: "store browsing requires a human operator"})
+		send("error", protocol.ErrorMsg{Message: "store browsing requires a user"})
 
 		return
 	}
@@ -206,10 +206,10 @@ func handleStoreList(sm *SessionManager, auth authContext, send func(string, any
 }
 
 // handleStoreGet returns a read-only document for the GUI browser (#902).
-// Human-only for the same reason as handleStoreList.
+// User-only for the same reason as handleStoreList.
 func handleStoreGet(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
 	if !auth.isHuman() {
-		send("error", protocol.ErrorMsg{Message: "store browsing requires a human operator"})
+		send("error", protocol.ErrorMsg{Message: "store browsing requires a user"})
 
 		return
 	}
@@ -319,7 +319,7 @@ func handleScreenSnapshot(sm *SessionManager, auth authContext, send func(string
 	send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, output.ScreenSnapshot()))
 }
 
-// handlePairApprove approves a pending device pairing (local human only). A
+// handlePairApprove approves a pending device pairing (local user only). A
 // device paired while require_pairing=false gets the read-only guest role.
 func handlePairApprove(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope, log *slog.Logger) {
 	if auth.role != roleLocalHuman {
@@ -365,7 +365,7 @@ func handlePairApprove(sm *SessionManager, auth authContext, send func(string, a
 	send("pair_approved", protocol.PairResponseMsg{DeviceID: deviceID, ClientToken: token, DaemonProfile: sm.paths.Profile, TLSPinSPKI: tlsPin})
 }
 
-// handlePairList lists pending and paired devices (local human only).
+// handlePairList lists pending and paired devices (local user only).
 func handlePairList(sm *SessionManager, auth authContext, send func(string, any)) {
 	if auth.role != roleLocalHuman {
 		send("error", protocol.ErrorMsg{Message: "pair list is local-only"})
@@ -406,7 +406,7 @@ func handlePairList(sm *SessionManager, auth authContext, send func(string, any)
 }
 
 // handlePairRevoke revokes a paired device and closes its live connections
-// (local human only).
+// (local user only).
 func handlePairRevoke(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope, log *slog.Logger) {
 	if auth.role != roleLocalHuman {
 		send("error", protocol.ErrorMsg{Message: "pair revoke is local-only"})

@@ -262,7 +262,7 @@ reconnect_timeout = "10s"         # bounds attach disconnect-recovery before giv
 reconnect_interval = "250ms"      # how often the attach recovery loop re-probes the daemon
 remote_dial_timeout = "10s"       # bounds the TCP dial to a paired remote daemon
 remote_handshake_timeout = "15s"  # bounds the remote handshake + proof-of-possession
-remote_pairing_timeout = "11m"    # how long to wait for the remote human to approve pairing
+remote_pairing_timeout = "11m"    # how long to wait for the remote user to approve pairing
 
 # Extra terminal variables copied into the one-shot startup request for the
 # app-associated daemon on supported macOS packages. PATH, SHELL, TMPDIR,
@@ -614,7 +614,7 @@ fresh_start_threshold = 3 # after this many consecutive restarts, relaunch the a
 enabled = false           # expose the remote control listener over the tailnet
 mode = "tsnet"            # transport: "tsnet" (embedded Tailscale) or "interface" (bind an existing tailnet IP)
 port = 4823               # TCP port the listener binds
-require_pairing = true    # require per-device pairing for human-level rights; false is read-only and UNSAFE
+require_pairing = true    # require per-device pairing for user-level rights; false is read-only and UNSAFE
 # pair_request_rate = "5/min"     # anti-flood rate on pending pair requests ("<n>/<sec|min|hour>")
 # max_pending_pairings = 16       # cap on unapproved pair requests outstanding at once (1-1024)
 # pending_pairing_ttl  = "10m"    # how long an unapproved pair request lives (1m-24h)
@@ -886,7 +886,7 @@ watch_builtin_ignores    = [".git/", ".git", ".hg/", ".svn/", "*.swp", "*.swx", 
 # inbox = "{session_name}"
 #
 # GCX → session: investigate newly observed OnCall alert groups, but only while
-# the configured human is currently present in one of the selected schedules.
+# the configured user is currently present in one of the selected schedules.
 # For trigger testing, oncall_user_id = "*" passes when any user is currently on
 # any selected schedule; schedule_ids are still required and validated.
 # Authentication stays in the named gcx context; do not put tokens here.
