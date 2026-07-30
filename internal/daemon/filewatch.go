@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -58,10 +59,52 @@ func (sm *SessionManager) watchRetryBackoff(attempt int) time.Duration {
 // binding's git ignore matcher and a reconcile of its watched directories.
 const gitignoreFilename = ".gitignore"
 
+const watchRegistrationSkipSampleLimit = 5
+
 // mandatoryWatchIgnores are always applied on top of the configurable
 // [triggers.advanced] watch_builtin_ignores list, and can never be un-ignored:
 // watching .git churns constantly and creates a feedback loop.
 var mandatoryWatchIgnores = []string{".git/", ".git"}
+
+type watchRegistrationSkip struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+type watchRegistrationSummary struct {
+	skipped  int
+	samples  []watchRegistrationSkip
+	canceled error
+}
+
+func (s *watchRegistrationSummary) record(path string, err error) error {
+	if isWatchRegistrationCanceled(err) {
+		s.canceled = err
+
+		return err
+	}
+
+	s.skipped++
+	if len(s.samples) < watchRegistrationSkipSampleLimit {
+		s.samples = append(s.samples, watchRegistrationSkip{Path: path, Error: err.Error()})
+	}
+
+	return nil
+}
+
+func (s *watchRegistrationSummary) recordContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		s.canceled = err
+
+		return err
+	}
+
+	return nil
+}
+
+func isWatchRegistrationCanceled(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
 
 // RunFileWatchLoop is the daemon-owned file-watch (#593) trigger source. It
 // reconciles bindings (watch trigger × matching live writable session) against
@@ -523,7 +566,7 @@ func (sm *SessionManager) bindingDebounce(triggerName string) time.Duration {
 
 func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName string, b *watchBinding, matcher *watchMatcher, ev watchEvent, debounce time.Duration) {
 	if ev.Scan {
-		sm.reloadIgnores(b, matcher)
+		sm.reloadIgnores(ctx, b, matcher)
 		sm.scanChangedSubtree(ctx, b, matcher, ev.Name, debounce, triggerName, ev.LossyScan)
 
 		return
@@ -534,16 +577,6 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			rel := matcher.rel(ev.Name)
 			if matcher.shouldWatchDir(rel) && !matcher.ignoredDir(rel) {
-				if b.backend != nil && !b.backend.Recursive() {
-					// Best-effort: a post-creation Add failure (e.g. the watch limit
-					// exhausted only after a healthy start) is not routed through the
-					// degraded/retry path — that covers creation-time degradation only
-					// (#1029). Runtime subtree-add recovery is a separate follow-up.
-					if err := sm.registerWatchPath(b, ev.Name); err != nil {
-						sm.log.Warn("trigger: new directory watch skipped", "trigger", triggerName, "path", ev.Name, "err", err)
-					}
-				}
-
 				sm.scanNewDir(ctx, b, matcher, ev.Name, debounce, triggerName)
 			}
 
@@ -567,7 +600,7 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 	// creation. Runs in this (the binding's) goroutine, so the matcher and
 	// watcher need no extra locking.
 	if filepath.Base(ev.Name) == gitignoreFilename {
-		sm.reloadIgnores(b, matcher)
+		sm.reloadIgnores(ctx, b, matcher)
 	}
 
 	if !matcher.fires(rel) {
@@ -580,9 +613,9 @@ func (sm *SessionManager) handleWatchEvent(ctx context.Context, triggerName stri
 // reloadIgnores rebuilds the git ignore matcher from the current on-disk sources
 // and reconciles the live watch set against the new rules. Called from the
 // binding's event goroutine when a .gitignore changes.
-func (sm *SessionManager) reloadIgnores(b *watchBinding, matcher *watchMatcher) {
+func (sm *SessionManager) reloadIgnores(ctx context.Context, b *watchBinding, matcher *watchMatcher) {
 	matcher.reloadGit()
-	sm.reconcileWatchDirs(b, matcher)
+	sm.reconcileWatchDirs(ctx, b, matcher)
 
 	sm.log.Info("trigger: reloaded ignore rules", "trigger", b.triggerName, "worktree", b.worktree)
 }
@@ -593,14 +626,20 @@ func (sm *SessionManager) reloadIgnores(b *watchBinding, matcher *watchMatcher) 
 // newly-un-ignored directory is watched but not scanned for pre-existing files —
 // only subsequent events fire it — so merely un-ignoring a populated tree does
 // not synthesise a burst of changes. Runs in the binding's event goroutine.
-func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatcher) {
+func (sm *SessionManager) reconcileWatchDirs(ctx context.Context, b *watchBinding, matcher *watchMatcher) {
 	if b.backend == nil || b.backend.Recursive() {
 		return
 	}
 
 	desired := make(map[string]bool)
 
-	_ = filepath.WalkDir(b.worktree, func(path string, d os.DirEntry, err error) error {
+	var summary watchRegistrationSummary
+
+	walkErr := filepath.WalkDir(b.worktree, func(path string, d os.DirEntry, err error) error {
+		if err := summary.recordContext(ctx); err != nil {
+			return err
+		}
+
 		if err != nil {
 			return nil //nolint:nilerr // skip unreadable dirs, keep walking
 		}
@@ -620,11 +659,28 @@ func (sm *SessionManager) reconcileWatchDirs(b *watchBinding, matcher *watchMatc
 
 		desired[path] = true
 		if err := sm.registerWatchPath(b, path); err != nil {
-			sm.log.Warn("trigger: directory watch skipped", "trigger", b.triggerName, "path", path, "err", err)
+			if err := summary.record(path, err); err != nil {
+				return err
+			}
 		}
 
 		return nil
 	})
+
+	if summary.skipped > 0 {
+		sm.logWatchRegistrationSummary("trigger: directory watches skipped", b.triggerName, b.worktree, summary)
+	}
+
+	canceled := summary.canceled != nil || isWatchRegistrationCanceled(walkErr)
+	if canceled {
+		if summary.canceled == nil {
+			summary.canceled = walkErr
+		}
+
+		sm.logWatchRegistrationCanceled("trigger: directory watch reconcile canceled", b.triggerName, b.worktree, summary.canceled)
+
+		return
+	}
 
 	// Prune directories that are now ignored but still watched. WatchList holds
 	// only this binding's paths (each binding owns its watcher); the rel guard is
@@ -667,7 +723,7 @@ func (sm *SessionManager) scanChangedSubtree(ctx context.Context, b *watchBindin
 		return
 	}
 
-	if sm.scanNewDir(ctx, b, matcher, name, debounce, triggerName) {
+	if noted, canceled := sm.scanNewDir(ctx, b, matcher, name, debounce, triggerName); noted || canceled {
 		return
 	}
 
@@ -680,9 +736,16 @@ func (sm *SessionManager) scanChangedSubtree(ctx context.Context, b *watchBindin
 // scanNewDir handles a newly-created (or moved-in) directory: it registers
 // watches for the whole non-ignored subtree and notes any existing files as
 // changes, so a tool that atomically creates a nested tree isn't missed.
-func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, matcher *watchMatcher, dir string, debounce time.Duration, triggerName string) bool {
+func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, matcher *watchMatcher, dir string, debounce time.Duration, triggerName string) (bool, bool) {
 	noted := false
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+
+	var summary watchRegistrationSummary
+
+	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err := summary.recordContext(ctx); err != nil {
+			return err
+		}
+
 		if err != nil {
 			return nil //nolint:nilerr // skip unreadable entries, keep walking
 		}
@@ -703,7 +766,9 @@ func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, match
 
 			if b.backend != nil && !b.backend.Recursive() {
 				if err := sm.registerWatchPath(b, path); err != nil {
-					sm.log.Warn("trigger: new subtree watch skipped", "trigger", triggerName, "path", path, "err", err)
+					if err := summary.record(path, err); err != nil {
+						return err
+					}
 				}
 			}
 
@@ -719,7 +784,52 @@ func (sm *SessionManager) scanNewDir(ctx context.Context, b *watchBinding, match
 		return nil
 	})
 
-	return noted
+	if summary.skipped > 0 {
+		sm.logWatchRegistrationSummary("trigger: new subtree watches skipped", triggerName, dir, summary)
+	}
+
+	canceled := summary.canceled != nil || isWatchRegistrationCanceled(walkErr)
+	if canceled {
+		if summary.canceled == nil {
+			summary.canceled = walkErr
+		}
+
+		sm.logWatchRegistrationCanceled("trigger: new subtree watch registration canceled", triggerName, dir, summary.canceled)
+	}
+
+	return noted, canceled
+}
+
+func (sm *SessionManager) logWatchRegistrationSummary(message, triggerName, root string, summary watchRegistrationSummary) {
+	watchBudget := sm.Config().TriggersRuntime.WatchMaxDirectories()
+
+	sm.triggers.mu.Lock()
+	watchUsed := sm.triggers.watchDirs
+	sm.triggers.mu.Unlock()
+
+	sm.log.Warn(message,
+		"trigger", triggerName,
+		"root", root,
+		"skipped", summary.skipped,
+		"sample_limit", watchRegistrationSkipSampleLimit,
+		"samples", summary.samples,
+		"watch_budget_used", watchUsed,
+		"watch_budget", watchBudget)
+}
+
+func (sm *SessionManager) logWatchRegistrationCanceled(message, triggerName, root string, err error) {
+	watchBudget := sm.Config().TriggersRuntime.WatchMaxDirectories()
+
+	sm.triggers.mu.Lock()
+	watchUsed := sm.triggers.watchDirs
+	sm.triggers.mu.Unlock()
+
+	sm.log.Info(message,
+		"trigger", triggerName,
+		"root", root,
+		"err", err,
+		"watch_budget_used", watchUsed,
+		"watch_budget", watchBudget)
 }
 
 // noteChange records a changed path and (re)arms the debounce timer.

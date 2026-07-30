@@ -1912,6 +1912,82 @@ func TestCheckEnvironmentLargeDaemonLog(t *testing.T) {
 	}
 }
 
+func TestCheckEnvironmentDaemonLogUsesConfiguredCap(t *testing.T) {
+	oldCfg, oldPaths, oldCfgFile, oldOut, oldFix := cfg, paths, cfgFile, out, doctorAutofix
+
+	t.Cleanup(func() { cfg, paths, cfgFile, out, doctorAutofix = oldCfg, oldPaths, oldCfgFile, oldOut, oldFix })
+
+	var buf bytes.Buffer
+
+	out = output.NewWithWriter(false, &buf)
+	doctorAutofix = false
+
+	dir := t.TempDir()
+
+	cfgFile = filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgFile, []byte("[sandbox]\nenabled = false\n[logging]\ndaemon_max_bytes = 64\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	logPath := filepath.Join(dir, "daemon.log")
+	if err := os.WriteFile(logPath, bytes.Repeat([]byte("b"), 65), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths = config.Paths{DataDir: dir, DaemonLog: logPath}
+	cfg = config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: false}
+	cfg.Logging.DaemonMaxBytes = 64
+
+	dc := newDoctorContext()
+	dc.checkEnvironment()
+
+	warned := strings.Join(checkResults(dc, "warn"), "\n")
+	if !strings.Contains(warned, "Daemon log") {
+		t.Errorf("expected daemon-log warning above configured cap, got: %q", warned)
+	}
+
+	if rendered := buf.String(); !strings.Contains(rendered, "configured cap") {
+		t.Errorf("expected configured-cap hint, got:\n%s", rendered)
+	}
+}
+
+func TestCheckEnvironmentDaemonLogAutofixUsesConfiguredCap(t *testing.T) {
+	oldCfg, oldOut, oldFix := cfg, out, doctorAutofix
+
+	t.Cleanup(func() { cfg, out, doctorAutofix = oldCfg, oldOut, oldFix })
+
+	out = output.NewWithWriter(false, io.Discard)
+	doctorAutofix = true
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "daemon.log")
+
+	content := append(bytes.Repeat([]byte("H"), 64), bytes.Repeat([]byte("T"), 64)...)
+	if err := os.WriteFile(logPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg = config.Default()
+	cfg.Logging.DaemonMaxBytes = 64
+
+	dc := newDoctorContext()
+	dc.checkEnvironmentDaemonLogFile(logPath)
+
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if int64(len(got)) != cfg.Logging.DaemonMaxBytes {
+		t.Fatalf("autofix kept %d bytes, want configured cap %d", len(got), cfg.Logging.DaemonMaxBytes)
+	}
+
+	if want := bytes.Repeat([]byte("T"), 64); !bytes.Equal(got, want) {
+		t.Errorf("autofix kept the wrong bytes: expected the configured-cap tail, got head bytes present=%v", bytes.Contains(got, []byte("H")))
+	}
+}
+
 func TestCheckEnvironmentLargeDaemonStderrLog(t *testing.T) {
 	oldCfg, oldPaths, oldCfgFile := cfg, paths, cfgFile
 

@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +15,37 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/fsnotify/fsnotify"
 )
+
+type fakeWatchBackend struct {
+	add     func(string) error
+	watched []string
+}
+
+func (b *fakeWatchBackend) Name() string { return "fake" }
+
+func (b *fakeWatchBackend) Events() <-chan watchEvent { return nil }
+
+func (b *fakeWatchBackend) Errors() <-chan error { return nil }
+
+func (b *fakeWatchBackend) Add(path string) error {
+	if b.add != nil {
+		if err := b.add(path); err != nil {
+			return err
+		}
+	}
+
+	b.watched = append(b.watched, path)
+
+	return nil
+}
+
+func (b *fakeWatchBackend) Remove(string) error { return nil }
+
+func (b *fakeWatchBackend) WatchList() []string { return append([]string(nil), b.watched...) }
+
+func (b *fakeWatchBackend) Close() error { return nil }
+
+func (b *fakeWatchBackend) Recursive() bool { return false }
 
 // setWatchBuiltinIgnores swaps the daemon-wide watch-ignore policy the way a
 // config reload does — a fresh *config.Config published under sm.mu — rather than
@@ -305,6 +339,147 @@ func TestFileWatchBudgetDegradesAndReleases(t *testing.T) {
 	}
 
 	sm.teardownAllBindings()
+}
+
+func TestScanNewDirStopsOnContextCanceledWatchRegistration(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"braw", "canny", "dreich", filepath.Join("strath", "bothy")} {
+		mustMkdir(t, filepath.Join(root, dir))
+	}
+
+	trig := config.TriggerConfig{Name: "blether", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	addCalls := 0
+	backend := &fakeWatchBackend{add: func(string) error {
+		addCalls++
+
+		return context.Canceled
+	}}
+	b := &watchBinding{triggerName: trig.Name, sessionID: "src", worktree: root, backend: backend, watchPaths: make(map[string]int), changed: make(map[string]bool)}
+	matcher := newWatchMatcher(root, trig.Watch, nil)
+
+	noted, canceled := sm.scanNewDir(context.Background(), b, matcher, root, time.Second, trig.Name)
+	if noted {
+		t.Fatal("canceled scan should not note changes")
+	}
+
+	if !canceled {
+		t.Fatal("scan should report cancellation")
+	}
+
+	if addCalls != 1 {
+		t.Fatalf("context-canceled registration should stop the walk after one Add, got %d", addCalls)
+	}
+
+	rendered := logs.String()
+	if strings.Contains(rendered, "trigger: new subtree watches skipped") {
+		t.Fatalf("context cancellation should not emit skip WARN summary, got logs:\n%s", rendered)
+	}
+
+	if got := strings.Count(rendered, "trigger: new subtree watch registration canceled"); got != 1 {
+		t.Fatalf("context cancellation should log once, got %d cancellation records:\n%s", got, rendered)
+	}
+}
+
+func TestScanNewDirAggregatesWatchRegistrationSkips(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"braw", "canny", "dreich", "thrawn", "strath", "bothy", "croft"} {
+		mustMkdir(t, filepath.Join(root, dir))
+	}
+
+	trig := config.TriggerConfig{Name: "blether", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	backend := &fakeWatchBackend{add: func(string) error { return errors.New("watch limit dreich") }}
+	b := &watchBinding{triggerName: trig.Name, sessionID: "src", worktree: root, backend: backend, watchPaths: make(map[string]int), changed: make(map[string]bool)}
+	matcher := newWatchMatcher(root, trig.Watch, nil)
+
+	sm.scanNewDir(context.Background(), b, matcher, root, time.Second, trig.Name)
+
+	rendered := strings.TrimSpace(logs.String())
+	if strings.Count(rendered, "trigger: new subtree watches skipped") != 1 {
+		t.Fatalf("expected one aggregate warning, got logs:\n%s", rendered)
+	}
+
+	if strings.Contains(rendered, "trigger: new subtree watch skipped") {
+		t.Fatalf("old per-directory warning should not be emitted, got logs:\n%s", rendered)
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal([]byte(rendered), &record); err != nil {
+		t.Fatalf("decode log record: %v\n%s", err, rendered)
+	}
+
+	if got := int(record["skipped"].(float64)); got != 8 {
+		t.Fatalf("skipped = %d, want 8 directories", got)
+	}
+
+	samples, ok := record["samples"].([]any)
+	if !ok {
+		t.Fatalf("samples = %#v, want JSON array", record["samples"])
+	}
+
+	if got := len(samples); got != watchRegistrationSkipSampleLimit {
+		t.Fatalf("sample count = %d, want %d", got, watchRegistrationSkipSampleLimit)
+	}
+
+	if got := int(record["watch_budget"].(float64)); got != sm.cfg.TriggersRuntime.WatchMaxDirectories() {
+		t.Fatalf("watch_budget = %d, want configured budget", got)
+	}
+}
+
+func TestHandleWatchEventAggregatesCreatedDirectoryWatchSkips(t *testing.T) {
+	root := t.TempDir()
+
+	newDir := filepath.Join(root, "strath")
+	for _, dir := range []string{newDir, filepath.Join(newDir, "braw"), filepath.Join(newDir, "canny")} {
+		mustMkdir(t, dir)
+	}
+
+	trig := config.TriggerConfig{Name: "blether", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	backend := &fakeWatchBackend{add: func(string) error { return errors.New("watch limit dreich") }}
+	b := &watchBinding{triggerName: trig.Name, sessionID: "src", worktree: root, backend: backend, watchPaths: make(map[string]int), changed: make(map[string]bool)}
+	matcher := newWatchMatcher(root, trig.Watch, nil)
+
+	sm.handleWatchEvent(context.Background(), trig.Name, b, matcher, watchEvent{Name: newDir, Op: fsnotify.Create}, time.Second)
+
+	rendered := strings.TrimSpace(logs.String())
+	if strings.Contains(rendered, "trigger: new directory watch skipped") {
+		t.Fatalf("created-directory path should use aggregate subtree warning, got logs:\n%s", rendered)
+	}
+
+	lines := strings.Split(rendered, "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected one aggregate warning, got %d log lines:\n%s", len(lines), rendered)
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatalf("decode log record: %v\n%s", err, lines[0])
+	}
+
+	if got := record["msg"]; got != "trigger: new subtree watches skipped" {
+		t.Fatalf("message = %v, want aggregate subtree warning", got)
+	}
+
+	if got := int(record["skipped"].(float64)); got != 3 {
+		t.Fatalf("skipped = %d, want new directory plus two children", got)
+	}
 }
 
 func TestFSNotifyWatchPathCostForGOOS(t *testing.T) {
@@ -1472,7 +1647,7 @@ func TestReconcileWatchDirs(t *testing.T) {
 
 	sm := newTriggerTestSM(t)
 	b := &watchBinding{worktree: root, backend: newFSNotifyWatchBackend(w, nil), changed: make(map[string]bool)}
-	sm.reconcileWatchDirs(b, m)
+	sm.reconcileWatchDirs(context.Background(), b, m)
 
 	if watchListContains(w, filepath.Join(root, "build")) {
 		t.Error("build/ should be pruned from the watch set after being ignored")
@@ -1519,7 +1694,7 @@ func TestReconcileWatchDirs_AddsUnignored(t *testing.T) {
 
 	sm := newTriggerTestSM(t)
 	b := &watchBinding{worktree: root, backend: newFSNotifyWatchBackend(w, nil), changed: make(map[string]bool)}
-	sm.reconcileWatchDirs(b, m)
+	sm.reconcileWatchDirs(context.Background(), b, m)
 
 	if !watchListContains(w, filepath.Join(root, "build")) {
 		t.Error("build/ should be watched again once un-ignored")
@@ -1566,6 +1741,94 @@ func TestHandleWatchEvent_GitignoreReload(t *testing.T) {
 
 	if watchListContains(w, filepath.Join(root, "logs")) {
 		t.Error("logs/ should be pruned from the watch set after the reload")
+	}
+}
+
+func TestHandleWatchEventAggregatesReconcileWatchSkips(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"braw", "canny", filepath.Join("strath", "bothy")} {
+		mustMkdir(t, filepath.Join(root, dir))
+	}
+
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm := newTriggerTestSM(t, config.TriggerConfig{
+		Name:   "wf",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "wynd"}},
+	})
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	matcher := newWatchMatcher(root, sm.cfg.Triggers[0].Watch, nil)
+	backend := &fakeWatchBackend{add: func(string) error { return errors.New("watch limit dreich") }}
+	b := &watchBinding{triggerName: "wf", worktree: root, backend: backend, watchPaths: make(map[string]int), changed: make(map[string]bool)}
+
+	ev := watchEvent{Name: filepath.Join(root, ".gitignore"), Op: fsnotify.Write}
+	sm.handleWatchEvent(context.Background(), "wf", b, matcher, ev, time.Second)
+
+	rendered := logs.String()
+	if strings.Contains(rendered, "trigger: directory watch skipped") {
+		t.Fatalf("reconcile path should use aggregate warning, got logs:\n%s", rendered)
+	}
+
+	if got := strings.Count(rendered, "trigger: directory watches skipped"); got != 1 {
+		t.Fatalf("expected one aggregate warning, got %d records:\n%s", got, rendered)
+	}
+
+	var summary map[string]any
+
+	for _, line := range strings.Split(strings.TrimSpace(rendered), "\n") {
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode log record: %v\n%s", err, line)
+		}
+
+		if record["msg"] == "trigger: directory watches skipped" {
+			summary = record
+			break
+		}
+	}
+
+	if summary == nil {
+		t.Fatalf("missing aggregate warning in logs:\n%s", rendered)
+	}
+
+	if got := int(summary["skipped"].(float64)); got != 5 {
+		t.Fatalf("skipped = %d, want root plus four directories", got)
+	}
+}
+
+func TestReconcileWatchDirsStopsOnCanceledBinding(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"braw", "canny", filepath.Join("strath", "bothy")} {
+		mustMkdir(t, filepath.Join(root, dir))
+	}
+
+	trig := config.TriggerConfig{Name: "blether", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	backend := &fakeWatchBackend{}
+	b := &watchBinding{triggerName: trig.Name, sessionID: "src", worktree: root, backend: backend, watchPaths: make(map[string]int), changed: make(map[string]bool), canceled: true}
+	matcher := newWatchMatcher(root, trig.Watch, nil)
+
+	sm.reconcileWatchDirs(context.Background(), b, matcher)
+
+	rendered := logs.String()
+	if strings.Contains(rendered, "trigger: directory watches skipped") {
+		t.Fatalf("context cancellation should not emit reconcile skip WARN summary, got logs:\n%s", rendered)
+	}
+
+	if got := strings.Count(rendered, "trigger: directory watch reconcile canceled"); got != 1 {
+		t.Fatalf("context cancellation should log once, got %d cancellation records:\n%s", got, rendered)
 	}
 }
 
