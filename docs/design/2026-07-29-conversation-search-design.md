@@ -118,9 +118,10 @@ are absent from state and their cache entries are pruned during each search, so
 no persisted index data survives purge. Unsupported agents are skipped with a
 count in the response rather than being treated as zero-result sessions.
 Cold parsing is cancellable between bounded line reads and capped per source at
-16 MiB and 10,000 turns; responses set `truncated` when these bounds or result
-window limits are hit. When a cold parse hits those source bounds, v1 keeps the
-oldest records it read and omits later transcript content.
+the `[search]` `max_source_bytes` and `max_source_turns` defaults (16 MiB and
+10,000 turns); responses set `truncated` when these bounds or result window
+limits are hit. When a cold parse hits those source bounds, v1 keeps the oldest
+records it read and omits later transcript content.
 
 Trade-offs:
 

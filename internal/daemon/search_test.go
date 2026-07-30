@@ -12,13 +12,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func newSearchTestSM(sessions map[string]*SessionState) *SessionManager {
+	return newSearchTestSMWithConfig(sessions, config.Default())
+}
+
+func newSearchTestSMWithConfig(sessions map[string]*SessionState, cfg *config.Config) *SessionManager {
 	return &SessionManager{
 		state:  &State{Sessions: sessions},
 		search: newConversationSearchCache(),
+		cfg:    cfg,
 	}
 }
 
@@ -230,18 +236,31 @@ func TestSearchConversationsFallsBackToDefaultCodexRootForOldState(t *testing.T)
 }
 
 func TestSearchConversationsCursorAndWindowValidation(t *testing.T) {
+	limits := config.SearchConfig{DefaultLimit: 3, MaxLimit: 5, MaxWindow: 8}.Limits()
+
 	tests := map[string]struct {
+		limit   int
 		cursor  string
+		wantLim int
 		want    int
 		wantErr string
 	}{
+		"default limit from config": {
+			wantLim: 3,
+		},
+		"requested limit clamped to config max": {
+			limit:   10,
+			wantLim: 5,
+		},
 		"integer cursor": {
-			cursor: "7",
-			want:   7,
+			cursor:  "7",
+			wantLim: 3,
+			want:    7,
 		},
 		"opaque cursor": {
-			cursor: encodeSearchCursor(13),
-			want:   13,
+			cursor:  encodeSearchCursor(4),
+			wantLim: 3,
+			want:    4,
 		},
 		"beyond window": {
 			cursor:  "1001",
@@ -251,7 +270,7 @@ func TestSearchConversationsCursorAndWindowValidation(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			filters, err := parseSearchFilters(protocol.SearchMsg{Query: "braw", Cursor: test.cursor})
+			filters, err := parseSearchFilters(protocol.SearchMsg{Query: "braw", Limit: test.limit, Cursor: test.cursor}, limits)
 			if test.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 					t.Fatalf("parseSearchFilters err = %v, want %q", err, test.wantErr)
@@ -267,7 +286,25 @@ func TestSearchConversationsCursorAndWindowValidation(t *testing.T) {
 			if filters.offset != test.want {
 				t.Fatalf("offset = %d, want %d", filters.offset, test.want)
 			}
+
+			if filters.limit != test.wantLim {
+				t.Fatalf("limit = %d, want %d", filters.limit, test.wantLim)
+			}
 		})
+	}
+}
+
+func TestBuildSearchSnippetUsesConfiguredShape(t *testing.T) {
+	text := "braw canny dreich bothy thrawn strath"
+	matches := findRuneMatches(text, lowerRunes("bothy"))
+
+	snippet, ranges := buildSearchSnippet(text, matches, lowerRunes("bothy"), 12, 3)
+	if snippet != "...ch bothy thr..." {
+		t.Fatalf("snippet = %q, want configured 12-rune window around match", snippet)
+	}
+
+	if len(ranges) != 1 || ranges[0].Start != 6 || ranges[0].End != 11 {
+		t.Fatalf("ranges = %+v, want match range shifted by ellipsis prefix", ranges)
 	}
 }
 
@@ -371,9 +408,11 @@ func TestSearchConversationsBoundsColdTranscriptParse(t *testing.T) {
 	t.Setenv("CODEX_HOME", root)
 
 	worktree := t.TempDir()
+	cfg := config.Default()
+	cfg.Search.MaxSourceTurns = 2
 
-	lines := make([]string, 0, searchMaxSourceTurns+1)
-	for i := 0; i < searchMaxSourceTurns; i++ {
+	lines := make([]string, 0, cfg.Search.MaxSourceTurns+1)
+	for i := 0; i < cfg.Search.MaxSourceTurns; i++ {
 		lines = append(lines,
 			`{"type":"response_item","timestamp":"2026-07-29T10:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"bounded braw"}]}}`,
 		)
@@ -385,13 +424,13 @@ func TestSearchConversationsBoundsColdTranscriptParse(t *testing.T) {
 
 	writeSearchCodexTranscript(t, root, worktree, "sess-codex", lines...)
 
-	sm := newSearchTestSM(map[string]*SessionState{
+	sm := newSearchTestSMWithConfig(map[string]*SessionState{
 		"canny": {
 			ID: "canny", Name: "canny", Agent: "codex", AgentSessionID: "sess-codex",
 			WorktreePath: worktree, Status: StatusRunning,
 			CreatedAt: time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC),
 		},
-	})
+	}, cfg)
 
 	resp, err := sm.SearchConversations(context.Background(), protocol.SearchMsg{Query: "beyond bound phrase"})
 	if err != nil {
@@ -515,7 +554,11 @@ func TestSearchConversationsKeepsNewestMatchesWithinBoundedWindow(t *testing.T) 
 	root := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", root)
 
-	bulkLines := make([]string, searchMaxWindow+1)
+	cfg := config.Default()
+	cfg.Search.MaxWindow = 4
+	limits := cfg.Search.Limits()
+
+	bulkLines := make([]string, (limits.MaxWindow+1)*2+1)
 	for i := range bulkLines {
 		bulkLines[i] = fmt.Sprintf(
 			`{"type":"user","uuid":"bulk-%d","timestamp":"2026-07-29T08:%02d:%02dZ","message":{"role":"user","content":"common phrase from braw %d"}}`,
@@ -528,7 +571,7 @@ func TestSearchConversationsKeepsNewestMatchesWithinBoundedWindow(t *testing.T) 
 		`{"type":"assistant","uuid":"latest","timestamp":"2026-07-29T13:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"common phrase from canny"}]}}`,
 	)
 
-	sm := newSearchTestSM(map[string]*SessionState{
+	sm := newSearchTestSMWithConfig(map[string]*SessionState{
 		"bulk": {
 			ID: "bulk", Name: "bulk", Agent: "claude", AgentSessionID: "sess-bulk",
 			Status: StatusRunning, CreatedAt: time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
@@ -537,7 +580,7 @@ func TestSearchConversationsKeepsNewestMatchesWithinBoundedWindow(t *testing.T) 
 			ID: "latest", Name: "latest", Agent: "claude", AgentSessionID: "sess-latest",
 			Status: StatusRunning, CreatedAt: time.Date(2026, 7, 29, 7, 0, 0, 0, time.UTC),
 		},
-	})
+	}, cfg)
 
 	resp, err := sm.SearchConversations(context.Background(), protocol.SearchMsg{Query: "common phrase", Limit: 1})
 	if err != nil {

@@ -127,7 +127,7 @@ braw (braw-id)  claude/user  graith  2026-07-29T10:00:00Z
 | `--until <time>` | Include messages at or before an RFC3339 timestamp or `YYYY-MM-DD` date |
 | `--state <state>` | Filter by session state: `all` (default), `active` (`running`/`creating`), or `stopped` (`stopped`/`errored`) |
 | `--deleted` | Include soft-deleted sessions |
-| `--limit <n>` | Result count, default 20 and capped at 200 |
+| `--limit <n>` | Result count; defaults to `[search] default_limit` (20) and is capped by `[search] max_limit` (200) |
 | `--cursor <cursor>` | Continue from a previous response's `next_cursor` |
 
 Search is literal and case-insensitive. It is not fuzzy or semantic. Results are
@@ -136,8 +136,9 @@ session creation time, session ID, migrated/current generation, agent, native
 agent session ID, and transcript turn index. Time filters only match turns whose
 transcript record provided a parseable timestamp.
 
-Cold transcript parses are bounded per source: search reads at most 16 MiB and
-keeps at most 10,000 turns from one transcript source. Responses set
+Cold transcript parses are bounded per source: by default search reads at most
+16 MiB and keeps at most 10,000 turns from one transcript source. These and
+other search resource limits are tunable in `[search]`. Responses set
 `truncated` when pagination or resource bounds mean more matching content may
 exist outside the returned window. When a source bound is hit, v1 searches the
 oldest records read from that source and omits later transcript content.
@@ -179,9 +180,10 @@ transcript path, size, and mtime. Appends, replacement, truncation, resume, and
 migration become searchable on the next query that observes the changed
 fingerprint. A daemon restart drops the cache and rebuilds it on demand. The
 daemon bounds scanner line size through the `[transcript]` config, stores at
-most 32 MiB of parsed search text in memory, truncates any single turn cached
-for search at 128 Ki runes, returns snippets of at most 240 runes, and caps one
-paginated query window at 1,000 results.
+most 32 MiB of parsed search text in memory by default, truncates any single
+turn cached for search at 128 Ki runes, returns snippets of at most 240 runes,
+and caps one paginated query window at 1,000 results. These defaults are
+controlled by the `[search]` config block.
 
 ### `gr events`
 

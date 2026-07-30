@@ -15,21 +15,12 @@ import (
 	"unicode"
 
 	"github.com/d0ugal/graith/internal/agent/transcript"
+	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
 const (
-	searchDefaultLimit   = 20
-	searchMaxLimit       = 200
-	searchMaxWindow      = 1000
-	searchSnippetRunes   = 240
-	searchSnippetContext = 80
-	searchMaxTurnRunes   = 128 * 1024
-	searchMaxSourceBytes = 16 * 1024 * 1024
-	searchMaxSourceTurns = 10000
 	searchTurnOverhead   = 96
-	searchMaxCacheBytes  = 32 * 1024 * 1024
-	searchMaxEntryBytes  = searchMaxSourceBytes
 	searchCursorVersion  = 1
 	searchGenerationLive = "live"
 	searchGenerationPrev = "migrated"
@@ -149,9 +140,9 @@ func (c *conversationSearchCache) getFresh(id string, target tokenTarget) ([]sea
 	return cloneSearchTurns(entry.turns), entry.truncated, true
 }
 
-func (c *conversationSearchCache) put(id, fingerprint string, sources []transcript.Source, turns []searchTurn, truncated bool) {
+func (c *conversationSearchCache) put(id, fingerprint string, sources []transcript.Source, turns []searchTurn, truncated bool, limits config.SearchLimits) {
 	bytes := searchTurnsBytes(turns)
-	if bytes > searchMaxEntryBytes {
+	if bytes > limits.MaxCacheEntryBytes {
 		return
 	}
 
@@ -171,7 +162,7 @@ func (c *conversationSearchCache) put(id, fingerprint string, sources []transcri
 		accessed:    time.Now(),
 	}
 	c.bytes += bytes
-	c.pruneLocked(nil)
+	c.pruneLocked(nil, limits)
 }
 
 func refreshSearchSources(sources []transcript.Source) ([]transcript.Source, bool) {
@@ -192,14 +183,14 @@ func refreshSearchSources(sources []transcript.Source) ([]transcript.Source, boo
 	return refreshed, true
 }
 
-func (c *conversationSearchCache) prune(live map[string]bool) {
+func (c *conversationSearchCache) prune(live map[string]bool, limits config.SearchLimits) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.pruneLocked(live)
+	c.pruneLocked(live, limits)
 }
 
-func (c *conversationSearchCache) pruneLocked(live map[string]bool) {
+func (c *conversationSearchCache) pruneLocked(live map[string]bool, limits config.SearchLimits) {
 	for id, entry := range c.entries {
 		if live != nil && !live[id] {
 			delete(c.entries, id)
@@ -207,7 +198,7 @@ func (c *conversationSearchCache) pruneLocked(live map[string]bool) {
 		}
 	}
 
-	for c.bytes > searchMaxCacheBytes {
+	for c.bytes > limits.MaxCacheBytes {
 		var (
 			oldestID string
 			oldest   time.Time
@@ -245,7 +236,9 @@ func (sm *SessionManager) searchCache() *conversationSearchCache {
 // It snapshots session metadata under sm.mu and performs all filesystem work
 // after releasing it.
 func (sm *SessionManager) SearchConversations(ctx context.Context, req protocol.SearchMsg) (protocol.SearchResponseMsg, error) {
-	filters, err := parseSearchFilters(req)
+	limits := sm.Config().Search.Limits()
+
+	filters, err := parseSearchFilters(req, limits)
 	if err != nil {
 		return protocol.SearchResponseMsg{}, err
 	}
@@ -256,7 +249,7 @@ func (sm *SessionManager) SearchConversations(ctx context.Context, req protocol.
 	}
 
 	cache := sm.searchCache()
-	cache.prune(live)
+	cache.prune(live, limits)
 
 	var (
 		results         []searchResult
@@ -276,7 +269,7 @@ func (sm *SessionManager) SearchConversations(ctx context.Context, req protocol.
 			continue
 		}
 
-		turns, parseTruncated, ok, err := sm.cachedSearchTurns(ctx, cache, target)
+		turns, parseTruncated, ok, err := sm.cachedSearchTurns(ctx, cache, target, limits)
 		if err != nil {
 			return protocol.SearchResponseMsg{}, err
 		}
@@ -309,14 +302,14 @@ func (sm *SessionManager) SearchConversations(ctx context.Context, req protocol.
 				target:  target,
 				turn:    turn,
 				matches: matches,
-			}, windowTruncated)
+			}, windowTruncated, limits.MaxWindow)
 		}
 	}
 
 	sortSearchResults(results)
 
-	if len(results) > searchMaxWindow+1 {
-		results = results[:searchMaxWindow+1]
+	if len(results) > limits.MaxWindow+1 {
+		results = results[:limits.MaxWindow+1]
 		windowTruncated = true
 	}
 
@@ -339,7 +332,7 @@ func (sm *SessionManager) SearchConversations(ctx context.Context, req protocol.
 	}
 
 	for _, result := range results[start:end] {
-		resp.Results = append(resp.Results, result.protocolResult(filters.queryLower))
+		resp.Results = append(resp.Results, result.protocolResult(filters.queryLower, limits))
 	}
 
 	if end < len(results) {
@@ -352,7 +345,7 @@ func (sm *SessionManager) SearchConversations(ctx context.Context, req protocol.
 	return resp, nil
 }
 
-func (sm *SessionManager) cachedSearchTurns(ctx context.Context, cache *conversationSearchCache, target searchTarget) ([]searchTurn, bool, bool, error) {
+func (sm *SessionManager) cachedSearchTurns(ctx context.Context, cache *conversationSearchCache, target searchTarget, limits config.SearchLimits) ([]searchTurn, bool, bool, error) {
 	fingerprintTarget := tokenTarget{
 		id:             target.id,
 		agent:          target.agent,
@@ -380,8 +373,8 @@ func (sm *SessionManager) cachedSearchTurns(ctx context.Context, cache *conversa
 
 	conv, err := transcript.ReadFromWithOptions(target.agent, sources, transcript.ReadOptions{
 		Context:           ctx,
-		MaxBytesPerSource: searchMaxSourceBytes,
-		MaxTurnsPerSource: searchMaxSourceTurns,
+		MaxBytesPerSource: int64(limits.MaxSourceBytes),
+		MaxTurnsPerSource: limits.MaxSourceTurns,
 	})
 
 	var turns []searchTurn
@@ -398,14 +391,14 @@ func (sm *SessionManager) cachedSearchTurns(ctx context.Context, cache *conversa
 		return nil, false, false, nil
 	} else {
 		truncated = conv.Truncated
-		turns = searchTurnsFromConversation(conv)
+		turns = searchTurnsFromConversation(conv, limits.MaxTurnRunes)
 	}
 
 	post, err := transcript.LocateWithRoot(target.agent, target.agentSessionID, target.worktreePath, target.nativeTranscriptRoot)
 	stable := err == nil && tokenFingerprint(fingerprintTarget, post) == fp
 
 	if stable {
-		cache.put(target.cacheKey, fp, post, turns, truncated)
+		cache.put(target.cacheKey, fp, post, turns, truncated, limits)
 	}
 
 	return turns, truncated, true, nil
@@ -513,7 +506,7 @@ func searchTargetCacheKey(sessionID, generation, agent, agentSessionID string) s
 	return strings.Join([]string{sessionID, generation, agent, agentSessionID}, "\x00")
 }
 
-func parseSearchFilters(req protocol.SearchMsg) (searchFilters, error) {
+func parseSearchFilters(req protocol.SearchMsg, limits config.SearchLimits) (searchFilters, error) {
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
 		return searchFilters{}, errors.New("search query must not be empty")
@@ -521,11 +514,11 @@ func parseSearchFilters(req protocol.SearchMsg) (searchFilters, error) {
 
 	limit := req.Limit
 	if limit <= 0 {
-		limit = searchDefaultLimit
+		limit = limits.DefaultLimit
 	}
 
-	if limit > searchMaxLimit {
-		limit = searchMaxLimit
+	if limit > limits.MaxLimit {
+		limit = limits.MaxLimit
 	}
 
 	offset, err := decodeSearchCursor(req.Cursor)
@@ -533,8 +526,8 @@ func parseSearchFilters(req protocol.SearchMsg) (searchFilters, error) {
 		return searchFilters{}, err
 	}
 
-	if offset > searchMaxWindow {
-		return searchFilters{}, fmt.Errorf("search cursor is beyond the maximum window of %d results", searchMaxWindow)
+	if offset > limits.MaxWindow {
+		return searchFilters{}, fmt.Errorf("search cursor is beyond the maximum window of %d results", limits.MaxWindow)
 	}
 
 	state := req.State
@@ -719,7 +712,7 @@ func searchTurnMatchesFilters(turn searchTurn, filters searchFilters) bool {
 	return true
 }
 
-func searchTurnsFromConversation(conv *transcript.Conversation) []searchTurn {
+func searchTurnsFromConversation(conv *transcript.Conversation, maxTurnRunes int) []searchTurn {
 	turns := make([]searchTurn, 0, len(conv.Turns))
 	for i, turn := range conv.Turns {
 		text := sanitizeSearchText(searchTextForTurn(turn))
@@ -730,7 +723,7 @@ func searchTurnsFromConversation(conv *transcript.Conversation) []searchTurn {
 		turns = append(turns, searchTurn{
 			Index:     i,
 			Kind:      string(turn.Role),
-			Text:      truncateRunes(text, searchMaxTurnRunes),
+			Text:      truncateRunes(text, maxTurnRunes),
 			Timestamp: turn.Timestamp,
 		})
 	}
@@ -988,15 +981,15 @@ func sortSearchResults(results []searchResult) {
 	})
 }
 
-func appendSearchResult(results []searchResult, result searchResult, truncated bool) ([]searchResult, bool) {
+func appendSearchResult(results []searchResult, result searchResult, truncated bool, maxWindow int) ([]searchResult, bool) {
 	results = append(results, result)
-	if len(results) <= (searchMaxWindow+1)*2 {
+	if len(results) <= (maxWindow+1)*2 {
 		return results, truncated
 	}
 
 	sortSearchResults(results)
 
-	return results[:searchMaxWindow+1], true
+	return results[:maxWindow+1], true
 }
 
 func (r searchResult) sortTime() time.Time {
@@ -1007,8 +1000,8 @@ func (r searchResult) sortTime() time.Time {
 	return r.target.createdAt
 }
 
-func (r searchResult) protocolResult(queryLower []rune) protocol.SearchResult {
-	snippet, matches := buildSearchSnippet(r.turn.Text, r.matches, queryLower)
+func (r searchResult) protocolResult(queryLower []rune, limits config.SearchLimits) protocol.SearchResult {
+	snippet, matches := buildSearchSnippet(r.turn.Text, r.matches, queryLower, limits.SnippetRunes, limits.SnippetContext)
 
 	result := protocol.SearchResult{
 		SessionID:      r.target.id,
@@ -1041,24 +1034,24 @@ func (r searchResult) locator() string {
 	return strings.Join(parts, ":")
 }
 
-func buildSearchSnippet(text string, matches []runeRange, queryLower []rune) (string, []protocol.SearchMatchRange) {
+func buildSearchSnippet(text string, matches []runeRange, queryLower []rune, snippetRunes, snippetContext int) (string, []protocol.SearchMatchRange) {
 	runes := []rune(text)
 	if len(runes) == 0 || len(matches) == 0 {
 		return "", nil
 	}
 
 	first := matches[0]
-	start := first.start - searchSnippetContext
+	start := first.start - snippetContext
 
 	if start < 0 {
 		start = 0
 	}
 
-	end := start + searchSnippetRunes
+	end := start + snippetRunes
 	if end > len(runes) {
 		end = len(runes)
 
-		start = end - searchSnippetRunes
+		start = end - snippetRunes
 		if start < 0 {
 			start = 0
 		}
@@ -1074,12 +1067,12 @@ func buildSearchSnippet(text string, matches []runeRange, queryLower []rune) (st
 		suffix = "..."
 	}
 
-	snippetRunes := runes[start:end]
-	snippet := prefix + string(snippetRunes) + suffix
+	windowRunes := runes[start:end]
+	snippet := prefix + string(windowRunes) + suffix
 	prefixRunes := len([]rune(prefix))
 
 	var ranges []protocol.SearchMatchRange
-	for _, match := range findRuneMatches(string(snippetRunes), queryLower) {
+	for _, match := range findRuneMatches(string(windowRunes), queryLower) {
 		ranges = append(ranges, protocol.SearchMatchRange{
 			Start: prefixRunes + match.start,
 			End:   prefixRunes + match.end,
