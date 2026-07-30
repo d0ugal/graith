@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.71.6](https://github.com/d0ugal/graith/compare/v0.71.5...v0.71.6) (2026-07-30)
+
+
+### Bug Fixes
+
+* update github.com/charmbracelet/ultraviolet digest to 19049f2 ([#1907](https://github.com/d0ugal/graith/issues/1907)) ([e6a857b](https://github.com/d0ugal/graith/commit/e6a857b904cc1c93acd62ab0f6735fe6ba6d804a))
+* verify stable rpm signatures with runner keyring ([12922e7](https://github.com/d0ugal/graith/commit/12922e7afa8331dffe4a545e8fb36a5f3d504bf8))
+
 ## [0.71.5](https://github.com/d0ugal/graith/compare/v0.71.4...v0.71.5) (2026-07-30)
 
 
