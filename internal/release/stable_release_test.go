@@ -202,7 +202,11 @@ func TestStableRPMBytesAreFinalBeforeChecksumAndAttestation(t *testing.T) {
 		case step.Name == "Apply configured RPM signatures before checksums and provenance":
 			signAt = index
 
-			for _, required := range []string{"rpm --addsign", "sha256sum", "GPG_PRIVATE_KEY", "GPG_PASSPHRASE"} {
+			for _, required := range []string{
+				"rpm --addsign", "sha256sum", "GPG_PRIVATE_KEY", "GPG_PASSPHRASE",
+				"key_created_epoch", "--passphrase-file", "GPG signing preflight failed",
+				"rpm_output", "RPM signing failed",
+			} {
 				if !strings.Contains(step.Run+strings.Join([]string{step.Env["GPG_PRIVATE_KEY"], step.Env["GPG_PASSPHRASE"]}, "\n"), required) {
 					t.Errorf("RPM finalization missing %q", required)
 				}

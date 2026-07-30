@@ -657,6 +657,12 @@ jobs:
             GNUPGHOME="$(mktemp -d)"
             chmod 700 "$GNUPGHOME"
             export GNUPGHOME
+            passphrase_file="$(mktemp)"
+            preflight_file="$(mktemp)"
+            chmod 600 "$passphrase_file" "$preflight_file"
+            printf '%s' "$GPG_PASSPHRASE" >"$passphrase_file"
+            printf 'graith rpm signing preflight\n' >"$preflight_file"
+            trap 'rm -rf "$GNUPGHOME" "$passphrase_file" "$preflight_file" "${preflight_file}.sig"' EXIT
             {
               echo allow-loopback-pinentry
               echo allow-preset-passphrase
@@ -667,21 +673,40 @@ jobs:
             test -n "$key_id"
             signing_epoch="$(git show -s --format=%ct "$RELEASE_REVISION")"
             [[ "$signing_epoch" =~ ^[1-9][0-9]*$ ]]
+            key_created_epoch="$(gpg --list-secret-keys --with-colons "$key_id" | \
+              awk -F: '/^(sec|ssb):/ && $12 ~ /[sS]/ { if (($6 + 0) > max) max = $6 + 0 } END { if (max) print max }')"
+            [[ "$key_created_epoch" =~ ^[1-9][0-9]*$ ]]
+            if (( signing_epoch <= key_created_epoch )); then
+              signing_epoch=$((key_created_epoch + 1))
+            fi
             preset=/usr/lib/gnupg/gpg-preset-passphrase
             [ -x "$preset" ] || preset=/usr/libexec/gpg-preset-passphrase
             gpg --with-keygrip --list-secret-keys --with-colons "$key_id" | \
               GPG_PASSPHRASE="$GPG_PASSPHRASE" \
                 scripts/rpm-preset-keygrips.sh "$preset"
+            if ! preflight_output="$(gpg --batch --yes --pinentry-mode loopback \
+                --passphrase-file "$passphrase_file" \
+                --local-user "$key_id" --detach-sign \
+                --output "${preflight_file}.sig" \
+                --faked-system-time "$signing_epoch!" "$preflight_file" 2>&1)"; then
+              printf '%s\n' "$preflight_output"
+              echo "::error::GPG signing preflight failed; verify GPG_PASSPHRASE matches GPG_PRIVATE_KEY and the signing key is valid at the deterministic RPM signing time"
+              exit 1
+            fi
             {
               echo '%_signature gpg'
               printf '%%_gpg_name %s\n' "$key_id"
               echo '%__gpg /usr/bin/gpg'
-              printf '%%_gpg_sign_cmd %%{__gpg} gpg --no-verbose --no-armor --batch --pinentry-mode loopback --no-secmem-warning --faked-system-time %s! -u "%%{_gpg_name}" -sbo %%{__signature_filename} --digest-algo sha256 %%{__plaintext_filename}\n' "$signing_epoch"
+              printf '%%_gpg_sign_cmd %%{__gpg} gpg --no-verbose --no-armor --batch --pinentry-mode loopback --passphrase-file %s --no-secmem-warning --faked-system-time %s! -u "%%{_gpg_name}" -sbo %%{__signature_filename} --digest-algo sha256 %%{__plaintext_filename}\n' "$passphrase_file" "$signing_epoch"
             } >"$HOME/.rpmmacros"
             gpg --armor --export "$key_id" >"${RUNNER_TEMP}/graith.asc"
             sudo rpm --import "${RUNNER_TEMP}/graith.asc"
             for package in dist/*.rpm; do
-              rpm --addsign "$package"
+              if ! rpm_output="$(rpm --addsign "$package" 2>&1)"; then
+                printf '%s\n' "$rpm_output"
+                echo "::error::RPM signing failed for $(basename "$package"); inspect the rpm/gpg diagnostic above and verify the configured GPG_PRIVATE_KEY/GPG_PASSPHRASE pair"
+                exit 1
+              fi
               signature="$(rpm --checksig "$package")"
               [[ "$signature" == *"signatures OK"* ]]
             done
