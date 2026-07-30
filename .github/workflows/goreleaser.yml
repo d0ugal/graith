@@ -961,8 +961,8 @@ jobs:
         run: |
           set -euo pipefail
           scripts/render-stable-homebrew.sh "$RELEASE_VERSION" dist/checksums.txt \
-            homebrew-tap/Formula/graith.rb
-          ruby -c homebrew-tap/Formula/graith.rb
+            homebrew-tap/graith.rb
+          ruby -c homebrew-tap/graith.rb
 
       - name: Check out apt/yum repository
         if: steps.publishing_secrets.outputs.has_gpg == 'true'

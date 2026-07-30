@@ -171,6 +171,7 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 		releaseLookup, targetCommitCheck,
 		`test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 10`,
 		"if [ \"$draft\" = false ]", "Publish prepared Homebrew formula",
+		"homebrew-tap/graith.rb", "ruby -c homebrew-tap/graith.rb",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("stable publisher missing %q", required)
@@ -199,6 +200,10 @@ func TestStablePublisherStagesDraftAndPublishesOnlyCompleteSet(t *testing.T) {
 
 	if strings.Contains(text, `test "$(find "$remote" -maxdepth 1 -type f | wc -l)" -eq 11`) {
 		t.Fatal("stable publisher still expects an unsupported Darwin amd64 release asset")
+	}
+
+	if strings.Contains(text, "homebrew-tap/Formula/") {
+		t.Fatal("stable publisher writes Homebrew formula outside the tap's root formula layout")
 	}
 
 	if strings.Index(text, "gh release upload") > strings.LastIndex(text, "gh release download") ||
