@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/telemetry"
 )
 
 func TestTelemetryRuntimeDisabledStartsNothing(t *testing.T) {
@@ -285,6 +286,36 @@ func TestTelemetryRuntimeTracingOnlyDoesNotListen(t *testing.T) {
 
 	if metrics := sm.metrics.Load(); metrics != nil {
 		t.Fatalf("tracing-only telemetry created metrics registry: %+v", metrics)
+	}
+}
+
+func TestTelemetryRuntimeTracingResource(t *testing.T) {
+	sm := newSMWithConfig(t, config.Default())
+	sm.paths.Profile = "canny"
+
+	got := sm.telemetryResource()
+	if got.ServiceName != telemetry.ServiceNameDefault {
+		t.Errorf("ServiceName = %q, want %q", got.ServiceName, telemetry.ServiceNameDefault)
+	}
+
+	if got.DaemonInstanceID != sm.InstanceID() {
+		t.Errorf("DaemonInstanceID = %q, want %q", got.DaemonInstanceID, sm.InstanceID())
+	}
+
+	if got.Profile != "canny" {
+		t.Errorf("Profile = %q, want canny", got.Profile)
+	}
+
+	if got.ProcessPID <= 0 {
+		t.Errorf("ProcessPID = %d, want positive", got.ProcessPID)
+	}
+
+	if got.ProcessKind != "daemon" {
+		t.Errorf("ProcessKind = %q, want daemon", got.ProcessKind)
+	}
+
+	if got.ProcessExecutableName == "" {
+		t.Error("ProcessExecutableName is empty")
 	}
 }
 

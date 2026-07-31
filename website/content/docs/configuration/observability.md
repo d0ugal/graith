@@ -106,11 +106,11 @@ timeout = "10s"
 # Authorization = "Bearer ..."
 ```
 
-`enabled` must be set to `true` before the daemon creates trace-export runtime
-state. The first telemetry slice stores validated exporter configuration only;
-OTLP export and spans are added by follow-up tracing work. `endpoint` is
-required when tracing is enabled; Graith does not fall back to `OTEL_*`
-environment variables. Credentials belong in
+`enabled` must be set to `true` before the daemon installs an OpenTelemetry
+tracer provider and OTLP exporter. `endpoint` is required when tracing is
+enabled; Graith passes the configured endpoint to the exporter and does not fall
+back to `OTEL_*` environment variables for endpoint, headers, TLS certificates,
+compression, timeout, sampler behavior, or proxy settings. Credentials belong in
 `[telemetry.tracing.headers]`, not in the endpoint URL, and header values are
 redacted from daemon config responses and local `gr config show`/`diff` output.
 
@@ -122,9 +122,11 @@ Supported protocols:
 | `"http/protobuf"` | full `http` or `https` trace URL used verbatim, for example `http://127.0.0.1:4318/v1/traces` |
 
 `timeout` uses the same duration syntax as other Graith config values and must
-be greater than zero when set. `insecure` applies only to the `grpc` protocol;
-for `http/protobuf`, choose `http://` or `https://` in the endpoint URL.
+be greater than zero when set. It bounds exporter setup, export requests, and
+shutdown flushing. `insecure` disables TLS for the `grpc` exporter only; HTTP
+endpoints use the scheme in the configured trace URL.
 
-Tracing instrumentation and OTLP export are optional runtime plumbing. Graith
-does not require Grafana Cloud, Alloy, Mimir, Loki, Tempo, or any collector to
-run normally.
+Tracing export is optional runtime plumbing for a collector such as Alloy, which
+can forward traces to Tempo. Export failures are reported in the daemon log and
+do not stop the daemon. Graith does not require Grafana Cloud, Alloy, Mimir,
+Loki, Tempo, or any collector to run normally.
