@@ -9,18 +9,8 @@ import (
 	"strings"
 )
 
-func CreateWorktree(repoPath, worktreePath, branchName string) error {
-	_, err := RunOutput(repoPath, "worktree", "add", worktreePath, branchName)
-	return err
-}
-
 func CreateWorktreeContext(ctx context.Context, repoPath, worktreePath, branchName string) error {
 	_, err := RunOutputContext(ctx, repoPath, "worktree", "add", worktreePath, branchName)
-	return err
-}
-
-func CreateDetachedWorktree(repoPath, worktreePath, ref string) error {
-	_, err := RunOutput(repoPath, "worktree", "add", "--detach", worktreePath, ref)
 	return err
 }
 

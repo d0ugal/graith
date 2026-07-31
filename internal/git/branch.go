@@ -68,11 +68,6 @@ func unbornBranchContext(ctx context.Context, repoPath string) (string, bool) {
 	return branch, true
 }
 
-func CreateBranch(repoPath, branchName, fromRef string) error {
-	_, err := RunOutput(repoPath, "branch", branchName, fromRef)
-	return err
-}
-
 func CreateBranchContext(ctx context.Context, repoPath, branchName, fromRef string) error {
 	_, err := RunOutputContext(ctx, repoPath, "branch", branchName, fromRef)
 	return err
@@ -88,36 +83,15 @@ func DeleteBranchContext(ctx context.Context, repoPath, branchName string) error
 	return err
 }
 
-func FetchOrigin(repoPath string) error {
-	_, err := RunOutput(repoPath, "fetch", "origin")
-	return err
-}
-
 func FetchOriginContext(ctx context.Context, repoPath string) error {
 	_, err := RunOutputContext(ctx, repoPath, "fetch", "origin")
 	return err
 }
 
-// ResolveBranchCommit resolves branch to a commit SHA. For ordinary branch
-// names it prefers origin/<branch> when available, matching writable worktree
-// creation, and falls back to the local branch. Fully-qualified refs and
-// explicit origin/<branch> values are honoured as supplied.
-func ResolveBranchCommit(repoPath, branch string) (string, error) {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return "", errors.New("branch is required")
-	}
-
-	for _, ref := range branchRefCandidates(branch) {
-		sha, err := RunOutput(repoPath, "rev-parse", "--verify", ref+"^{commit}")
-		if err == nil && sha != "" {
-			return sha, nil
-		}
-	}
-
-	return "", fmt.Errorf("branch %q does not resolve to a commit", branch)
-}
-
+// ResolveBranchCommitContext resolves branch to a commit SHA. For ordinary
+// branch names it prefers origin/<branch> when available, matching writable
+// worktree creation, and falls back to the local branch. Fully-qualified refs
+// and explicit origin/<branch> values are honoured as supplied.
 func ResolveBranchCommitContext(ctx context.Context, repoPath, branch string) (string, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {

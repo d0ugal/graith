@@ -152,7 +152,7 @@ func TestResolveBranchCommitPrefersOriginBranch(t *testing.T) {
 		t.Fatal("local commit did not diverge from origin")
 	}
 
-	got, err := ResolveBranchCommit(dir, "canny")
+	got, err := ResolveBranchCommitContext(context.Background(), dir, "canny")
 	if err != nil {
 		t.Fatalf("ResolveBranchCommit: %v", err)
 	}
@@ -176,8 +176,8 @@ func TestCreateBranch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := setupTestRepo(t)
 
-			if err := CreateBranch(dir, tt.branchName, tt.fromRef); err != nil {
-				t.Fatalf("CreateBranch(%q, %q): %v", tt.branchName, tt.fromRef, err)
+			if err := CreateBranchContext(context.Background(), dir, tt.branchName, tt.fromRef); err != nil {
+				t.Fatalf("CreateBranchContext(context.Background(), %q, %q): %v", tt.branchName, tt.fromRef, err)
 			}
 
 			if !RefExists(dir, tt.branchName) {
@@ -200,7 +200,7 @@ func TestDeleteBranch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := setupTestRepo(t)
 
-			if err := CreateBranch(dir, tt.branchName, "HEAD"); err != nil {
+			if err := CreateBranchContext(context.Background(), dir, tt.branchName, "HEAD"); err != nil {
 				t.Fatalf("setup CreateBranch: %v", err)
 			}
 
@@ -224,11 +224,11 @@ func TestCreateWorktree(t *testing.T) {
 	branchName := "glen-bothy"
 	worktreePath := filepath.Join(t.TempDir(), "bothy-braw")
 
-	if err := CreateBranch(dir, branchName, "HEAD"); err != nil {
+	if err := CreateBranchContext(context.Background(), dir, branchName, "HEAD"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
-	if err := CreateWorktree(dir, worktreePath, branchName); err != nil {
+	if err := CreateWorktreeContext(context.Background(), dir, worktreePath, branchName); err != nil {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
 
@@ -247,11 +247,11 @@ func TestRemoveWorktree(t *testing.T) {
 	branchName := "glen-auld-remove"
 	worktreePath := filepath.Join(t.TempDir(), "bothy-auld")
 
-	if err := CreateBranch(dir, branchName, "HEAD"); err != nil {
+	if err := CreateBranchContext(context.Background(), dir, branchName, "HEAD"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
-	if err := CreateWorktree(dir, worktreePath, branchName); err != nil {
+	if err := CreateWorktreeContext(context.Background(), dir, worktreePath, branchName); err != nil {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
 
