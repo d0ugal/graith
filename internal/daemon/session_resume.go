@@ -936,8 +936,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
-	lc := sm.Config().Lifecycle
-	historyRows := sm.Config().Limits.LogLinesOrDefault()
+	cfgSnapshot := sm.Config()
+	lc := cfgSnapshot.Lifecycle
+	historyRows := cfgSnapshot.Terminal.HistoryRowsOrDefault()
 
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,

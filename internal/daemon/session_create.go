@@ -1068,7 +1068,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			MaxLogSize:          lc.MaxLogBytesOrDefault(),
 			InputDelay:          lc.InputDelayDuration(),
 			Logger:              sm.log,
-			TerminalHistoryRows: cfgSnapshot.Limits.LogLinesOrDefault(),
+			TerminalHistoryRows: cfgSnapshot.Terminal.HistoryRowsOrDefault(),
 		})
 	}
 

@@ -196,11 +196,12 @@ reports, it doesn't enable mouse tracking itself.
 
 ```toml
 [terminal]
-refresh_interval = "2s"  # how often the Navigator/status bar/message viewer re-poll
-summary_width    = 40    # max visible width of a `gr status` summary in the Navigator
+refresh_interval = "2s"   # how often the Navigator/status bar/message viewer re-poll
+summary_width    = 40     # max visible width of a `gr status` summary in the Navigator
+history_rows     = 2000   # formatted terminal-owned history rows for new/adopted PTY sessions
 ```
 
-The `[terminal]` block holds the interactive client's presentation preferences that were previously fixed.
+The `[terminal]` block holds the interactive client's preferences and the daemon-owned terminal history depth used by PTY sessions.
 
 **`refresh_interval`** is the cadence at which the Session Navigator (`ctrl+b w`), an attached status bar, and the message viewer (`m`) re-poll the daemon for session state. A shorter interval feels more live but polls more; a non-positive value falls back to the default (zero would busy-loop).
 
@@ -212,7 +213,11 @@ ignored. Truncation never splits a multi-byte character, so the summary is
 always valid UTF-8. (This differs from `[limits]` byte caps such as
 `inbox_preview_bytes`, measured in bytes.)
 
-The fallback terminal geometry (used when graith can't read the real size, e.g. piped output) and the per-session scrollback cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback follows the same `[lifecycle]` defaults, for a single source of truth.
+**`history_rows`** is the requested formatted terminal-owned scrollback depth for interactive scroll mode in new and adopted PTY sessions. It is read when the PTY backend is created, so already-running sessions keep their existing history cap until respawn or adoption. The native terminal backend clamps it to at most 2,000 rows and about 256 Ki terminal cells, so very wide terminals may retain fewer rows.
+
+`history_rows` replaces the old behavior where `[limits].log_lines` also set interactive PTY history depth. This is not backwards compatible for users who raised `limits.log_lines` only to scroll further in `gr attach`: set `[terminal].history_rows` instead. `limits.log_lines` now controls `gr logs` and raw attach replay/fallback only.
+
+The fallback terminal geometry (used when graith can't read the real size, e.g. piped output) and the raw per-session scrollback log cap are session-lifecycle settings — see [`[lifecycle]`]({{< relref "/docs/configuration/sessions.md" >}}) (`default_cols`, `default_rows`, `max_log_bytes`). The client's not-a-TTY fallback follows the same `[lifecycle]` defaults, for a single source of truth.
 
 Only genuine preferences are configurable here. Layout invariants — the Navigator's column-width arithmetic, wrap widths, the minimum name column, and the GUI's 60 fps redraw rate — stay as fixed constants matching the render logic.
 

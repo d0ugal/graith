@@ -111,9 +111,9 @@ max_log_bytes              = 104857600 # per-session scrollback log cap in bytes
 
 **Escalation waits.** The three `convert_*` timeouts bound stopping a headless process during conversion to interactive (`gr attach` on a headless session); the control-channel interrupt round-trip is tuned separately by `[headless]` `interrupt_timeout`. `mass_exit_threshold` exits within `mass_exit_window` log a warning — usually an external signal (OOM killer or macOS jetsam), not a graith bug.
 
-**Adoption & PTY.** After a daemon upgrade the daemon re-attaches to surviving agents; `adopted_timeout`/`adopted_poll_interval` tune the watch loop and `scrollback_hydration_bytes` how much is replayed into the reconstructed screen. `input_delay` is the pause `gr type` inserts so a TUI doesn't treat text and Enter as a paste. `default_cols`/`default_rows` serve daemon launch paths with no attaching client (watchdog restart, orchestrator, scenarios, triggers, adoption); an attaching client immediately resizes to its real geometry.
+**Adoption & PTY.** After a daemon upgrade the daemon re-attaches to surviving agents; `adopted_timeout`/`adopted_poll_interval` tune the watch loop and `scrollback_hydration_bytes` controls how many bytes of raw scrollback tail are replayed to reconstruct the adopted screen and terminal-owned history. That reconstruction is bounded by the bytes still retained in the per-session raw scrollback log, whose cap is `max_log_bytes`. `input_delay` is the pause `gr type` inserts so a TUI doesn't treat text and Enter as a paste. `default_cols`/`default_rows` serve daemon launch paths with no attaching client (watchdog restart, orchestrator, scenarios, triggers, adoption); an attaching client immediately resizes to its real geometry.
 
-Empty or non-positive durations fall back to the defaults shown; an out-of-range or unparseable value is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched or adopted after the change** — a running session keeps what it started with. Escalation waits and `input_delay` are read at each use, so a reload takes effect on the next operation.
+Empty or non-positive durations fall back to the defaults shown; an out-of-range or unparseable value is rejected at config load. **Geometry, hydration, and the log cap apply only to sessions launched or adopted after the change** — a running session keeps what it started with. Terminal-owned history depth is configured separately as [`[terminal].history_rows`]({{< relref "/docs/configuration/interface.md#terminal--tui-presentation" >}}), and is also fixed when the PTY backend is created. Escalation waits and `input_delay` are read at each use, so a reload takes effect on the next operation.
 
 ## Detection & status classification
 
@@ -167,14 +167,14 @@ graith truncates output in several user-visible places so a huge log or long fin
 
 ```toml
 [limits]
-log_lines              = 300      # default trailing lines for `gr logs` and attach replay (when no -n)
+log_lines              = 300      # default trailing lines for `gr logs` and raw attach replay/fallback (when no -n)
 wait_scan_lines        = 500      # scrollback lines `gr wait --contains` scans for an already-present match
 wait_buffer_bytes      = 65536    # partial-line buffer cap in the live `gr wait` matcher (64 KiB)
 last_message_runes     = 2000     # agent's final Stop message the status hook forwards (counted in runes)
 inbox_preview_bytes    = 1000     # unread-inbox preview injected into a session's SessionStart hook context
 ```
 
-`log_lines` is the shared default when a `--lines`/`-n` count is omitted: `gr logs` and attach scroll mode send `0`, so the daemon applies its current value per request — reconnecting attach sessions and graphical clients' log peeks pick up the same server-side default after a reload. Interactive PTY sessions also use this value as their initial daemon-owned terminal history depth for terminal-owned attach; that retention is fixed when the PTY backend is created and is clamped by the native terminal model to at most 2,000 rows and about 256 Ki cells. `last_message_runes` and `inbox_preview_bytes` cap what's shown; the full message stays available via `gr msg inbox --all`. Byte caps never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
+`log_lines` is the shared default when a `--lines`/`-n` count is omitted: `gr logs` and raw attach replay/fallback send `0`, so the daemon applies its current value per request — reconnecting attach sessions and graphical clients' log peeks pick up the same server-side default after a reload. It no longer controls terminal-owned interactive PTY history; use [`[terminal].history_rows`]({{< relref "/docs/configuration/interface.md#terminal--tui-presentation" >}}) for mouse-wheel / scroll-mode depth when terminal-owned history is available in new or adopted PTY sessions. This is an intentional behavior change from older releases. `last_message_runes` and `inbox_preview_bytes` cap what's shown; the full message stays available via `gr msg inbox --all`. Byte caps never split a multi-byte character mid-rune, and `last_message_runes` is counted in whole runes.
 
 ## Conversation search limits
 
