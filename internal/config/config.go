@@ -43,6 +43,7 @@ type Config struct {
 	GitPull          GitPullConfig          `toml:"git_pull"`
 	Launch           LaunchConfig           `toml:"launch"`
 	Logging          LoggingConfig          `toml:"logging"`
+	Telemetry        TelemetryConfig        `toml:"telemetry"`
 	PRWatch          PRWatchConfig          `toml:"pr_watch"`
 	SessionNavigator SessionNavigatorConfig `toml:"session_navigator"`
 	Orchestrator     OrchestratorConfig     `toml:"orchestrator"`
@@ -4827,6 +4828,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.DaemonService.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := c.Telemetry.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

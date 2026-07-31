@@ -147,7 +147,7 @@ var configDiffCmd = &cobra.Command{
 			return fmt.Errorf("parse config: %w", err)
 		}
 
-		text, err := config.DiffFromDefaults(userCfg, target)
+		text, err := config.DiffFromDefaults(config.RedactSecrets(userCfg), target)
 		if err != nil {
 			return err
 		}
@@ -176,7 +176,7 @@ var configShowCmd = &cobra.Command{
 			return fmt.Errorf("load config: %w", err)
 		}
 
-		data, err := config.EffectiveTOML(effectiveCfg)
+		data, err := config.EffectiveTOML(config.RedactSecrets(effectiveCfg))
 		if err != nil {
 			return err
 		}

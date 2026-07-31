@@ -914,6 +914,17 @@ func run(
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
 
+	if err := sm.startTelemetryRuntime(serverCtx); err != nil {
+		serverCancel()
+
+		if adoptFrom == "" {
+			ReleasePIDFile(paths.PIDFile)
+		}
+
+		return fmt.Errorf("start telemetry runtime: %w", err)
+	}
+	defer sm.stopTelemetryRuntime()
+
 	srv := NewServer(l, func(ctx context.Context, conn net.Conn) {
 		HandleConnection(ctx, conn, ConnOrigin{}, sm, log)
 	}, log)

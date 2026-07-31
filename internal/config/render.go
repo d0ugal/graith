@@ -25,6 +25,7 @@ const RedactedMask = "***"
 func RedactSecrets(cfg *Config) *Config {
 	c := *cfg
 	c.PRWatch.Push.Secret = redactSecret(c.PRWatch.Push.Secret)
+	c.Telemetry.Tracing.Headers = maskValues(cfg.Telemetry.Tracing.Headers)
 
 	if len(cfg.Agents) > 0 {
 		c.Agents = make(map[string]Agent, len(cfg.Agents))
