@@ -207,6 +207,10 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) (ReloadConfig
 		return ReloadConfigResult{}, fmt.Errorf("data_dir changed from %q to %q: run 'gr daemon restart' to apply", oldDataDir, newCfg.DataDir)
 	}
 
+	if !sameTelemetryRuntimeConfig(old.Telemetry, newCfg.Telemetry) {
+		return ReloadConfigResult{}, errors.New("telemetry runtime config changed: run 'gr daemon restart' to apply metrics or tracing runtime changes")
+	}
+
 	var (
 		remoteRuntimeChanged bool
 		runtime              *remoteRuntime

@@ -30,6 +30,11 @@ reload. It is read at daemon start, so changing it takes effect only after a
 `gr daemon restart`. Most other settings re-read on reload; startup-only settings
 call that out below.
 
+Telemetry runtime settings are startup-only once enabled. Enabling or disabling
+metrics or tracing, or changing settings for an enabled telemetry runtime,
+requires `gr daemon restart`; a daemon reload rejects that runtime-affecting
+config generation and keeps the previous telemetry runtime active.
+
 Daemon process logs rotate by size. These settings are read when the daemon
 starts, so restart after changing them:
 
@@ -60,6 +65,7 @@ This reference is organized by area:
 - **[Notifications & messages]({{< relref "notifications.md" >}})** — status bar, notifications, messages.
 - **[Automation & PR awareness]({{< relref "automation.md" >}})** — PR/CI watching, author-trust gate, triggers.
 - **[TUI & input]({{< relref "interface.md" >}})** — keybindings, Session Navigator, input handling.
+- **[Observability]({{< relref "observability.md" >}})** — optional metrics and tracing.
 - **[Orchestrator & remote access]({{< relref "access.md" >}})** — orchestrator session, tailnet remote listener.
 
 ## Global settings

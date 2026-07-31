@@ -256,6 +256,9 @@ type SessionManager struct {
 	// tests. Production leaves it nil and sendNotification uses the same
 	// dispatchMacNotification path as proactive notifications.
 	statusDispatch func(title, message, priority string, timeout time.Duration) error
+	// telemetry owns optional metrics/tracing runtimes. It is created only when a
+	// telemetry sub-runtime is explicitly enabled at daemon start.
+	telemetry *telemetryRuntime
 
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the

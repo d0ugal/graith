@@ -137,6 +137,40 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 		}
 	})
 
+	t.Run("telemetry", func(t *testing.T) {
+		if d.Telemetry.Metrics.Enabled {
+			t.Error("Default().Telemetry.Metrics.Enabled = true, want false")
+		}
+
+		if d.Telemetry.Metrics.BindAddress != TelemetryMetricsBindAddressDefault {
+			t.Errorf("Default().Telemetry.Metrics.BindAddress = %q, want %q", d.Telemetry.Metrics.BindAddress, TelemetryMetricsBindAddressDefault)
+		}
+
+		if d.Telemetry.Metrics.Path != TelemetryMetricsPathDefault {
+			t.Errorf("Default().Telemetry.Metrics.Path = %q, want %q", d.Telemetry.Metrics.Path, TelemetryMetricsPathDefault)
+		}
+
+		if d.Telemetry.Tracing.Enabled {
+			t.Error("Default().Telemetry.Tracing.Enabled = true, want false")
+		}
+
+		if d.Telemetry.Tracing.Endpoint != "" {
+			t.Errorf("Default().Telemetry.Tracing.Endpoint = %q, want empty", d.Telemetry.Tracing.Endpoint)
+		}
+
+		if d.Telemetry.Tracing.Protocol != TelemetryTracingProtocolGRPC {
+			t.Errorf("Default().Telemetry.Tracing.Protocol = %q, want %q", d.Telemetry.Tracing.Protocol, TelemetryTracingProtocolGRPC)
+		}
+
+		if d.Telemetry.Tracing.Timeout != "10s" {
+			t.Errorf("Default().Telemetry.Tracing.Timeout = %q, want %q", d.Telemetry.Tracing.Timeout, "10s")
+		}
+
+		if got := d.Telemetry.Tracing.TimeoutDuration(); got != TelemetryTracingTimeoutDefault {
+			t.Errorf("Default().Telemetry.Tracing.TimeoutDuration() = %v, want %v", got, TelemetryTracingTimeoutDefault)
+		}
+	})
+
 	t.Run("terminal", func(t *testing.T) {
 		term := d.Terminal
 		if term.RefreshInterval != "2s" {

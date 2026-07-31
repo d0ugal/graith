@@ -122,6 +122,27 @@ reload_debounce = "200ms"  # quiet period after the last write before reloading 
 daemon_max_bytes = 104857600 # daemon.log rotation threshold in bytes (< 0 => default; "0" => unlimited)
 daemon_max_backups = 3       # number of rotated daemon.log.N files to retain (< 0 => default; "0" => none)
 
+# Optional observability endpoints. Metrics and tracing are disabled by default:
+# no listener, exporter, dial, or telemetry network endpoint starts unless the
+# matching enabled flag is true when the daemon starts. Runtime-affecting
+# telemetry changes require `gr daemon restart`; `gr daemon reload` rejects those
+# changes and leaves the running runtime untouched.
+[telemetry.metrics]
+enabled = false                  # expose a local Prometheus scrape endpoint
+bind_address = "127.0.0.1:4824"  # TCP host:port to bind; 0.0.0.0, [::], or :port expose every interface
+path = "/metrics"                # literal scrape path served by the metrics listener
+
+[telemetry.tracing]
+enabled = false      # prepare trace export over OTLP
+endpoint = ""        # required when enabled; grpc uses host:port, http/protobuf uses a full http(s) trace URL
+protocol = "grpc"    # "grpc" or "http/protobuf"
+insecure = false     # disable TLS for grpc; http/protobuf uses the endpoint URL scheme
+timeout = "10s"      # exporter request timeout
+
+# Optional OTLP headers such as Authorization. Values are redacted in daemon
+# config responses and `gr config show`/`gr config diff` output.
+[telemetry.tracing.headers]
+
 # Background auto-pull to keep tracked git-maintenance repos current (NOT session
 # worktrees). Fast-forwards a repo only when it is on its default branch, clean,
 # has an upstream, and can fast-forward; skips detached HEADs, in-progress git

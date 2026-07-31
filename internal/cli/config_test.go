@@ -179,6 +179,48 @@ func withConfigGlobals(t *testing.T, file string, p config.Paths, fn func()) {
 	fn()
 }
 
+func captureConfigCommandForFile(t *testing.T, target, name string, run func() error) string {
+	t.Helper()
+
+	var got string
+
+	withConfigGlobals(t, target, config.Paths{ConfigFile: target}, func() {
+		got = captureStdout(t, func() {
+			if err := run(); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		})
+	})
+
+	return got
+}
+
+func writeTelemetryHeaderConfig(t *testing.T, secret string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "config.toml")
+	body := "[telemetry.tracing.headers]\nAuthorization = \"" + secret + "\"\n"
+
+	if err := os.WriteFile(target, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return target
+}
+
+func assertRedactedTelemetryHeaderOutput(t *testing.T, name, got, secret string) {
+	t.Helper()
+
+	if strings.Contains(got, secret) {
+		t.Fatalf("%s leaked telemetry header:\n%s", name, got)
+	}
+
+	if !strings.Contains(got, config.RedactedMask) {
+		t.Fatalf("%s did not include redaction marker:\n%s", name, got)
+	}
+}
+
 func TestConfigResetCovWritesWhenAbsent(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "graith", "config.toml")
@@ -338,6 +380,17 @@ func TestConfigShowCovValidFile(t *testing.T) {
 	}
 }
 
+func TestConfigShowRedactsTelemetryHeaders(t *testing.T) {
+	const secret = "Bearer canny-secret-fixture" // #nosec G101 -- fixture exercises config output redaction.
+
+	target := writeTelemetryHeaderConfig(t, secret)
+	got := captureConfigCommandForFile(t, target, "show", func() error {
+		return configShowCmd.RunE(configShowCmd, nil)
+	})
+
+	assertRedactedTelemetryHeaderOutput(t, "config show", got, secret)
+}
+
 func TestConfigShowCovMissingFileUsesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "nope.toml")
@@ -404,6 +457,17 @@ func TestConfigDiffCovWithChanges(t *testing.T) {
 			t.Fatalf("diff with changes: %v", err)
 		}
 	})
+}
+
+func TestConfigDiffRedactsTelemetryHeaders(t *testing.T) {
+	const secret = "Bearer dreich-secret-fixture" // #nosec G101 -- fixture exercises config output redaction.
+
+	target := writeTelemetryHeaderConfig(t, secret)
+	got := captureConfigCommandForFile(t, target, "diff", func() error {
+		return configDiffCmd.RunE(configDiffCmd, nil)
+	})
+
+	assertRedactedTelemetryHeaderOutput(t, "config diff", got, secret)
 }
 
 func TestConfigDiffCovMissingFile(t *testing.T) {
