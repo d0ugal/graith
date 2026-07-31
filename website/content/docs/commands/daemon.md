@@ -103,6 +103,11 @@ still match the stopped daemon, then starts a fresh daemon. If even this fails,
 the error names the PID and gives the manual `kill -9` and `gr doctor --autofix`
 recovery commands.
 
+Ordinary commands use the same preserved exec path after a daemon/CLI version
+mismatch. If a managed auto-upgrade cannot prove a fresh daemon generation, the
+old daemon and sessions keep running; retry with `gr daemon restart`, then check
+`gr daemon service status` and `gr daemon service repair` if it repeats.
+
 ### `gr daemon reload`
 
 Reload configuration without restarting the daemon. Invalid settings or a

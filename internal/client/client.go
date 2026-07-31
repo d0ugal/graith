@@ -236,8 +236,12 @@ func connect(ctx context.Context, cfg *config.Config, paths config.Paths, config
 					return connect(ctx, cfg, paths, configFile, false)
 				}
 
+				if probeNewDaemonGeneration(paths.SocketPath, paths, version.Version, priorInstanceID) {
+					return connect(ctx, cfg, paths, configFile, false)
+				}
+
 				if managedUpgrade {
-					return nil, errors.New("managed daemon exec upgrade did not produce a new generation; the existing daemon and its sessions were left running")
+					return nil, errors.New(managedUpgradeNoGenerationMessage)
 				}
 
 				fmt.Fprintf(os.Stderr, "Exec upgrade did not produce a new daemon generation, falling back to clean restart...\n")
@@ -367,11 +371,16 @@ func (c *Client) restartAcrossProtocolBoundary(ctx context.Context, paths config
 var (
 	requestUpgradeForClient             = requestUpgrade
 	resolveUpgradeCandidateForClient    = daemonservice.ResolveUpgradeCandidateContext
+	probeDaemonIdentityForUpgrade       = probeDaemonIdentity
 	stopDaemonIdentityForUpgrade        = stopDaemonIdentity
 	waitForSocketGoneForUpgrade         = waitForSocketGone
 	reconnectAfterCleanUpgrade          func(*config.Config, config.Paths, string) (*Client, error)
 	prepareDaemonCleanRestartForUpgrade = PrepareDaemonCleanRestart
 )
+
+const managedUpgradeNoGenerationMessage = "managed daemon exec upgrade did not produce a new generation; " +
+	"the existing daemon and its sessions were left running. Retry with `gr daemon restart` to preserve sessions; " +
+	"if this repeats, run `gr daemon service status` and `gr daemon service repair`"
 
 // probeDaemonIdentity handshakes the daemon at sockPath and returns its reported
 // version and per-process instance ID. Empty strings mean the daemon was
@@ -440,10 +449,24 @@ func waitForNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion
 	budget := maxDuration(daemonStartTimeout, upgradeReadinessFloor)
 
 	return pollDaemonReadyWithin(budget, func(deadline time.Time) bool {
-		v, id := probeDaemonIdentity(sockPath, paths, deadline)
+		v, id := probeDaemonIdentityForUpgrade(sockPath, paths, deadline)
 
-		return v == wantVersion && id != "" && id != priorInstanceID
+		return isNewDaemonGeneration(v, id, wantVersion, priorInstanceID)
 	})
+}
+
+// probeNewDaemonGeneration takes one final full dial+handshake attempt after
+// the poll loop expires. The loop's last probe can be truncated to the remaining
+// startup budget; this check can still catch a daemon that became ready at that
+// edge without weakening the generation predicate.
+func probeNewDaemonGeneration(sockPath string, paths config.Paths, wantVersion, priorInstanceID string) bool {
+	v, id := probeDaemonIdentityForUpgrade(sockPath, paths, time.Now().Add(daemonDialTimeout+daemonHandshakeTimeout))
+
+	return isNewDaemonGeneration(v, id, wantVersion, priorInstanceID)
+}
+
+func isNewDaemonGeneration(daemonVersion, instanceID, wantVersion, priorInstanceID string) bool {
+	return daemonVersion == wantVersion && instanceID != "" && instanceID != priorInstanceID
 }
 
 func upgradeMessageForClient(ctx context.Context) (protocol.UpgradeMsg, bool, error) {
