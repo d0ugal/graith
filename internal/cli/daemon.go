@@ -355,18 +355,9 @@ var daemonReloadCmd = &cobra.Command{
 	Use:   "reload",
 	Short: "Reload config without restarting the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := client.Connect(cfg, paths, cfgFile)
+		c, err := connectExistingForCLI(cfg, paths)
 		if err != nil {
-			conn, startErr := client.EnsureDaemonConfigured(cfg, paths, cfgFile)
-			if startErr != nil {
-				return fmt.Errorf("start daemon: %w", startErr)
-			}
-
-			_ = conn.Close()
-
-			out.Printf("Daemon started with current config\n")
-
-			return nil
+			return fmt.Errorf("connect to running daemon: %w", err)
 		}
 		defer c.Close()
 
@@ -920,6 +911,8 @@ var (
 
 type existingDaemonConnection interface {
 	DaemonIdentity() (client.DaemonIdentity, error)
+	SendControl(messageType string, payload any) error
+	ReadControlResponse() (protocol.Envelope, error)
 	Close()
 }
 

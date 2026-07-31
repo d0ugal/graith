@@ -72,6 +72,106 @@ func TestPrintDaemonReloadResultReportsRemoteDegradationWithoutError(t *testing.
 	}
 }
 
+func TestDaemonReloadUsesExistingDaemonWithoutAutoUpgrade(t *testing.T) {
+	originalCfg := cfg
+	originalPaths := paths
+	originalCfgFile := cfgFile
+	originalOut := out
+	originalConnect := connectExistingForCLI
+	originalVersion := version.Version
+
+	t.Cleanup(func() {
+		cfg = originalCfg
+		paths = originalPaths
+		cfgFile = originalCfgFile
+		out = originalOut
+		connectExistingForCLI = originalConnect
+		version.Version = originalVersion
+	})
+
+	dir := shortDaemonPathTestDir(t)
+	socketPath := filepath.Join(dir, "braw.sock")
+	connection := &fakeExistingDaemonConnection{
+		responses: []protocol.Envelope{
+			payloadEnv("reloaded", protocol.ReloadedMsg{Applied: true}),
+		},
+	}
+	connectExistingForCLI = func(gotCfg *config.Config, gotPaths config.Paths) (existingDaemonConnection, error) {
+		if gotCfg != cfg {
+			t.Fatalf("connect config = %#v, want command config", gotCfg)
+		}
+
+		if gotPaths.SocketPath != socketPath {
+			t.Fatalf("connect socket = %q, want %q", gotPaths.SocketPath, socketPath)
+		}
+
+		return connection, nil
+	}
+
+	var rendered bytes.Buffer
+
+	cfg = config.Default()
+	cfgFile = filepath.Join(dir, "config.toml")
+	paths = config.Paths{
+		SocketPath:     socketPath,
+		HumanTokenFile: filepath.Join(dir, "human.token"),
+	}
+	out = output.NewWithWriter(false, &rendered)
+	version.Version = "9.9.9"
+
+	t.Setenv("GRAITH_TOKEN", "")
+
+	if err := daemonReloadCmd.RunE(daemonReloadCmd, nil); err != nil {
+		t.Fatalf("daemon reload failed: %v", err)
+	}
+
+	if got := connection.sent; len(got) != 1 || got[0] != "reload" {
+		t.Fatalf("daemon reload sent %v, want [reload]", got)
+	}
+
+	if !connection.closed {
+		t.Fatal("daemon reload did not close the existing-daemon connection")
+	}
+
+	if got := rendered.String(); got != "Config reloaded\n" {
+		t.Fatalf("reload output = %q", got)
+	}
+}
+
+func TestDaemonReloadDoesNotStartDaemonWhenUnavailable(t *testing.T) {
+	originalCfg := cfg
+	originalPaths := paths
+	originalOut := out
+	originalConnect := connectExistingForCLI
+
+	t.Cleanup(func() {
+		cfg = originalCfg
+		paths = originalPaths
+		out = originalOut
+		connectExistingForCLI = originalConnect
+	})
+
+	cfg = config.Default()
+	paths = config.Paths{SocketPath: "/bothy/missing.sock"}
+
+	var rendered bytes.Buffer
+
+	out = output.NewWithWriter(false, &rendered)
+
+	connectExistingForCLI = func(*config.Config, config.Paths) (existingDaemonConnection, error) {
+		return nil, errors.New("dreich socket")
+	}
+
+	err := daemonReloadCmd.RunE(daemonReloadCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "connect to running daemon: dreich socket") {
+		t.Fatalf("daemon reload error = %v, want existing-daemon connect failure", err)
+	}
+
+	if got := rendered.String(); got != "" {
+		t.Fatalf("reload output = %q, want no daemon-start message", got)
+	}
+}
+
 func TestExecUpgradeRejectsGoTestBeforeDial(t *testing.T) {
 	setupUpgradeTest(t)
 
@@ -148,13 +248,39 @@ func TestStopManagedServiceDaemonRequiresAuthenticatedSocketPath(t *testing.T) {
 }
 
 type fakeExistingDaemonConnection struct {
-	identity client.DaemonIdentity
-	err      error
-	closed   bool
+	identity  client.DaemonIdentity
+	err       error
+	sendErr   error
+	readErr   error
+	responses []protocol.Envelope
+	readIdx   int
+	sent      []string
+	closed    bool
 }
 
 func (connection *fakeExistingDaemonConnection) DaemonIdentity() (client.DaemonIdentity, error) {
 	return connection.identity, connection.err
+}
+
+func (connection *fakeExistingDaemonConnection) SendControl(messageType string, _ any) error {
+	connection.sent = append(connection.sent, messageType)
+
+	return connection.sendErr
+}
+
+func (connection *fakeExistingDaemonConnection) ReadControlResponse() (protocol.Envelope, error) {
+	if connection.readErr != nil {
+		return protocol.Envelope{}, connection.readErr
+	}
+
+	if connection.readIdx >= len(connection.responses) {
+		return protocol.Envelope{}, io.EOF
+	}
+
+	response := connection.responses[connection.readIdx]
+	connection.readIdx++
+
+	return response, nil
 }
 
 func (connection *fakeExistingDaemonConnection) Close() { connection.closed = true }
