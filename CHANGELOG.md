@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.72.0](https://github.com/d0ugal/graith/compare/v0.71.8...v0.72.0) (2026-07-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* RunOverlay, OverlayResult, PickerState, and OverlayKeys are replaced by RunSessionNavigator, SessionNavigatorResult, SessionNavigatorState, and SessionNavigatorKeys; keybindings.session_list, [overlay], and [keybindings.overlay] are replaced by keybindings.session_navigator, [session_navigator], and [keybindings.tui].
+
+### Features
+
+* add wide navigator session details ([19443d8](https://github.com/d0ugal/graith/commit/19443d8611bea053561ca532b0d1987bc6749a4f))
+* make navigator help configurable ([ccce998](https://github.com/d0ugal/graith/commit/ccce9985670d2e9362aa6d455ea395cd4e709715))
+
+
+### Code Refactoring
+
+* rename Session Navigator API and config ([71c55fb](https://github.com/d0ugal/graith/commit/71c55fb0bd671229212f6062d9fa83bce3409250))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.4.2 ([#1925](https://github.com/d0ugal/graith/issues/1925)) ([8cf3ea7](https://github.com/d0ugal/graith/commit/8cf3ea72fa3faa34052bc1281e098bc01495efbc))
+* **deps:** update renovate/renovate docker tag to v44.4.5 ([#1926](https://github.com/d0ugal/graith/issues/1926)) ([da3ae53](https://github.com/d0ugal/graith/commit/da3ae53c6ce49728843808da4776e2d40379fad6))
+
 ## [0.71.8](https://github.com/d0ugal/graith/compare/v0.71.7...v0.71.8) (2026-07-30)
 
 
