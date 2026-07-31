@@ -14,6 +14,7 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // ConvertToInteractive turns a headless (one-shot stream-json) session into an
@@ -230,7 +231,12 @@ func (sm *SessionManager) resumeWithSummaryContext(ctx context.Context, id strin
 // holds the per-session launch gate. Callers that pass a seed prompt must mark
 // FreshStart before launch when the seed should use fresh-start args rather
 // than resume_args; FreshStart is cleared after the launch state is committed.
-func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (SessionState, error) {
+func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, id string, rows, cols uint16, lifecycleSummary, seedPrompt string) (result SessionState, returnErr error) {
+	ctx, span := startDaemonSpan(ctx, "graith.session.resume",
+		attribute.Bool("graith.session.has_seed_prompt", seedPrompt != ""),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	worktreePort := sm.worktreePort
 	if worktreePort == nil {
 		worktreePort = defaultWorktreePort()
@@ -611,9 +617,13 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		}
 
 		gitCtx, gitCancel := context.WithTimeout(ctx, gitFetchTimeout)
+		_, refreshSpan := startDaemonSpan(ctx, "graith.session.worktree.refresh_read_only",
+			attribute.Bool("graith.session.fetch", readOnlyFetch),
+		)
 		revision, refreshErr := worktreePort.RefreshReadOnly(gitCtx, sessRepoPath, sessWorktreePath, sessBranch, readOnlyFetch)
 
 		gitCancel()
+		endDaemonSpan(refreshSpan, refreshErr)
 
 		if refreshErr != nil {
 			rollbackState()
@@ -900,7 +910,15 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 		var wrapErr error
 
+		_, wrapSpan := startDaemonSpan(ctx, "graith.session.sandbox.wrap",
+			attribute.Bool("graith.session.mirror", sessMirror),
+			attribute.Bool("graith.session.read_only", sessReadOnlyBranch),
+			attribute.Bool("graith.session.orchestrator", isOrchestrator),
+			attribute.Int("graith.session.includes", len(resumeIncludes)),
+		)
 		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		endDaemonSpan(wrapSpan, wrapErr)
+
 		if wrapErr != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
@@ -941,6 +959,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	historyRows := cfgSnapshot.Terminal.HistoryRowsOrDefault()
 
 	launchStarted := time.Now()
+	_, spawnSpan := startDaemonSpan(ctx, "graith.session.launch.spawn",
+		lifecycleSpanAttrs(DriverPTY, sandboxed, sessMirror, sessReadOnlyBranch, sessInPlace, len(resumeIncludes))...,
+	)
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,
 		Command:             command,
@@ -956,6 +977,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		TerminalHistoryRows: historyRows,
 	})
 	sm.observeSessionLaunch(metricOperationResume, DriverPTY, time.Since(launchStarted), err)
+	endDaemonSpan(spawnSpan, err)
 
 	if err != nil {
 		slot.release()
@@ -1134,7 +1156,9 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	delete(sm.silentWarned, id)
 
 	scenarioIDForRepublish := sessState.ScenarioID
-	result := cloneSessionState(sessState)
+	result = cloneSessionState(sessState)
+
+	span.SetAttributes(lifecycleSpanAttrs(DriverPTY, sandboxed, sessMirror, sessReadOnlyBranch, sessInPlace, len(resumeIncludes))...)
 	sm.mu.Unlock()
 
 	sm.publishPendingStatusChangeEvent(lifecycleEvent)
