@@ -229,6 +229,69 @@ func TestReadLoopWritesTerminalRepliesToPTY(t *testing.T) {
 	}
 }
 
+func TestReadLoopDoesNotHoldSessionLockWhilePolling(t *testing.T) {
+	pollEntered := make(chan struct{})
+	releasePoll := make(chan struct{})
+
+	var enterOnce sync.Once
+
+	ptmx, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = writer.Close() })
+	t.Cleanup(func() { _ = ptmx.Close() })
+
+	session := &Session{
+		ID:       "braw-poll",
+		Ptmx:     ptmx,
+		screen:   &replyingTestTerminal{cols: 80, rows: 24},
+		readDone: make(chan struct{}),
+		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		pollInput: func(_ []unix.PollFd, _ int) (int, error) {
+			enterOnce.Do(func() { close(pollEntered) })
+			<-releasePoll
+
+			return 0, nil
+		},
+	}
+
+	go session.readLoop()
+
+	select {
+	case <-pollEntered:
+	case <-time.After(time.Second):
+		t.Fatal("read loop did not enter poll")
+	}
+
+	snapshotDone := make(chan struct{})
+
+	go func() {
+		_ = session.ScreenSnapshot()
+
+		close(snapshotDone)
+	}()
+
+	select {
+	case <-snapshotDone:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("screen snapshot blocked behind read-loop poll")
+	}
+
+	session.mu.Lock()
+	session.closed = true
+	session.mu.Unlock()
+
+	close(releasePoll)
+
+	select {
+	case <-session.readDone:
+	case <-time.After(time.Second):
+		t.Fatal("read loop did not exit")
+	}
+}
+
 func TestReplayWritesDiscardTerminalReplies(t *testing.T) {
 	term := &replyingTestTerminal{cols: 80, rows: 24, reply: []byte("dreich")}
 

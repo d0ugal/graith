@@ -86,6 +86,9 @@ type Session struct {
 	// setSize is a test seam for the PTY ownership window. Production uses
 	// pty.Setsize when it is nil.
 	setSize func(*os.File, *pty.Winsize) error
+	// pollInput is a test seam for readLoop's blocking wait. Production uses
+	// unix.Poll when it is nil.
+	pollInput func([]unix.PollFd, int) (int, error)
 	// afterScrollbackAppend is a deterministic test seam. It runs while mu is
 	// held, proving snapshots cannot interleave between durable append and
 	// applying the same chunk to the derived screen.
@@ -732,35 +735,40 @@ func (s *Session) readLoop() {
 
 	buf := make([]byte, 32*1024)
 
+	ptmx, fd, pollFD, err := s.readLoopFDs()
+	if err != nil {
+		s.log.Warn("pty read loop could not duplicate poll fd; output drainage stopped",
+			"session", s.ID, "error", err)
+
+		return
+	}
+
+	// Close the polling duplicate before publishing readDone so Close observes a
+	// fully released PTY master.
+	defer func() { _ = unix.Close(int(pollFD)) }()
+
+	pollInput := s.pollInput
+	if pollInput == nil {
+		pollInput = unix.Poll
+	}
+
 	for {
 		if !s.upgradeReadSafePoint() {
 			return
 		}
 
-		s.mu.RLock()
-
-		if s.closed || s.Ptmx == nil {
-			s.mu.RUnlock()
+		if !s.readLoopOpen(ptmx, fd) {
 			return
 		}
 
-		fd := int(s.Ptmx.Fd())
-		if fd < 0 || fd > math.MaxInt32 {
-			s.mu.RUnlock()
-
-			return
-		}
-
-		pollFD := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
-		_, pollErr := unix.Poll(pollFD, 100)
-
-		s.mu.RUnlock()
+		pollFDs := []unix.PollFd{{Fd: pollFD, Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
+		_, pollErr := pollInput(pollFDs, 100)
 
 		if pollErr != nil && !errors.Is(pollErr, unix.EINTR) {
 			return
 		}
 
-		if pollErr != nil || pollFD[0].Revents == 0 {
+		if pollErr != nil || pollFDs[0].Revents == 0 {
 			continue
 		}
 		// A pause may have arrived while Poll waited. Acknowledge it before
@@ -771,12 +779,13 @@ func (s *Session) readLoop() {
 
 		s.mu.RLock()
 
-		if s.closed || s.Ptmx == nil || int(s.Ptmx.Fd()) != fd {
+		if s.closed || s.Ptmx != ptmx || int(ptmx.Fd()) != fd {
 			s.mu.RUnlock()
 			return
 		}
 
-		n, err := s.Ptmx.Read(buf)
+		n, err := ptmx.Read(buf)
+
 		s.mu.RUnlock()
 
 		if n > 0 {
@@ -859,6 +868,42 @@ func (s *Session) readLoop() {
 			return
 		}
 	}
+}
+
+func (s *Session) readLoopFDs() (*os.File, int, int32, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed || s.Ptmx == nil {
+		return nil, 0, 0, errors.New("session closed")
+	}
+
+	ptmx := s.Ptmx
+
+	fd := int(ptmx.Fd())
+	if fd < 0 || fd > math.MaxInt32 {
+		return nil, 0, 0, fmt.Errorf("pty fd %d outside poll range", fd)
+	}
+
+	pollFD, err := unix.FcntlInt(ptmx.Fd(), unix.F_DUPFD_CLOEXEC, 3)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("duplicate pty fd: %w", err)
+	}
+
+	if pollFD < 0 || pollFD > math.MaxInt32 {
+		_ = unix.Close(pollFD)
+
+		return nil, 0, 0, fmt.Errorf("poll fd %d outside poll range", pollFD)
+	}
+
+	return ptmx, fd, int32(pollFD), nil
+}
+
+func (s *Session) readLoopOpen(ptmx *os.File, fd int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return !s.closed && s.Ptmx == ptmx && int(ptmx.Fd()) == fd
 }
 
 func (s *Session) upgradeReadSafePoint() bool {
