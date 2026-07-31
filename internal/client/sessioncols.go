@@ -176,12 +176,56 @@ func SessionColumns() []SessionColumn {
 }
 
 func renderTUIColumnCell(c SessionColumn, s protocol.SessionInfo, width int) string {
+	return renderTUIColumnCellWithStyle(c, s, width, nil)
+}
+
+func renderSelectedTUIColumnCell(c SessionColumn, s protocol.SessionInfo, width int) string {
+	return renderTUIColumnCellWithStyle(c, s, width, selectedTUIColumnStyle)
+}
+
+func renderTUIColumnCellWithStyle(c SessionColumn, s protocol.SessionInfo, width int, transform func(lipgloss.Style) lipgloss.Style) string {
 	base := c.TUIStyle(s)
+	if transform != nil {
+		base = transform(base)
+	}
+
 	if c.TUIRender != nil {
 		return c.TUIRender(s, width, base)
 	}
 
 	return base.Render(pad(c.TUIValue(s), width))
+}
+
+func selectedTUIColumnStyle(style lipgloss.Style) lipgloss.Style {
+	if foreground, ok := selectedRowForeground(style.GetForeground()); ok {
+		return style.Foreground(foreground)
+	}
+
+	return style
+}
+
+func selectedRowForeground(foreground color.Color) (color.Color, bool) {
+	switch {
+	case sameRGBAColor(foreground, colorDim):
+		return colorSelectDim, true
+	case sameRGBAColor(foreground, colorRed):
+		return colorSelectRed, true
+	case sameRGBAColor(foreground, colorBlue):
+		return colorSelectBlue, true
+	default:
+		return nil, false
+	}
+}
+
+func sameRGBAColor(a, b color.Color) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+
+	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
 // displayStatus is the merged status shown in the TUI status column: the agent

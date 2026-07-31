@@ -1,6 +1,7 @@
 package client
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -372,5 +373,52 @@ func TestTUIColumnCellsGolden(t *testing.T) {
 
 	if !sawANSI {
 		t.Error("expected ANSI styling in rendered TUI cells")
+	}
+}
+
+func TestRenderSelectedTUIColumnCellAdjustsSelectedForegrounds(t *testing.T) {
+	tests := map[string]struct {
+		regular  color.Color
+		selected color.Color
+	}{
+		"dim foreground is lifted": {
+			regular:  colorDim,
+			selected: colorSelectDim,
+		},
+		"red foreground is lifted": {
+			regular:  colorRed,
+			selected: colorSelectRed,
+		},
+		"blue foreground is lifted": {
+			regular:  colorBlue,
+			selected: colorSelectBlue,
+		},
+		"green foreground is preserved": {
+			regular:  colorGreen,
+			selected: colorGreen,
+		},
+	}
+
+	const width = 8
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			col := SessionColumn{
+				Key: "output",
+				TUIValue: func(protocol.SessionInfo) string {
+					return "dreich"
+				},
+				TUIStyle: func(protocol.SessionInfo) lipgloss.Style {
+					return lipgloss.NewStyle().Foreground(test.regular)
+				},
+			}
+
+			got := renderSelectedTUIColumnCell(col, protocol.SessionInfo{}, width)
+
+			want := lipgloss.NewStyle().Foreground(test.selected).Render(pad("dreich", width))
+			if got != want {
+				t.Fatalf("selected cell render mismatch:\n got %q\nwant %q", got, want)
+			}
+		})
 	}
 }
