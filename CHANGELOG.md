@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.73.1](https://github.com/d0ugal/graith/compare/v0.73.0...v0.73.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* reduce terminal-owned input latency ([1998494](https://github.com/d0ugal/graith/commit/19984947c8dc93cd35b9103f650708bd6bf76038))
+* update module tailscale.com to v1.102.1 ([#1951](https://github.com/d0ugal/graith/issues/1951)) ([63ebd1e](https://github.com/d0ugal/graith/commit/63ebd1eceb19f36bb751636f7e5d433952ba2230))
+
+
+### Dependencies
+
+* **deps:** update dependency nolabs-ai/nono to v0.71.0 ([#1952](https://github.com/d0ugal/graith/issues/1952)) ([d171eab](https://github.com/d0ugal/graith/commit/d171eab6483adfd20149e764dc9f2ec9c8a951fd))
+* **deps:** update renovate/renovate docker tag to v44.5.0 ([#1954](https://github.com/d0ugal/graith/issues/1954)) ([7456771](https://github.com/d0ugal/graith/commit/74567714f97a60fb9a728f9fdbeae00156953098))
+
 ## [0.73.0](https://github.com/d0ugal/graith/compare/v0.72.2...v0.73.0) (2026-07-31)
 
 
