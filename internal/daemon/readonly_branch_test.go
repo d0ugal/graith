@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -261,7 +262,7 @@ func TestDeleteReadOnlyBranchRemovesDetachedWorktreeWithoutDeletingSourceBranch(
 	}
 
 	worktree := filepath.Join(t.TempDir(), "reader")
-	if err := git.CreateDetachedWorktree(repo, worktree, rev); err != nil {
+	if err := git.CreateDetachedWorktreeContext(context.Background(), repo, worktree, rev); err != nil {
 		t.Fatalf("create detached worktree: %v", err)
 	}
 

@@ -438,7 +438,7 @@ func TestFetchOriginCov(t *testing.T) {
 	dir := setupTestRepo(t)
 	addBareOrigin(t, dir)
 
-	if err := FetchOrigin(dir); err != nil {
+	if err := FetchOriginContext(context.Background(), dir); err != nil {
 		t.Errorf("FetchOrigin: %v", err)
 	}
 }
@@ -708,7 +708,7 @@ func TestUnpushedCommitCountNeverPushed(t *testing.T) {
 func TestSetupSessionBranchExistsCov(t *testing.T) {
 	dir := setupTestRepo(t)
 
-	if err := CreateBranch(dir, "graith/glen-clash", "main"); err != nil {
+	if err := CreateBranchContext(context.Background(), dir, "graith/glen-clash", "main"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 

@@ -13,11 +13,11 @@ func makeWorktree(t *testing.T, repo, branch string) string {
 	t.Helper()
 
 	wt := filepath.Join(t.TempDir(), "bothy")
-	if err := CreateBranch(repo, branch, "main"); err != nil {
+	if err := CreateBranchContext(context.Background(), repo, branch, "main"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
-	if err := CreateWorktree(repo, wt, branch); err != nil {
+	if err := CreateWorktreeContext(context.Background(), repo, wt, branch); err != nil {
 		t.Fatalf("CreateWorktree: %v", err)
 	}
 
