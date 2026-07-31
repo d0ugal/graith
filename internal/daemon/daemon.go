@@ -961,6 +961,20 @@ func (sm *SessionManager) adoptSessions(
 		unresolved[upgradeCleanupKey(session)] = session
 	}
 
+	cleanupDeadline := manifest.adoptionDeadline
+	if cleanupDeadline.IsZero() {
+		cleanupTimeout := lc.AdoptedTimeoutDuration()
+		if cleanupTimeout <= 0 {
+			cleanupTimeout = 5 * time.Second
+		}
+
+		cleanupDeadline = time.Now().Add(cleanupTimeout)
+	}
+
+	terminateForAdoption := func(session UpgradeSession) (bool, error) {
+		return terminateUpgradeSession(session, cleanupDeadline)
+	}
+
 	for _, us := range sessions {
 		legacyAlreadyReaped := false
 
@@ -1004,7 +1018,7 @@ func (sm *SessionManager) adoptSessions(
 
 			cleaned, cleanupErr := legacyAlreadyReaped, error(nil)
 			if !cleaned {
-				cleaned, cleanupErr = terminateFailedUpgradeSession(us)
+				cleaned, cleanupErr = terminateForAdoption(us)
 			}
 
 			if cleaned {
@@ -1056,7 +1070,7 @@ func (sm *SessionManager) adoptSessions(
 		// of the ownership manifest, so resolve it under the same fail-closed
 		// cleanup registry before the replacement daemon begins serving.
 		if !upgradeSessionHasPTY(us) {
-			cleaned, cleanupErr := terminateFailedUpgradeSession(us)
+			cleaned, cleanupErr := terminateForAdoption(us)
 			if cleaned {
 				result.ResolvedSessions = append(result.ResolvedSessions, us)
 			} else {
@@ -1116,7 +1130,7 @@ func (sm *SessionManager) adoptSessions(
 			TerminalHistoryRows:  sm.Config().Limits.LogLinesOrDefault(),
 		})
 		if adoptErr != nil {
-			cleaned, cleanupErr := terminateFailedUpgradeSession(us)
+			cleaned, cleanupErr := terminateForAdoption(us)
 			sm.log.Warn("failed to adopt session", "id", us.ID, "err", adoptErr, "cleanup_error", cleanupErr)
 
 			sm.mu.Lock()
@@ -1152,16 +1166,6 @@ func (sm *SessionManager) adoptSessions(
 		if state == nil || state.PID != us.PID || state.PIDStartTime != us.PIDStartTime ||
 			state.Status != StatusRunning || state.IsSoftDeleted() {
 			sm.mu.Unlock()
-
-			cleanupDeadline := manifest.adoptionDeadline
-			if cleanupDeadline.IsZero() {
-				cleanupTimeout := lc.AdoptedTimeoutDuration()
-				if cleanupTimeout <= 0 {
-					cleanupTimeout = 5 * time.Second
-				}
-
-				cleanupDeadline = time.Now().Add(cleanupTimeout)
-			}
 
 			cleanupCtx, cancelCleanup := context.WithDeadline(context.Background(), cleanupDeadline)
 			cleanupErr := ptySess.RejectAdoption(cleanupCtx)

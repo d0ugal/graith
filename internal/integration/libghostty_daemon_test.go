@@ -376,6 +376,13 @@ func TestLibghosttyDaemonLifecycle(t *testing.T) {
 	client.close()
 
 	client = h.connectNewGeneration(initialInstance)
+	waitForNativeRestartLifecycleLabels(t, h,
+		"exec-started",
+		"adoption-bootstrap",
+		"adoption-sessions",
+		"daemon-upgraded",
+		"startup-recovery-started:upgrade-journal",
+	)
 
 	waitForProcessExit(t, oldHelper)
 	waitForPreview(t, client, info.ID, "dreich-before-restart")
@@ -1135,6 +1142,47 @@ func requestNativePreservingRestart(
 	client.close()
 
 	return h.connectNewGeneration(previous)
+}
+
+func waitForNativeRestartLifecycleLabels(t *testing.T, h *nativeDaemonHarness, wants ...string) {
+	t.Helper()
+
+	deadline := time.Now().Add(nativeOpTimeout)
+	var lastLabels []string
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		logTail, err := readBoundedNativeTail(filepath.Join(filepath.Dir(h.tokenFile), "daemon.log"), nativeDiagnosticTailBytes)
+		if err != nil {
+			lastErr = err
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+
+		evidence := classifyNativeRestartLog(logTail)
+		lastLabels = evidence.labels
+
+		found := make(map[string]struct{}, len(evidence.labels))
+		for _, label := range evidence.labels {
+			found[label] = struct{}{}
+		}
+
+		missing := false
+		for _, want := range wants {
+			if _, ok := found[want]; !ok {
+				missing = true
+				break
+			}
+		}
+
+		if !missing {
+			return
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	t.Fatalf("restart lifecycle labels missing %v; last labels=%v err=%v", wants, lastLabels, lastErr)
 }
 
 func startNativeProbeHammer(t *testing.T, h *nativeDaemonHarness) func() int {

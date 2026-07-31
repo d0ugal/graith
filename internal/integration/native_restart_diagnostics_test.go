@@ -25,9 +25,16 @@ type nativeRestartLogEvidence struct {
 
 var nativeLifecycleLabels = map[string]string{
 	"daemon started": "daemon-started", "preparing upgrade": "preparing-upgrade",
-	"exec-ing new binary": "exec-started", "daemon upgraded": "adoption-started",
+	"exec-ing new binary": "exec-started", "daemon upgraded": "daemon-upgraded",
+	"upgrade adoption bootstrap started":                                "adoption-bootstrap",
+	"upgrade adoption loaded state snapshot":                            "adoption-state-loaded",
+	"upgrade adoption reaped inherited terminal helpers":                "adoption-helpers-reaped",
+	"upgrade adoption adopted listener":                                 "adoption-listener",
+	"upgrade adoption adopted sessions":                                 "adoption-sessions",
 	"upgrade attempt failed; old daemon remains active":                 "old-daemon-rollback",
 	"upgrade descriptor rollback could not be made safe; shutting down": "unsafe-rollback",
+	"startup recovery started":                                          "startup-recovery-started",
+	"startup recovery completed":                                        "startup-recovery-completed",
 }
 
 func readBoundedNativeTail(path string, limit int) ([]byte, error) {
@@ -54,8 +61,9 @@ func classifyNativeRestartLog(value []byte) nativeRestartLogEvidence {
 
 	for _, line := range strings.Split(string(value), "\n") {
 		var event struct {
-			Message string `json:"msg"`
-			Error   string `json:"err"`
+			Message  string `json:"msg"`
+			Error    string `json:"err"`
+			Recovery string `json:"recovery"`
 		}
 		if json.Unmarshal([]byte(line), &event) != nil {
 			continue
@@ -66,13 +74,18 @@ func classifyNativeRestartLog(value []byte) nativeRestartLogEvidence {
 			continue
 		}
 
-		evidence.replacement = evidence.replacement || label == "exec-started" || label == "adoption-started" || label == "unsafe-rollback"
+		evidence.replacement = evidence.replacement || label == "exec-started" ||
+			strings.HasPrefix(label, "adoption-") || label == "daemon-upgraded" || label == "unsafe-rollback"
 		errorClass := nativeRestartErrorClass(event.Error)
 		evidence.drainFailed = evidence.drainFailed || strings.HasSuffix(errorClass, "-drain")
 
 		evidence.replacement = evidence.replacement || errorClass == "exec"
 		if errorClass != "none" {
 			label += ":" + errorClass
+		}
+
+		if strings.HasPrefix(label, "startup-recovery-") && event.Recovery != "" {
+			label += ":" + event.Recovery
 		}
 
 		evidence.labels = append(evidence.labels, label)
@@ -161,6 +174,20 @@ func TestNativeRestartDiagnostics(t *testing.T) {
 
 	if got := strings.Join(evidence.labels, ","); got != "old-daemon-rollback:background-drain" || strings.Contains(got, "deadbeef") || strings.Contains(got, "terminal") {
 		t.Fatalf("safe lifecycle evidence = %q", got)
+	}
+
+	phaseTail := []byte(strings.Join([]string{
+		`{"msg":"exec-ing new binary"}`,
+		`{"msg":"upgrade adoption bootstrap started","sessions":9}`,
+		`{"msg":"upgrade adoption adopted sessions","resolved_sessions":9}`,
+		`{"msg":"daemon upgraded"}`,
+		`{"msg":"startup recovery started","recovery":"orphaned-processes"}`,
+		`{"msg":"startup recovery completed","recovery":"orphaned-processes"}`,
+	}, "\n"))
+
+	phaseEvidence := classifyNativeRestartLog(phaseTail)
+	if got, want := strings.Join(phaseEvidence.labels, ","), "exec-started,adoption-bootstrap,adoption-sessions,daemon-upgraded,startup-recovery-started:orphaned-processes,startup-recovery-completed:orphaned-processes"; got != want {
+		t.Fatalf("phase lifecycle evidence = %q, want %q", got, want)
 	}
 
 	classes := [][2]string{
