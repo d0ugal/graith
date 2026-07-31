@@ -1432,6 +1432,169 @@ func TestUpgradeMessageUsesResolvedManagedCandidate(t *testing.T) {
 	}
 }
 
+type scriptedHandshakeIdentity struct {
+	version string
+	id      string
+}
+
+func installScriptedDaemonDial(t *testing.T, paths config.Paths, identities ...scriptedHandshakeIdentity) func() int {
+	t.Helper()
+
+	dialIdentities := make(chan scriptedHandshakeIdentity, len(identities))
+	for _, identity := range identities {
+		dialIdentities <- identity
+	}
+
+	dialLocalDaemon = func(network, address string, _ time.Duration) (net.Conn, error) {
+		if network != "unix" || address != paths.SocketPath {
+			return nil, errors.New("unexpected daemon address")
+		}
+
+		select {
+		case identity := <-dialIdentities:
+			return handshakeReplyConn(t, identity.version, identity.id), nil
+		default:
+			return nil, errors.New("unexpected extra daemon dial")
+		}
+	}
+
+	return func() int { return len(dialIdentities) }
+}
+
+func TestConnectManagedAutoUpgradeReconcilesLateGeneration(t *testing.T) {
+	shortenStartTimeout(t, 10*time.Millisecond)
+	shortenStartPollInterval(t, time.Millisecond)
+
+	originalVersion := version.Version
+	originalDial := dialLocalDaemon
+	originalRequest := requestUpgradeForClient
+
+	t.Cleanup(func() {
+		version.Version = originalVersion
+		dialLocalDaemon = originalDial
+		requestUpgradeForClient = originalRequest
+	})
+
+	version.Version = "2.0.0"
+
+	paths := config.Paths{SocketPath: "/bothy/graith.sock"}
+	upgradeRequested := false
+	freshGenerationObserved := false
+
+	dialLocalDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		if network != "unix" || address != paths.SocketPath {
+			return nil, errors.New("unexpected daemon address")
+		}
+
+		if upgradeRequested && (freshGenerationObserved || timeout > daemonStartTimeout) {
+			freshGenerationObserved = true
+			return handshakeReplyConn(t, version.Version, "braw-gen"), nil
+		}
+
+		return handshakeReplyConn(t, "1.0.0", "auld-gen"), nil
+	}
+
+	requestUpgradeForClient = func(context.Context, *Client) (bool, bool, error) {
+		upgradeRequested = true
+		return true, true, nil
+	}
+
+	c, err := connect(context.Background(), config.Default(), paths, "", true)
+	if err != nil {
+		t.Fatalf("connect should reconcile the late managed generation: %v", err)
+	}
+	defer c.Close()
+
+	if !freshGenerationObserved {
+		t.Fatal("connect returned before observing the fresh generation")
+	}
+}
+
+func TestConnectManagedAutoUpgradeFailureGivesRecoveryCommands(t *testing.T) {
+	shortenStartTimeout(t, 10*time.Millisecond)
+	shortenStartPollInterval(t, time.Millisecond)
+
+	originalVersion := version.Version
+	originalDial := dialLocalDaemon
+	originalRequest := requestUpgradeForClient
+	originalProbe := probeDaemonIdentityForUpgrade
+
+	t.Cleanup(func() {
+		version.Version = originalVersion
+		dialLocalDaemon = originalDial
+		requestUpgradeForClient = originalRequest
+		probeDaemonIdentityForUpgrade = originalProbe
+	})
+
+	version.Version = "2.0.0"
+
+	paths := config.Paths{SocketPath: "/croft/graith.sock"}
+	remainingDials := installScriptedDaemonDial(t, paths,
+		scriptedHandshakeIdentity{"1.0.0", "auld-gen"},
+		scriptedHandshakeIdentity{"1.0.0", "auld-gen"},
+	)
+
+	requestUpgradeForClient = func(context.Context, *Client) (bool, bool, error) {
+		return true, true, nil
+	}
+
+	probeDaemonIdentityForUpgrade = func(string, config.Paths, time.Time) (string, string) {
+		return "1.0.0", "auld-gen"
+	}
+
+	c, err := connect(context.Background(), config.Default(), paths, "", true)
+	if err == nil {
+		c.Close()
+		t.Fatal("connect should report an unproven managed upgrade")
+	}
+
+	for _, want := range []string{"existing daemon and its sessions were left running", "gr daemon restart", "gr daemon service status", "gr daemon service repair"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("connect error = %q, want %q", err, want)
+		}
+	}
+
+	if remaining := remainingDials(); remaining != 0 {
+		t.Fatalf("remaining scripted dials = %d, want no clean-restart fallback dials", remaining)
+	}
+}
+
+func TestProbeNewDaemonGenerationUsesBoundedRealProbe(t *testing.T) {
+	originalDial := dialLocalDaemon
+	originalProbe := probeDaemonIdentityForUpgrade
+
+	t.Cleanup(func() {
+		dialLocalDaemon = originalDial
+		probeDaemonIdentityForUpgrade = originalProbe
+	})
+
+	probeDaemonIdentityForUpgrade = probeDaemonIdentity
+	paths := config.Paths{SocketPath: "/bothy/daemon.sock"}
+
+	var gotTimeout time.Duration
+
+	dialLocalDaemon = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		if network != "unix" || address != paths.SocketPath {
+			t.Fatalf("dial target = %s/%s, want unix/%s", network, address, paths.SocketPath)
+		}
+
+		gotTimeout = timeout
+		if timeout <= 0 || timeout > daemonDialTimeout {
+			t.Fatalf("dial timeout = %v, want bounded by %v", timeout, daemonDialTimeout)
+		}
+
+		return handshakeReplyConn(t, version.Version, "new-generation"), nil
+	}
+
+	if !probeNewDaemonGeneration(paths.SocketPath, paths, version.Version, "old-generation") {
+		t.Fatal("probeNewDaemonGeneration should accept the real probed generation")
+	}
+
+	if gotTimeout == 0 {
+		t.Fatal("probeNewDaemonGeneration did not dial through the real probe")
+	}
+}
+
 func TestRequestUpgradeReportsDaemonOutcomes(t *testing.T) {
 	originalResolver := resolveUpgradeCandidateForClient
 
