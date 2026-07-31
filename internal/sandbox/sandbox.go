@@ -216,15 +216,3 @@ func CheckAvailability(backend, command string, req Requirements) (Availability,
 
 	return be.Availability(command, req), nil
 }
-
-// Available reports whether the default (safehouse) backend can enforce.
-// Retained for callers that predate pluggable backends.
-func Available() bool {
-	return safehouseBackend{}.Availability("", Requirements{}).CanEnforce
-}
-
-// AvailableCommand reports whether the safehouse backend can enforce with the
-// given binary name. Retained for backward compatibility.
-func AvailableCommand(command string) bool {
-	return safehouseBackend{}.Availability(command, Requirements{}).CanEnforce
-}

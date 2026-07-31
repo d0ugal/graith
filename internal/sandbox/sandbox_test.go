@@ -461,15 +461,24 @@ func TestWrapAcceptsPathsWithoutColons(t *testing.T) {
 }
 
 func TestAvailableOnlyOnDarwin(t *testing.T) {
-	result := Available()
-	if runtime.GOOS != "darwin" && result {
-		t.Error("Available() should be false on non-darwin")
+	result, err := CheckAvailability(BackendSafehouse, "", Requirements{})
+	if err != nil {
+		t.Fatalf("CheckAvailability() = %v", err)
+	}
+
+	if runtime.GOOS != "darwin" && result.CanEnforce {
+		t.Error("safehouse availability should be false on non-darwin")
 	}
 }
 
 func TestAvailableCommandCustomBinary(t *testing.T) {
-	if AvailableCommand("this-binary-does-not-exist-anywhere") {
-		t.Error("AvailableCommand should be false for nonexistent binary")
+	result, err := CheckAvailability(BackendSafehouse, "this-binary-does-not-exist-anywhere", Requirements{})
+	if err != nil {
+		t.Fatalf("CheckAvailability() = %v", err)
+	}
+
+	if result.CanEnforce {
+		t.Error("safehouse availability should be false for nonexistent binary")
 	}
 }
 
