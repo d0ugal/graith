@@ -1,0 +1,316 @@
+name: Mainline Failure Notifier
+
+on:
+  # zizmor: ignore[dangerous-triggers] The notifier deliberately runs after
+  # selected workflows complete, but never checks out or executes triggering-run
+  # code and gates mutation to trusted push runs on main or version tags.
+  workflow_run:
+    workflows:
+      - CI
+      - Release Please
+      - Stable Release
+    types:
+      - completed
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: mainline-failure-notifier-${{ github.event.workflow_run.name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Notify watched workflow failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+      WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+      REF_NAME: ${{ github.event.workflow_run.head_branch }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Open, update, or close workflow failure issue
+        run: |
+          set -euo pipefail
+
+          case "$WORKFLOW_NAME" in
+            "CI"|"Release Please"|"Stable Release")
+              ;;
+            *)
+              echo "Ignoring unconfigured workflow: $WORKFLOW_NAME"
+              exit 0
+              ;;
+          esac
+
+          if [ "$TRIGGER_EVENT" != "push" ]; then
+            echo "Ignoring $WORKFLOW_NAME run for event $TRIGGER_EVENT."
+            exit 0
+          fi
+
+          case "$WORKFLOW_NAME" in
+            "CI"|"Release Please")
+              if [ "$REF_NAME" != "main" ]; then
+                echo "Ignoring $WORKFLOW_NAME push on $REF_NAME; only main is watched."
+                exit 0
+              fi
+              REF_KIND=branch
+              ;;
+            "Stable Release")
+              if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+                echo "Ignoring Stable Release push on $REF_NAME; only version tags are watched."
+                exit 0
+              fi
+              REF_KIND=tag
+              ;;
+          esac
+
+          MARKER="<!-- graith-workflow-failure-notifier:v1 workflow=${WORKFLOW_NAME} ref=${REF_NAME} -->"
+
+          latest_completed_run_id() {
+            local runs_file
+            runs_file="$(mktemp)"
+            gh api --paginate --slurp "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?event=$TRIGGER_EVENT&status=completed&per_page=100" >"$runs_file"
+            jq -r --arg ref "$REF_NAME" --arg event "$TRIGGER_EVENT" '
+              [
+                .[] | .workflow_runs[]? |
+                select(.event == $event) |
+                select(.head_branch == $ref) |
+                select(.status == "completed")
+              ] |
+              sort_by(.run_number) |
+              last |
+              .id // ""
+            ' "$runs_file"
+          }
+
+          require_latest_completed_run() {
+            local latest_id
+            if ! latest_id="$(latest_completed_run_id)"; then
+              echo "::warning::Could not list completed $WORKFLOW_NAME runs on $REF_NAME; leaving issues unchanged."
+              return 1
+            fi
+
+            if [ -z "$latest_id" ]; then
+              echo "::warning::Could not confirm the latest completed $WORKFLOW_NAME run on $REF_NAME; leaving issues unchanged."
+              return 1
+            fi
+
+            if [ "$latest_id" != "$RUN_ID" ]; then
+              echo "Ignoring stale $WORKFLOW_NAME run #$RUN_NUMBER ($RUN_ID) on $REF_NAME; latest completed run is $latest_id."
+              return 1
+            fi
+          }
+
+          find_open_issue() {
+            local issues_file
+            issues_file="$(mktemp)"
+            gh api --paginate --slurp "repos/$REPO/issues?state=open&per_page=100" >"$issues_file"
+            jq -r --arg marker "$MARKER" \
+              'first(.[][] | select(.pull_request == null) | select(.user.login == "github-actions[bot]") | select((.body // "") | contains($marker)) | .number) // ""' \
+              "$issues_file"
+          }
+
+          ensure_label() {
+            local name="$1"
+            local color="$2"
+            local description="$3"
+
+            if gh api "repos/$REPO/labels/$name" --silent >/dev/null 2>&1; then
+              return 0
+            fi
+
+            if ! gh api --method POST "repos/$REPO/labels" \
+              -f name="$name" \
+              -f color="$color" \
+              -f description="$description" \
+              --silent >/dev/null; then
+              echo "::warning::Could not create label $name; continuing without failing notification."
+            fi
+          }
+
+          apply_labels() {
+            local issue_number="$1"
+            local label_payload
+            label_payload="$(mktemp)"
+
+            ensure_label "ci-failure" "d73a4a" "Open mainline or release workflow failure"
+            if [ "$WORKFLOW_NAME" = "Stable Release" ] || [ "$WORKFLOW_NAME" = "Release Please" ]; then
+              ensure_label "release-blocker" "b60205" "Failure blocking release automation"
+              printf '%s\n' "ci-failure" "release-blocker" | jq -R . | jq -s '{labels: .}' >"$label_payload"
+            else
+              printf '%s\n' "ci-failure" | jq -R . | jq -s '{labels: .}' >"$label_payload"
+            fi
+
+            if ! gh api --method POST "repos/$REPO/issues/$issue_number/labels" \
+              --input "$label_payload" --silent; then
+              echo "::warning::Could not apply notification labels to issue #$issue_number."
+            fi
+          }
+
+          failure_like_jobs() {
+            local jobs_file
+            jobs_file="$(mktemp)"
+            if ! gh api --paginate --slurp "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" >"$jobs_file"; then
+              printf '%s\n' "- Failed jobs unavailable: the jobs API request failed."
+              return 0
+            fi
+
+            local jobs
+            jobs="$(jq -r '
+              [
+                .[] | .jobs[]? |
+                select((.conclusion // "") as $conclusion |
+                  ["failure", "timed_out", "cancelled", "action_required"] | index($conclusion)) |
+                "- `\(.name)` (\(.conclusion))"
+              ] |
+              unique |
+              .[]
+            ' "$jobs_file")"
+
+            if [ -z "$jobs" ]; then
+              printf '%s\n' "- No failure-like jobs were returned by the jobs API."
+            else
+              printf '%s\n' "$jobs"
+            fi
+          }
+
+          comment_on_repeat_failure() {
+            local issue_number="$1"
+            local failed_jobs="$2"
+            local comment_file
+            local comment_payload
+            comment_file="$(mktemp)"
+            comment_payload="$(mktemp)"
+
+            cat >"$comment_file" <<COMMENT
+          $MARKER
+
+          Another failure-like run for \`$WORKFLOW_NAME\` on \`$REF_NAME\` completed.
+
+          - Run: $RUN_URL
+          - Run number: \`$RUN_NUMBER\`
+          - Conclusion: \`$CONCLUSION\`
+          - Head SHA: \`$HEAD_SHA\`
+
+          Failed jobs:
+
+          $failed_jobs
+          COMMENT
+
+            jq -n --arg body "$(cat "$comment_file")" '{body: $body}' >"$comment_payload"
+            gh api --method POST "repos/$REPO/issues/$issue_number/comments" \
+              --input "$comment_payload" --silent
+          }
+
+          create_or_update_failure_issue() {
+            local issue_number
+            local failed_jobs
+            local title
+            local body_file
+            local payload_file
+
+            issue_number="$(find_open_issue)"
+            failed_jobs="$(failure_like_jobs)"
+            title="Workflow failure: ${WORKFLOW_NAME} on ${REF_NAME}"
+            body_file="$(mktemp)"
+            payload_file="$(mktemp)"
+
+            cat >"$body_file" <<BODY
+          $MARKER
+
+          A watched GitHub Actions workflow failed on a protected ${REF_KIND}.
+
+          | Field | Value |
+          | --- | --- |
+          | Workflow | \`$WORKFLOW_NAME\` |
+          | Run number | \`$RUN_NUMBER\` |
+          | Conclusion | \`$CONCLUSION\` |
+          | Event | \`$TRIGGER_EVENT\` |
+          | Ref | \`$REF_NAME\` |
+          | Head SHA | \`$HEAD_SHA\` |
+          | Run URL | $RUN_URL |
+
+          Failed jobs:
+
+          $failed_jobs
+          BODY
+
+            jq -n \
+              --arg title "$title" \
+              --arg body "$(cat "$body_file")" \
+              '{title: $title, body: $body}' >"$payload_file"
+
+            if [ -n "$issue_number" ]; then
+              gh api --method PATCH "repos/$REPO/issues/$issue_number" \
+                --input "$payload_file" --silent
+              comment_on_repeat_failure "$issue_number" "$failed_jobs"
+              echo "Updated workflow failure issue #$issue_number."
+            else
+              local response_file
+              response_file="$(mktemp)"
+              gh api --method POST "repos/$REPO/issues" --input "$payload_file" >"$response_file"
+              issue_number="$(jq -r '.number' "$response_file")"
+              echo "Created workflow failure issue #$issue_number."
+            fi
+
+            apply_labels "$issue_number"
+          }
+
+          comment_and_close_issue() {
+            local issue_number
+            issue_number="$(find_open_issue)"
+
+            if [ -z "$issue_number" ]; then
+              echo "No open workflow failure issue found for $WORKFLOW_NAME on $REF_NAME."
+              return 0
+            fi
+
+            local comment_file
+            local comment_payload
+            comment_file="$(mktemp)"
+            comment_payload="$(mktemp)"
+
+            cat >"$comment_file" <<COMMENT
+          $MARKER
+
+          A later run for \`$WORKFLOW_NAME\` on \`$REF_NAME\` succeeded, so this workflow/ref is green again.
+
+          - Successful run: $RUN_URL
+          - Run number: \`$RUN_NUMBER\`
+          - Head SHA: \`$HEAD_SHA\`
+          COMMENT
+
+            jq -n --arg body "$(cat "$comment_file")" '{body: $body}' >"$comment_payload"
+            gh api --method POST "repos/$REPO/issues/$issue_number/comments" \
+              --input "$comment_payload" --silent
+            gh api --method PATCH "repos/$REPO/issues/$issue_number" \
+              -f state=closed \
+              -f state_reason=completed \
+              --silent
+            echo "Closed workflow failure issue #$issue_number after a successful run."
+          }
+
+          if ! require_latest_completed_run; then
+            exit 0
+          fi
+
+          case "$CONCLUSION" in
+            success)
+              comment_and_close_issue
+              ;;
+            failure|timed_out|cancelled|action_required)
+              create_or_update_failure_issue
+              ;;
+            *)
+              echo "Ignoring conclusion $CONCLUSION for $WORKFLOW_NAME on $REF_NAME."
+              ;;
+          esac
