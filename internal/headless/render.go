@@ -160,28 +160,6 @@ func toolNameOf(ev event) string {
 	return ""
 }
 
-// controlToolName best-effort extracts a tool name from a can_use_tool control
-// request body (schema is SDK-internal; tolerate absence).
-func controlToolName(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-
-	var body struct {
-		ToolName string `json:"tool_name"`
-		Name     string `json:"name"`
-	}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return ""
-	}
-
-	if body.ToolName != "" {
-		return body.ToolName
-	}
-
-	return body.Name
-}
-
 func asExitError(err error, target **exec.ExitError) bool {
 	return errors.As(err, target)
 }
