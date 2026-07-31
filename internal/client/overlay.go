@@ -211,11 +211,14 @@ var (
 	colorYellow  = lipgloss.Color("#FFD75F")
 	colorPreview = lipgloss.Color("#555555")
 	colorPanel   = lipgloss.Color("#1a1a1a")
-	// colorSelectBg is the background of the highlighted row in the Navigator, so
-	// the whole selected line stands out rather than just the "> " cursor. Dark
-	// and purple-tinted to echo the accent used for the selected name and the
-	// selected view label.
-	colorSelectBg = lipgloss.Color("#2f2b45")
+	// Selected-row colours are intentionally stronger than the panel background:
+	// the active Navigator row must be visible at a glance on common dark
+	// terminals without waiting for the "> " cursor to catch the eye.
+	colorSelectBg   = lipgloss.Color("#155e75")
+	colorSelectFg   = lipgloss.Color("#f8fafc")
+	colorSelectDim  = lipgloss.Color("#cbd5e1")
+	colorSelectRed  = lipgloss.Color("#fecaca")
+	colorSelectBlue = lipgloss.Color("#bfdbfe")
 )
 
 type sessionItem struct {
@@ -1478,6 +1481,10 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	dim := lipgloss.NewStyle().Foreground(colorDim)
+	if selected {
+		dim = lipgloss.NewStyle().Foreground(colorSelectDim)
+	}
+
 	isCurrent := si.info.ID == d.currentSessionID
 
 	indicator := "●"
@@ -1486,10 +1493,20 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	switch si.info.Status {
 	case "stopped":
 		indicator = "○"
+
 		indicatorColor = colorDim
+		if selected {
+			indicatorColor = colorSelectDim
+		}
 	case "errored":
 		indicator = "✗"
 		indicatorColor = colorRed
+	}
+
+	if selected {
+		if selectedColor, ok := selectedRowForeground(indicatorColor); ok {
+			indicatorColor = selectedColor
+		}
 	}
 
 	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
@@ -1559,7 +1576,12 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	for _, c := range tuiColumns() {
 		b.WriteString(sep)
-		b.WriteString(renderTUIColumnCell(c, si.info, d.cols.col(c.Key)))
+
+		if selected {
+			b.WriteString(renderSelectedTUIColumnCell(c, si.info, d.cols.col(c.Key)))
+		} else {
+			b.WriteString(renderTUIColumnCell(c, si.info, d.cols.col(c.Key)))
+		}
 	}
 
 	line := b.String()
@@ -1576,8 +1598,8 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 // highlightSelectedRow makes the Navigator's selected row stand out by giving the
-// whole line a subtle background (and keeping it bold), so the eye doesn't have
-// to trace the "> " cursor across a wide terminal to find the current row.
+// whole line a clear background (and keeping it bold), so the eye doesn't have to
+// trace the "> " cursor across a wide terminal to find the current row.
 //
 // A plain background wrap won't do: each column is pre-rendered with its own
 // foreground style and ends in a full SGR reset ("\x1b[m"), which also clears
@@ -1607,19 +1629,26 @@ func highlightSelectedRow(line string, width int) string {
 	return open + line + "\x1b[0m"
 }
 
-// selectRowOpen returns the SGR sequence that opens the selected-row style
-// (bold + background). lipgloss v2's Render always emits full-fidelity truecolor
-// here; downsampling to a limited palette (or stripping under a no-color
-// profile) happens downstream in Bubble Tea's output layer, exactly as it does
-// for every other cell in the row. The "" return is a defensive fallback for a
-// renderer that emits no SGR at all.
+// selectRowOpen returns the SGR sequence that opens the selected-row style.
+// lipgloss v2's Render always emits full-fidelity truecolor here; downsampling
+// to a limited palette (or stripping under a no-color profile) happens
+// downstream in Bubble Tea's output layer, exactly as it does for every other
+// cell in the row. The "" return is a defensive fallback for a renderer that
+// emits no SGR at all.
 func selectRowOpen() string {
-	probe := lipgloss.NewStyle().Bold(true).Background(colorSelectBg).Render("x")
+	probe := selectedRowStyle().Render("x")
 	if i := strings.IndexByte(probe, 'x'); i > 0 {
 		return probe[:i]
 	}
 
 	return ""
+}
+
+func selectedRowStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(colorSelectFg).
+		Background(colorSelectBg)
 }
 
 type previewMsg struct {

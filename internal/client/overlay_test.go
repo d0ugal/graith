@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -4886,6 +4887,64 @@ func TestCompactDelegate_RenderSelectedVsUnselected(t *testing.T) {
 	}
 }
 
+func TestSelectedRowDefaultStyleContrast(t *testing.T) {
+	tests := map[string]struct {
+		foreground color.Color
+		background color.Color
+		minRatio   float64
+	}{
+		"background stands out from panel": {
+			foreground: colorSelectBg,
+			background: colorPanel,
+			minRatio:   2,
+		},
+		"default foreground readable on selection": {
+			foreground: colorSelectFg,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+		"dim foreground readable on selection": {
+			foreground: colorSelectDim,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+		"red semantic foreground readable on selection": {
+			foreground: colorSelectRed,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+		"blue semantic foreground readable on selection": {
+			foreground: colorSelectBlue,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+		"green semantic foreground readable on selection": {
+			foreground: colorGreen,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+		"gold semantic foreground readable on selection": {
+			foreground: colorGold,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+		"yellow semantic foreground readable on selection": {
+			foreground: colorYellow,
+			background: colorSelectBg,
+			minRatio:   4.5,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := contrastRatio(test.foreground, test.background)
+			if got < test.minRatio {
+				t.Errorf("contrast ratio = %.2f, want at least %.2f", got, test.minRatio)
+			}
+		})
+	}
+}
+
 // TestHighlightSelectedRow guards the core reset-reopen mechanism directly: a
 // Navigator row is built from columns that each end in a full SGR reset, which
 // would clear the background mid-row. highlightSelectedRow must re-open the
@@ -4954,6 +5013,32 @@ func TestHighlightSelectedRow_ZeroWidth(t *testing.T) {
 	if !strings.Contains(out, "\x1b[m"+open) {
 		t.Errorf("zero-width row should still re-open the background after resets, got %q", out)
 	}
+}
+
+func contrastRatio(foreground, background color.Color) float64 {
+	fg, bg := relativeLuminance(foreground), relativeLuminance(background)
+	if bg > fg {
+		fg, bg = bg, fg
+	}
+
+	return (fg + 0.05) / (bg + 0.05)
+}
+
+func relativeLuminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+
+	return 0.2126*linearizedChannel(r) +
+		0.7152*linearizedChannel(g) +
+		0.0722*linearizedChannel(b)
+}
+
+func linearizedChannel(v uint32) float64 {
+	c := float64(v) / 0xffff
+	if c <= 0.04045 {
+		return c / 12.92
+	}
+
+	return math.Pow((c+0.055)/1.055, 2.4)
 }
 
 func TestCompactDelegate_RenderTruncatesLongLine(t *testing.T) {
