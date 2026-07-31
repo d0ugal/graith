@@ -52,8 +52,43 @@ fragment, and is matched as a literal URL path.
 
 When enabling metrics for local collection, point Alloy or another Prometheus
 scraper at `http://127.0.0.1:4824/metrics` unless you changed the address or
-path. The first telemetry slice starts the scrape endpoint only; daemon and
-session metric series are added by follow-up instrumentation work.
+path.
+
+The initial metric set focuses on daemon and session reliability signals:
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `graith_daemon_info` | gauge | `version`, `commit` |
+| `graith_daemon_uptime_seconds` | gauge | none |
+| `graith_daemon_attached_clients` | gauge | none |
+| `graith_sessions` | gauge | `status`, `driver_kind` |
+| `graith_session_launch_duration_seconds` | histogram | `operation`, `driver_kind`, `result` |
+| `graith_session_lifecycle_transitions_total` | counter | `from`, `to` |
+| `graith_session_input_events_total` | counter | `operation`, `result` |
+| `graith_session_input_bytes_total` | counter | `operation`, `result` |
+| `graith_session_input_duration_seconds` | histogram | `operation`, `result` |
+| `graith_screen_snapshot_requests_total` | counter | `kind` |
+| `graith_screen_snapshot_duration_seconds` | histogram | `kind` |
+| `graith_messages_published_total` | counter | `stream_kind`, `sender_kind` |
+
+Histogram metrics also expose the standard Prometheus `_bucket`, `_sum`, and
+`_count` series. Label values are intentionally bounded. `status`, `from`, and
+`to` use `creating`, `running`, `stopped`, `errored`, `deleting`, or `unknown`.
+`driver_kind` uses `pty`, `headless`, or `unknown`; launch `operation` uses
+`create`, `fork`, `orchestrator_create`, `resume`, or `unknown`; input
+`operation` uses `attach`, `type`, `type_no_newline`, or `unknown`; `result`
+uses `success` or `error`; snapshot `kind` uses `full`, `delta`, or `unknown`;
+`stream_kind` uses `topic`, `inbox`, `system`, or `unknown`; and `sender_kind`
+uses `session`, `device`, `system`, or `unknown`.
+
+`graith_session_lifecycle_transitions_total` counts published session
+status-change events. It can collapse transient internal busy states. For
+`graith_session_input_duration_seconds`, `operation="type"` includes the
+configured `lifecycle.input_delay` between writing the input bytes and
+submitting the trailing carriage return.
+
+Graith does not put session IDs, session names, repository paths, worktree
+paths, branch names, prompts, message bodies, or user names in metric labels.
 
 ## Tracing
 

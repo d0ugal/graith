@@ -38,6 +38,10 @@ func TestTelemetryRuntimeDisabledStartsNothing(t *testing.T) {
 	if sm.telemetry != nil {
 		t.Fatalf("disabled telemetry created runtime: %+v", sm.telemetry)
 	}
+
+	if metrics := sm.metrics.Load(); metrics != nil {
+		t.Fatalf("disabled telemetry created metrics registry: %+v", metrics)
+	}
 }
 
 func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
@@ -53,6 +57,112 @@ func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
 
 	t.Cleanup(sm.stopTelemetryRuntime)
 
+	body := scrapeTelemetryMetrics(t, sm)
+
+	for _, want := range []string{
+		"# TYPE graith_daemon_info gauge",
+		"# TYPE graith_daemon_uptime_seconds gauge",
+		"# TYPE graith_daemon_attached_clients gauge",
+		"# TYPE graith_sessions gauge",
+		"# TYPE graith_session_launch_duration_seconds histogram",
+		"# TYPE graith_session_lifecycle_transitions_total counter",
+		"# TYPE graith_session_input_events_total counter",
+		"# TYPE graith_session_input_bytes_total counter",
+		"# TYPE graith_session_input_duration_seconds histogram",
+		"# TYPE graith_screen_snapshot_requests_total counter",
+		"# TYPE graith_screen_snapshot_duration_seconds histogram",
+		"# TYPE graith_messages_published_total counter",
+	} {
+		assertMetricsContain(t, body, want)
+	}
+}
+
+func TestTelemetryRuntimeMetricsLabelsStayLowCardinality(t *testing.T) {
+	cfg := config.Default()
+	cfg.Telemetry.Metrics.Enabled = true
+	cfg.Telemetry.Metrics.BindAddress = "127.0.0.1:0"
+
+	deletedAt := time.Now()
+	sm := newSMWithConfig(t, cfg)
+	sm.state.Sessions["braw-id"] = &SessionState{
+		ID:           "braw-id",
+		Name:         "canny-name",
+		Status:       StatusRunning,
+		DriverKind:   DriverPTY,
+		RepoPath:     "/repo/croft",
+		WorktreePath: "/work/bothy",
+		Branch:       "feature/thrawn",
+	}
+	sm.state.Sessions["headless-id"] = &SessionState{
+		ID:           "headless-id",
+		Name:         "dreich-headless",
+		Status:       StatusStopped,
+		DriverKind:   DriverHeadless,
+		RepoPath:     "/repo/strath",
+		WorktreePath: "/work/strath",
+		Branch:       "feature/haar",
+	}
+	sm.state.Sessions["deleted-id"] = &SessionState{
+		ID:         "deleted-id",
+		Name:       "deleted-name",
+		Status:     StatusRunning,
+		DriverKind: DriverPTY,
+		DeletedAt:  &deletedAt,
+	}
+
+	if err := sm.startTelemetryRuntime(t.Context()); err != nil {
+		t.Fatalf("startTelemetryRuntime() error = %v", err)
+	}
+
+	t.Cleanup(sm.stopTelemetryRuntime)
+
+	sm.observeSessionLaunch("fork-braw-id", "custom-driver-braw-id", time.Millisecond, errors.New("dreich launch"))
+	sm.observeSessionLaunch(metricOperationFork, DriverPTY, time.Millisecond, nil)
+	sm.observeSessionLaunch(metricOperationOrchestratorCreate, DriverPTY, time.Millisecond, nil)
+	sm.observeSessionInput("paste-canny-name", 42, time.Millisecond, nil)
+	sm.observeScreenSnapshot("history-bothy", time.Millisecond)
+	sm.observeSessionLifecycleTransition("fash-from", "thrawn-to")
+	sm.observeSessionLifecycleTransition(string(StatusRunning), string(StatusStopped))
+	sm.observeMessagePublished(Message{Stream: "inbox:braw-id", SenderID: "device:canny-device"})
+	sm.observeMessagePublished(Message{Stream: "blether-topic", SenderID: "headless-id"})
+
+	body := scrapeTelemetryMetrics(t, sm)
+
+	for _, want := range []string{
+		`graith_sessions{driver_kind="pty",status="running"} 1`,
+		`graith_sessions{driver_kind="headless",status="stopped"} 1`,
+		`graith_session_launch_duration_seconds_count{driver_kind="pty",operation="fork",result="success"} 1`,
+		`graith_session_launch_duration_seconds_count{driver_kind="pty",operation="orchestrator_create",result="success"} 1`,
+		`graith_session_launch_duration_seconds_count{driver_kind="unknown",operation="unknown",result="error"} 1`,
+		`graith_session_input_events_total{operation="unknown",result="success"} 1`,
+		`graith_screen_snapshot_requests_total{kind="unknown"} 1`,
+		`graith_session_lifecycle_transitions_total{from="running",to="stopped"} 1`,
+		`graith_messages_published_total{sender_kind="device",stream_kind="inbox"} 1`,
+		`graith_messages_published_total{sender_kind="session",stream_kind="topic"} 1`,
+	} {
+		assertMetricsContain(t, body, want)
+	}
+
+	for _, secret := range []string{
+		"braw-id",
+		"canny-name",
+		"custom-driver-braw-id",
+		"/repo/croft",
+		"/work/bothy",
+		"feature/thrawn",
+		"headless-id",
+		"deleted-name",
+		"fash-from",
+		"thrawn-to",
+		`graith_session_lifecycle_transitions_total{from="unknown",to="unknown"}`,
+	} {
+		assertMetricsNotContain(t, body, secret)
+	}
+}
+
+func scrapeTelemetryMetrics(t *testing.T, sm *SessionManager) string {
+	t.Helper()
+
 	addr, path, ok := sm.telemetryMetricsEndpoint()
 	if !ok {
 		t.Fatal("metrics endpoint not active")
@@ -60,7 +170,12 @@ func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
 
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	resp, err := client.Get("http://" + addr + path) //nolint:noctx // bounded by client timeout and t.Context cleanup.
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+path, nil)
+	if err != nil {
+		t.Fatalf("create metrics request: %v", err)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET metrics endpoint: %v", err)
 	}
@@ -72,11 +187,25 @@ func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("metrics status = %d body=%q, want 200", resp.StatusCode, body)
+		t.Fatalf("metrics status = %d body prefix=%q, want 200", resp.StatusCode, string(body[:min(len(body), 512)]))
 	}
 
-	if !strings.Contains(string(body), "graith metrics endpoint enabled") {
-		t.Fatalf("metrics body = %q", body)
+	return string(body)
+}
+
+func assertMetricsContain(t *testing.T, body, want string) {
+	t.Helper()
+
+	if !strings.Contains(body, want) {
+		t.Fatalf("metrics body missing %q", want)
+	}
+}
+
+func assertMetricsNotContain(t *testing.T, body, forbidden string) {
+	t.Helper()
+
+	if strings.Contains(body, forbidden) {
+		t.Fatalf("metrics body contains high-cardinality value %q", forbidden)
 	}
 }
 
@@ -153,6 +282,10 @@ func TestTelemetryRuntimeTracingOnlyDoesNotListen(t *testing.T) {
 	if sm.telemetry == nil || sm.telemetry.tracing == nil {
 		t.Fatalf("tracing runtime not recorded: %+v", sm.telemetry)
 	}
+
+	if metrics := sm.metrics.Load(); metrics != nil {
+		t.Fatalf("tracing-only telemetry created metrics registry: %+v", metrics)
+	}
 }
 
 func TestTelemetryRuntimeMetricsListenFailure(t *testing.T) {
@@ -175,6 +308,10 @@ func TestTelemetryRuntimeMetricsListenFailure(t *testing.T) {
 
 	if sm.telemetry != nil {
 		t.Fatalf("failed start retained runtime: %+v", sm.telemetry)
+	}
+
+	if metrics := sm.metrics.Load(); metrics != nil {
+		t.Fatalf("failed start retained metrics registry: %+v", metrics)
 	}
 }
 

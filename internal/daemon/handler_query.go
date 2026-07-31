@@ -308,15 +308,28 @@ func handleScreenSnapshot(sm *SessionManager, auth authContext, send func(string
 		return
 	}
 
+	snapshotStarted := time.Now()
+
 	if ss.DeltaFrom != 0 {
 		if deltaOutput, ok := output.(screenDeltaOutput); ok {
-			send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, deltaOutput.ScreenSnapshotDelta(ss.DeltaFrom)))
+			snap := deltaOutput.ScreenSnapshotDelta(ss.DeltaFrom)
+
+			kind := metricSnapshotFull
+			if snap.Delta {
+				kind = metricSnapshotDelta
+			}
+
+			sm.observeScreenSnapshot(kind, time.Since(snapshotStarted))
+			send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, snap))
 
 			return
 		}
 	}
 
-	send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, output.ScreenSnapshot()))
+	snap := output.ScreenSnapshot()
+
+	sm.observeScreenSnapshot(metricSnapshotFull, time.Since(snapshotStarted))
+	send("screen_snapshot_response", screenSnapshotResponse(ss.SessionID, snap))
 }
 
 // handlePairApprove approves a pending device pairing (local user only). A

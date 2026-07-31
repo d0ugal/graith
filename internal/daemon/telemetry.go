@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var telemetryListen = net.Listen
@@ -22,7 +23,7 @@ type telemetryRuntime struct {
 	tracing *telemetryTracingRuntime
 }
 
-func newTelemetryRuntime(ctx context.Context, cfg config.TelemetryConfig, log *slog.Logger) (*telemetryRuntime, error) {
+func newTelemetryRuntime(ctx context.Context, cfg config.TelemetryConfig, metricsGatherer prometheus.Gatherer, log *slog.Logger) (*telemetryRuntime, error) {
 	if !cfg.Enabled() {
 		return nil, nil
 	}
@@ -30,7 +31,7 @@ func newTelemetryRuntime(ctx context.Context, cfg config.TelemetryConfig, log *s
 	rt := &telemetryRuntime{}
 
 	if cfg.Metrics.Enabled {
-		metrics, err := startTelemetryMetricsRuntime(ctx, cfg.Metrics, log)
+		metrics, err := startTelemetryMetricsRuntime(ctx, cfg.Metrics, metricsGatherer, log)
 		if err != nil {
 			return nil, err
 		}
@@ -77,11 +78,11 @@ type telemetryMetricsRuntime struct {
 	path      string
 }
 
-func startTelemetryMetricsRuntime(ctx context.Context, cfg config.TelemetryMetricsConfig, log *slog.Logger) (*telemetryMetricsRuntime, error) {
+func startTelemetryMetricsRuntime(ctx context.Context, cfg config.TelemetryMetricsConfig, gatherer prometheus.Gatherer, log *slog.Logger) (*telemetryMetricsRuntime, error) {
 	path := cfg.PathOrDefault()
 
 	mux := http.NewServeMux()
-	handler := newTelemetryMetricsHandler()
+	handler := newTelemetryMetricsHandler(gatherer)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != path {
@@ -134,11 +135,12 @@ func startTelemetryMetricsRuntime(ctx context.Context, cfg config.TelemetryMetri
 	return rt, nil
 }
 
-func newTelemetryMetricsHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		_, _ = io.WriteString(w, "# graith metrics endpoint enabled\n")
-	})
+func newTelemetryMetricsHandler(gatherer prometheus.Gatherer) http.Handler {
+	if gatherer == nil {
+		gatherer = prometheus.NewRegistry()
+	}
+
+	return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
 }
 
 func (rt *telemetryMetricsRuntime) stop() {
@@ -250,9 +252,29 @@ func (sm *SessionManager) startTelemetryRuntime(ctx context.Context) error {
 
 	cfg := sm.Config()
 
-	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, sm.log)
+	var (
+		metrics         *daemonMetrics
+		metricsGatherer prometheus.Gatherer
+	)
+
+	if cfg.Telemetry.Metrics.Enabled {
+		registry := prometheus.NewRegistry()
+		metrics = newDaemonMetrics(sm)
+
+		if err := metrics.register(registry); err != nil {
+			return fmt.Errorf("register metrics: %w", err)
+		}
+
+		metricsGatherer = registry
+	}
+
+	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, metricsGatherer, sm.log)
 	if err != nil {
 		return err
+	}
+
+	if metrics != nil {
+		sm.metrics.Store(metrics)
 	}
 
 	sm.telemetry = rt
@@ -270,6 +292,7 @@ func (sm *SessionManager) stopTelemetryRuntime() {
 
 	sm.telemetry.stop()
 	sm.telemetry = nil
+	sm.metrics.Store(nil)
 }
 
 func (sm *SessionManager) telemetryMetricsEndpoint() (addr, path string, ok bool) {
