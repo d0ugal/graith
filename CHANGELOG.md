@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.73.0](https://github.com/d0ugal/graith/compare/v0.72.2...v0.73.0) (2026-07-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* [limits].log_lines no longer controls terminal-owned interactive scrollback history; use [terminal].history_rows instead.
+
+### Features
+
+* configure terminal history rows ([63eb6d3](https://github.com/d0ugal/graith/commit/63eb6d3ea56e1a532d96481ee7564c964b0a81c7))
+
+
+### Bug Fixes
+
+* avoid preserved restart adoption stalls ([c48e729](https://github.com/d0ugal/graith/commit/c48e729401e8d8eb2af27368ac6474b9079909d2))
+* remove legacy message overlay shim ([2de854a](https://github.com/d0ugal/graith/commit/2de854a5e7507a0d0467f8af6ed307b9ce6e20e8))
+* remove unused adoption state loader ([712dd46](https://github.com/d0ugal/graith/commit/712dd464cab441f2d2d7aaa7dadef41a5610fd89))
+* remove unused agent environment detector ([bbd70ca](https://github.com/d0ugal/graith/commit/bbd70ca200df9b464f9392b670dd6aea4389e91c))
+* remove unused codex transcript locator ([e43b86a](https://github.com/d0ugal/graith/commit/e43b86a112828fd86f799e5d32d663243f69a200))
+* remove unused daemon autostart wrappers ([3c56e93](https://github.com/d0ugal/graith/commit/3c56e9371848c20ec0561aa03257218ebf3633e1))
+* remove unused daemon lifecycle wrappers ([5fe52bc](https://github.com/d0ugal/graith/commit/5fe52bcdfc46c8aa7434a67b0e5e3dac3fc5ad20))
+* remove unused daemon service cache wrappers ([7e8ec72](https://github.com/d0ugal/graith/commit/7e8ec727b5be08f2028139e55720c214cbba7bb9))
+* remove unused git convenience wrappers ([648f6d6](https://github.com/d0ugal/graith/commit/648f6d62f3816c634c3f0a096f7738f3eb4e6d5d))
+* remove unused list helper wrappers ([41027e0](https://github.com/d0ugal/graith/commit/41027e0e2001413f6abc4707d39a3824941a6c98))
+* remove unused lock decoder wrapper ([d98d3ba](https://github.com/d0ugal/graith/commit/d98d3ba9b9cd964de81834b03fc5ab9e34b3d591))
+* remove unused relative path expander ([b215344](https://github.com/d0ugal/graith/commit/b215344d3468e55de8dbdee390c0a0a97b65defa))
+* remove unused sandbox availability wrappers ([9bef292](https://github.com/d0ugal/graith/commit/9bef2920543f2edbd7f77984a1beb2d97846fe5d))
+* remove unused status and render helpers ([f17a15e](https://github.com/d0ugal/graith/commit/f17a15e2cfc04f9aa907bb3c3a46b8b789027a48))
+* remove unused terminal-owned wrappers ([b14fbe8](https://github.com/d0ugal/graith/commit/b14fbe889034fd0a7ab36965ecb70f302968ec6b))
+* remove unused transcript convenience wrappers ([f402b0f](https://github.com/d0ugal/graith/commit/f402b0f324f6e4d60db253608e2c5db76cf08dcf))
+* remove unused workflow classifier modes ([656b280](https://github.com/d0ugal/graith/commit/656b2805de25769330cd0c9937e86221dfb02884))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.4.6 ([#1945](https://github.com/d0ugal/graith/issues/1945)) ([ea89534](https://github.com/d0ugal/graith/commit/ea895341a8ceedfb9e2c981618036b8a22639831))
+
 ## [0.72.2](https://github.com/d0ugal/graith/compare/v0.72.1...v0.72.2) (2026-07-31)
 
 
