@@ -42,15 +42,12 @@ func canonPath(p string) string {
 	return filepath.Clean(p)
 }
 
-// locateCodex finds the most recent Codex rollout whose session_meta.cwd
+// locateCodexInRoot finds the most recent Codex rollout whose session_meta.cwd
 // matches the given worktree. Codex assigns its own session id and does not let
 // graith set one, so until graith captures the id this is a cwd scan. Cold
 // rollouts may be zstd-compressed (.jsonl.zst); those are skipped (a live
-// migration source is always an uncompressed .jsonl).
-func locateCodex(agentSessionID, worktreePath string) (string, error) {
-	return locateCodexInRoot("", agentSessionID, worktreePath)
-}
-
+// migration source is always an uncompressed .jsonl). Pass root "" for the
+// daemon default.
 func locateCodexInRoot(root, agentSessionID, worktreePath string) (string, error) {
 	if root == "" {
 		var err error
