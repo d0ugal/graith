@@ -443,10 +443,6 @@ func ReceiptRoot(uid int) (string, error) {
 	return filepath.Join(root, "control"), nil
 }
 
-func CacheBundle(source ValidatedBundle, expectations BundleExpectations, uid int) (ValidatedBundle, error) {
-	return CacheBundleContext(context.Background(), source, expectations, uid)
-}
-
 func CacheBundleContext(ctx context.Context, source ValidatedBundle, expectations BundleExpectations, uid int) (ValidatedBundle, error) {
 	root, err := CacheRoot(uid)
 	if err != nil {
@@ -458,10 +454,6 @@ func CacheBundleContext(ctx context.Context, source ValidatedBundle, expectation
 	}
 
 	return cacheBundleAtRootContext(ctx, source, expectations, root)
-}
-
-func cacheBundleAtRoot(source ValidatedBundle, expectations BundleExpectations, root string) (ValidatedBundle, error) {
-	return cacheBundleAtRootContext(context.Background(), source, expectations, root)
 }
 
 func cacheBundleAtRootContext(ctx context.Context, source ValidatedBundle, expectations BundleExpectations, root string) (ValidatedBundle, error) {
@@ -604,10 +596,11 @@ func validatedCachedBundles(root string, uid int, expectations BundleExpectation
 	var bundles []ValidatedBundle
 
 	for _, entry := range entries {
-		// CacheBundle stages copies in dot-prefixed directories before an atomic
-		// rename. A hard-killed installer can leave one behind, and Finder can add
-		// .DS_Store. Neither is a published generation, so ignore private entries
-		// while retaining strict validation for every visible generation name.
+		// Cache installation stages copies in dot-prefixed directories before an
+		// atomic rename. A hard-killed installer can leave one behind, and Finder
+		// can add .DS_Store. Neither is a published generation, so ignore private
+		// entries while retaining strict validation for every visible generation
+		// name.
 		if entry.Name() == "control" || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
