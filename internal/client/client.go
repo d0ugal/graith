@@ -1150,46 +1150,6 @@ func FetchScrollback(cfg *config.Config, paths config.Paths, configFile string, 
 	return cleanScrollback(buf.String())
 }
 
-// FetchConversation retrieves the full direct-message conversation (both
-// directions) for sessionID via a one-shot passive connection. It is safe for
-// the user CLI: msg_conversation authorises with the self-or-descendant rule,
-// which permits unauthenticated callers.
-func FetchConversation(cfg *config.Config, paths config.Paths, configFile string, sessionID string) ([]protocol.ConversationMessage, error) {
-	c, err := ConnectPassive(cfg, paths, configFile)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-
-	if err := c.SendControl("msg_conversation", protocol.MsgConversationMsg{SessionID: sessionID}); err != nil {
-		return nil, err
-	}
-
-	resp, err := c.ReadControlResponse()
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.Type == "error" {
-		var e protocol.ErrorMsg
-
-		_ = protocol.DecodePayload(resp, &e)
-
-		return nil, fmt.Errorf("%s", e.Message)
-	}
-
-	if resp.Type != "msg_conversation_list" {
-		return nil, fmt.Errorf("unexpected response %q", resp.Type)
-	}
-
-	var list protocol.MsgConversationListMsg
-	if err := protocol.DecodePayload(resp, &list); err != nil {
-		return nil, err
-	}
-
-	return list.Messages, nil
-}
-
 // FetchMessageBrowser retrieves the direct-message conversation, visible topic
 // list, and (when requested) the full selected topic stream for the message
 // browser overlay. It uses one passive connection so a refresh is a consistent

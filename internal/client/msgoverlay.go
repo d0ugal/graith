@@ -309,24 +309,6 @@ type messageOverlayModel struct {
 	refresh time.Duration
 }
 
-func newMessageOverlayModel(selfID string, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) messageOverlayModel {
-	// Keep the original direct-message constructor as a compatibility shim for
-	// tests and any external callers using the package-level overlay API.
-	var browserFetch MessageBrowserFetch
-	if fetch != nil {
-		browserFetch = func(MessageFetchRequest) (MessageFetchResult, bool) {
-			msgs, ok := fetch()
-			if !ok {
-				return MessageFetchResult{}, false
-			}
-
-			return MessageFetchResult{DirectMessages: msgs}, true
-		}
-	}
-
-	return newMessageBrowserModel(selfID, browserFetch, names)
-}
-
 func newMessageBrowserModel(selfID string, fetch MessageBrowserFetch, names map[string]string) messageOverlayModel {
 	return messageOverlayModel{
 		selfID:         selfID,
@@ -1508,20 +1490,6 @@ func sanitizeMessageBody(s string) string {
 
 		return r
 	}, s)
-}
-
-// RunMessageOverlay displays the chatroom-style message viewer for sessionID,
-// showing direct messages to and from that session grouped by peer. It is
-// read-only in v1 and re-polls the daemon at the configured shared refresh
-// interval (terminal.refresh_interval), matching the picker and status bar.
-// fetch returns the conversation and ok=false on a transient error
-// (so the last good snapshot is kept).
-// Returns when the user closes the overlay; the caller then reattaches.
-func RunMessageOverlay(sessionID string, keys MessageKeys, fetch func() ([]protocol.ConversationMessage, bool), names map[string]string) {
-	m := newMessageOverlayModel(sessionID, fetch, names)
-	m.keys = keys
-	p := tea.NewProgram(m)
-	_, _ = p.Run()
 }
 
 // RunMessageBrowserOverlay displays the bounded direct/topic message browser

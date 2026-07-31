@@ -1242,16 +1242,16 @@ func TestFetchScrollbackPreview_EmptyWhenDaemonUnreachable(t *testing.T) {
 	}
 }
 
-func TestFetchConversation_ErrorWhenDaemonUnreachable(t *testing.T) {
+func TestFetchMessageBrowser_ErrorWhenDaemonUnreachable(t *testing.T) {
 	paths, cfg := withStubDaemonStart(t)
 
-	msgs, err := FetchConversation(cfg, paths, "", "braw")
+	result, err := FetchMessageBrowser(cfg, paths, "", "braw", MessageFetchRequest{})
 	if err == nil {
-		t.Error("FetchConversation should return an error when the daemon is unreachable")
+		t.Error("FetchMessageBrowser should return an error when the daemon is unreachable")
 	}
 
-	if msgs != nil {
-		t.Errorf("FetchConversation should return nil messages on error, got %+v", msgs)
+	if len(result.DirectMessages) != 0 || len(result.Topics) != 0 || len(result.TopicMessages) != 0 {
+		t.Errorf("FetchMessageBrowser should return an empty result on error, got %+v", result)
 	}
 }
 
