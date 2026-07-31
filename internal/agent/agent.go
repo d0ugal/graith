@@ -33,22 +33,10 @@ func Detected() bool {
 	return agentDetected
 }
 
-// DetectedEnviron applies the same canonical agent-mode rules to an explicit
-// environment snapshot. Lifecycle code uses this instead of maintaining a
-// second, inevitably divergent list of agent markers.
-func DetectedEnviron(environ []string) bool {
-	values := environValues(environ)
-
-	return detect(func(name string) (string, bool) {
-		value, ok := values[name]
-		return value, ok
-	})
-}
-
 // SecurityBoundaryDetectedEnviron detects agent and Graith-session callers for
-// trust-boundary decisions. Unlike DetectedEnviron, a negative GR_AGENT_MODE
-// presentation override cannot hide concrete session or external-agent
-// markers from a security check.
+// trust-boundary decisions. Unlike Detected, a negative GR_AGENT_MODE
+// presentation override cannot hide concrete session or external-agent markers
+// from a security check.
 func SecurityBoundaryDetectedEnviron(environ []string) bool {
 	values := environValues(environ)
 	lookup := func(name string) (string, bool) {
