@@ -541,7 +541,7 @@ func TestPrintQuietNames(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
-	if err := printQuiet(cmd, sessions); err != nil {
+	if err := printQuietWithOutput(cmd, out, sessions); err != nil {
 		t.Fatalf("printQuiet: %v", err)
 	}
 
@@ -575,7 +575,7 @@ func TestPrintQuietJSONIDs(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
-	if err := printQuiet(cmd, sessions); err != nil {
+	if err := printQuietWithOutput(cmd, out, sessions); err != nil {
 		t.Fatalf("printQuiet: %v", err)
 	}
 
@@ -614,7 +614,7 @@ func TestPrintQuietEmptyJSON(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
 
-	if err := printQuiet(cmd, nil); err != nil {
+	if err := printQuietWithOutput(cmd, out, nil); err != nil {
 		t.Fatalf("printQuiet: %v", err)
 	}
 
@@ -648,7 +648,7 @@ func TestPrintQuietDoesNotMutateInput(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 
-	if err := printQuiet(cmd, sessions); err != nil {
+	if err := printQuietWithOutput(cmd, out, sessions); err != nil {
 		t.Fatalf("printQuiet: %v", err)
 	}
 
@@ -746,8 +746,8 @@ func TestColorize(t *testing.T) {
 }
 
 func TestVisibleColumns(t *testing.T) {
-	compact := visibleColumns(false)
-	wide := visibleColumns(true)
+	compact := visibleColumnsFor(false, effectiveListSummaryMode())
+	wide := visibleColumnsFor(true, effectiveListSummaryMode())
 
 	if len(wide) <= len(compact) {
 		t.Fatalf("wide (%d) should have more columns than compact (%d)", len(wide), len(compact))
@@ -830,7 +830,7 @@ func TestListSummaryUsesConfiguredWidthAndPerInvocationOverrides(t *testing.T) {
 	info := protocol.SessionInfo{SummaryText: strings.Repeat("braw ", 20)}
 
 	findSummary := func() sessionColumn {
-		for _, col := range visibleColumns(false) {
+		for _, col := range visibleColumnsFor(false, effectiveListSummaryMode()) {
 			if col.header == "SUMMARY" {
 				return col
 			}
@@ -991,7 +991,7 @@ func TestPrintFlatCov(t *testing.T) {
 // headers are upper-cased, and the display order matches the historical layout.
 func TestTrailingColumnsFromRegistry(t *testing.T) {
 	// Wide view exposes every CLI column in registry order.
-	wide := visibleColumns(true)
+	wide := visibleColumnsFor(true, effectiveListSummaryMode())
 
 	var gotWide []string
 	for _, c := range wide {
@@ -1011,7 +1011,7 @@ func TestTrailingColumnsFromRegistry(t *testing.T) {
 
 	// Compact view drops the wide columns (MODEL, BRANCH, ATTACHED).
 	var gotCompact []string
-	for _, c := range visibleColumns(false) {
+	for _, c := range visibleColumnsFor(false, effectiveListSummaryMode()) {
 		gotCompact = append(gotCompact, c.header)
 	}
 
@@ -1037,7 +1037,7 @@ func TestTrailingColumnsValues(t *testing.T) {
 	}
 
 	cells := map[string]string{}
-	for _, c := range visibleColumns(true) {
+	for _, c := range visibleColumnsFor(true, effectiveListSummaryMode()) {
 		cells[c.header] = c.value(s, now, false)
 	}
 
@@ -1067,7 +1067,7 @@ func TestTrailingColumnsColorize(t *testing.T) {
 
 	var statusCol, activityCol sessionColumn
 
-	for _, c := range visibleColumns(true) {
+	for _, c := range visibleColumnsFor(true, effectiveListSummaryMode()) {
 		switch c.header {
 		case "STATUS":
 			statusCol = c
