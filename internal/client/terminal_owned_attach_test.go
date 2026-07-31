@@ -201,8 +201,9 @@ func TestTranslateSGRMouseForTerminalOwnedFrame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := string(translateSGRMouseForTerminalOwnedFrame([]byte(test.input), test.frame)); got != test.want {
-				t.Fatalf("translateSGRMouseForTerminalOwnedFrame() = %q, want %q", got, test.want)
+			translated, _ := translateSGRMouseForTerminalOwnedFrameWithState([]byte(test.input), test.frame, terminalOwnedChromeMouseState{})
+			if got := string(translated); got != test.want {
+				t.Fatalf("translateSGRMouseForTerminalOwnedFrameWithState() = %q, want %q", got, test.want)
 			}
 		})
 	}

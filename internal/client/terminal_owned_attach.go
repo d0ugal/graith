@@ -147,20 +147,12 @@ func terminalOwnedAttachExitSequence() string {
 		"\x1b[?25h" // show cursor
 }
 
-func writeTerminalOwnedAttachSeed(w io.Writer, seed *protocol.TerminalOwnedAttachSeedMsg) {
-	writeTerminalOwnedAttachSeedWithChrome(w, seed, nil)
-}
-
 func writeTerminalOwnedAttachSeedWithChrome(w io.Writer, seed *protocol.TerminalOwnedAttachSeedMsg, chrome *terminalOwnedAttachChrome) {
 	if seed == nil {
 		return
 	}
 
 	writeTerminalOwnedScreenSnapshotWithChrome(w, &seed.Snapshot, chrome)
-}
-
-func writeTerminalOwnedScreenSnapshot(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg) {
-	writeTerminalOwnedScreenSnapshotWithChrome(w, snap, nil)
 }
 
 func writeTerminalOwnedScreenSnapshotWithChrome(w io.Writer, snap *protocol.ScreenSnapshotResponseMsg, chrome *terminalOwnedAttachChrome) {
@@ -578,12 +570,6 @@ func (f terminalOwnedChromeFrame) clipChildFrame(frame string) string {
 	}
 
 	return frame
-}
-
-func translateSGRMouseForTerminalOwnedFrame(input []byte, frame terminalOwnedChromeFrame) []byte {
-	out, _ := translateSGRMouseForTerminalOwnedFrameWithState(input, frame, terminalOwnedChromeMouseState{})
-
-	return out
 }
 
 func translateSGRMouseForTerminalOwnedFrameWithState(input []byte, frame terminalOwnedChromeFrame, mouseState terminalOwnedChromeMouseState) ([]byte, terminalOwnedChromeMouseState) {

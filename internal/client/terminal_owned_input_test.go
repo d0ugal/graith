@@ -14,6 +14,10 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
+func processTerminalOwnedInput(router *terminalOwnedInputRouter, input []byte) []byte {
+	return router.processWithResult(input, false).input
+}
+
 func TestTerminalOwnedInputTranslatesMouseThroughChrome(t *testing.T) {
 	tests := map[string]struct {
 		position string
@@ -60,7 +64,7 @@ func TestTerminalOwnedInputTranslatesMouseThroughChrome(t *testing.T) {
 				},
 			})
 
-			if got := string(router.process([]byte(test.input))); got != test.want {
+			if got := string(processTerminalOwnedInput(router, []byte(test.input))); got != test.want {
 				t.Fatalf("processed mouse = %q, want %q", got, test.want)
 			}
 		})
@@ -131,7 +135,7 @@ func TestTerminalOwnedInputRoutesWheelByChildMode(t *testing.T) {
 				button = 66
 			}
 
-			got := string(router.process([]byte(fmt.Sprintf("\x1b[<%d;5;6M", button))))
+			got := string(processTerminalOwnedInput(router, []byte(fmt.Sprintf("\x1b[<%d;5;6M", button))))
 			if got != test.want {
 				t.Fatalf("wheel output = %q, want %q", got, test.want)
 			}
@@ -285,7 +289,7 @@ func TestTerminalOwnedInputRoutesConfiguredWheelGestures(t *testing.T) {
 				InputModes: &test.modes,
 			})
 
-			got := string(router.process([]byte(fmt.Sprintf("\x1b[<%d;5;6M", test.button))))
+			got := string(processTerminalOwnedInput(router, []byte(fmt.Sprintf("\x1b[<%d;5;6M", test.button))))
 			if got != test.want {
 				t.Fatalf("wheel output = %q, want %q", got, test.want)
 			}
@@ -321,7 +325,7 @@ func TestTerminalOwnedInputDropsWheelOnChromeRow(t *testing.T) {
 		},
 	})
 
-	if got := string(router.process([]byte("\x1b[<64;5;1M"))); got != "" {
+	if got := string(processTerminalOwnedInput(router, []byte("\x1b[<64;5;1M"))); got != "" {
 		t.Fatalf("wheel on chrome row output = %q, want empty", got)
 	}
 
@@ -341,7 +345,7 @@ func TestTerminalOwnedInputDropsUnsupportedSGRPixelsMouse(t *testing.T) {
 		},
 	})
 
-	if got := string(router.process([]byte("\x1b[<0;10;2M"))); got != "" {
+	if got := string(processTerminalOwnedInput(router, []byte("\x1b[<0;10;2M"))); got != "" {
 		t.Fatalf("SGR-pixels mouse output = %q, want empty", got)
 	}
 }
@@ -381,7 +385,7 @@ func TestTerminalOwnedInputFocusAndPasteModes(t *testing.T) {
 				InputModes: &test.modes,
 			})
 
-			if got := string(router.process([]byte(test.input))); got != test.want {
+			if got := string(processTerminalOwnedInput(router, []byte(test.input))); got != test.want {
 				t.Fatalf("processed input = %q, want %q", got, test.want)
 			}
 		})

@@ -120,10 +120,6 @@ func (r *terminalOwnedInputRouter) keyboardLocked() bool {
 	return locked
 }
 
-func (r *terminalOwnedInputRouter) process(input []byte) []byte {
-	return r.processWithResult(input, false).input
-}
-
 func (r *terminalOwnedInputRouter) processChildRelative(input []byte) terminalOwnedInputProcessResult {
 	return r.processWithResult(input, true)
 }

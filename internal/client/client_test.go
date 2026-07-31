@@ -810,14 +810,14 @@ func TestReadControlResponse_PropagatesReadError(t *testing.T) {
 func TestWriteTerminalOwnedAttachSeed(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeTerminalOwnedAttachSeed(&buf, &protocol.TerminalOwnedAttachSeedMsg{
+	writeTerminalOwnedAttachSeedWithChrome(&buf, &protocol.TerminalOwnedAttachSeedMsg{
 		Snapshot: protocol.ScreenSnapshotResponseMsg{
 			Frame:         "hello bothy",
 			CursorX:       4,
 			CursorY:       2,
 			CursorVisible: true,
 		},
-	})
+	}, nil)
 
 	out := buf.String()
 	if !strings.Contains(out, "\x1b[?2026h") || !strings.Contains(out, "\x1b[?2026l") {
@@ -840,10 +840,10 @@ func TestWriteTerminalOwnedAttachSeed(t *testing.T) {
 func TestTerminalOwnedAttachRepaintResetsScrollRegionBeforeFrame(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeTerminalOwnedScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		Frame:         "braw\r\nbothy",
 		CursorVisible: true,
-	})
+	}, nil)
 
 	out := buf.String()
 	wantPrefix := "\x1b[?2026h\x1b[r\x1b[0m\x1b[?25l\x1b[H\x1b[2J"
@@ -884,11 +884,11 @@ func TestTerminalOwnedAttachExitSequenceCleansMirroredModes(t *testing.T) {
 func TestWriteTerminalOwnedScreenSnapshotIgnoresEmptyFrame(t *testing.T) {
 	var buf bytes.Buffer
 
-	writeTerminalOwnedScreenSnapshot(&buf, &protocol.ScreenSnapshotResponseMsg{
+	writeTerminalOwnedScreenSnapshotWithChrome(&buf, &protocol.ScreenSnapshotResponseMsg{
 		SessionID:     "canny",
 		Frame:         "",
 		CursorVisible: true,
-	})
+	}, nil)
 
 	if got := buf.String(); got != "" {
 		t.Fatalf("empty experimental snapshot wrote %q, want no output", got)
