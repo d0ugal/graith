@@ -26,7 +26,7 @@ func FuzzDetect(f *testing.F) {
 		d := New(agent)
 
 		// None of these should panic regardless of input.
-		status := d.Detect(content, -1)
+		status := d.DetectWithRecentWindow(content, -1, RecentOutputThreshold)
 		busy := d.IsBusy(content)
 		ready := d.IsReady(content)
 

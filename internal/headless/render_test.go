@@ -291,33 +291,6 @@ func TestToolNameOf(t *testing.T) {
 	}
 }
 
-func TestControlToolName(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		raw  json.RawMessage
-		want string
-	}{
-		{name: "tool_name field", raw: json.RawMessage(`{"tool_name":"Bash"}`), want: "Bash"},
-		{name: "name field fallback", raw: json.RawMessage(`{"name":"Edit"}`), want: "Edit"},
-		{name: "tool_name preferred over name", raw: json.RawMessage(`{"tool_name":"Bash","name":"Edit"}`), want: "Bash"},
-		{name: "empty raw", raw: nil, want: ""},
-		{name: "malformed json", raw: json.RawMessage(`{bad`), want: ""},
-		{name: "neither field", raw: json.RawMessage(`{"other":"haar"}`), want: ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := controlToolName(tt.raw); got != tt.want {
-				t.Fatalf("controlToolName(%s) = %q, want %q", tt.raw, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAppendNL(t *testing.T) {
 	t.Parallel()
 

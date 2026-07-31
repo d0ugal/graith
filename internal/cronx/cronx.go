@@ -85,7 +85,6 @@ var specParser = cron.NewParser(
 // Schedule is a parsed graith cron schedule. The zero value is not usable;
 // obtain one from Parse.
 type Schedule struct {
-	spec  string // the original spec, for diagnostics
 	inner cron.Schedule
 }
 
@@ -115,7 +114,7 @@ func Parse(spec string) (Schedule, error) {
 		return Schedule{}, fmt.Errorf("invalid cron %q: %w", spec, err)
 	}
 
-	return Schedule{spec: spec, inner: inner}, nil
+	return Schedule{inner: inner}, nil
 }
 
 // Validate reports whether spec is a well-formed graith cron expression,
@@ -150,6 +149,3 @@ func validateFields(spec string) error {
 func (s Schedule) Next(t time.Time) time.Time {
 	return s.inner.Next(t)
 }
-
-// String returns the original spec, for logging and diagnostics.
-func (s Schedule) String() string { return s.spec }

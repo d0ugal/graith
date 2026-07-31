@@ -253,17 +253,6 @@ func TestNextNonHourDST(t *testing.T) {
 	}
 }
 
-func TestScheduleString(t *testing.T) {
-	sched, err := Parse("0 9 * * *")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if sched.String() != "0 9 * * *" {
-		t.Errorf("String() = %q; want %q", sched.String(), "0 9 * * *")
-	}
-}
-
 func TestGrammarDocumented(t *testing.T) {
 	// The exported Grammar string is referenced by docs; guard the descriptors
 	// stay listed so a future edit can't silently drop one.

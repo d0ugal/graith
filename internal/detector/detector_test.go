@@ -154,7 +154,7 @@ func TestDetect(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := d.Detect(tt.content, tt.outputAge); got != tt.want {
+			if got := d.DetectWithRecentWindow(tt.content, tt.outputAge, RecentOutputThreshold); got != tt.want {
 				t.Errorf("Detect() = %v, want %v", got, tt.want)
 			}
 		})
@@ -227,7 +227,7 @@ func TestDetect_OutputRecency(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := d.Detect(tt.content, tt.outputAge); got != tt.want {
+			if got := d.DetectWithRecentWindow(tt.content, tt.outputAge, RecentOutputThreshold); got != tt.want {
 				t.Errorf("Detect() = %v, want %v", got, tt.want)
 			}
 		})
@@ -303,11 +303,11 @@ func TestDetect_UsesDefaultWindow(t *testing.T) {
 	d := New("claude")
 	content := "thrawn croft output filling the screen\n"
 
-	if got := d.Detect(content, RecentOutputThreshold-time.Millisecond); got != StatusActive {
+	if got := d.DetectWithRecentWindow(content, RecentOutputThreshold-time.Millisecond, RecentOutputThreshold); got != StatusActive {
 		t.Errorf("Detect() just under default window = %v, want active", got)
 	}
 
-	if got := d.Detect(content, RecentOutputThreshold); got != StatusUnknown {
+	if got := d.DetectWithRecentWindow(content, RecentOutputThreshold, RecentOutputThreshold); got != StatusUnknown {
 		t.Errorf("Detect() at default window = %v, want unknown", got)
 	}
 }
