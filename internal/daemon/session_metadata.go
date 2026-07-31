@@ -335,7 +335,7 @@ func (sm *SessionManager) Diagnostics() protocol.DiagnosticsMsg {
 			}
 		}
 
-		sd.ConfigStale = isConfigStale(*s, cfg)
+		sd.ConfigStale = reportConfigStale(*s, cfg)
 		sd.HasToken = s.Token != ""
 
 		if hr, ok := sm.hookReports[id]; ok && s.Status == StatusRunning {

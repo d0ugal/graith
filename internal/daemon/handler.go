@@ -1436,7 +1436,7 @@ func toSessionInfo(s SessionState, cfg *config.Config, hr *hookReport) protocol.
 		InPlace:          s.InPlace,
 		Model:            s.Model,
 		ToolName:         s.HookToolName,
-		ConfigStale:      isConfigStale(s, cfg),
+		ConfigStale:      reportConfigStale(s, cfg),
 		Starred:          s.Starred,
 		SystemKind:       s.SystemKind,
 		ScenarioID:       s.ScenarioID,
@@ -1546,4 +1546,15 @@ func isConfigStale(s SessionState, cfg *config.Config) bool {
 	}
 
 	return !reflect.DeepEqual(s.CreationCfg.SandboxConfig, currentSandbox)
+}
+
+// reportConfigStale filters raw launch-config drift down to cases where a
+// user-facing restart prompt is useful. Stopped sessions recompute their launch
+// config on resume, so flagging them stale only creates busywork.
+func reportConfigStale(s SessionState, cfg *config.Config) bool {
+	if s.Status == StatusStopped {
+		return false
+	}
+
+	return isConfigStale(s, cfg)
 }

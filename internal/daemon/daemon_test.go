@@ -1046,6 +1046,105 @@ func TestIsConfigStale(t *testing.T) {
 	})
 }
 
+func TestToSessionInfoReportsConfigStaleOnlyWhenActionable(t *testing.T) {
+	cfg, creationCfg := staleSandboxConfigFixture()
+
+	tests := map[string]struct {
+		status SessionStatus
+		want   bool
+	}{
+		"running stale session reports stale config": {
+			status: StatusRunning,
+			want:   true,
+		},
+		"stopped stale session suppresses stale config": {
+			status: StatusStopped,
+			want:   false,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			creationCfg := creationCfg
+			info := toSessionInfo(SessionState{
+				ID:          "braw",
+				Name:        "braw",
+				Agent:       "claude",
+				Status:      test.status,
+				CreatedAt:   time.Now().UTC(),
+				CreationCfg: &creationCfg,
+			}, cfg, nil)
+
+			if info.ConfigStale != test.want {
+				t.Errorf("ConfigStale = %v, want %v", info.ConfigStale, test.want)
+			}
+		})
+	}
+}
+
+func TestDiagnosticsReportsConfigStaleOnlyWhenActionable(t *testing.T) {
+	cfg, creationCfg := staleSandboxConfigFixture()
+	sm := newSMWithConfig(t, cfg)
+
+	runningCreationCfg := creationCfg
+	stoppedCreationCfg := creationCfg
+
+	sm.mu.Lock()
+	sm.state.Sessions["braw"] = &SessionState{
+		ID:          "braw",
+		Name:        "braw",
+		Agent:       "claude",
+		Status:      StatusRunning,
+		CreationCfg: &runningCreationCfg,
+	}
+	sm.state.Sessions["canny"] = &SessionState{
+		ID:          "canny",
+		Name:        "canny",
+		Agent:       "claude",
+		Status:      StatusStopped,
+		CreationCfg: &stoppedCreationCfg,
+	}
+	sm.mu.Unlock()
+
+	diag := sm.Diagnostics()
+
+	got := make(map[string]bool, len(diag.Sessions))
+	for _, session := range diag.Sessions {
+		got[session.ID] = session.ConfigStale
+	}
+
+	if !got["braw"] {
+		t.Error("running session ConfigStale = false, want true")
+	}
+
+	if got["canny"] {
+		t.Error("stopped session ConfigStale = true, want false")
+	}
+}
+
+func staleSandboxConfigFixture() (*config.Config, CreationConfig) {
+	agent := config.Agent{
+		NonInteractiveArgs: []string{},
+		Command:            "claude",
+		Args:               []string{"--model", "sonnet"},
+	}
+	cfg := &config.Config{
+		Agents: map[string]config.Agent{"claude": agent},
+		Sandbox: config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/braw"},
+		},
+	}
+
+	return cfg, CreationConfig{
+		Agent: agent,
+		SandboxConfig: config.SandboxConfig{
+			Enabled:  true,
+			ReadDirs: []string{"/dreich"},
+		},
+	}
+}
+
 func TestIsConfigStaleOrchestrator(t *testing.T) {
 	agent := config.Agent{
 		NonInteractiveArgs: []string{},
