@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // stopAttempt identifies one optimistic StopReason write. Stop calls may signal
@@ -459,7 +461,14 @@ func (sm *SessionManager) restartWithReasonModeLocked(id string, rows, cols uint
 	return sm.restartWithReasonModeContextLocked(context.Background(), id, rows, cols, stopReason, initiator, bounded)
 }
 
-func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context, id string, rows, cols uint16, stopReason, initiator string, bounded bool) (SessionState, error) {
+func (sm *SessionManager) restartWithReasonModeContextLocked(ctx context.Context, id string, rows, cols uint16, stopReason, initiator string, bounded bool) (result SessionState, returnErr error) {
+	ctx, span := startDaemonSpan(ctx, "graith.session.restart",
+		attribute.String("graith.lifecycle.initiator", lifecycleInitiator(initiator)),
+		attribute.String("graith.lifecycle.stop_reason", lifecycleStopReason(stopReason)),
+		attribute.Bool("graith.session.bounded_teardown", bounded),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	sm.mu.RLock()
 
 	softDeleted := false

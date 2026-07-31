@@ -14,6 +14,7 @@ import (
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/sessionlabel"
 	"github.com/d0ugal/graith/internal/store"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Create starts a new agent session, either in a git worktree, in-place
@@ -24,7 +25,19 @@ import (
 //  1. Lock: validate, reserve session as StatusCreating, unlock
 //  2. Git setup and PTY spawn (no lock held)
 //  3. Lock: commit to StatusRunning, unlock
-func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
+func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnErr error) {
+	spanCtx, span := startDaemonSpan(context.Background(), "graith.session.create",
+		attribute.Bool("graith.session.no_repo", opts.NoRepo),
+		attribute.Bool("graith.session.mirror_requested", opts.Mirror != "" || opts.MirrorSourceID != ""),
+		attribute.Bool("graith.session.read_only", opts.ReadOnly),
+		attribute.Bool("graith.session.in_place", opts.InPlace),
+		attribute.Bool("graith.session.has_parent", opts.ParentID != ""),
+		attribute.Bool("graith.session.headless_requested", opts.Headless),
+		attribute.Int("graith.session.labels", len(opts.Labels)),
+		attribute.Int("graith.session.env_overrides", len(opts.EnvExtra)),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	worktreePort := sm.worktreePort
 	if worktreePort == nil {
 		worktreePort = defaultWorktreePort()
@@ -610,7 +623,14 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		gitCtx, gitCancel := context.WithTimeout(context.Background(), cfgSnapshot.Git.FetchTimeoutDuration())
 		defer gitCancel()
 
+		_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+			attribute.Bool("graith.session.read_only", true),
+			attribute.Bool("graith.session.fetch", fetchOnCreate),
+			attribute.Int("graith.session.includes", 0),
+		)
 		readOnlyRevision, err = worktreePort.SetupReadOnly(gitCtx, repoRoot, worktreePath, branchName, fetchOnCreate)
+		endDaemonSpan(setupSpan, err)
+
 		if err != nil {
 			rollbackState()
 			return SessionState{}, fmt.Errorf("setup read-only branch session: %w", err)
@@ -622,10 +642,20 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 		branchPrefix, _ := config.Expand(cfgSnapshot.BranchPrefix, config.TemplateVars{Username: preUsername})
 
 		if len(rcIncludes) > 0 {
+			_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+				attribute.Bool("graith.session.read_only", false),
+				attribute.Bool("graith.session.fetch", fetchOnCreate),
+				attribute.Int("graith.session.includes", len(rcIncludes)),
+				attribute.String("graith.session.worktree_role", "main"),
+			)
 			if err := worktreePort.Setup(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+				endDaemonSpan(setupSpan, err)
 				rollbackState()
+
 				return SessionState{}, fmt.Errorf("setup main repo git session: %w", err)
 			}
+
+			endDaemonSpan(setupSpan, nil)
 
 			for _, incPath := range rcIncludes {
 				resolved := config.ResolvePath(incPath)
@@ -669,13 +699,23 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				sessionDir := filepath.Dir(worktreePath)
 				incWorktreePath := filepath.Join(sessionDir, incName)
 
+				_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+					attribute.Bool("graith.session.read_only", false),
+					attribute.Bool("graith.session.fetch", fetchOnCreate),
+					attribute.Int("graith.session.includes", len(rcIncludes)),
+					attribute.String("graith.session.worktree_role", "include"),
+				)
 				if err := worktreePort.Setup(gitCtx, incRoot, incWorktreePath, incBranch, incBaseBranch, fetchOnCreate); err != nil {
+					endDaemonSpan(setupSpan, err)
+
 					sm.teardownWorktreePort(worktreePort, repoRoot, worktreePath, branchName, includes)
 
 					rollbackState()
 
 					return SessionState{}, fmt.Errorf("setup included repo %q: %w", incName, err)
 				}
+
+				endDaemonSpan(setupSpan, nil)
 
 				includes = append(includes, IncludedRepoState{
 					RepoPath:     incRoot,
@@ -686,10 +726,20 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 				})
 			}
 		} else {
+			_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+				attribute.Bool("graith.session.read_only", false),
+				attribute.Bool("graith.session.fetch", fetchOnCreate),
+				attribute.Int("graith.session.includes", 0),
+				attribute.String("graith.session.worktree_role", "main"),
+			)
 			if err := worktreePort.Setup(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+				endDaemonSpan(setupSpan, err)
 				rollbackState()
+
 				return SessionState{}, fmt.Errorf("setup git session: %w", err)
 			}
+
+			endDaemonSpan(setupSpan, nil)
 		}
 
 		// Post-create hook: rewrite absolute source-repo paths in known
@@ -983,7 +1033,14 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 
 		var wrapErr error
 
+		_, wrapSpan := startDaemonSpan(spanCtx, "graith.session.sandbox.wrap",
+			attribute.Bool("graith.session.mirror", isMirror),
+			attribute.Bool("graith.session.read_only", readOnlyBranch),
+			attribute.Int("graith.session.includes", len(includes)),
+		)
 		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		endDaemonSpan(wrapSpan, wrapErr)
+
 		if wrapErr != nil {
 			cleanupOnError()
 
@@ -1005,7 +1062,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	// Throttle concurrent launches so a burst doesn't stampede (#1092). The slot
 	// is held across the agent's startup window and released on first output or a
 	// settle timeout (releaseLaunchSlotWhenSettled), or immediately on spawn error.
-	slot, err := sm.acquireLaunchSlot(context.Background(), id, name)
+	slot, err := sm.acquireLaunchSlot(spanCtx, id, name)
 	if err != nil {
 		cleanupOnError()
 
@@ -1040,6 +1097,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	lc := sm.Config().Lifecycle
 	launchStarted := time.Now()
 
+	_, spawnSpan := startDaemonSpan(spanCtx, "graith.session.launch.spawn",
+		lifecycleSpanAttrs(driverKind, sandboxed, isMirror, readOnlyBranch, inPlace, len(effectiveIncludes))...,
+	)
 	if driverKind == DriverHeadless {
 		ptySess, err = headless.New(headless.Opts{
 			ID:               id,
@@ -1074,6 +1134,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	sm.observeSessionLaunch(metricOperationCreate, driverKind, time.Since(launchStarted), err)
+	endDaemonSpan(spawnSpan, err)
 
 	if err != nil {
 		slot.release()
@@ -1200,7 +1261,9 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	}
 
 	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
-	result := cloneSessionState(sessState)
+	result = cloneSessionState(sessState)
+
+	span.SetAttributes(lifecycleSpanAttrs(driverKind, sandboxed, isMirror, readOnlyBranch, inPlace, len(effectiveIncludes))...)
 	sm.mu.Unlock()
 
 	sm.publishPendingStatusChangeEvent(lifecycleEvent)

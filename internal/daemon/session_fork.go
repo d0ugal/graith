@@ -14,6 +14,7 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Fork creates a new session/worktree that natively continues the source
@@ -39,7 +40,13 @@ func (sm *SessionManager) Fork(name, sourceSessionID string, rows, cols uint16) 
 //
 // See docs/design/2026-06-24-cross-agent-conversation-migration-design.md
 // ("Future: cross-agent fork").
-func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targetModel string, rows, cols uint16) (SessionState, error) {
+func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targetModel string, rows, cols uint16) (result SessionState, returnErr error) {
+	spanCtx, span := startDaemonSpan(context.Background(), "graith.session.fork",
+		attribute.Bool("graith.session.target_agent_requested", targetAgent != ""),
+		attribute.Bool("graith.session.target_model_requested", targetModel != ""),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return SessionState{}, err
 	}
@@ -368,22 +375,41 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	defer gitCancel()
 
 	if len(sourceForkIncludes) > 0 {
+		_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+			attribute.Bool("graith.session.fetch", fetchOnCreate),
+			attribute.Int("graith.session.includes", len(sourceForkIncludes)),
+			attribute.String("graith.session.worktree_role", "main"),
+		)
 		if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+			endDaemonSpan(setupSpan, err)
 			rollbackState()
+
 			return SessionState{}, fmt.Errorf("setup main repo git session for fork: %w", err)
 		}
+
+		endDaemonSpan(setupSpan, nil)
 
 		for _, srcInc := range sourceForkIncludes {
 			incBranch := fmt.Sprintf("%s/%s-%s/%s", branchPrefix, name, id, srcInc.RepoName)
 
 			incWorktreePath := filepath.Join(sessionDir, srcInc.RepoName)
+
+			_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+				attribute.Bool("graith.session.fetch", fetchOnCreate),
+				attribute.Int("graith.session.includes", len(sourceForkIncludes)),
+				attribute.String("graith.session.worktree_role", "include"),
+			)
 			if err := git.SetupSession(gitCtx, srcInc.RepoPath, incWorktreePath, incBranch, srcInc.Branch, fetchOnCreate); err != nil {
+				endDaemonSpan(setupSpan, err)
+
 				_ = sm.teardownIncludes(repoRoot, worktreePath, branchName, forkIncludes)
 
 				rollbackState()
 
 				return SessionState{}, fmt.Errorf("setup included repo %q for fork: %w", srcInc.RepoName, err)
 			}
+
+			endDaemonSpan(setupSpan, nil)
 
 			forkIncludes = append(forkIncludes, IncludedRepoState{
 				RepoPath:     srcInc.RepoPath,
@@ -399,10 +425,19 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		// rewritten too (#1033).
 		sm.applyIncludePathRewrites(repoRoot, worktreePath, forkIncludes)
 	} else {
+		_, setupSpan := startDaemonSpan(spanCtx, "graith.session.worktree.setup",
+			attribute.Bool("graith.session.fetch", fetchOnCreate),
+			attribute.Int("graith.session.includes", 0),
+			attribute.String("graith.session.worktree_role", "main"),
+		)
 		if err := git.SetupSession(gitCtx, repoRoot, worktreePath, branchName, baseBranch, fetchOnCreate); err != nil {
+			endDaemonSpan(setupSpan, err)
 			rollbackState()
+
 			return SessionState{}, fmt.Errorf("setup git session: %w", err)
 		}
+
+		endDaemonSpan(setupSpan, nil)
 	}
 
 	// For a cross-agent fork the source's native id belongs to a different agent
@@ -620,7 +655,13 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 
 		var wrapErr error
 
+		_, wrapSpan := startDaemonSpan(spanCtx, "graith.session.sandbox.wrap",
+			attribute.Bool("graith.session.cross_agent", crossAgent),
+			attribute.Int("graith.session.includes", len(forkIncludes)),
+		)
 		command, finalArgs, wrapErr = sandbox.Wrap(agent.Command, expandedArgs, opts)
+		endDaemonSpan(wrapSpan, wrapErr)
+
 		if wrapErr != nil {
 			forkCleanup()
 			rollbackState()
@@ -635,7 +676,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	}
 
 	// Throttle concurrent launches (#1092); see Create for the slot lifecycle.
-	slot, err := sm.acquireLaunchSlot(context.Background(), id, name)
+	slot, err := sm.acquireLaunchSlot(spanCtx, id, name)
 	if err != nil {
 		forkCleanup()
 		rollbackState()
@@ -659,6 +700,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	historyRows := launchCfg.Terminal.HistoryRowsOrDefault()
 
 	launchStarted := time.Now()
+	_, spawnSpan := startDaemonSpan(spanCtx, "graith.session.launch.spawn",
+		lifecycleSpanAttrs(DriverPTY, sandboxed, false, false, false, len(forkIncludes))...,
+	)
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,
 		Command:             command,
@@ -674,6 +718,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		TerminalHistoryRows: historyRows,
 	})
 	sm.observeSessionLaunch(metricOperationFork, DriverPTY, time.Since(launchStarted), err)
+	endDaemonSpan(spawnSpan, err)
 
 	if err != nil {
 		slot.release()
@@ -800,7 +845,12 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	forkContextCommitted = true
 
 	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
-	result := cloneSessionState(sessState)
+	result = cloneSessionState(sessState)
+
+	span.SetAttributes(
+		attribute.Bool("graith.session.cross_agent", crossAgent),
+	)
+	span.SetAttributes(lifecycleSpanAttrs(DriverPTY, sandboxed, false, false, false, len(forkIncludes))...)
 	sm.mu.Unlock()
 
 	sm.publishPendingStatusChangeEvent(lifecycleEvent)
