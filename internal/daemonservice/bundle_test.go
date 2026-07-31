@@ -197,9 +197,9 @@ func TestHomebrewSourceBundleAllowsWritableCellarBeforeSecureCache(t *testing.T)
 		t.Fatal(err)
 	}
 
-	cached, err := cacheBundleAtRoot(source, expectations, cache)
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
 	if err != nil {
-		t.Fatalf("cacheBundleAtRoot() = %v", err)
+		t.Fatalf("cacheBundleAtRootContext() = %v", err)
 	}
 
 	if cached.AppPath == app || cached.Generation.ID != source.Generation.ID {
@@ -263,9 +263,9 @@ func TestHomebrewSourceBundleAllowsSymlinkedStandaloneBeforeSecureCache(t *testi
 		t.Fatal(err)
 	}
 
-	cached, err := cacheBundleAtRoot(source, expectations, cache)
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
 	if err != nil {
-		t.Fatalf("cacheBundleAtRoot() = %v", err)
+		t.Fatalf("cacheBundleAtRootContext() = %v", err)
 	}
 
 	if cached.AppPath == app || cached.Generation.ID != source.Generation.ID {
@@ -423,12 +423,12 @@ func TestCacheBundleIsImmutableAndRevalidated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := cacheBundleAtRoot(source, expectations, cache)
+	first, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	second, err := cacheBundleAtRoot(source, expectations, cache)
+	second, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +441,7 @@ func TestCacheBundleIsImmutableAndRevalidated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := cacheBundleAtRoot(source, expectations, cache); err == nil {
+	if _, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache); err == nil {
 		t.Fatal("tampered existing cache accepted")
 	}
 }
@@ -499,8 +499,8 @@ func TestCacheBundleVerifiesDistributionBeforePublishingGeneration(t *testing.T)
 
 		return errors.New("dreich staple")
 	}
-	if _, err := cacheBundleAtRoot(source, expectations, cache); err == nil || !strings.Contains(err.Error(), "dreich staple") {
-		t.Fatalf("cacheBundleAtRoot() distribution error = %v", err)
+	if _, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache); err == nil || !strings.Contains(err.Error(), "dreich staple") {
+		t.Fatalf("cacheBundleAtRootContext() distribution error = %v", err)
 	}
 
 	if !called {
@@ -527,7 +527,7 @@ func TestValidatedCachedBundlesIgnoresUnpublishedPrivateEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := cacheBundleAtRoot(source, expectations, cache); err != nil {
+	if _, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache); err != nil {
 		t.Fatal(err)
 	}
 
