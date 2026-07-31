@@ -143,6 +143,12 @@ func cloneSelectedDetailFields(fields []string) []string {
 	return out
 }
 
+// actionableConfigStale mirrors the daemon's reported stale projection and
+// also protects optimistic client-side stop updates before the daemon refreshes.
+func actionableConfigStale(s protocol.SessionInfo) bool {
+	return s.ConfigStale && s.Status != "stopped"
+}
+
 // SessionNavigatorView identifies the Session Navigator view to restore within
 // one attach client. It is deliberately a client-local value; it is never
 // persisted.
@@ -1402,7 +1408,7 @@ func appendSelectedDetailField(b *strings.Builder, item sessionItem, field strin
 	case "purges":
 		appendDetailLine(b, "Purges", detailTimestamp(s.DeleteExpiresAt), width, lipgloss.NewStyle(), false)
 	case "config":
-		if s.ConfigStale {
+		if actionableConfigStale(s) {
 			appendDetailLine(b, "Config", "restart to apply changes", width, lipgloss.NewStyle().Foreground(colorYellow), false)
 		}
 	case "id":
@@ -1598,7 +1604,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	styledIndicator := lipgloss.NewStyle().Foreground(indicatorColor).Render(indicator)
 
 	staleMarker := " "
-	if si.info.ConfigStale {
+	if actionableConfigStale(si.info) {
 		staleMarker = lipgloss.NewStyle().Foreground(colorYellow).Render("↻")
 	}
 
@@ -3215,7 +3221,7 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "a", "A":
 				return m.beginRestartQueue(func(protocol.SessionInfo) bool { return true })
 			case "o", "O":
-				return m.beginRestartQueue(func(s protocol.SessionInfo) bool { return s.ConfigStale })
+				return m.beginRestartQueue(actionableConfigStale)
 			case "s", "S":
 				return m.beginRestartQueue(func(s protocol.SessionInfo) bool { return s.Status == "stopped" })
 			default:
@@ -3708,7 +3714,7 @@ func (m *overlayModel) View() tea.View {
 					panelContent.WriteString(dim.Render(strings.Join(line1, "  ")))
 				}
 
-				if s.ConfigStale {
+				if actionableConfigStale(s) {
 					panelContent.WriteString("\n")
 					panelContent.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("config stale — restart to apply changes"))
 				}
@@ -3846,7 +3852,7 @@ func (m *overlayModel) View() tea.View {
 			outdated, stopped := 0, 0
 
 			for _, s := range sessions {
-				if s.ConfigStale {
+				if actionableConfigStale(s) {
 					outdated++
 				}
 

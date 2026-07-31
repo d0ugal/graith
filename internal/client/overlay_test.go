@@ -1977,6 +1977,50 @@ func TestUpdate_Stop_Confirm(t *testing.T) {
 	}
 }
 
+func TestUpdate_Stop_StaleSessionDropsOutdatedIndicator(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:          "braw",
+		Name:        "braw",
+		RepoName:    "graith",
+		Agent:       "claude",
+		Status:      "running",
+		ConfigStale: true,
+	}}
+
+	m := sizedModel(t, sessions, "")
+	m.stopSession = func(string) error { return nil }
+
+	updated, _ := sendKey(m, "S")
+	updated, cmd := sendKey(updated, "y")
+
+	if cmd == nil {
+		t.Fatal("expected a command from stop confirmation")
+	}
+
+	updated, _ = updated.Update(cmd())
+	om := asOverlay(updated)
+
+	if got := om.allSessions[0].Status; got != "stopped" {
+		t.Fatalf("status after stop = %q, want stopped", got)
+	}
+
+	if !om.allSessions[0].ConfigStale {
+		t.Fatal("test setup lost ConfigStale; client guard should filter it without waiting for refresh")
+	}
+
+	om.state = stateRestartMenu
+	out := ansi.Strip(om.View().Content)
+
+	if !strings.Contains(out, "[o]utdated (0)") {
+		t.Errorf("restart menu should stop counting locally-stopped stale session:\n%s", out)
+	}
+
+	line := ansi.Strip(renderItem(om.allSessions, "", 1))
+	if strings.Contains(line, "↻") {
+		t.Errorf("stopped stale session should not render stale marker: %q", line)
+	}
+}
+
 func TestUpdate_Stop_Cancel(t *testing.T) {
 	called := false
 	stopFn := func(string) error {
@@ -2065,6 +2109,7 @@ func TestUpdate_RestartMenu_Stopped(t *testing.T) {
 func TestUpdate_RestartMenu_Outdated(t *testing.T) {
 	sessions := overlayTestSessions()
 	sessions[0].ConfigStale = true // s1 is stale
+	sessions[1].ConfigStale = true // s2 is stopped, so stale config is not actionable
 
 	var restarted []string
 
@@ -4978,6 +5023,40 @@ func TestCompactDelegate_RenderSessionItem(t *testing.T) {
 	}
 }
 
+func TestCompactDelegate_RenderConfigStaleMarkerOnlyWhenActionable(t *testing.T) {
+	tests := map[string]struct {
+		status string
+		want   bool
+	}{
+		"running stale session shows marker": {
+			status: "running",
+			want:   true,
+		},
+		"stopped stale session suppresses marker": {
+			status: "stopped",
+			want:   false,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			sessions := []protocol.SessionInfo{{
+				ID:          "braw",
+				Name:        "braw",
+				RepoName:    "graith",
+				Agent:       "claude",
+				Status:      test.status,
+				ConfigStale: true,
+			}}
+
+			line := ansi.Strip(renderItem(sessions, "", 1))
+			if got := strings.Contains(line, "↻"); got != test.want {
+				t.Errorf("stale marker present = %v, want %v in %q", got, test.want, line)
+			}
+		})
+	}
+}
+
 func TestCompactDelegate_RenderGroupHeader(t *testing.T) {
 	d := compactDelegate{}
 	items := buildGroupedItems(overlayTestSessions(), nil)
@@ -6805,13 +6884,16 @@ func TestView_ProfileShownInTitle(t *testing.T) {
 }
 
 func TestView_RestartMenuShowsCounts(t *testing.T) {
-	// overlayTestSessions(): 3 sessions, one stopped (s2), none config-stale.
-	m := sizedModel(t, overlayTestSessions(), "")
+	sessions := overlayTestSessions()
+	sessions[0].ConfigStale = true
+	sessions[1].ConfigStale = true // stopped sessions are not counted as outdated
+
+	m := sizedModel(t, sessions, "")
 	m.restartSession = func(string) error { return nil }
 	m.state = stateRestartMenu
 
 	out := m.View().Content
-	for _, want := range []string{"Restart:", "[a]ll (3)", "[o]utdated (0)", "[s]topped (1)"} {
+	for _, want := range []string{"Restart:", "[a]ll (3)", "[o]utdated (1)", "[s]topped (1)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("restart menu should show %q:\n%s", want, out)
 		}
