@@ -99,7 +99,7 @@ func TestReadCodexEndToEndCov(t *testing.T) {
 	}
 	writeRollout(t, day, "rollout-1-braw.jsonl", "sess-braw", cwd, extra...)
 
-	conv, err := Read(AgentCodex, "", cwd)
+	conv, err := ReadWithRoot(AgentCodex, "", cwd, "")
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestReadCodexEndToEndCov(t *testing.T) {
 }
 
 func TestReadUnsupportedAgentCov(t *testing.T) {
-	_, err := Read("scunner-agent", "id", "/tmp/glen")
+	_, err := ReadWithRoot("scunner-agent", "id", "/tmp/glen", "")
 	if !errors.Is(err, ErrUnsupportedAgent) {
 		t.Errorf("err = %v, want ErrUnsupportedAgent", err)
 	}
@@ -154,7 +154,7 @@ func TestReadNoTurnsCov(t *testing.T) {
 		`{"type":"event_msg","payload":{"type":"token_count","total":9}}`,
 	)
 
-	_, err := Read(AgentCodex, "", cwd)
+	_, err := ReadWithRoot(AgentCodex, "", cwd, "")
 	if !errors.Is(err, ErrNoTurns) {
 		t.Errorf("err = %v, want ErrNoTurns", err)
 	}
@@ -163,7 +163,7 @@ func TestReadNoTurnsCov(t *testing.T) {
 func TestReadLocateFailureCodexCov(t *testing.T) {
 	writeCodexSessions(t)
 	// No rollout matches this cwd, so locate fails.
-	_, err := Read(AgentCodex, "", t.TempDir())
+	_, err := ReadWithRoot(AgentCodex, "", t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected locate error for unmatched cwd")
 	}
@@ -176,7 +176,7 @@ func TestReadLocateFailureCodexCov(t *testing.T) {
 func TestReadLocateFailureClaudeEmptyIDCov(t *testing.T) {
 	// Empty agent session id makes the claude locate branch fail fast at the
 	// guard, exercising locate()'s claude case and readerFor's claude branch.
-	_, err := Read(AgentClaude, "", t.TempDir())
+	_, err := ReadWithRoot(AgentClaude, "", t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected claude locate error for empty session id")
 	}
@@ -187,7 +187,7 @@ func TestReadLocateFailureClaudeNoTranscriptCov(t *testing.T) {
 	// matching transcript, exercising locateClaude's not-found path.
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 
-	_, err := Read(AgentClaude, "sess-nae-such", t.TempDir())
+	_, err := ReadWithRoot(AgentClaude, "sess-nae-such", t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected claude locate error when no transcript matches the id")
 	}

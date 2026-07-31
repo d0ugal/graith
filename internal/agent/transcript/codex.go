@@ -148,79 +148,12 @@ func findCodexRolloutByID(sessionsDir, id string) (string, bool) {
 	return found, true
 }
 
-// LocateCodexSince returns the newest Codex rollout for a cwd whose mtime is at
-// or after `since`. Used for post-start session-id capture: filtering by start
-// time avoids picking a stale rollout from a prior session in the same cwd
-// (a real hazard for in-place sessions and codex→codex migrations).
-func LocateCodexSince(worktreePath string, since time.Time) (string, bool) {
-	return LocateCodexSinceIn("", worktreePath, since)
-}
-
-// LocateCodexSinceIn is LocateCodexSince scoped to an explicit Codex state root
-// (CODEX_HOME). Pass "" to use the daemon's default root. This matters because
-// the daemon-side scrape runs in the daemon process, but CODEX_HOME can be set
-// per-session via the agent's launch env — reading the daemon's os.Getenv would
-// scan the wrong directory and silently miss the rollout.
-func LocateCodexSinceIn(root, worktreePath string, since time.Time) (string, bool) {
-	if root == "" {
-		var err error
-
-		root, err = codexHome()
-		if err != nil {
-			return "", false
-		}
-	}
-
-	sessionsDir := filepath.Join(root, "sessions")
-	want := canonPath(worktreePath)
-
-	var (
-		best    string
-		bestMod int64
-	)
-
-	_ = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-
-		name := d.Name()
-		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
-			return nil
-		}
-
-		info, statErr := d.Info()
-		if statErr != nil || info.ModTime().Before(since) {
-			return nil
-		}
-
-		cwd, ok := codexRolloutCwd(path)
-		if !ok || canonPath(cwd) != want {
-			return nil
-		}
-
-		if mod := info.ModTime().UnixNano(); mod >= bestMod {
-			bestMod = mod
-			best = path
-		}
-
-		return nil
-	})
-
-	if best == "" {
-		return "", false
-	}
-
-	return best, true
-}
-
 // CodexSessionIDSince returns the native session id of the Codex rollout for a
-// cwd created at/after `since`. Unlike LocateCodexSinceIn (newest-by-mtime), it
-// refuses to guess when the (since, cwd) window contains rollouts with two or
-// more DIFFERENT session ids — the concurrent mirror / in-place case —
-// returning ("", false) so the caller falls back to a non-pinned resume rather
-// than cross-assigning another session's conversation. Pass root "" for the
-// daemon default.
+// cwd created at/after `since`. It refuses to guess when the (since, cwd)
+// window contains rollouts with two or more DIFFERENT session ids — the
+// concurrent mirror / in-place case — returning ("", false) so the caller falls
+// back to a non-pinned resume rather than cross-assigning another session's
+// conversation. Pass root "" for the daemon default.
 func CodexSessionIDSince(root, worktreePath string, since time.Time) (string, bool) {
 	if root == "" {
 		var err error

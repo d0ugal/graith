@@ -24,9 +24,9 @@ const (
 	AgentCodex  = "codex"
 )
 
-// ErrNoTurns is returned by Read when a transcript parsed successfully but
-// contained no usable conversation turns. Callers use this to fail fast before
-// disrupting a running session.
+// ErrNoTurns is returned when a transcript parsed successfully but contained no
+// usable conversation turns. Callers use this to fail fast before disrupting a
+// running session.
 var ErrNoTurns = errors.New("transcript contains no usable turns")
 
 // ErrUnsupportedAgent is returned for source agents without a reader.
@@ -108,17 +108,12 @@ func Supported(agent string) bool {
 	return err == nil
 }
 
-// Read locates and parses the transcript for a session. agentSessionID is the
-// id graith tracks for the source agent (used to locate Claude transcripts);
-// worktreePath is the session's working directory (used to locate Codex
-// transcripts and as a fallback). Returns ErrNoTurns if the transcript parsed
-// but yielded nothing usable.
-func Read(agent, agentSessionID, worktreePath string) (*Conversation, error) {
-	return ReadWithRoot(agent, agentSessionID, worktreePath, "")
-}
-
-// ReadWithRoot is Read scoped to an explicit agent-native state root when the
-// provider supports one.
+// ReadWithRoot locates and parses the transcript for a session. agentSessionID
+// is the id graith tracks for the source agent (used to locate Claude
+// transcripts); worktreePath is the session's working directory (used to locate
+// Codex transcripts and as a fallback). stateRoot scopes lookup to an explicit
+// agent-native state root when the provider supports one. Returns ErrNoTurns if
+// the transcript parsed but yielded nothing usable.
 func ReadWithRoot(agent, agentSessionID, worktreePath, stateRoot string) (*Conversation, error) {
 	sources, err := LocateWithRoot(agent, agentSessionID, worktreePath, stateRoot)
 	if err != nil {

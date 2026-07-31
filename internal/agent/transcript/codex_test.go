@@ -180,59 +180,6 @@ func TestFindCodexRolloutByIDNotFoundCov(t *testing.T) {
 	}
 }
 
-func TestLocateCodexSinceCov(t *testing.T) {
-	day := writeCodexSessions(t)
-	cwd := t.TempDir()
-
-	since := time.Now()
-
-	stale := writeRollout(t, day, "rollout-1-auld.jsonl", "sess-auld", cwd)
-	setMtime(t, stale, since.Add(-time.Hour)) // before since → excluded
-
-	fresh := writeRollout(t, day, "rollout-2-bonnie.jsonl", "sess-bonnie", cwd)
-	setMtime(t, fresh, since.Add(time.Hour)) // after since → the winner
-
-	got, ok := LocateCodexSince(cwd, since)
-	if !ok {
-		t.Fatal("LocateCodexSince returned not found")
-	}
-
-	if !strings.HasSuffix(got, "rollout-2-bonnie.jsonl") {
-		t.Errorf("located %q, want the fresh rollout", got)
-	}
-}
-
-func TestLocateCodexSinceNoneCov(t *testing.T) {
-	day := writeCodexSessions(t)
-	cwd := t.TempDir()
-
-	old := writeRollout(t, day, "rollout-1-dreich.jsonl", "sess-dreich", cwd)
-	setMtime(t, old, time.Now().Add(-2*time.Hour))
-
-	// Everything predates `since`, so nothing qualifies.
-	if _, ok := LocateCodexSince(cwd, time.Now()); ok {
-		t.Error("expected no rollout at/after since")
-	}
-}
-
-func TestLocateCodexSinceInExplicitRootCov(t *testing.T) {
-	root := t.TempDir()
-	// Deliberately do NOT set CODEX_HOME; pass the root explicitly instead.
-	day := filepath.Join(root, "sessions", "2026", "07", "09")
-	if err := os.MkdirAll(day, 0o750); err != nil {
-		t.Fatal(err)
-	}
-
-	cwd := t.TempDir()
-	fresh := writeRollout(t, day, "rollout-1-glen.jsonl", "sess-glen", cwd)
-	setMtime(t, fresh, time.Now().Add(time.Hour))
-
-	got, ok := LocateCodexSinceIn(root, cwd, time.Now().Add(-time.Hour))
-	if !ok || !strings.HasSuffix(got, "rollout-1-glen.jsonl") {
-		t.Errorf("LocateCodexSinceIn = %q, %v; want the glen rollout, true", got, ok)
-	}
-}
-
 func TestCodexSessionIDSinceSingleCov(t *testing.T) {
 	day := writeCodexSessions(t)
 	cwd := t.TempDir()
