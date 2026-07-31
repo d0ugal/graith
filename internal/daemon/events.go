@@ -120,6 +120,10 @@ func (sm *SessionManager) publishPendingStatusChangeEvent(event pendingStatusCha
 }
 
 func (sm *SessionManager) publishStatusChangeEvent(sessionID, sessionName, statusKind, from, to string, at time.Time) {
+	if statusKind == eventStatusKindSession {
+		sm.observeSessionLifecycleTransition(from, to)
+	}
+
 	if sm.events == nil || from == to {
 		return
 	}
@@ -154,6 +158,7 @@ func (sm *SessionManager) publishMessage(opts PublishOpts) (Message, error) {
 		return Message{}, err
 	}
 
+	sm.observeMessagePublished(msg)
 	sm.publishMessageEvent(msg)
 
 	return msg, nil

@@ -251,6 +251,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	lc := cfgSnapshot.Lifecycle
 	historyRows := cfgSnapshot.Terminal.HistoryRowsOrDefault()
 
+	launchStarted := time.Now()
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,
 		Command:             command,
@@ -265,6 +266,8 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		Logger:              sm.log,
 		TerminalHistoryRows: historyRows,
 	})
+	sm.observeSessionLaunch(metricOperationOrchestratorCreate, DriverPTY, time.Since(launchStarted), err)
+
 	if err != nil {
 		sm.rollbackOrchestratorCreate(id)
 		return SessionState{}, fmt.Errorf("start orchestrator pty: %w", err)

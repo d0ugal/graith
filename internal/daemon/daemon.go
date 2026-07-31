@@ -259,6 +259,9 @@ type SessionManager struct {
 	// telemetry owns optional metrics/tracing runtimes. It is created only when a
 	// telemetry sub-runtime is explicitly enabled at daemon start.
 	telemetry *telemetryRuntime
+	// metrics is nil unless the metrics runtime was explicitly enabled and
+	// started successfully.
+	metrics atomic.Pointer[daemonMetrics]
 
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the

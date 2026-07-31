@@ -102,23 +102,24 @@ func TestCheckRejectsOwnerForUnknownPackage(t *testing.T) {
 
 func TestCheckUnknownAndExpiredManifestData(t *testing.T) {
 	m := testManifest()
+	checkNow := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
 
 	m.Exceptions = []Exception{{ID: "old", From: "example.com/braw/a", To: "example.com/braw/b", Kind: "production", Owner: "croft", Reason: "migration", Expires: "2026-07-22"}}
-	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}}, time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)); !strings.Contains(err.Error(), "expired") {
+	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}}, checkNow); !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("err=%v", err)
 	}
 
 	m.Exceptions[0].Expires = "2026-08-01"
 
 	m.Exceptions[0].To = "example.com/braw/missing"
-	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}}, time.Now()); !strings.Contains(err.Error(), "unknown imported") {
+	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}}, checkNow); !strings.Contains(err.Error(), "unknown imported") {
 		t.Fatalf("err=%v", err)
 	}
 
 	m.Exceptions[0].To = "example.com/braw/b"
 
 	m.Exceptions = append(m.Exceptions, Exception{ID: "new", From: "example.com/braw/a", To: "example.com/braw/b", Kind: "production", Owner: "bairn", Reason: "duplicate", Expires: "2026-08-02"})
-	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}, {ImportPath: "example.com/braw/b"}}, time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)); !strings.Contains(err.Error(), "duplicate exception edge") {
+	if _, err := Check(m, []Package{{ImportPath: "example.com/braw/a"}, {ImportPath: "example.com/braw/b"}}, checkNow); !strings.Contains(err.Error(), "duplicate exception edge") {
 		t.Fatalf("err=%v", err)
 	}
 }

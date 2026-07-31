@@ -940,6 +940,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	lc := cfgSnapshot.Lifecycle
 	historyRows := cfgSnapshot.Terminal.HistoryRowsOrDefault()
 
+	launchStarted := time.Now()
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,
 		Command:             command,
@@ -954,6 +955,8 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		Logger:              sm.log,
 		TerminalHistoryRows: historyRows,
 	})
+	sm.observeSessionLaunch(metricOperationResume, DriverPTY, time.Since(launchStarted), err)
+
 	if err != nil {
 		slot.release()
 		rollbackState()
