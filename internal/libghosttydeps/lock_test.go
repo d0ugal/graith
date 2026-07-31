@@ -86,7 +86,7 @@ func TestValidateShortGhosttyCommitDoesNotPanic(t *testing.T) {
 }
 
 func TestDecodeLockRejectsTrailingJSON(t *testing.T) {
-	_, err := DecodeLock([]byte(`{} {}`))
+	_, err := decodeLock([]byte(`{} {}`), true)
 	if err == nil || !strings.Contains(err.Error(), "trailing JSON") {
 		t.Fatalf("trailing JSON error = %v", err)
 	}
@@ -103,7 +103,7 @@ func TestGenerationDecodeAllowsStaleDerivedURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lock, err := DecodeLock(data)
+	lock, err := decodeLock(data, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestGenerationDecodeAllowsStaleDerivedURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := DecodeLock(stale); err == nil ||
+	if _, err := decodeLock(stale, true); err == nil ||
 		!strings.Contains(err.Error(), "Apple artifact URL") ||
 		!strings.Contains(err.Error(), "SPDX tools URL") {
 		t.Fatalf("strict stale-projection error = %v", err)
@@ -145,7 +145,7 @@ func TestStrictLockRejectsPendingArtifactPlaceholders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := DecodeLock(data); err == nil ||
+	if _, err := decodeLock(data, true); err == nil ||
 		!strings.Contains(err.Error(), "Apple artifact SHA-256 is a placeholder") ||
 		!strings.Contains(err.Error(), "Linux amd64 artifact SHA-256 is a placeholder") ||
 		!strings.Contains(err.Error(), "Linux arm64 artifact SHA-256 is a placeholder") {
