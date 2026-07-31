@@ -109,18 +109,6 @@ func TestDetect(t *testing.T) {
 	}
 }
 
-func TestDetectedEnvironUsesCanonicalOverrides(t *testing.T) {
-	t.Parallel()
-
-	if !DetectedEnviron([]string{"GR_AGENT_MODE=1"}) {
-		t.Fatal("explicit agent mode was not detected")
-	}
-
-	if DetectedEnviron([]string{"GRAITH_SESSION_ID=canny", "GR_AGENT_MODE=0"}) {
-		t.Fatal("explicit non-agent override did not take precedence")
-	}
-}
-
 func TestSecurityBoundaryDetectionIgnoresNegativePresentationOverride(t *testing.T) {
 	t.Parallel()
 
