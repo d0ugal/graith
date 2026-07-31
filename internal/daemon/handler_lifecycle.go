@@ -383,12 +383,26 @@ func handleType(sm *SessionManager, auth authContext, send func(string, any), ms
 		}
 	}
 
+	operation := metricOperationType
+	inputBytes := len(t.Input)
+
+	if t.NoNewline {
+		operation = metricOperationTypeNoNewline
+	} else {
+		inputBytes++
+	}
+
+	writeStarted := time.Now()
+
 	var writeErr error
+
 	if t.NoNewline {
 		writeErr = pty.WriteInput([]byte(t.Input))
 	} else {
 		writeErr = pty.WriteInputAndSubmit([]byte(t.Input))
 	}
+
+	sm.observeSessionInput(operation, inputBytes, time.Since(writeStarted), writeErr)
 
 	if writeErr != nil {
 		send("error", protocol.ErrorMsg{Message: "write failed: " + writeErr.Error()})

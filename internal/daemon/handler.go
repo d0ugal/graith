@@ -1122,7 +1122,11 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			if attachedSessionID != "" && sm.IsAttachedClient(attachedSessionID, conn) {
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
-					if err := pty.WriteInput(frame.Payload); err != nil {
+					writeStarted := time.Now()
+					err := pty.WriteInput(frame.Payload)
+					sm.observeSessionInput(metricOperationAttach, len(frame.Payload), time.Since(writeStarted), err)
+
+					if err != nil {
 						sendControl("error", protocol.ErrorMsg{Message: "session input was not accepted; reconnect and retry"})
 						return
 					}

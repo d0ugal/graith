@@ -1038,6 +1038,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 	var ptySess sessionDriver
 
 	lc := sm.Config().Lifecycle
+	launchStarted := time.Now()
 
 	if driverKind == DriverHeadless {
 		ptySess, err = headless.New(headless.Opts{
@@ -1071,6 +1072,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (SessionState, error) {
 			TerminalHistoryRows: cfgSnapshot.Terminal.HistoryRowsOrDefault(),
 		})
 	}
+
+	sm.observeSessionLaunch(metricOperationCreate, driverKind, time.Since(launchStarted), err)
 
 	if err != nil {
 		slot.release()

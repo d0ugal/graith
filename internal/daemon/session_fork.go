@@ -658,6 +658,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	lc := launchCfg.Lifecycle
 	historyRows := launchCfg.Terminal.HistoryRowsOrDefault()
 
+	launchStarted := time.Now()
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,
 		Command:             command,
@@ -672,6 +673,8 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		Logger:              sm.log,
 		TerminalHistoryRows: historyRows,
 	})
+	sm.observeSessionLaunch(metricOperationFork, DriverPTY, time.Since(launchStarted), err)
+
 	if err != nil {
 		slot.release()
 		forkCleanup()
