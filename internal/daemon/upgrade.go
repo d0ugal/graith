@@ -3855,6 +3855,7 @@ var (
 	upgradeProcessStartTime = grpty.ProcessStartTime
 	upgradePreSignalWait4   = syscall.Wait4
 	upgradeSessionSignal    = syscall.Kill
+	terminateUpgradeSession = terminateFailedUpgradeSessionUntil
 )
 
 func waitForExactChild(pid int, expectedStartTime int64, timeout time.Duration) (bool, error) {

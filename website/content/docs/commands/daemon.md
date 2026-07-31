@@ -80,13 +80,18 @@ are identity-checked, terminated, and marked stopped rather than left unmanaged.
 
 The replacement arms cleanup before loading configuration, paths, state, or
 authentication, so an early failure still identity-checks and terminates
-inherited agents. If preserve is accepted but the replacement isn't ready after
-the configured startup wait, graith rechecks the live daemon and falls back to a
-clean start only after proving the exact process that answered the pre-upgrade
-handshake has exited — a stale PID file isn't enough — then checks that result
-for the requested version and a fresh daemon generation. Otherwise it leaves the
-possible in-progress replacement alone: retry once startup finishes, or use
-`--force` to kill the sessions intentionally.
+inherited agents. Once live session adoption is committed, the replacement starts
+serving, removes the consumed upgrade journal first, and then repairs interrupted
+deletes, soft-delete kills, stale orphan processes, or scenario-add cleanup; those
+repairs continue in daemon-owned background work and are logged as startup
+recovery phases. If preserve is
+accepted but the replacement isn't ready after the configured startup wait,
+graith rechecks the live daemon and falls back to a clean start only after
+proving the exact process that answered the pre-upgrade handshake has exited — a
+stale PID file isn't enough — then checks that result for the requested version
+and a fresh daemon generation. Otherwise it leaves the possible in-progress
+replacement alone: retry once startup finishes, or use `--force` to kill the
+sessions intentionally.
 
 If a preserve restart cannot drain accepted daemon mutations before its
 deadline, the error and daemon log identify every active holder by an opaque

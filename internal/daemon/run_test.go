@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -181,6 +182,78 @@ func TestResolvedUpgradeSnapshotPathsDoesNotRetainRemovedDataDir(t *testing.T) {
 
 	if got == makeUpgradePathDescriptor(running, defaults.ConfigFile) {
 		t.Fatal("removed data_dir inherited the running daemon's custom paths")
+	}
+}
+
+func TestStartupRecoveryJobRunsBeforeTerminalRecovery(t *testing.T) {
+	sm := NewSessionManager(config.Default(), config.Paths{}, discardLogger())
+
+	var events []string
+
+	jobs := sm.prependStartupRecoveryJobsWithLauncher([]func(context.Context){
+		func(context.Context) { events = append(events, "background-loop") },
+	}, []daemonStartupRecovery{{
+		name: "orphaned-processes",
+		run:  func() { events = append(events, "post-adoption-recovery") },
+	}}, func(context.Context) { events = append(events, "terminal-recovery") }, func(ctx context.Context, job func(context.Context)) bool {
+		job(ctx)
+
+		return true
+	})
+
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %d, want one recovery wrapper", len(jobs))
+	}
+
+	for _, job := range jobs {
+		job(context.Background())
+	}
+
+	if got, want := strings.Join(events, ","), "post-adoption-recovery,terminal-recovery,background-loop"; got != want {
+		t.Fatalf("recovery order = %s, want %s", got, want)
+	}
+}
+
+func TestPostAdoptionStartupRecoveriesRemoveJournalBeforeLongCleanup(t *testing.T) {
+	sm := NewSessionManager(config.Default(), config.Paths{}, discardLogger())
+
+	recoveries := sm.postAdoptionStartupRecoveries("bothy", &UpgradeManifest{JournalID: "dreich"})
+	if len(recoveries) < 2 {
+		t.Fatalf("post-adoption recoveries = %d, want multiple recovery phases", len(recoveries))
+	}
+
+	if got, want := recoveries[0].name, "upgrade-journal"; got != want {
+		t.Fatalf("first post-adoption recovery = %q, want %q", got, want)
+	}
+
+	if got, want := recoveries[1].name, "upgrade-cleanup"; got != want {
+		t.Fatalf("second post-adoption recovery = %q, want %q", got, want)
+	}
+}
+
+func TestStartupRecoveryJobHonorsCanceledContextBeforeTerminalRecovery(t *testing.T) {
+	sm := NewSessionManager(config.Default(), config.Paths{}, discardLogger())
+
+	var events []string
+
+	jobs := sm.prependStartupRecoveryJobsWithLauncher([]func(context.Context){
+		func(context.Context) { events = append(events, "background-loop") },
+	}, []daemonStartupRecovery{{
+		name: "tombstones",
+		run:  func() { events = append(events, "post-adoption-recovery") },
+	}}, func(context.Context) { events = append(events, "terminal-recovery") }, func(ctx context.Context, job func(context.Context)) bool {
+		job(ctx)
+
+		return true
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	jobs[0](ctx)
+
+	if len(events) != 0 {
+		t.Fatalf("canceled recovery events = %v, want none", events)
 	}
 }
 

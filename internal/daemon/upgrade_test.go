@@ -4050,6 +4050,63 @@ func TestAdoptSessionsPostAdoptStateChangeTerminatesAfterFinalDrain(t *testing.T
 	}
 }
 
+func TestAdoptSessionsUsesSingleDeadlineForNonPTYCleanup(t *testing.T) {
+	sm := sleeperSM(t)
+
+	originalTerminate := terminateUpgradeSession
+
+	t.Cleanup(func() { terminateUpgradeSession = originalTerminate })
+
+	var (
+		calls     []UpgradeSession
+		deadlines []time.Time
+	)
+
+	terminateUpgradeSession = func(session UpgradeSession, deadline time.Time) (bool, error) {
+		calls = append(calls, session)
+		deadlines = append(deadlines, deadline)
+
+		return true, nil
+	}
+
+	manifest := &UpgradeManifest{
+		adoptionDeadline: time.Now().Add(250 * time.Millisecond),
+		Sessions: []UpgradeSession{
+			{ID: "braw-headless", Fd: -1, PID: 4011, PIDStartTime: 111},
+			{ID: "canny-headless", Fd: -1, PID: 4012, PIDStartTime: 112},
+		},
+	}
+
+	for _, session := range manifest.Sessions {
+		sm.state.Sessions[session.ID] = &SessionState{
+			ID: session.ID, Name: session.ID, Status: StatusRunning,
+			PID: session.PID, PIDStartTime: session.PIDStartTime,
+		}
+	}
+
+	result, err := sm.adoptSessions(manifest, nil, nil, nil, false)
+	if err != nil || len(result.UnresolvedSessions) != 0 || len(result.ResolvedSessions) != len(manifest.Sessions) {
+		t.Fatalf("non-PTY adoption cleanup = (%+v, %v)", result, err)
+	}
+
+	if len(calls) != len(manifest.Sessions) {
+		t.Fatalf("cleanup calls = %d, want %d", len(calls), len(manifest.Sessions))
+	}
+
+	for i, deadline := range deadlines {
+		if !deadline.Equal(manifest.adoptionDeadline) {
+			t.Fatalf("cleanup deadline %d = %v, want shared adoption deadline %v", i, deadline, manifest.adoptionDeadline)
+		}
+	}
+
+	for _, session := range manifest.Sessions {
+		state := sm.state.Sessions[session.ID]
+		if state.Status != StatusStopped || state.PID != 0 || state.PIDStartTime != 0 {
+			t.Fatalf("session %s state after cleanup = %+v, want stopped with no PID", session.ID, state)
+		}
+	}
+}
+
 func TestAdoptSessionsKeepsEarlierWaiterDormantAcrossLaterFailure(t *testing.T) {
 	sm := sleeperSM(t)
 

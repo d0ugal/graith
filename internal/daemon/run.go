@@ -173,6 +173,99 @@ type legacyDialer func(network, address string, timeout time.Duration) (net.Conn
 type legacyProcessChecker func(pid int) bool
 type legacyKiller func(pid int, signal syscall.Signal) error
 
+type daemonStartupRecovery struct {
+	name string
+	run  func()
+}
+
+func (sm *SessionManager) postAdoptionStartupRecoveries(adoptFrom string, manifest *UpgradeManifest) []daemonStartupRecovery {
+	return []daemonStartupRecovery{
+		{name: "upgrade-journal", run: func() {
+			if err := removeUpgradeJournal(adoptFrom, manifest); err != nil {
+				// Adoption is already committed and its live PTYs have left the
+				// rollback guard. A stale private manifest is safer than turning a
+				// cleanup failure into orphaned live agents.
+				sm.log.Warn("failed to remove consumed upgrade manifest", "err", err)
+			} else if err := removeUpgradeJournalMarker(adoptFrom, upgradeJournalCommitted); err != nil {
+				sm.log.Warn("failed to remove committed upgrade marker", "err", err)
+			}
+		}},
+		{name: "upgrade-cleanup", run: sm.reconcileUpgradeCleanup},
+		{name: "tombstones", run: sm.resumeTombstones},
+		{name: "soft-deleted-orphans", run: sm.reconcileSoftDeletedOrphans},
+		{name: "orphaned-processes", run: sm.cleanupOrphanedProcesses},
+		{name: "scenario-adds", run: sm.recoverInterruptedScenarioAdds},
+		{name: "scenario-manifests", run: sm.recoverInterruptedScenarioManifestRepublishes},
+	}
+}
+
+func (sm *SessionManager) runStartupRecoveries(ctx context.Context, recoveries []daemonStartupRecovery) {
+	for _, recovery := range recoveries {
+		select {
+		case <-ctx.Done():
+			sm.log.Info("startup recovery canceled", "recovery", recovery.name)
+			return
+		default:
+		}
+
+		started := time.Now()
+
+		sm.log.Info("startup recovery started", "recovery", recovery.name)
+		recovery.run()
+		sm.log.Info("startup recovery completed", "recovery", recovery.name, "duration_ms", time.Since(started).Milliseconds())
+	}
+}
+
+func (sm *SessionManager) prependStartupRecoveryJobs(
+	jobs []func(context.Context),
+	recoveries []daemonStartupRecovery,
+	terminalRecovery func(context.Context),
+) []func(context.Context) {
+	return sm.prependStartupRecoveryJobsWithLauncher(jobs, recoveries, terminalRecovery, sm.startBackgroundTask)
+}
+
+func (sm *SessionManager) prependStartupRecoveryJobsWithLauncher(
+	jobs []func(context.Context),
+	recoveries []daemonStartupRecovery,
+	terminalRecovery func(context.Context),
+	launch func(context.Context, func(context.Context)) bool,
+) []func(context.Context) {
+	if terminalRecovery == nil {
+		terminalRecovery = sm.recoverTerminalScreensAfterUpgrade
+	}
+
+	if len(recoveries) > 0 {
+		recoveries := append([]daemonStartupRecovery(nil), recoveries...)
+		deferredJobs := append([]func(context.Context){}, jobs...)
+
+		return []func(context.Context){
+			func(ctx context.Context) {
+				sm.runStartupRecoveries(ctx, recoveries)
+
+				if ctx.Err() != nil {
+					return
+				}
+
+				terminalRecovery(ctx)
+
+				if ctx.Err() != nil {
+					return
+				}
+
+				for _, job := range deferredJobs {
+					if launch(ctx, job) {
+						continue
+					}
+
+					sm.log.Warn("failed to start background task after startup recovery")
+				}
+			},
+		}
+	}
+
+	return append([]func(context.Context){terminalRecovery}, jobs...)
+}
+
 func cleanupLegacyDaemonDirs(
 	dirs []string,
 	log *slog.Logger,
@@ -561,6 +654,11 @@ func run(
 	defer func() { _ = logFile.Close() }()
 
 	log := slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if adoptFrom != "" {
+		log.Info("upgrade adoption bootstrap started",
+			"sessions", len(manifest.Sessions), "helpers", len(manifest.Helpers),
+			"pid", os.Getpid(), "version", version.Version, "commit", version.CommitSHA)
+	}
 
 	// Install the configured external-tool resolver before anything shells out
 	// to git/gh/ps/etc. Validation already ran at config load, so this only fills
@@ -611,27 +709,43 @@ func run(
 		}
 	}()
 
+	var startupRecoveries []daemonStartupRecovery
+
 	if adoptFrom != "" {
+		log.Info("upgrade adoption loading state snapshot")
+
 		_, err := sm.loadStateSnapshotForAdoption(manifest.StateSnapshot)
 		if err != nil {
 			return adoptionStateLoadRefusal(err)
 		}
 
+		log.Info("upgrade adoption loaded state snapshot")
+
 		if err := sm.restoreUpgradeCleanup(); err != nil {
 			return err
 		}
 
-		sm.reconcileUpgradeCleanup()
 		// Exec preserves child parenthood but destroys the old Wait goroutines.
-		// Resolve every registry entry before any new helper can be created.
+		// Reap inherited terminal helpers before any replacement helper can be
+		// created for adopted sessions.
+		log.Info("upgrade adoption reaping inherited terminal helpers", "helpers", len(manifest.Helpers))
+
 		if err := ownership.reapHelpers(); err != nil {
 			return fmt.Errorf("reap inherited terminal helpers: %w", err)
 		}
+
+		log.Info("upgrade adoption reaped inherited terminal helpers")
+
+		log.Info("upgrade adoption adopting listener")
 
 		l, err = adoptUpgradeListener(manifest, ownership, sm.loadOrCreateHumanToken)
 		if err != nil {
 			return fmt.Errorf("adopt upgrade listener: %w", err)
 		}
+
+		log.Info("upgrade adoption adopted listener")
+
+		log.Info("upgrade adoption adopting sessions", "sessions", len(manifest.Sessions))
 
 		adoption, err := sm.adoptSessions(
 			manifest,
@@ -652,6 +766,10 @@ func run(
 		if err != nil {
 			return fmt.Errorf("persist upgrade adoption state: %w", err)
 		}
+
+		log.Info("upgrade adoption adopted sessions",
+			"resolved_sessions", len(adoption.ResolvedSessions),
+			"unresolved_sessions", len(adoption.UnresolvedSessions))
 
 		if len(adoption.UnresolvedSessions) > 0 {
 			return errors.New("upgrade adoption process cleanup remains unresolved")
@@ -681,7 +799,6 @@ func run(
 		// Resolve processes which exited during adoption immediately. Anything
 		// still live remains registered for the recurring cleanup loop below;
 		// the ownership guard is disarmed only after exact cleanup succeeds.
-		sm.reconcileUpgradeCleanup()
 		sm.mu.RLock()
 
 		adoptedDrivers := make(map[string]sessionDriver, len(manifest.Sessions))
@@ -696,23 +813,13 @@ func run(
 		for id, driver := range adoptedDrivers {
 			sm.startWatcher(id, driver)
 		}
-		// Exec can interrupt a durable delete or soft-delete kill just as a
-		// process restart can. Finish those transactions before serving lifecycle
-		// requests from the inherited listener.
-		sm.resumeTombstones()
-		sm.reconcileSoftDeletedOrphans()
-		sm.cleanupOrphanedProcesses()
-		sm.recoverInterruptedScenarioAdds()
-		sm.recoverInterruptedScenarioManifestRepublishes()
-
-		if err := removeUpgradeJournal(adoptFrom, manifest); err != nil {
-			// Adoption is already committed and its live PTYs have left the
-			// rollback guard. A stale private manifest is safer than turning a
-			// cleanup failure into orphaned live agents.
-			log.Warn("failed to remove consumed upgrade manifest", "err", err)
-		} else if err := removeUpgradeJournalMarker(adoptFrom, upgradeJournalCommitted); err != nil {
-			log.Warn("failed to remove committed upgrade marker", "err", err)
-		}
+		// Exec can interrupt a durable delete, soft-delete kill, orphan cleanup,
+		// or scenario recovery just as a process restart can. These repairs can
+		// perform bounded process waits for each affected session, so they must
+		// not hold the replacement generation's readiness hostage after the live
+		// descriptor handoff has committed. The background task group owns them
+		// immediately after the inherited listener starts serving.
+		startupRecoveries = sm.postAdoptionStartupRecoveries(adoptFrom, manifest)
 
 		log.Info("daemon upgraded", "adopted_sessions", len(manifest.Sessions), "pid", os.Getpid(), "version", version.Version, "commit", version.CommitSHA)
 	} else {
@@ -833,7 +940,6 @@ func run(
 	startBackground := func() bool {
 		group := newDaemonTaskGroup()
 		jobs := []func(context.Context){
-			sm.recoverTerminalScreensAfterUpgrade,
 			sm.RunDetectionLoop,
 			sm.RunStartupWatchdogLoop,
 			sm.RunResourceMonitorLoop,
@@ -859,6 +965,7 @@ func run(
 				}
 			},
 		}
+		jobs = sm.prependStartupRecoveryJobs(jobs, startupRecoveries, nil)
 		// Register the complete top-level generation before publication. Nested
 		// jobs use the same group's admission lock, which closes before drain.
 		group.Go(func(ctx context.Context) {
