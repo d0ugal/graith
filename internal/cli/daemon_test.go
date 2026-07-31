@@ -115,8 +115,8 @@ func TestProbeDaemonIdentityNoSocket(t *testing.T) {
 
 	paths.SocketPath = filepath.Join(t.TempDir(), "absent.sock")
 
-	if v, id := probeDaemonIdentity(); v != "" || id != "" {
-		t.Errorf("probeDaemonIdentity() = (%q, %q), want empty strings", v, id)
+	if v, id := probeDaemonIdentityWithDeadline(time.Time{}); v != "" || id != "" {
+		t.Errorf("probeDaemonIdentityWithDeadline(time.Time{}) = (%q, %q), want empty strings", v, id)
 	}
 }
 

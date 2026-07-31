@@ -115,18 +115,14 @@ func localDaemonStartPollInterval() time.Duration {
 	return cfg.Connection.StartPollIntervalDuration()
 }
 
-// pollLocalDaemon polls ready at the effective start-poll interval until it
-// returns true or the effective start-timeout budget elapses, checking once
+// pollLocalDaemonWithin polls ready at the effective start-poll interval until
+// it returns true or the supplied start-timeout budget elapses, checking once
 // before the first sleep. It shares the [connection] start policy with the
 // client's EnsureDaemon so the CLI's post-exec readiness and socket-disappearance
 // lifecycle waits honour a configured startup allowance rather than a fixed
 // retry count (issue #1319). The absolute aggregate deadline is passed into
 // ready so each dial and handshake caps its distinct operation policy at the
 // remaining startup budget.
-func pollLocalDaemon(ready func(deadline time.Time) bool) bool {
-	return pollLocalDaemonWithin(localDaemonStartTimeout(), ready)
-}
-
 func pollLocalDaemonWithin(timeout time.Duration, ready func(deadline time.Time) bool) bool {
 	deadline := connectionNow().Add(timeout)
 	interval := localDaemonStartPollInterval()

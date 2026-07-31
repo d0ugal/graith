@@ -808,10 +808,6 @@ func execUpgradeWithGuard(successMsg string, guard func(string) error) error {
 	return nil
 }
 
-func probeDaemonIdentity() (daemonVersion, instanceID string) {
-	return probeDaemonIdentityWithDeadline(time.Time{})
-}
-
 func probeDaemonIdentityUntil(aggregateDeadline time.Time) (daemonVersion, instanceID string) {
 	return probeDaemonIdentityWithDeadline(aggregateDeadline)
 }
