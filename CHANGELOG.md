@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.72.2](https://github.com/d0ugal/graith/compare/v0.72.1...v0.72.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* ignore stopped sessions for stale config ([1a58c44](https://github.com/d0ugal/graith/commit/1a58c448c4d282a66a34a3dbe31ad467531e389c))
+* make navigator selection stand out ([1eaa8b4](https://github.com/d0ugal/graith/commit/1eaa8b41b25a0595dffad31fe85ddb3d06f3144d))
+* show full navigator selected status ([dbbd4a8](https://github.com/d0ugal/graith/commit/dbbd4a8f9b096040bcdb49126594dd630da93012))
+
 ## [0.72.1](https://github.com/d0ugal/graith/compare/v0.72.0...v0.72.1) (2026-07-31)
 
 
