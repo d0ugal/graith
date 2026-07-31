@@ -59,10 +59,10 @@ func TestReconcileUnresponsiveDaemonVerifiesOwnedGeneration(t *testing.T) {
 
 	recoverySocketGone = func(string) bool { return true }
 
-	recovered, err := reconcileUnresponsiveDaemon(paths)
+	recovered, err := reconcileUnresponsiveDaemonGeneration(paths, nil)
 
 	if err != nil || !recovered {
-		t.Fatalf("reconcileUnresponsiveDaemon() = (%t, %v)", recovered, err)
+		t.Fatalf("reconcileUnresponsiveDaemonGeneration() = (%t, %v)", recovered, err)
 	}
 
 	if stopped != (DaemonIdentity{PID: 4242, StartTime: 4242}) {
@@ -105,9 +105,9 @@ func TestEnsureDaemonRecoversLivePIDAfterLaunchFailure(t *testing.T) {
 		return errors.New("replacement launcher failed")
 	}
 
-	_, err := EnsureDaemon(paths, "")
+	_, err := EnsureDaemonConfigured(config.Default(), paths, "")
 	if err == nil || !strings.Contains(err.Error(), "replacement launcher failed") {
-		t.Fatalf("EnsureDaemon() error = %v, want replacement launch failure", err)
+		t.Fatalf("EnsureDaemonConfigured() error = %v, want replacement launch failure", err)
 	}
 
 	if launches != 2 {
@@ -144,9 +144,9 @@ func TestEnsureDaemonRecoversAfterReadinessTimeout(t *testing.T) {
 		return nil
 	}
 
-	_, err := EnsureDaemon(paths, "")
+	_, err := EnsureDaemonConfigured(config.Default(), paths, "")
 	if err == nil || !strings.Contains(err.Error(), "daemon did not start in time") {
-		t.Fatalf("EnsureDaemon() error = %v, want readiness timeout", err)
+		t.Fatalf("EnsureDaemonConfigured() error = %v, want readiness timeout", err)
 	}
 
 	if launches != 2 {
@@ -447,7 +447,7 @@ func TestDaemonRespondsFalseWhenNothingListening(t *testing.T) {
 
 	sockPath := shortSockPath(t, "graith.sock")
 
-	if daemonResponds(sockPath, "", "") {
+	if daemonRespondsWithDeadline(sockPath, "", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be false when nothing is listening")
 	}
 }
@@ -470,7 +470,7 @@ func TestDaemonRespondsFalseOnStuckSocket(t *testing.T) {
 
 	start := time.Now()
 
-	if daemonResponds(sockPath, "", "") {
+	if daemonRespondsWithDeadline(sockPath, "", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be false for a socket that never replies")
 	}
 
@@ -497,7 +497,7 @@ func TestDaemonRespondsFalseOnForeignSocket(t *testing.T) {
 		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\ngarbage"))
 	})
 
-	if daemonResponds(sockPath, "", "") {
+	if daemonRespondsWithDeadline(sockPath, "", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be false for a non-graith server")
 	}
 }
@@ -511,7 +511,7 @@ func TestDaemonRespondsTrueOnHandshakeOK(t *testing.T) {
 		writeHandshakeResponse(t, conn, "handshake_ok")
 	})
 
-	if !daemonResponds(sockPath, "", "") {
+	if !daemonRespondsWithDeadline(sockPath, "", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be true for a graith daemon replying handshake_ok")
 	}
 }
@@ -526,7 +526,7 @@ func TestDaemonRespondsTrueOnHandshakeErr(t *testing.T) {
 		writeHandshakeResponse(t, conn, "handshake_err")
 	})
 
-	if !daemonResponds(sockPath, "", "") {
+	if !daemonRespondsWithDeadline(sockPath, "", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be true for a daemon replying handshake_err")
 	}
 }
@@ -545,7 +545,7 @@ func TestDaemonRespondsTrueOnAuthError(t *testing.T) {
 		writeHandshakeResponse(t, conn, "error")
 	})
 
-	if !daemonResponds(sockPath, "", "") {
+	if !daemonRespondsWithDeadline(sockPath, "", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be true for a daemon replying error (auth rejection)")
 	}
 }
@@ -582,7 +582,7 @@ func TestDaemonRespondsSendsToken(t *testing.T) {
 		_ = writer.WriteFrame(protocol.ChannelControl, data)
 	})
 
-	if !daemonResponds(sockPath, "human-braw", "") {
+	if !daemonRespondsWithDeadline(sockPath, "human-braw", "", time.Time{}) {
 		t.Fatal("expected daemonResponds to be true when the daemon replies handshake_ok")
 	}
 
@@ -636,7 +636,7 @@ func TestDaemonRespondsSendsProfile(t *testing.T) {
 		_ = writer.WriteFrame(protocol.ChannelControl, data)
 	})
 
-	if !daemonResponds(sockPath, "", "bothy") {
+	if !daemonRespondsWithDeadline(sockPath, "", "bothy", time.Time{}) {
 		t.Fatal("expected daemonResponds to be true when the daemon replies handshake_ok")
 	}
 
@@ -733,7 +733,7 @@ func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {
 		return nil
 	})
 
-	_, err := EnsureDaemon(config.Paths{SocketPath: sockPath}, "")
+	_, err := EnsureDaemonConfigured(config.Default(), config.Paths{SocketPath: sockPath}, "")
 	if err == nil {
 		t.Fatal("expected EnsureDaemon to fail when no real daemon starts")
 	}
@@ -792,7 +792,7 @@ func TestEnsureDaemonStartBudgetCapsStalledHandshake(t *testing.T) {
 
 	start := time.Now()
 
-	conn, err := EnsureDaemon(config.Paths{SocketPath: "/bothy/stalled.sock"}, "")
+	conn, err := EnsureDaemonConfigured(config.Default(), config.Paths{SocketPath: "/bothy/stalled.sock"}, "")
 	if conn != nil {
 		_ = conn.Close()
 
@@ -833,7 +833,7 @@ func TestEnsureDaemonStartBudgetIncludesManagedLaunch(t *testing.T) {
 
 	started := time.Now()
 
-	_, err := EnsureDaemon(config.Paths{SocketPath: "/bothy/absent.sock"}, "")
+	_, err := EnsureDaemonConfigured(config.Default(), config.Paths{SocketPath: "/bothy/absent.sock"}, "")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("EnsureDaemon error = %v, want managed launch deadline", err)
 	}
@@ -968,7 +968,7 @@ func TestEnsureDaemonReusesLiveDaemon(t *testing.T) {
 		return nil
 	})
 
-	conn, err := EnsureDaemon(config.Paths{SocketPath: sockPath}, "")
+	conn, err := EnsureDaemonConfigured(config.Default(), config.Paths{SocketPath: sockPath}, "")
 	if err != nil {
 		t.Fatalf("EnsureDaemon returned error for a live daemon: %v", err)
 	}

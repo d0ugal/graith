@@ -1707,7 +1707,7 @@ func TestEnsureDaemonReachesFailClosedDaemon(t *testing.T) {
 			HumanTokenFile: filepath.Join(env.tmpDir, "data", "human.token"),
 		}
 
-		conn, err := client.EnsureDaemon(paths, "")
+		conn, err := client.EnsureDaemonConfigured(config.Default(), paths, "")
 		if err != nil {
 			t.Fatalf("EnsureDaemon against a live fail-closed daemon: %v", err)
 		}
@@ -1728,7 +1728,7 @@ func TestEnsureDaemonReachesFailClosedDaemon(t *testing.T) {
 			HumanTokenFile: filepath.Join(env.tmpDir, "data", "absent.token"),
 		}
 
-		conn, err := client.EnsureDaemon(paths, "")
+		conn, err := client.EnsureDaemonConfigured(config.Default(), paths, "")
 		if err != nil {
 			t.Fatalf("tokenless EnsureDaemon against a live fail-closed daemon: %v", err)
 		}

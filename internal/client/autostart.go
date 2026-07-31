@@ -44,8 +44,9 @@ var (
 	cleanRestartSecurityBoundaryDetected   = func() bool { return agent.SecurityBoundaryDetectedEnviron(os.Environ()) }
 )
 
-// EnsureDaemon returns a connection to a live graith daemon, starting one if
-// necessary.
+// EnsureDaemonConfigured returns a connection to a live graith daemon, starting
+// one if necessary. It uses the loaded config needed by the managed macOS
+// launcher.
 //
 // A successful Unix socket dial proves *something* is listening, but not that
 // it's a live graith daemon: the socket may be stale (left behind by a stuck or
@@ -58,13 +59,6 @@ var (
 // deliberately does not unlink the socket itself: doing so could orphan a
 // live-but-slow daemon that merely lost the probe race — its socket would be
 // gone but the PID guard would then block the replacement from rebinding.
-func EnsureDaemon(paths config.Paths, configFile string) (net.Conn, error) {
-	return EnsureDaemonConfigured(config.Default(), paths, configFile)
-}
-
-// EnsureDaemonConfigured is EnsureDaemon with the loaded config needed by the
-// managed macOS launcher. The compatibility wrapper above preserves direct
-// callers and tests; CLI connections use this form.
 func EnsureDaemonConfigured(cfg *config.Config, paths config.Paths, configFile string) (net.Conn, error) {
 	return EnsureDaemonConfiguredContext(context.Background(), cfg, paths, configFile)
 }
@@ -206,15 +200,6 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	return readyConn, nil
 }
 
-// reconcileUnresponsiveDaemon stops a daemon process which owns the PID marker
-// but no longer serves the configured socket. The bool reports whether the
-// marker identified a candidate; a false result means callers must preserve the
-// original startup error. The process identity and start-time checks prevent a
-// stale or recycled PID from being signalled.
-func reconcileUnresponsiveDaemon(paths config.Paths) (bool, error) {
-	return reconcileUnresponsiveDaemonGeneration(paths, nil)
-}
-
 func daemonIdentityFromPIDFile(paths config.Paths) *DaemonIdentity {
 	data, err := os.ReadFile(paths.PIDFile)
 	if err != nil {
@@ -234,6 +219,12 @@ func daemonIdentityFromPIDFile(paths config.Paths) *DaemonIdentity {
 	return &DaemonIdentity{PID: pid, StartTime: start}
 }
 
+// reconcileUnresponsiveDaemonGeneration stops a daemon process which owns the
+// PID marker but no longer serves the configured socket. The bool reports
+// whether the marker identified a candidate; a false result means callers must
+// preserve the original startup error. The process identity and start-time
+// checks prevent a stale or recycled PID from being signalled. When expected is
+// non-nil, only that exact daemon generation is eligible.
 func reconcileUnresponsiveDaemonGeneration(paths config.Paths, expected *DaemonIdentity) (bool, error) {
 	data, err := os.ReadFile(paths.PIDFile)
 	if err != nil {
@@ -284,14 +275,20 @@ func initialDaemonProbeDeadline(startupDeadline time.Time) time.Time {
 	return now.Add(probeBudget)
 }
 
-// daemonResponds reports whether a live graith daemon is listening on sockPath.
-// It dials with a short timeout and performs a throwaway handshake under a
-// deadline, presenting token and profile to match the real handshake (a current
-// daemon exempts the handshake from its auth gate, but a pre-#1066 daemon does
-// not, so the token keeps the probe working against those older versions). A
-// socket that accepts the connection but never completes a graith handshake — a
-// stale socket from a stuck process, or a non-graith server — is reported as not
-// responding, so callers treat it as stale instead of blocking on it forever.
+// daemonRespondsUntil reports whether a live graith daemon is listening on
+// sockPath, with each dial and handshake capped at the remaining aggregate
+// startup budget (issue #1319).
+func daemonRespondsUntil(sockPath, token, profile string, aggregateDeadline time.Time) bool {
+	return daemonRespondsWithDeadline(sockPath, token, profile, aggregateDeadline)
+}
+
+// daemonRespondsWithDeadline dials and performs a throwaway handshake,
+// presenting token and profile to match the real handshake (a current daemon
+// exempts the handshake from its auth gate, but a pre-#1066 daemon does not, so
+// the token keeps the probe working against those older versions). A socket that
+// accepts the connection but never completes a graith handshake — a stale socket
+// from a stuck process, or a non-graith server — is reported as not responding,
+// so callers treat it as stale instead of blocking on it forever.
 //
 // The reply type is matched against an explicit allowlist, NOT "any decodable
 // control frame": handshake_ok, handshake_err (a protocol-level rejection, e.g.
@@ -303,16 +300,6 @@ func initialDaemonProbeDeadline(startupDeadline time.Time) time.Time {
 // treated as not-alive rather than masking a broken daemon. Accepting error is
 // what keeps a tokenless probe from misreading a live, auth-gating daemon as
 // dead and triggering a doomed autostart.
-func daemonResponds(sockPath, token, profile string) bool {
-	return daemonRespondsWithDeadline(sockPath, token, profile, time.Time{})
-}
-
-// daemonRespondsUntil is daemonResponds with each dial and handshake capped at
-// the remaining aggregate startup budget (issue #1319).
-func daemonRespondsUntil(sockPath, token, profile string, aggregateDeadline time.Time) bool {
-	return daemonRespondsWithDeadline(sockPath, token, profile, aggregateDeadline)
-}
-
 func daemonRespondsWithDeadline(sockPath, token, profile string, aggregateDeadline time.Time) bool {
 	var (
 		conn net.Conn
