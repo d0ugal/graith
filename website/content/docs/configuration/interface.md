@@ -129,12 +129,15 @@ IDs within one list, and invalid `toggle_keys` names fail config validation.
 `[session_navigator.selected_detail]` controls the optional wide-terminal
 detail panel for the highlighted session. It never replaces the session tree,
 columns, or live terminal preview. When it is shown, default footer metadata
-moves into the side panel; rows omitted from `fields` are hidden. Set
-`enabled = false` to hide it, raise `min_terminal_width`/`min_terminal_height`
-if you want it only on larger terminals, adjust `max_width` to cap the side
-panel at 38 columns or wider, or trim/reorder `fields` to choose which metadata
-rows are shown. Set `fields = []` to keep only the selected-session heading and
-context line. Supported field IDs are `summary`, `agent`, `model`, `branch`,
+moves into the side panel; rows omitted from `fields` are hidden. The `summary`
+field is rendered as a wrapped full-status block at the bottom of the Navigator
+when the wide detail panel is active, so long `gr status` text remains visible
+without widening the side panel. Set `enabled = false` to hide the wide detail
+surface, raise `min_terminal_width`/`min_terminal_height` if you want it only on
+larger terminals, adjust `max_width` to cap the side panel at 38 columns or
+wider, or trim/reorder `fields` to choose which metadata rows are shown. Set
+`fields = []` to keep only the selected-session heading and context line.
+Supported field IDs are `summary`, `agent`, `model`, `branch`,
 `mode`, `base`, `git`, `worktree`, `cwd`, `pr`, `review`, `labels`, `created`,
 `attached`, `changed`, `deleted`, `purges`, `config`, and `id`. The only
 supported layout today is `side_panel`; the key exists so future Navigator

@@ -505,7 +505,9 @@ expanded_by_default = false   # start the Navigator with expanded help open
 # Wide-terminal selected-session metadata panel in the Session Navigator. The
 # Navigator tree/columns and live terminal preview remain the primary surface;
 # this panel appears only when the terminal is wide enough. Set enabled=false
-# to hide it.
+# to hide it. When "summary" is present in fields, the selected session's full
+# status summary is wrapped at the bottom of the Navigator instead of truncated
+# in the side panel.
 enabled = true
 layout = "side_panel"
 min_terminal_width = 150
