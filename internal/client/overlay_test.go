@@ -3378,7 +3378,8 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 
 	for _, want := range []string{
 		"Selected Session",
-		"Summary:  polishing navigator detail",
+		"Status:",
+		"polishing navigator detail",
 		"Branch:   issue-1870-wide-details",
 		"Base:     main",
 		"Worktree:",
@@ -3397,6 +3398,7 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 	}
 
 	for _, absent := range []string{
+		"Summary:  polishing navigator detail",
 		"branch: issue-1870-wide-details",
 		"PR #1870 open",
 		"/tmp/graith/strath/braw-detail  id:",
@@ -3413,6 +3415,132 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 	}
 }
 
+func TestView_WideSelectedSessionDetailShowsFullStatusAtBottom(t *testing.T) {
+	longStatus := "checking a canny navigator follow-up with full selected session status visible beside the wide detail panel"
+	sessions := []protocol.SessionInfo{{
+		ID:          "braw-full-status",
+		Name:        "braw-status",
+		RepoName:    "graith",
+		Branch:      "d0ugal/graith/issue-1870-wide-details",
+		Agent:       "codex",
+		Status:      "running",
+		SummaryText: longStatus,
+		CreatedAt:   time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+
+	m := newOverlayModel(sessions, "braw-full-status", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 160, 40)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	if !strings.Contains(view, "Selected Session") {
+		t.Fatalf("wide detail panel should render:\n%s", view)
+	}
+
+	if strings.Contains(view, "Summary:") {
+		t.Fatalf("wide detail panel should not keep the old truncated Summary row:\n%s", view)
+	}
+
+	for _, want := range []string{
+		"Status:",
+		"checking a canny navigator follow-up",
+		"full selected session status visible",
+		"detail panel",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("bottom status should contain %q from the full selected-session status:\n%s", want, view)
+		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailVeryLongStatusKeepsHelpVisible(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:          "braw-long-status",
+		Name:        "braw-status",
+		RepoName:    "graith",
+		Agent:       "codex",
+		Status:      "running",
+		SummaryText: strings.Repeat("checking navigator status wrapping ", 40),
+		CreatedAt:   time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+
+	m := newOverlayModel(sessions, "braw-long-status", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 160, 24)
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{
+		"Selected Session",
+		"Status:",
+		"…",
+		"enter attach",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("very long status should preserve %q in the wide Navigator:\n%s", want, view)
+		}
+	}
+
+	for i, line := range strings.Split(asOverlay(updated).View().Content, "\n") {
+		if width := ansi.StringWidth(line); width > 160 {
+			t.Fatalf("line %d width = %d, want <= 160: %q", i+1, width, line)
+		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailSelectionChangeReflowsStatusReserve(t *testing.T) {
+	now := time.Now()
+	sessions := []protocol.SessionInfo{
+		{
+			ID:          "auld-short",
+			Name:        "auld-short",
+			RepoName:    "graith",
+			Agent:       "codex",
+			Status:      "running",
+			SummaryText: "short status",
+			CreatedAt:   now.Add(-2 * time.Hour).Format(time.RFC3339),
+		},
+		{
+			ID:          "braw-long",
+			Name:        "braw-long",
+			RepoName:    "graith",
+			Agent:       "codex",
+			Status:      "running",
+			SummaryText: strings.Repeat("checking navigator status wrapping ", 20),
+			CreatedAt:   now.Add(-2 * time.Hour).Format(time.RFC3339),
+		},
+	}
+
+	for i := 0; i < 18; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("croft-%02d", i),
+			Name:      fmt.Sprintf("croft-%02d", i),
+			RepoName:  "graith",
+			Agent:     "codex",
+			Status:    "running",
+			CreatedAt: now.Add(-time.Duration(i+1) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
+	m := newOverlayModel(sessions, "auld-short", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 160, 24)
+	om := asOverlay(updated)
+	shortHeight := om.list.Height()
+
+	updated, _ = sendKey(om, "down")
+	om = asOverlay(updated)
+
+	if item, ok := om.list.SelectedItem().(sessionItem); !ok || item.info.ID != "braw-long" {
+		t.Fatalf("selected item after down = %#v, want braw-long", om.list.SelectedItem())
+	}
+
+	if om.list.Height() >= shortHeight {
+		t.Fatalf("list height should shrink after selecting a long status: before=%d after=%d", shortHeight, om.list.Height())
+	}
+
+	view := ansi.Strip(om.View().Content)
+	if !strings.Contains(view, "enter attach") {
+		t.Fatalf("reflowed long-status selection should keep help visible:\n%s", view)
+	}
+}
+
 func TestView_CompactOmitsWideSelectedSessionDetailPanel(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
@@ -3422,6 +3550,7 @@ func TestView_CompactOmitsWideSelectedSessionDetailPanel(t *testing.T) {
 			Branch:       "d0ugal/graith/issue-1870-wide-details",
 			Agent:        "codex",
 			Status:       "running",
+			SummaryText:  "checking a canny navigator follow-up with full selected session status visible beside the wide detail panel",
 			Labels:       []string{"cli", "polish"},
 			WorktreePath: "/tmp/graith/strath/braw-detail",
 			CreatedAt:    time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
@@ -3434,6 +3563,10 @@ func TestView_CompactOmitsWideSelectedSessionDetailPanel(t *testing.T) {
 
 	if strings.Contains(view, "Selected Session") {
 		t.Fatalf("compact view should not show the wide-only detail panel:\n%s", view)
+	}
+
+	if strings.Contains(view, "Status:") {
+		t.Fatalf("compact view should not spend footer space on the wide-only full-status block:\n%s", view)
 	}
 
 	for _, want := range []string{
@@ -3517,6 +3650,55 @@ func TestView_WideSelectedSessionDetailSpareWidthFallbackKeepsFooter(t *testing.
 	}
 }
 
+func TestView_WideSelectedSessionDetailSpareWidthFallbackDoesNotReserveStatusRows(t *testing.T) {
+	now := time.Now()
+	sessions := []protocol.SessionInfo{{
+		ID:          "braw-width-detail",
+		Name:        "braw-detail",
+		RepoName:    "graith",
+		Branch:      "d0ugal/graith/issue-1870-wide-details",
+		Agent:       "codex",
+		Status:      "running",
+		SummaryText: strings.Repeat("checking navigator status wrapping ", 20),
+		CreatedAt:   now.Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+
+	for i := 0; i < 20; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("croft-width-%02d", i),
+			Name:      fmt.Sprintf("croft-width-%02d", i),
+			RepoName:  "graith",
+			Agent:     "codex",
+			Status:    "running",
+			CreatedAt: now.Add(-time.Duration(i+1) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
+	for width := 120; width <= 220; width++ {
+		m := newOverlayModel(sessions, "braw-width-detail", nil, nil, nil, nil)
+		updated, _ := sendWindowSize(m, width, 24)
+		om := asOverlay(updated)
+		view := ansi.Strip(om.View().Content)
+
+		if strings.Contains(view, "Selected Session") || om.wideDetailPanelWidth(om.panelWidth()) == 0 {
+			continue
+		}
+
+		if strings.Contains(view, "Status:") {
+			t.Fatalf("spare-width fallback should not render the wide-only status block at width %d:\n%s", width, view)
+		}
+
+		wantHeight := min(len(om.list.Items())+4, om.height-om.baseListReserve())
+		if om.list.Height() != wantHeight {
+			t.Fatalf("spare-width fallback should not reserve hidden status rows at width %d: height=%d want=%d", width, om.list.Height(), wantHeight)
+		}
+
+		return
+	}
+
+	t.Fatal("test setup did not find a width where the pre-render gate allowed wide detail but final layout rejected it")
+}
+
 func TestView_WideSelectedSessionDetailTooTallFallbackKeepsFooter(t *testing.T) {
 	sessions := []protocol.SessionInfo{
 		{
@@ -3543,7 +3725,7 @@ func TestView_WideSelectedSessionDetailTooTallFallbackKeepsFooter(t *testing.T) 
 	m := newOverlayModel(sessions, "braw-tall-detail", nil, nil, nil, nil)
 
 	m.selectedDetail.Fields = append(cloneSelectedDetailFields(defaultSelectedDetailFields),
-		"cwd", "summary", "summary", "summary", "summary", "summary", "summary",
+		"cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd",
 	)
 
 	updated, _ := sendWindowSize(m, 160, 24)
@@ -3562,6 +3744,63 @@ func TestView_WideSelectedSessionDetailTooTallFallbackKeepsFooter(t *testing.T) 
 		if !strings.Contains(view, want) {
 			t.Errorf("too-tall fallback should retain compact footer detail %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestView_WideSelectedSessionDetailTooTallFallbackDoesNotReserveStatusRows(t *testing.T) {
+	now := time.Now()
+	sessions := []protocol.SessionInfo{{
+		ID:              "braw-tall-detail",
+		Name:            "braw-detail",
+		RepoName:        "graith",
+		Branch:          "d0ugal/graith/issue-1870-wide-details",
+		BaseBranch:      "main",
+		Agent:           "codex",
+		Model:           "gpt-5",
+		Status:          "running",
+		SummaryText:     strings.Repeat("checking navigator status wrapping ", 20),
+		WorktreePath:    "/tmp/graith/strath/braw-detail",
+		CWD:             "/tmp/graith/strath/braw-detail",
+		Labels:          []string{"cli", "polish"},
+		CreatedAt:       now.Add(-2 * time.Hour).Format(time.RFC3339),
+		LastAttachedAt:  now.Add(-20 * time.Minute).Format(time.RFC3339),
+		StatusChangedAt: now.Add(-5 * time.Minute).Format(time.RFC3339),
+		PullRequest:     &protocol.PRInfo{Number: 1870, State: "open", ReviewDecision: "review_required"},
+		CI:              &protocol.CIInfo{State: "pending", Passed: 16, Total: 22},
+	}}
+
+	for i := 0; i < 20; i++ {
+		sessions = append(sessions, protocol.SessionInfo{
+			ID:        fmt.Sprintf("croft-%02d", i),
+			Name:      fmt.Sprintf("croft-%02d", i),
+			RepoName:  "graith",
+			Agent:     "codex",
+			Status:    "running",
+			CreatedAt: now.Add(-time.Duration(i+1) * time.Hour).Format(time.RFC3339),
+		})
+	}
+
+	m := newOverlayModel(sessions, "braw-tall-detail", nil, nil, nil, nil)
+
+	m.selectedDetail.Fields = append(cloneSelectedDetailFields(defaultSelectedDetailFields),
+		"cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd", "cwd",
+	)
+
+	updated, _ := sendWindowSize(m, 160, 24)
+	om := asOverlay(updated)
+	view := ansi.Strip(om.View().Content)
+
+	if strings.Contains(view, "Selected Session") {
+		t.Fatalf("detail panel taller than the terminal should fall back to inline footer:\n%s", view)
+	}
+
+	if strings.Contains(view, "Status:") {
+		t.Fatalf("too-tall fallback should not render the wide-only status block:\n%s", view)
+	}
+
+	wantHeight := min(len(om.list.Items())+4, om.height-om.baseListReserve())
+	if om.list.Height() != wantHeight {
+		t.Fatalf("too-tall fallback should not reserve hidden status rows: height=%d want=%d", om.list.Height(), wantHeight)
 	}
 }
 
@@ -3678,6 +3917,7 @@ func TestView_WideSelectedSessionDetailFieldsConfig(t *testing.T) {
 
 	for _, absent := range []string{
 		"Summary:  should be hidden from wide panel",
+		"Status:",
 		"Agent:    codex",
 		"PR:       #1870 open",
 	} {
@@ -4242,6 +4482,37 @@ func TestView_ConfirmDeleteShowsPrompt(t *testing.T) {
 
 	if !strings.Contains(view, "Delete") || !strings.Contains(view, "[y/N]") {
 		t.Error("delete confirmation should show 'Delete ... [y/N]'")
+	}
+}
+
+func TestView_ConfirmDeleteWideDetailLongStatusKeepsPrompt(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:          "braw-delete-status",
+		Name:        "braw-delete-status",
+		RepoName:    "graith",
+		Agent:       "codex",
+		Status:      "running",
+		SummaryText: strings.Repeat("checking navigator delete confirmation status wrapping ", 40),
+		Dirty:       true,
+		CreatedAt:   time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+	}}
+	m := newOverlayModel(sessions, "braw-delete-status", nil, nil, nil, nil)
+	updated, _ := sendWindowSize(m, 160, 24)
+	updated, _ = sendKey(asOverlay(updated), "x")
+	view := ansi.Strip(asOverlay(updated).View().Content)
+
+	for _, want := range []string{
+		"Selected Session",
+		"Session has unsaved work",
+		"Delete 'braw-delete-status'? [y/N]",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("delete confirmation should preserve %q with wide details and long status:\n%s", want, view)
+		}
+	}
+
+	if strings.Contains(view, "Status:") {
+		t.Fatalf("delete confirmation should not spend prompt space on the wide status block:\n%s", view)
 	}
 }
 

@@ -1190,7 +1190,13 @@ func wrapHelpLines(parts []string, width int) []string {
 
 func renderSelectedSessionDetailPanel(item sessionItem, currentSessionID string, panelWidth int, detail SelectedDetailConfig) string {
 	innerWidth := max(1, panelWidth-4)
-	content := renderSelectedSessionDetailContent(item, currentSessionID, innerWidth, detail.Fields)
+
+	fields := detail.Fields
+	if selectedDetailFieldVisible(detail, "summary") {
+		fields = selectedDetailFieldsWithout(fields, "summary")
+	}
+
+	content := renderSelectedSessionDetailContent(item, currentSessionID, innerWidth, fields)
 
 	return lipgloss.NewStyle().
 		Width(panelWidth).
@@ -1234,6 +1240,98 @@ func renderSelectedSessionDetailContent(item sessionItem, currentSessionID strin
 	}
 
 	return b.String()
+}
+
+func selectedDetailFieldVisible(detail SelectedDetailConfig, field string) bool {
+	for _, configured := range detail.Fields {
+		if configured == field {
+			return true
+		}
+	}
+
+	return false
+}
+
+func selectedDetailFieldsWithout(fields []string, skip string) []string {
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if field != skip {
+			out = append(out, field)
+		}
+	}
+
+	return out
+}
+
+func appendSelectedStatusSummary(b *strings.Builder, s protocol.SessionInfo, width, maxLines int) int {
+	lines := selectedStatusSummaryLinesWithLimit(s, width, maxLines)
+	if len(lines) == 0 {
+		return 0
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(colorDim)
+
+	valueStyle := lipgloss.NewStyle()
+	if s.SummaryFaded {
+		valueStyle = valueStyle.Foreground(colorDim)
+	}
+
+	label := detailLabelPrefix("Status")
+	continuation := strings.Repeat(" ", lipgloss.Width(label))
+
+	for i, line := range lines {
+		b.WriteString("\n")
+
+		if i == 0 {
+			b.WriteString(labelStyle.Render(label))
+		} else {
+			b.WriteString(labelStyle.Render(continuation))
+		}
+
+		b.WriteString(valueStyle.Render(line))
+	}
+
+	return len(lines)
+}
+
+func selectedStatusSummaryLinesWithLimit(s protocol.SessionInfo, width, maxLines int) []string {
+	summary := strings.TrimSpace(s.SummaryText)
+	if summary == "" || width <= 0 {
+		return nil
+	}
+
+	valueWidth := statusSummaryValueWidth(width)
+
+	wrapped := ansi.Wrap(summary, valueWidth, " /._")
+	if wrapped == "" {
+		return nil
+	}
+
+	lines := strings.Split(wrapped, "\n")
+
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+
+	if maxLines > 0 {
+		out = clampHelpLines(out, maxLines, valueWidth)
+	}
+
+	return out
+}
+
+func statusSummaryValueWidth(width int) int {
+	prefixWidth := lipgloss.Width(detailLabelPrefix("Status"))
+
+	valueWidth := width - prefixWidth
+	if valueWidth <= 0 {
+		valueWidth = width
+	}
+
+	return valueWidth
 }
 
 func renderSelectedGroupDetailContent(header groupHeader, width int) string {
@@ -1318,9 +1416,7 @@ func appendDetailLine(b *strings.Builder, label, value string, width int, valueS
 		return
 	}
 
-	labelText := label + ":"
-	labelWidth := max(9, lipgloss.Width(labelText))
-	prefix := pad(labelText, labelWidth) + " "
+	prefix := detailLabelPrefix(label)
 	valueWidth := width - lipgloss.Width(prefix)
 
 	if valueWidth > 0 {
@@ -1335,6 +1431,13 @@ func appendDetailLine(b *strings.Builder, label, value string, width int, valueS
 
 	b.WriteString("\n")
 	b.WriteString(fitStyledLine(line, width))
+}
+
+func detailLabelPrefix(label string) string {
+	labelText := label + ":"
+	labelWidth := max(9, lipgloss.Width(labelText))
+
+	return pad(labelText, labelWidth) + " "
 }
 
 func fitDetailTail(value string, width int) string {
@@ -1783,11 +1886,15 @@ func (m *overlayModel) resizeList() {
 		return
 	}
 
-	reserve := 12
-	if m.state == stateConfirmDelete || m.state == stateConfirmStop || m.state == stateConfirmRestart || m.state == stateRestartMenu || m.state == stateRestartingAll {
-		reserve = 14
-	} else if m.state == stateList && m.helpExpanded {
-		reserve += len(m.expandedNavigatorHelpLines(m.panelInnerWidth()))
+	reserve := m.baseListReserve()
+
+	if (m.state == stateList || m.state == stateFilter) && m.wideSelectedDetailFitsHeight(m.primaryPanelRenderedWidth()) {
+		if item, ok := m.list.SelectedItem().(sessionItem); ok {
+			detail := selectedDetailConfigOrDefault(&m.selectedDetail)
+			if selectedDetailFieldVisible(detail, "summary") {
+				reserve += len(selectedStatusSummaryLinesWithLimit(item.info, m.panelInnerWidth(), m.selectedStatusSummaryMaxLines(reserve)))
+			}
+		}
 	}
 
 	listHeight := min(len(m.list.Items())+4, m.height-reserve)
@@ -1797,6 +1904,54 @@ func (m *overlayModel) resizeList() {
 
 	m.list.SetSize(m.panelInnerWidth(), listHeight)
 	m.resizeFilterInput()
+}
+
+func (m *overlayModel) primaryPanelRenderedWidth() int {
+	return m.panelWidth() + 2
+}
+
+func (m *overlayModel) wideSelectedDetailFitsHeight(primaryRenderedWidth int) bool {
+	detailPanelWidth := m.wideDetailPanelWidth(primaryRenderedWidth)
+	if detailPanelWidth == 0 {
+		return false
+	}
+
+	detail := selectedDetailConfigOrDefault(&m.selectedDetail)
+
+	var detailPanel string
+
+	switch item := m.list.SelectedItem().(type) {
+	case sessionItem:
+		detailPanel = renderSelectedSessionDetailPanel(item, m.currentSessionID, detailPanelWidth, detail)
+	case groupHeader:
+		detailPanel = renderSelectedGroupDetailPanel(item, detailPanelWidth)
+	default:
+		return false
+	}
+
+	if detailPanel == "" {
+		return false
+	}
+
+	return len(strings.Split(detailPanel, "\n")) <= m.height
+}
+
+func (m *overlayModel) baseListReserve() int {
+	reserve := 12
+
+	if m.state == stateConfirmDelete || m.state == stateConfirmStop || m.state == stateConfirmRestart || m.state == stateRestartMenu || m.state == stateRestartingAll {
+		return 14
+	}
+
+	if m.state == stateList && m.helpExpanded {
+		reserve += len(m.expandedNavigatorHelpLines(m.panelInnerWidth()))
+	}
+
+	return reserve
+}
+
+func (m *overlayModel) selectedStatusSummaryMaxLines(baseReserve int) int {
+	return max(0, m.height-baseReserve-4)
 }
 
 // SessionNavigatorResult holds the outcome of the Session Navigator interaction.
@@ -3275,6 +3430,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.list.CursorDown()
 				}
 
+				m.resizeList()
+
 				return m, m.fetchPreviewCmd()
 
 			case "k", "up":
@@ -3283,6 +3440,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if _, ok := m.list.SelectedItem().(groupHeader); ok {
 					m.list.CursorUp()
 				}
+
+				m.resizeList()
 
 				return m, m.fetchPreviewCmd()
 
@@ -3294,6 +3453,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if _, ok := items[i].(groupHeader); ok {
 						if i+1 < len(items) {
 							m.list.Select(i + 1)
+							m.resizeList()
+
 							return m, m.fetchPreviewCmd()
 						}
 					}
@@ -3303,6 +3464,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if _, ok := items[i].(groupHeader); ok {
 						if i+1 < len(items) {
 							m.list.Select(i + 1)
+							m.resizeList()
+
 							return m, m.fetchPreviewCmd()
 						}
 					}
@@ -3342,6 +3505,8 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if prevGroupHeader >= 0 && prevGroupHeader+1 < len(items) {
 					m.list.Select(prevGroupHeader + 1)
+					m.resizeList()
+
 					return m, m.fetchPreviewCmd()
 				}
 
@@ -3400,7 +3565,12 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 
+	selectedIndex := m.list.Index()
+
 	m.list, cmd = m.list.Update(msg)
+	if m.list.Index() != selectedIndex {
+		m.resizeList()
+	}
 
 	return m, cmd
 }
@@ -3501,6 +3671,13 @@ func (m *overlayModel) View() tea.View {
 			}
 
 			panelContent.WriteString(fitStyledLine(selectedLine, panelInnerWidth))
+
+			if wideDetailActive && (m.state == stateList || m.state == stateFilter) {
+				detail := selectedDetailConfigOrDefault(&m.selectedDetail)
+				if selectedDetailFieldVisible(detail, "summary") {
+					appendSelectedStatusSummary(&panelContent, s, panelInnerWidth, m.selectedStatusSummaryMaxLines(m.baseListReserve()))
+				}
+			}
 
 			if !wideDetailActive {
 				var line1 []string
@@ -3786,7 +3963,7 @@ func (m *overlayModel) View() tea.View {
 		widePanelRenderedW := renderedBlockWidth(widePanelLines)
 		wideDetailLines, wideDetailRenderedW := renderWideDetail(widePanelRenderedW)
 
-		if wideDetailRenderedW > 0 {
+		if wideDetailRenderedW > 0 && len(widePanelLines) <= h {
 			panelLines = widePanelLines
 			panelRenderedW = widePanelRenderedW
 			detailLines = wideDetailLines
