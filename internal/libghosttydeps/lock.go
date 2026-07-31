@@ -151,10 +151,6 @@ func loadLock(path string, requireProjectionConsistency bool) (Lock, error) {
 	return decodeLock(data, requireProjectionConsistency)
 }
 
-func DecodeLock(data []byte) (Lock, error) {
-	return decodeLock(data, true)
-}
-
 func decodeLock(data []byte, requireProjectionConsistency bool) (Lock, error) {
 	var lock Lock
 
