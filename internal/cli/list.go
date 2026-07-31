@@ -221,12 +221,6 @@ func applyListFilters(sessions []protocol.SessionInfo, children, repo string, st
 	return filtered, nil
 }
 
-// printQuiet emits bare session names, one per line (or a JSON array of session
-// IDs when --json is set), for scripting.
-func printQuiet(cmd *cobra.Command, sessions []protocol.SessionInfo) error {
-	return printQuietWithOutput(cmd, out, sessions)
-}
-
 func printQuietWithOutput(cmd *cobra.Command, writer *output.Writer, sessions []protocol.SessionInfo) error {
 	sorted := make([]protocol.SessionInfo, len(sessions))
 	copy(sorted, sessions)
@@ -358,11 +352,6 @@ func formatDeleteExpiry(s protocol.SessionInfo, now time.Time, colorOn bool) str
 	}
 
 	return "in " + client.ShortDuration(remaining)
-}
-
-// visibleColumns filters trailingColumns by the wide flag.
-func visibleColumns(wide bool) []sessionColumn {
-	return visibleColumnsFor(wide, effectiveListSummaryMode())
 }
 
 func visibleColumnsFor(wide bool, summaryMode listSummaryMode) []sessionColumn {
