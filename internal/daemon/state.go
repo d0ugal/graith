@@ -802,22 +802,6 @@ func LoadState(path string) (*State, error) {
 	return &state, nil
 }
 
-// LoadStateForAdoption is the fail-closed variant used after an exec handoff.
-// Missing, malformed, or unmigratable durable state is an ownership error: the
-// daemon must not substitute NewState and then classify every transferred
-// session as unknown. Unlike ordinary cold-start recovery, this function makes
-// no backup or repair writes before the full file has been validated.
-func LoadStateForAdoption(path string) (*State, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read state for adoption: %w", err)
-	}
-
-	state, _, err := LoadStateSnapshotForAdoption(data)
-
-	return state, err
-}
-
 // stateSnapshotVersion validates the JSON envelope and returns only its state
 // version. Upgrade adoption uses this before migration so it can durably back
 // up the exact handed-off bytes before mutating the in-memory manager state.
