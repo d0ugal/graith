@@ -654,8 +654,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// Pre-spawn time for native session-id capture (see Create).
 	startedAt := time.Now()
 
-	lc := sm.Config().Lifecycle
-	historyRows := sm.Config().Limits.LogLinesOrDefault()
+	launchCfg := sm.Config()
+	lc := launchCfg.Lifecycle
+	historyRows := launchCfg.Terminal.HistoryRowsOrDefault()
 
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,

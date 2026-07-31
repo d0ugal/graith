@@ -2205,9 +2205,10 @@ func (r ResourceMonitor) SampleHistoryOrDefault() int {
 // name (lines, bytes, runes) so a single number is unambiguous.
 type LimitsConfig struct {
 	// LogLines is the default number of trailing output lines shown when a
-	// `lines`/`-n` count is not given: `gr logs` and the scrollback replayed to a
-	// client on attach share it. Values < 1 fall back to the default
-	// (LimitsLogLinesDefault).
+	// `lines`/`-n` count is not given: `gr logs` and the raw scrollback
+	// replay/fallback sent to a client on attach share it. It does not control
+	// terminal-owned interactive history; see TerminalConfig.HistoryRows.
+	// Values < 1 fall back to the default (LimitsLogLinesDefault).
 	LogLines int `toml:"log_lines"`
 	// WaitScanLines bounds how much existing scrollback `gr wait --contains`
 	// scans for an already-present match before it starts following live output.
@@ -2288,18 +2289,19 @@ func (l LimitsConfig) InboxPreviewBytesOrDefault() int {
 	return l.InboxPreviewBytes
 }
 
-// TerminalConfig is the [terminal] block: user-tunable interactive-TUI
-// presentation preferences that were previously fixed literals in the client
-// (issue #1254) — how often interactive session views refresh, and how
-// wide a `gr status` summary may grow in the Navigator before truncation.
+// TerminalConfig is the [terminal] block: user-tunable interactive terminal
+// preferences: how often interactive session views refresh, how wide a
+// `gr status` summary may grow in the Navigator before truncation, and how much
+// terminal-owned formatted history a PTY retains for interactive scroll mode.
 //
 // Session-lifecycle presentation (the fallback terminal geometry and the
 // per-session scrollback cap) is deliberately NOT here: it lives in the
 // [lifecycle] block (issue #1243, default_cols/default_rows/max_log_bytes),
-// which owns the daemon's PTY seed. Layout invariants (the Navigator's column
-// arithmetic, wrap widths, the minimum name column, and the GUI's frame rate)
-// are also excluded — they must match render logic and stay as documented
-// constants. Every field is optional and falls back to its default constant.
+// which owns the daemon's raw scrollback and PTY seed geometry. Layout
+// invariants (the Navigator's column arithmetic, wrap widths, the minimum name
+// column, and the GUI's frame rate) are also excluded — they must match render
+// logic and stay as documented constants. Every field is optional and falls
+// back to its default constant.
 type TerminalConfig struct {
 	// RefreshInterval is the cadence at which the Session Navigator, attached
 	// status bar, and message viewer re-poll the daemon for fresh session state.
@@ -2310,13 +2312,19 @@ type TerminalConfig struct {
 	// summary shown against a session in the Navigator before it is truncated with
 	// an ellipsis. Values < 1 fall back to the default (TerminalSummaryWidth).
 	SummaryWidth int `toml:"summary_width"`
+	// HistoryRows is the requested formatted terminal-owned history depth for
+	// new/adopted PTY sessions. Values < 1 fall back to the default
+	// (TerminalHistoryRowsDefault). The PTY backend may clamp this further by
+	// its own row and cell ceilings.
+	HistoryRows int `toml:"history_rows"`
 }
 
-// Terminal presentation defaults mirror the fixed literals that governed the
-// behaviour before issue #1254 made the policy configurable.
+// Terminal defaults back the [terminal] accessors when a value is omitted or
+// non-positive.
 const (
 	TerminalRefreshIntervalDefault = 2 * time.Second
 	TerminalSummaryWidth           = 40
+	TerminalHistoryRowsDefault     = 2000
 )
 
 // RefreshIntervalDuration returns the TUI refresh cadence, or the default when
@@ -2333,6 +2341,17 @@ func (t TerminalConfig) SummaryWidthValue() int {
 	}
 
 	return t.SummaryWidth
+}
+
+// HistoryRowsOrDefault returns the formatted terminal-owned scrollback row
+// depth for new/adopted PTY sessions, or the default when the configured value
+// is non-positive. This deliberately does not fall back to [limits].log_lines.
+func (t TerminalConfig) HistoryRowsOrDefault() int {
+	if t.HistoryRows < 1 {
+		return TerminalHistoryRowsDefault
+	}
+
+	return t.HistoryRows
 }
 
 type GitPullConfig struct {
@@ -5143,9 +5162,9 @@ func (c *Config) Validate() error {
 	// [terminal] refresh_interval: a non-empty but unparseable value must fail
 	// loudly rather than silently falling back to the accessor default, and it
 	// must be positive — a zero/negative cadence would busy-loop the refresh
-	// tick. The integer summary_width field self-clamps in its accessor (a
-	// non-positive value simply means "use the default"), so it needs no
-	// load-time rejection.
+	// tick. The integer summary_width and history_rows fields self-clamp in
+	// their accessors (a non-positive value simply means "use the default"), so
+	// they need no load-time rejection.
 	if s := strings.TrimSpace(c.Terminal.RefreshInterval); s != "" {
 		if d, err := ParseDurationWithDays(s); err != nil {
 			errs = append(errs, fmt.Errorf("terminal.refresh_interval %q: %w", s, err))

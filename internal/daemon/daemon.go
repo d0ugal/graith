@@ -864,7 +864,8 @@ func (sm *SessionManager) adoptSessions(
 	persist bool,
 ) (UpgradeAdoptionResult, error) {
 	sm.mu.RLock()
-	lc := sm.cfg.Lifecycle
+	cfgSnapshot := sm.cfg
+	lc := cfgSnapshot.Lifecycle
 	adoptSession := sm.adoptSession
 	sm.mu.RUnlock()
 
@@ -1113,7 +1114,7 @@ func (sm *SessionManager) adoptSessions(
 			Logger:               sm.log,
 			DegradedScreen:       true,
 			DeferWait:            true,
-			TerminalHistoryRows:  sm.Config().Limits.LogLinesOrDefault(),
+			TerminalHistoryRows:  cfgSnapshot.Terminal.HistoryRowsOrDefault(),
 		})
 		if adoptErr != nil {
 			cleaned, cleanupErr := terminateFailedUpgradeSession(us)

@@ -247,8 +247,9 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		"unix_sockets", opts.UnixSockets,
 		"workdir", opts.WorktreeDir)
 
-	lc := sm.Config().Lifecycle
-	historyRows := sm.Config().Limits.LogLinesOrDefault()
+	cfgSnapshot := sm.Config()
+	lc := cfgSnapshot.Lifecycle
+	historyRows := cfgSnapshot.Terminal.HistoryRowsOrDefault()
 
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,

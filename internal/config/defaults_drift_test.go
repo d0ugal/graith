@@ -137,7 +137,7 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 		}
 	})
 
-	t.Run("terminal presentation", func(t *testing.T) {
+	t.Run("terminal", func(t *testing.T) {
 		term := d.Terminal
 		if term.RefreshInterval != "2s" {
 			t.Errorf("Default().Terminal.RefreshInterval = %q, want %q", term.RefreshInterval, "2s")
@@ -149,6 +149,14 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 
 		if got := term.RefreshIntervalDuration(); got != TerminalRefreshIntervalDefault {
 			t.Errorf("Default().Terminal.RefreshIntervalDuration() = %v, want %v", got, TerminalRefreshIntervalDefault)
+		}
+
+		if term.HistoryRows != TerminalHistoryRowsDefault {
+			t.Errorf("Default().Terminal.HistoryRows = %d, want %d", term.HistoryRows, TerminalHistoryRowsDefault)
+		}
+
+		if got := term.HistoryRowsOrDefault(); got != TerminalHistoryRowsDefault {
+			t.Errorf("Default().Terminal.HistoryRowsOrDefault() = %d, want %d", got, TerminalHistoryRowsDefault)
 		}
 	})
 

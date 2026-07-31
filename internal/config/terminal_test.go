@@ -8,11 +8,11 @@ import (
 )
 
 // TestTerminal_EmbeddedDefaults asserts the embedded default config reproduces
-// exactly the terminal/TUI presentation literals that were hard-coded before
-// issue #1254, so a fresh install behaves identically. It asserts the RAW fields
-// parsed from the embedded TOML (not just the accessor), so a default silently
-// dropped from the TOML — leaving only the Go fallback — fails here (see the
-// "config default fallback defeated by embedded TOML" trap).
+// exactly the terminal/TUI literals, so a fresh install behaves as documented.
+// It asserts the RAW fields parsed from the embedded TOML (not just the
+// accessor), so a default silently dropped from the TOML — leaving only the Go
+// fallback — fails here (see the "config default fallback defeated by embedded
+// TOML" trap).
 func TestTerminal_EmbeddedDefaults(t *testing.T) {
 	d := Default().Terminal
 
@@ -24,12 +24,20 @@ func TestTerminal_EmbeddedDefaults(t *testing.T) {
 		t.Errorf("embedded terminal summary_width = %d, want %d", d.SummaryWidth, TerminalSummaryWidth)
 	}
 
+	if d.HistoryRows != TerminalHistoryRowsDefault {
+		t.Errorf("embedded terminal history_rows = %d, want %d", d.HistoryRows, TerminalHistoryRowsDefault)
+	}
+
 	if got := d.RefreshIntervalDuration(); got != 2*time.Second {
 		t.Errorf("default RefreshIntervalDuration() = %v, want 2s", got)
 	}
 
 	if got := d.SummaryWidthValue(); got != TerminalSummaryWidth {
 		t.Errorf("default SummaryWidthValue() = %d, want %d", got, TerminalSummaryWidth)
+	}
+
+	if got := d.HistoryRowsOrDefault(); got != TerminalHistoryRowsDefault {
+		t.Errorf("default HistoryRowsOrDefault() = %d, want %d", got, TerminalHistoryRowsDefault)
 	}
 }
 
@@ -47,10 +55,14 @@ func TestTerminal_Accessors(t *testing.T) {
 		if got := d.SummaryWidthValue(); got != TerminalSummaryWidth {
 			t.Errorf("summary empty = %d, want %d", got, TerminalSummaryWidth)
 		}
+
+		if got := d.HistoryRowsOrDefault(); got != TerminalHistoryRowsDefault {
+			t.Errorf("history rows empty = %d, want %d", got, TerminalHistoryRowsDefault)
+		}
 	})
 
 	t.Run("valid values parse", func(t *testing.T) {
-		d := TerminalConfig{RefreshInterval: "500ms", SummaryWidth: 64}
+		d := TerminalConfig{RefreshInterval: "500ms", SummaryWidth: 64, HistoryRows: 1234}
 
 		if got := d.RefreshIntervalDuration(); got != 500*time.Millisecond {
 			t.Errorf("refresh = %v, want 500ms", got)
@@ -58,6 +70,10 @@ func TestTerminal_Accessors(t *testing.T) {
 
 		if got := d.SummaryWidthValue(); got != 64 {
 			t.Errorf("summary = %d, want 64", got)
+		}
+
+		if got := d.HistoryRowsOrDefault(); got != 1234 {
+			t.Errorf("history rows = %d, want 1234", got)
 		}
 	})
 
@@ -73,6 +89,14 @@ func TestTerminal_Accessors(t *testing.T) {
 		for _, in := range []int{0, -3} {
 			if got := (TerminalConfig{SummaryWidth: in}).SummaryWidthValue(); got != TerminalSummaryWidth {
 				t.Errorf("SummaryWidthValue(%d) = %d, want default", in, got)
+			}
+		}
+	})
+
+	t.Run("non-positive history_rows falls back", func(t *testing.T) {
+		for _, in := range []int{0, -3} {
+			if got := (TerminalConfig{HistoryRows: in}).HistoryRowsOrDefault(); got != TerminalHistoryRowsDefault {
+				t.Errorf("HistoryRowsOrDefault(%d) = %d, want default", in, got)
 			}
 		}
 	})
@@ -106,13 +130,17 @@ refresh_interval = "5s"
 	if got := cfg.Terminal.SummaryWidthValue(); got != TerminalSummaryWidth {
 		t.Errorf("summary_width = %d, want %d (default retained)", got, TerminalSummaryWidth)
 	}
+
+	if got := cfg.Terminal.HistoryRowsOrDefault(); got != TerminalHistoryRowsDefault {
+		t.Errorf("history_rows = %d, want %d (default retained)", got, TerminalHistoryRowsDefault)
+	}
 }
 
 // TestValidateRejectsBadRefreshInterval confirms an unparseable or non-positive
 // [terminal] refresh_interval fails at load rather than silently falling back to
 // the accessor default (a zero/negative cadence would busy-loop the refresh
-// tick). The integer summary_width field self-clamps and so is never a load-time
-// error.
+// tick). Integer terminal fields such as summary_width and history_rows
+// self-clamp and so are never load-time errors.
 func TestValidateRejectsBadRefreshInterval(t *testing.T) {
 	for _, bad := range []string{"blether", "0", "-1s"} {
 		cfg := Default()

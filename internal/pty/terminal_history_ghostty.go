@@ -5,7 +5,9 @@ package pty
 import "strings"
 
 const (
-	defaultTerminalHistoryRows = 300
+	// For v1, invalid/omitted requests receive the largest history the backend
+	// supports; explicit larger requests clamp to the same cap below.
+	defaultTerminalHistoryRows = 2000
 	maxTerminalHistoryRows     = 2000
 	maxTerminalHistoryCells    = 256 * 1024
 )
