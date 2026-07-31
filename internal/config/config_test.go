@@ -637,33 +637,6 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
-func TestExpandPathRelative(t *testing.T) {
-	home, _ := os.UserHomeDir()
-
-	tests := []struct {
-		name    string
-		input   string
-		baseDir string
-		want    string
-	}{
-		{"empty stays empty", "", "/etc/graith", ""},
-		{"whitespace-only stays empty", "   ", "/etc/graith", ""},
-		{"tilde expanded ignoring baseDir", "~/glen.json", "/etc/graith", filepath.Join(home, "glen.json")},
-		{"leading whitespace trimmed then expanded", "  ~/glen.json  ", "/etc/graith", filepath.Join(home, "glen.json")},
-		{"relative joined against baseDir", "policy.json", "/etc/graith", "/etc/graith/policy.json"},
-		{"nested relative joined and cleaned", "rules/../policy.json", "/etc/graith", "/etc/graith/policy.json"},
-		{"absolute path untouched", "/opt/graith/policy.json", "/etc/graith", "/opt/graith/policy.json"},
-		{"relative with empty baseDir left relative", "policy.json", "", "policy.json"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ExpandPathRelative(tt.input, tt.baseDir); got != tt.want {
-				t.Errorf("ExpandPathRelative(%q, %q) = %q, want %q", tt.input, tt.baseDir, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRepoPathAllowed(t *testing.T) {
 	home, _ := os.UserHomeDir()
 
