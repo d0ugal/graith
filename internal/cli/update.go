@@ -15,6 +15,7 @@ import (
 type updateOptions struct {
 	name         *string
 	parent       *string
+	orphan       bool
 	starred      *bool
 	addLabels    []string
 	removeLabels []string
@@ -23,12 +24,13 @@ type updateOptions struct {
 var updateCmd = &cobra.Command{
 	Use:               "update <name-or-id>",
 	Short:             "Update session properties",
-	Long:              "Update session properties such as name, parent, and starred state. Use --parent \"\" to orphan a session.",
+	Long:              "Update session properties such as name, parent, and starred state. Use --orphan from a direct parent session to clear that parent safely.",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		nameFlag, _ := cmd.Flags().GetString("name")
 		parentFlag, _ := cmd.Flags().GetString("parent")
+		orphanFlag, _ := cmd.Flags().GetBool("orphan")
 		starredFlag, _ := cmd.Flags().GetBool("starred")
 		addLabels, _ := cmd.Flags().GetStringArray("add-label")
 		removeLabels, _ := cmd.Flags().GetStringArray("remove-label")
@@ -40,6 +42,10 @@ var updateCmd = &cobra.Command{
 
 		if cmd.Flags().Changed("parent") {
 			opts.parent = &parentFlag
+		}
+
+		if cmd.Flags().Changed("orphan") && orphanFlag {
+			opts.orphan = true
 		}
 
 		if cmd.Flags().Changed("starred") {
@@ -71,8 +77,12 @@ var updateCmd = &cobra.Command{
 }
 
 func validateUpdateOptions(opts updateOptions) error {
-	if opts.name == nil && opts.parent == nil && opts.starred == nil && opts.addLabels == nil && opts.removeLabels == nil {
-		return errors.New("at least one of --name, --parent, --starred, --add-label, or --remove-label must be specified")
+	if opts.name == nil && opts.parent == nil && !opts.orphan && opts.starred == nil && opts.addLabels == nil && opts.removeLabels == nil {
+		return errors.New("at least one of --name, --parent, --orphan, --starred, --add-label, or --remove-label must be specified")
+	}
+
+	if opts.parent != nil && opts.orphan {
+		return errors.New("--orphan cannot be used with --parent")
 	}
 
 	if opts.name != nil {
@@ -113,6 +123,7 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 	msg := protocol.UpdateMsg{
 		SessionID:    session.ID,
 		Name:         opts.name,
+		Orphan:       opts.orphan,
 		Starred:      opts.starred,
 		AddLabels:    opts.addLabels,
 		RemoveLabels: opts.removeLabels,
@@ -161,7 +172,7 @@ func runUpdate(c controlConn, nameOrID string, opts updateOptions) error {
 		out.Printf("Name: %s\n", result.Name)
 	}
 
-	if opts.parent != nil {
+	if opts.parent != nil || opts.orphan {
 		if result.ParentID == "" {
 			out.Printf("Parent: none\n")
 		} else {
@@ -239,10 +250,12 @@ func resolveUpdatableSessionInfo(c controlConn, nameOrID string) (*protocol.Sess
 // registerUpdateCmd registers this command on rootCmd. Called from registerCommands.
 func registerUpdateCmd() {
 	updateCmd.Flags().String("name", "", "new session name")
-	updateCmd.Flags().String("parent", "", "new parent session (empty string to orphan)")
+	updateCmd.Flags().String("parent", "", "new parent session (empty string to orphan explicitly)")
+	updateCmd.Flags().Bool("orphan", false, "clear parent only when caller is the session's direct parent")
 	updateCmd.Flags().Bool("starred", false, "set whether the session is starred (bare flag means true)")
 	updateCmd.Flags().StringArray("add-label", nil, "add a session label (repeatable)")
 	updateCmd.Flags().StringArray("remove-label", nil, "remove a session label (repeatable)")
+	updateCmd.MarkFlagsMutuallyExclusive("parent", "orphan")
 	_ = updateCmd.RegisterFlagCompletionFunc("parent", func(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return completeSessionNames(cmd, nil, toComplete)
 	})

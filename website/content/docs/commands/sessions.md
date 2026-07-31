@@ -330,16 +330,21 @@ sessions must be restored first.
 | Flag | Description |
 |------|-------------|
 | `--name <new-name>` | Set the session name |
-| `--parent <name-or-id>` | Set the parent session; pass an empty string to orphan |
+| `--parent <name-or-id>` | Set the parent session; pass an empty string to explicitly orphan |
+| `--orphan` | Clear the parent only when the command is run from the session's direct parent |
 | `--starred[=true\|false]` | Set deletion protection and Starred-view membership; a bare flag means true |
 | `--add-label <label>` | Add one label; repeat for multiple additions |
 | `--remove-label <label>` | Remove one label; repeat for multiple removals |
 
 The target and a non-empty parent may be a unique session name or an ID; an
-ambiguous name is rejected. Flags can be combined in one persisted update:
+ambiguous name is rejected. `--orphan` is mutually exclusive with `--parent` and
+is intended to be run inside a parent session when handing a direct child back
+to the user without accidentally clearing another session's parent. Flags can
+be combined in one persisted update:
 
 ```bash
 gr update important-session --name release-watch --parent orchestrator --starred
+gr update child-session --orphan  # from child-session's direct parent
 gr update release-watch --starred=false
 gr update release-watch --add-label urgent --add-label release
 gr update release-watch --remove-label urgent

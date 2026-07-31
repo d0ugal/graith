@@ -49,6 +49,8 @@ func TestValidateUpdateOptions(t *testing.T) {
 		{name: "no properties", wantErr: "at least one"},
 		{name: "valid name", opts: updateOptions{name: strptr("bonnie")}},
 		{name: "valid orphan", opts: updateOptions{parent: strptr("")}},
+		{name: "valid safe orphan", opts: updateOptions{orphan: true}},
+		{name: "safe orphan with parent", opts: updateOptions{parent: strptr("ben"), orphan: true}, wantErr: "--orphan cannot be used with --parent"},
 		{name: "valid starred false", opts: updateOptions{starred: boolptr(false)}},
 		{name: "valid labels", opts: updateOptions{addLabels: []string{"Urgent"}, removeLabels: []string{"release"}}},
 		{name: "empty label", opts: updateOptions{addLabels: []string{""}}, wantErr: "must not be empty"},
@@ -268,6 +270,33 @@ func TestRunUpdateCombinedProperties(t *testing.T) {
 	}
 }
 
+func TestRunUpdateSafeOrphan(t *testing.T) {
+	buf := captureUpdateOutput(t, false)
+	c := &scriptedConn{responses: []scriptedResp{
+		okResp(payloadEnv("session_list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+			{ID: "id-bairn", Name: "bairn", ParentID: "id-ben"},
+		}})),
+		updatedResp("id-bairn", "bairn", "", false),
+	}}
+
+	if err := runUpdate(c, "id-bairn", updateOptions{orphan: true}); err != nil {
+		t.Fatalf("runUpdate: %v", err)
+	}
+
+	if got := c.sentTypes(); len(got) != 2 || got[0] != "list" || got[1] != "update" {
+		t.Fatalf("sent = %v, want [list update]", got)
+	}
+
+	msg := c.sends[1].Payload.(protocol.UpdateMsg)
+	if msg.SessionID != "id-bairn" || !msg.Orphan || msg.ParentID != nil {
+		t.Fatalf("payload = %+v, want orphan update without parent_id", msg)
+	}
+
+	if got := buf.String(); got != "Parent: none\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
 func TestRunUpdateDaemonError(t *testing.T) {
 	captureUpdateOutput(t, false)
 
@@ -320,6 +349,11 @@ func TestRunUpdateStarredFalseReportsResult(t *testing.T) {
 
 func TestUpdateStarredFlagAndRemovedCommands(t *testing.T) {
 	registerCommands()
+
+	orphanFlag := updateCmd.Flags().Lookup("orphan")
+	if orphanFlag == nil {
+		t.Fatal("update --orphan flag is not registered")
+	}
 
 	flag := updateCmd.Flags().Lookup("starred")
 	if flag == nil {

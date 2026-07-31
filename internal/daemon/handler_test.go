@@ -4895,6 +4895,139 @@ func TestUpdateAllowsHumanOrphan(t *testing.T) {
 	}
 }
 
+func TestUpdateOrphanRejectsHumanCaller(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.setParent(t, "bairn", "ben")
+
+	h.sendControl(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		Orphan:    true,
+	})
+
+	env := h.expectType(t, "error")
+
+	var e protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(env, &e)
+
+	if !strings.Contains(e.Message, "direct parent") {
+		t.Errorf("error = %q, want direct-parent guidance", e.Message)
+	}
+
+	if got := h.parentOf(t, "bairn"); got != "ben" {
+		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
+	}
+}
+
+func TestUpdateOrphanAllowsDirectParent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.setParent(t, "bairn", "ben")
+
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		Orphan:    true,
+	}, "tok-ben")
+
+	env := h.readControlMsg(t)
+	if env.Type != "updated" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(env, &e)
+		t.Fatalf("expected updated, got %q (%s)", env.Type, e.Message)
+	}
+
+	if got := h.parentOf(t, "bairn"); got != "" {
+		t.Errorf("bairn ParentID = %q, want cleared", got)
+	}
+}
+
+func TestUpdateOrphanRejectsNonParent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "scunner", "scunner", "tok-scunner")
+	h.setParent(t, "bairn", "ben")
+
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		Orphan:    true,
+	}, "tok-scunner")
+
+	env := h.expectType(t, "error")
+
+	var e protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(env, &e)
+
+	if !strings.Contains(e.Message, "not authorized") {
+		t.Errorf("error = %q, want 'not authorized'", e.Message)
+	}
+
+	if got := h.parentOf(t, "bairn"); got != "ben" {
+		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
+	}
+}
+
+func TestUpdateOrphanRejectsAncestorThatIsNotDirectParent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "wee-bairn", "wee-bairn", "tok-wee")
+	h.setParent(t, "bairn", "ben")
+	h.setParent(t, "wee-bairn", "bairn")
+
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "wee-bairn",
+		Orphan:    true,
+	}, "tok-ben")
+
+	env := h.expectType(t, "error")
+
+	var e protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(env, &e)
+
+	if !strings.Contains(e.Message, "direct parent") {
+		t.Errorf("error = %q, want direct-parent guidance", e.Message)
+	}
+
+	if got := h.parentOf(t, "wee-bairn"); got != "bairn" {
+		t.Errorf("wee-bairn ParentID = %q, want unchanged (bairn)", got)
+	}
+}
+
+func TestUpdateOrphanRejectsParentIDCombination(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn", "bairn", "tok-bairn")
+	h.setParent(t, "bairn", "ben")
+
+	empty := ""
+	h.sendControlWithToken(t, "update", protocol.UpdateMsg{
+		SessionID: "bairn",
+		ParentID:  &empty,
+		Orphan:    true,
+	}, "tok-ben")
+
+	env := h.expectType(t, "error")
+
+	var e protocol.ErrorMsg
+
+	_ = protocol.DecodePayload(env, &e)
+
+	if !strings.Contains(e.Message, "cannot be combined") {
+		t.Errorf("error = %q, want mutual exclusion guidance", e.Message)
+	}
+
+	if got := h.parentOf(t, "bairn"); got != "ben" {
+		t.Errorf("bairn ParentID = %q, want unchanged (ben)", got)
+	}
+}
+
 // #568: rename-only updates (no ParentID) are still gated by the target check —
 // a session cannot rename an unrelated session.
 func TestUpdateRejectsRenameOnlyUnrelated(t *testing.T) {

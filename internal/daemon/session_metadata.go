@@ -16,6 +16,8 @@ import (
 	"github.com/d0ugal/graith/internal/sessionlabel"
 )
 
+var errParentChangedSinceAuthorization = errors.New("parent changed since authorization")
+
 func sanitizeSummaryText(text string) string {
 	var b strings.Builder
 
@@ -87,11 +89,14 @@ func (sm *SessionManager) ClearSummary(sessionID string) error {
 // fields are left unchanged; labels are individual add/remove operations so a
 // stale client never replaces another client's complete set.
 type SessionUpdate struct {
-	Name         *string
-	ParentID     *string
-	Starred      *bool
-	AddLabels    []string
-	RemoveLabels []string
+	Name     *string
+	ParentID *string
+	// ExpectedParentID requires the current parent to match while sm.mu is held.
+	// This binds safe orphan authorization to the parent edge being cleared.
+	ExpectedParentID *string
+	Starred          *bool
+	AddLabels        []string
+	RemoveLabels     []string
 }
 
 // Update preserves the pre-label call shape for internal lifecycle callers.
@@ -145,6 +150,10 @@ func (sm *SessionManager) UpdateMetadata(id string, update SessionUpdate) (Sessi
 	}
 
 	newParentValue := s.ParentID
+
+	if update.ExpectedParentID != nil && s.ParentID != *update.ExpectedParentID {
+		return SessionState{}, errParentChangedSinceAuthorization
+	}
 
 	if update.ParentID != nil {
 		newParent := *update.ParentID

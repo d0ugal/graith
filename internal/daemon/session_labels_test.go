@@ -299,6 +299,30 @@ func TestUpdateMetadataRejectsActiveSubtree(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadataRejectsExpectedParentMismatchWithoutMutation(t *testing.T) {
+	sm := newTestSessionManager(t)
+	putSession(sm, &SessionState{
+		ID: "braw-id", Name: "braw", ParentID: "canny-id", Status: StatusStopped,
+	})
+
+	empty := ""
+	expectedParent := "ben-id"
+	name := "bonnie"
+	starred := true
+
+	_, err := sm.UpdateMetadata("braw-id", SessionUpdate{
+		Name: &name, ParentID: &empty, ExpectedParentID: &expectedParent, Starred: &starred,
+	})
+	if err == nil {
+		t.Fatal("UpdateMetadata unexpectedly cleared a mismatched parent")
+	}
+
+	got, _ := sm.Get("braw-id")
+	if got.Name != "braw" || got.ParentID != "canny-id" || got.Starred {
+		t.Fatalf("failed expected-parent check mutated session: %+v", got)
+	}
+}
+
 func TestUpdateMetadataSaveFailureRollsBackEveryField(t *testing.T) {
 	sm := newTestSessionManager(t)
 	putSession(sm, &SessionState{

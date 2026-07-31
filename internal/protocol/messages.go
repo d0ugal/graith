@@ -313,6 +313,7 @@ type UpdateMsg struct {
 	SessionID    string   `json:"session_id"`
 	Name         *string  `json:"name,omitempty"`
 	ParentID     *string  `json:"parent_id,omitempty"`
+	Orphan       bool     `json:"orphan,omitempty"`
 	Starred      *bool    `json:"starred,omitempty"`
 	AddLabels    []string `json:"add_labels,omitempty"`
 	RemoveLabels []string `json:"remove_labels,omitempty"`

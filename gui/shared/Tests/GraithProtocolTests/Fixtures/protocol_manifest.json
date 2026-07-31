@@ -7059,6 +7059,13 @@
           "optional": true
         },
         {
+          "name": "orphan",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
           "name": "starred",
           "type": {
             "kind": "bool"
