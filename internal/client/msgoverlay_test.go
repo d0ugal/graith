@@ -200,7 +200,7 @@ func testModel(n int) messageOverlayModel {
 		}
 	}
 
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", msgs, nil)
 	m.loaded = true
 	m.msgCursor = m.msgCount() - 1 // start on the most recent, as the UI does
@@ -291,7 +291,7 @@ func TestMessageOverlayLongMessageScroll(t *testing.T) {
 		sb.WriteString("\n")
 	}
 
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
 		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: sb.String(), CreatedAt: "2026-06-25T10:00:00Z"},
 		{ID: "m1", Stream: "inbox:ben", SenderID: "bairn", Body: "short tail", CreatedAt: "2026-06-25T10:00:01Z"},
@@ -341,7 +341,7 @@ func longMessageModel() messageOverlayModel {
 		sb.WriteString("\n")
 	}
 
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
 		{ID: "m0", Stream: "inbox:ben", SenderID: "bairn", Body: sb.String(), CreatedAt: "2026-06-25T10:00:00Z"},
 		{ID: "m1", Stream: "inbox:ben", SenderID: "bairn", Body: "short tail", CreatedAt: "2026-06-25T10:00:01Z"},
@@ -592,10 +592,10 @@ func TestCurrentEntry_OutOfRange(t *testing.T) {
 // --- Init / tickCmd / fetchCmd ---
 
 func TestMsgOverlay_InitReturnsBatch(t *testing.T) {
-	m := newMessageOverlayModel("ben", func() ([]protocol.ConversationMessage, bool) {
-		return []protocol.ConversationMessage{
+	m := newMessageBrowserModel("ben", func(MessageFetchRequest) (MessageFetchResult, bool) {
+		return MessageFetchResult{DirectMessages: []protocol.ConversationMessage{
 			cm("inbox:ben", "bairn", "wee-bairn", "hi", "2026-06-25T10:00:00Z"),
-		}, true
+		}}, true
 	}, nil)
 
 	cmd := m.Init()
@@ -610,10 +610,10 @@ func TestMsgOverlay_InitReturnsBatch(t *testing.T) {
 }
 
 func TestMsgOverlay_FetchCmdGroupsConversations(t *testing.T) {
-	m := newMessageOverlayModel("ben", func() ([]protocol.ConversationMessage, bool) {
-		return []protocol.ConversationMessage{
+	m := newMessageBrowserModel("ben", func(MessageFetchRequest) (MessageFetchResult, bool) {
+		return MessageFetchResult{DirectMessages: []protocol.ConversationMessage{
 			cm("inbox:ben", "bairn", "wee-bairn", "hi", "2026-06-25T10:00:00Z"),
-		}, true
+		}}, true
 	}, nil)
 
 	msg := m.fetchCmd()()
@@ -629,7 +629,7 @@ func TestMsgOverlay_FetchCmdGroupsConversations(t *testing.T) {
 }
 
 func TestMsgOverlay_FetchCmdNilFetch(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 
 	fetched, ok := m.fetchCmd()().(msgFetchedMsg)
 	if !ok || !fetched.ok {
@@ -642,8 +642,8 @@ func TestMsgOverlay_FetchCmdNilFetch(t *testing.T) {
 }
 
 func TestMsgOverlay_FetchCmdTransientError(t *testing.T) {
-	m := newMessageOverlayModel("ben", func() ([]protocol.ConversationMessage, bool) {
-		return nil, false
+	m := newMessageBrowserModel("ben", func(MessageFetchRequest) (MessageFetchResult, bool) {
+		return MessageFetchResult{}, false
 	}, nil)
 
 	fetched := m.fetchCmd()().(msgFetchedMsg)
@@ -798,7 +798,7 @@ func TestMsgOverlay_FetchErrorKeepsSnapshot(t *testing.T) {
 }
 
 func TestMsgOverlay_FetchedDirectStartsAtLatest(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	fetched := groupConversations("ben", []protocol.ConversationMessage{
 		cmID("m0", "inbox:ben", "bairn", "bairn", "auld", "2026-06-25T10:00:00Z"),
 		cmID("m1", "inbox:ben", "bairn", "bairn", "canny", "2026-06-25T10:00:01Z"),
@@ -1045,7 +1045,7 @@ func TestMsgOverlay_TopicRefreshFollowsLatestWhenAtTail(t *testing.T) {
 // --- Update: conversation navigation (h/l) ---
 
 func TestMsgOverlay_ConversationSwitch(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
 		cm("inbox:ben", "aaa", "canny", "one", "2026-06-25T10:00:02Z"),
 		cm("inbox:ben", "bbb", "bonnie", "two", "2026-06-25T10:00:01Z"),
@@ -1301,7 +1301,7 @@ func TestMsgOverlay_PinAllUnpinAll(t *testing.T) {
 }
 
 func TestSetAllPinned_NoConversation(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.cursor = 5 // out of range
 	// Must not panic and must be a no-op.
 	m.setAllPinned(true)
@@ -1404,7 +1404,7 @@ func TestMsgOverlay_ViewNarrowSingleColumn(t *testing.T) {
 }
 
 func TestMsgOverlay_ViewLoadingIndicator(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.width, m.height = 120, 30
 	m.loaded = false
 
@@ -1415,7 +1415,7 @@ func TestMsgOverlay_ViewLoadingIndicator(t *testing.T) {
 }
 
 func TestMsgOverlay_ViewNarrowHeightBoundedWithLongContext(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, map[string]string{
+	m := newMessageBrowserModel("ben", nil, map[string]string{
 		"bairn": "very-long-session-name-that-would-wrap-without-truncation",
 	})
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
@@ -1435,7 +1435,7 @@ func TestMsgOverlay_ViewNarrowHeightBoundedWithLongContext(t *testing.T) {
 // --- renderRail: empty state and scrolling ---
 
 func TestRenderRail_EmptyLoaded(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.loaded = true
 
 	if got := m.renderRail(26, 10); !strings.Contains(got, "No direct messages") {
@@ -1457,7 +1457,7 @@ func TestRenderRail_ScrollsToSelected(t *testing.T) {
 		})
 	}
 
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", msgs, nil)
 	m.loaded = true
 	m.cursor = 9 // select the last, forcing the rail to scroll
@@ -1487,7 +1487,7 @@ func TestRenderTopicRail_EmptyLoaded(t *testing.T) {
 // --- renderThread: no-conversation states ---
 
 func TestRenderThread_NoConversationLoaded(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
 		cm("inbox:ben", "bairn", "bairn", "braw", "2026-06-25T10:00:00Z"),
 	}, nil)
@@ -1500,7 +1500,7 @@ func TestRenderThread_NoConversationLoaded(t *testing.T) {
 }
 
 func TestRenderThread_NoConversationNotLoaded(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.cursor = -1
 
 	if got := m.renderThread(80, 20); got != "" {
@@ -1543,7 +1543,7 @@ func TestRenderThread_TopicViewportBounded(t *testing.T) {
 // --- renderThread: system + outbound header rendering ---
 
 func TestRenderThread_SystemAndOutbound(t *testing.T) {
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	m.conversations = groupConversations("ben", []protocol.ConversationMessage{
 		{ID: "s1", Stream: "_system.notify", SenderID: "daemon", SenderName: "orchestrator", Body: "system note", CreatedAt: "2026-06-25T10:00:00Z"},
 		{ID: "o1", Stream: "inbox:bairn", SenderID: "ben", SenderName: "ben", Body: "sent by me", CreatedAt: "2026-06-25T10:00:01Z"},
@@ -1607,7 +1607,7 @@ func TestMessageOverlayUsesConfiguredRefreshInterval(t *testing.T) {
 	const want = 5 * time.Second // deliberately not the 2s default
 	ConfigurePresentation(PresentationPrefs{RefreshInterval: want})
 
-	m := newMessageOverlayModel("ben", nil, nil)
+	m := newMessageBrowserModel("ben", nil, nil)
 	if m.refresh != want {
 		t.Errorf("overlay refresh field = %v, want configured %v (issue #1315)", m.refresh, want)
 	}

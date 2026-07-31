@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func TestSplitKeys(t *testing.T) {
@@ -98,8 +97,8 @@ func TestMessageKeysRemapped(t *testing.T) {
 	keys := DefaultMessageKeys()
 	keys.Cancel = []string{"z"}
 
-	fetch := func() ([]protocol.ConversationMessage, bool) { return nil, true }
-	m := newMessageOverlayModel("self", fetch, map[string]string{})
+	fetch := func(MessageFetchRequest) (MessageFetchResult, bool) { return MessageFetchResult{}, true }
+	m := newMessageBrowserModel("self", fetch, map[string]string{})
 	m.keys = keys
 
 	// Old default 'q' no longer quits.
