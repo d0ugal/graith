@@ -7,11 +7,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/telemetry"
+	"github.com/d0ugal/graith/internal/version"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -23,7 +27,13 @@ type telemetryRuntime struct {
 	tracing *telemetryTracingRuntime
 }
 
-func newTelemetryRuntime(ctx context.Context, cfg config.TelemetryConfig, metricsGatherer prometheus.Gatherer, log *slog.Logger) (*telemetryRuntime, error) {
+func newTelemetryRuntime(
+	ctx context.Context,
+	cfg config.TelemetryConfig,
+	metricsGatherer prometheus.Gatherer,
+	log *slog.Logger,
+	resource telemetry.ResourceOptions,
+) (*telemetryRuntime, error) {
 	if !cfg.Enabled() {
 		return nil, nil
 	}
@@ -40,9 +50,17 @@ func newTelemetryRuntime(ctx context.Context, cfg config.TelemetryConfig, metric
 	}
 
 	if cfg.Tracing.Enabled {
-		rt.tracing = newTelemetryTracingRuntime(cfg.Tracing)
+		tracing, err := newTelemetryTracingRuntime(ctx, cfg.Tracing, resource, log)
+		if err != nil {
+			rt.stop(ctx)
+
+			return nil, err
+		}
+
+		rt.tracing = tracing
+
 		if log != nil {
-			log.Info("telemetry tracing configured",
+			log.Info("telemetry tracing exporter started",
 				"endpoint", cfg.Tracing.Endpoint,
 				"protocol", cfg.Tracing.ProtocolOrDefault(),
 				"insecure", cfg.Tracing.Insecure,
@@ -53,7 +71,7 @@ func newTelemetryRuntime(ctx context.Context, cfg config.TelemetryConfig, metric
 	return rt, nil
 }
 
-func (rt *telemetryRuntime) stop() {
+func (rt *telemetryRuntime) stop(ctx context.Context) {
 	if rt == nil {
 		return
 	}
@@ -63,7 +81,7 @@ func (rt *telemetryRuntime) stop() {
 	}
 
 	if rt.tracing != nil {
-		rt.tracing.stop()
+		rt.tracing.stop(ctx)
 	}
 }
 
@@ -177,9 +195,29 @@ func (rt *telemetryMetricsRuntime) endpoint() (addr, path string) {
 
 type telemetryTracingRuntime struct {
 	cfg config.TelemetryTracingConfig
+	rt  *telemetry.TracingRuntime
+	log *slog.Logger
 }
 
-func newTelemetryTracingRuntime(cfg config.TelemetryTracingConfig) *telemetryTracingRuntime {
+func newTelemetryTracingRuntime(
+	ctx context.Context,
+	cfg config.TelemetryTracingConfig,
+	resource telemetry.ResourceOptions,
+	log *slog.Logger,
+) (*telemetryTracingRuntime, error) {
+	tracing, err := telemetry.StartTracing(ctx, telemetry.TracingOptions{
+		Endpoint: cfg.Endpoint,
+		Protocol: cfg.ProtocolOrDefault(),
+		Insecure: cfg.Insecure,
+		Timeout:  cfg.TimeoutDuration(),
+		Headers:  cfg.Headers,
+		Resource: resource,
+		Logger:   log,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return &telemetryTracingRuntime{
 		cfg: config.TelemetryTracingConfig{
 			Enabled:  cfg.Enabled,
@@ -189,10 +227,23 @@ func newTelemetryTracingRuntime(cfg config.TelemetryTracingConfig) *telemetryTra
 			Timeout:  cfg.Timeout,
 			Headers:  cloneTelemetryHeaders(cfg.Headers),
 		},
-	}
+		rt:  tracing,
+		log: log,
+	}, nil
 }
 
-func (rt *telemetryTracingRuntime) stop() {}
+func (rt *telemetryTracingRuntime) stop(ctx context.Context) {
+	if rt == nil || rt.rt == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, rt.cfg.TimeoutDuration())
+	defer cancel()
+
+	if err := rt.rt.Shutdown(ctx); err != nil && rt.log != nil {
+		rt.log.Warn("telemetry tracing exporter shutdown failed", "err", err)
+	}
+}
 
 type telemetryRuntimeConfigSnapshot struct {
 	Metrics *telemetryMetricsRuntimeConfigSnapshot
@@ -268,7 +319,12 @@ func (sm *SessionManager) startTelemetryRuntime(ctx context.Context) error {
 		metricsGatherer = registry
 	}
 
-	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, metricsGatherer, sm.log)
+	resource := telemetry.ResourceOptions{}
+	if cfg.Telemetry.Tracing.Enabled {
+		resource = sm.telemetryResource()
+	}
+
+	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, metricsGatherer, sm.log, resource)
 	if err != nil {
 		return err
 	}
@@ -290,7 +346,7 @@ func (sm *SessionManager) stopTelemetryRuntime() {
 		return
 	}
 
-	sm.telemetry.stop()
+	sm.telemetry.stop(context.Background())
 	sm.telemetry = nil
 	sm.metrics.Store(nil)
 }
@@ -306,6 +362,26 @@ func (sm *SessionManager) telemetryMetricsEndpoint() (addr, path string, ok bool
 	addr, path = sm.telemetry.metrics.endpoint()
 
 	return addr, path, true
+}
+
+func (sm *SessionManager) telemetryResource() telemetry.ResourceOptions {
+	executableName := ""
+	if executable, err := os.Executable(); err == nil {
+		executableName = filepath.Base(executable)
+	} else if sm.log != nil {
+		sm.log.Warn("failed to resolve process executable for tracing resource", "err", err)
+	}
+
+	return telemetry.ResourceOptions{
+		ServiceName:           telemetry.ServiceNameDefault,
+		ServiceVersion:        version.Version,
+		Commit:                version.CommitSHA,
+		DaemonInstanceID:      sm.InstanceID(),
+		Profile:               sm.paths.Profile,
+		ProcessKind:           "daemon",
+		ProcessPID:            os.Getpid(),
+		ProcessExecutableName: executableName,
+	}
 }
 
 func cloneTelemetryHeaders(headers map[string]string) map[string]string {
