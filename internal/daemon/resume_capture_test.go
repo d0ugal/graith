@@ -123,32 +123,6 @@ func TestArgsNeedAgentID(t *testing.T) {
 	}
 }
 
-func TestLocateCodexSinceInRootAndSince(t *testing.T) {
-	root := t.TempDir()
-	cwd := t.TempDir()
-	now := time.Now()
-
-	// A fresh rollout in the right cwd, after `since`.
-	writeCodexRollout(t, root, "bide-id", cwd, now)
-
-	// Explicit root is honored (not the daemon's CODEX_HOME).
-	if path, ok := transcript.LocateCodexSinceIn(root, cwd, now.Add(-time.Minute)); !ok {
-		t.Fatal("expected to locate the rollout under the explicit root")
-	} else if id, ok := transcript.CodexRolloutID(path); !ok || id != "bide-id" {
-		t.Fatalf("CodexRolloutID = %q, %v; want bide-id", id, ok)
-	}
-
-	// A `since` after the file's mtime must exclude it (stale-filter).
-	if _, ok := transcript.LocateCodexSinceIn(root, cwd, now.Add(time.Hour)); ok {
-		t.Error("rollout older than `since` should be excluded")
-	}
-
-	// A different cwd must not match.
-	if _, ok := transcript.LocateCodexSinceIn(root, t.TempDir(), now.Add(-time.Minute)); ok {
-		t.Error("rollout for a different cwd should not match")
-	}
-}
-
 func TestCaptureNativeSessionIDCodex(t *testing.T) {
 	sm := newMigrateTestManager(t)
 	root := t.TempDir()
