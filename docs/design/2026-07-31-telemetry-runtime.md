@@ -49,7 +49,6 @@ a listener or ship telemetry unexpectedly.
 ### Non-Goals
 
 - Add daemon/session metric instruments.
-- Add an OpenTelemetry SDK, trace provider, or OTLP exporter dependency.
 - Configure logs for Loki shipping.
 - Add iOS or macOS UI for telemetry settings.
 - Support hot-reloading telemetry runtime endpoints in this slice.
@@ -141,10 +140,12 @@ metrics and tracing exporters exist.
 
 ### Implementation Notes
 
-The tracing runtime stores validated config only. It does not install an
-OpenTelemetry SDK provider or read `OTEL_*` environment variables, so enabling
-tracing without an endpoint fails validation rather than falling back to an
-ambient exporter. Follow-up work can build the exporter from this stored config.
+The tracing runtime installs an OpenTelemetry SDK tracer provider and OTLP
+exporter only when `[telemetry.tracing] enabled = true`. It always passes the
+configured endpoint to the exporter and does not rely on `OTEL_*` environment
+variables for exporter endpoint, headers, TLS certificates, compression,
+timeout, or proxy settings, so enabling tracing without an endpoint fails
+validation rather than falling back to an ambient exporter.
 Telemetry values are validated even when the matching sub-runtime is disabled,
 except that the tracing endpoint is required only when tracing is enabled; this
 catches invalid saved settings before the restart that activates them.

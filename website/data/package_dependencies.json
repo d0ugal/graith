@@ -125,16 +125,21 @@
     },
     {
       "id": "package_24",
-      "label": "internal/testprocess",
+      "label": "internal/telemetry",
       "group": "internal"
     },
     {
       "id": "package_25",
-      "label": "internal/tools",
+      "label": "internal/testprocess",
       "group": "internal"
     },
     {
       "id": "package_26",
+      "label": "internal/tools",
+      "group": "internal"
+    },
+    {
+      "id": "package_27",
       "label": "internal/version",
       "group": "internal"
     }
@@ -210,15 +215,15 @@
     },
     {
       "from": "package_4",
-      "to": "package_24"
-    },
-    {
-      "from": "package_4",
       "to": "package_25"
     },
     {
       "from": "package_4",
       "to": "package_26"
+    },
+    {
+      "from": "package_4",
+      "to": "package_27"
     },
     {
       "from": "package_5",
@@ -250,11 +255,11 @@
     },
     {
       "from": "package_5",
-      "to": "package_24"
+      "to": "package_25"
     },
     {
       "from": "package_5",
-      "to": "package_26"
+      "to": "package_27"
     },
     {
       "from": "package_6",
@@ -262,7 +267,7 @@
     },
     {
       "from": "package_6",
-      "to": "package_25"
+      "to": "package_26"
     },
     {
       "from": "package_8",
@@ -345,6 +350,10 @@
       "to": "package_26"
     },
     {
+      "from": "package_8",
+      "to": "package_27"
+    },
+    {
       "from": "package_9",
       "to": "package_1"
     },
@@ -358,11 +367,11 @@
     },
     {
       "from": "package_9",
-      "to": "package_24"
+      "to": "package_25"
     },
     {
       "from": "package_12",
-      "to": "package_25"
+      "to": "package_26"
     },
     {
       "from": "package_13",
@@ -370,11 +379,11 @@
     },
     {
       "from": "package_17",
-      "to": "package_25"
+      "to": "package_26"
     },
     {
       "from": "package_20",
-      "to": "package_25"
+      "to": "package_26"
     },
     {
       "from": "package_21",
@@ -390,10 +399,10 @@
     },
     {
       "from": "package_23",
-      "to": "package_25"
+      "to": "package_26"
     },
     {
-      "from": "package_24",
+      "from": "package_25",
       "to": "package_1"
     }
   ]
