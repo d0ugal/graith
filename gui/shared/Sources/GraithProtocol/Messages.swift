@@ -189,14 +189,17 @@ public struct UpdateMsg: Codable, Sendable {
     public var sessionID: String
     public var name: String?
     public var parentID: String?
+    public var orphan: Bool?
     public var starred: Bool?
     public var addLabels: [String]?
     public var removeLabels: [String]?
     public init(sessionID: String, name: String? = nil, parentID: String? = nil,
-                starred: Bool? = nil, addLabels: [String]? = nil, removeLabels: [String]? = nil) {
+                orphan: Bool? = nil, starred: Bool? = nil,
+                addLabels: [String]? = nil, removeLabels: [String]? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.parentID = parentID
+        self.orphan = orphan
         self.starred = starred
         self.addLabels = addLabels
         self.removeLabels = removeLabels
@@ -205,6 +208,7 @@ public struct UpdateMsg: Codable, Sendable {
         case sessionID = "session_id"
         case name
         case parentID = "parent_id"
+        case orphan
         case starred
         case addLabels = "add_labels"
         case removeLabels = "remove_labels"

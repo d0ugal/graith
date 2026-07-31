@@ -8,6 +8,8 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
+const orphanDirectParentError = "not authorized: orphan requires caller to be the target's direct parent"
+
 // createOptsFromMsg maps a create wire request onto CreateOpts. agentName is the
 // already-resolved agent (the caller applies the config default when c.Agent is
 // empty), and rows/cols are the client's terminal size. Kept as a pure function
@@ -130,14 +132,29 @@ func handleAttachConvert(sm *SessionManager, auth authContext, send func(string,
 	}
 }
 
-// authorizeUpdate checks that the caller may update the target session — and,
-// when adopting a new parent, over that parent too — under sm.mu. Clearing the
-// parent ("") is a privileged reparent: only the orchestrator and the user CLI
-// may orphan a session, otherwise a child could orphan itself to escape its
-// parent's control.
+// authorizeUpdate checks that the caller may update the target session and,
+// when adopting a new parent, over that parent too, under sm.mu. Explicitly
+// clearing the parent ("") remains a privileged reparent for the orchestrator
+// and user CLI. The safer orphan intent is narrower: only the target's direct
+// parent session may clear that specific parent edge.
 func authorizeUpdate(sm *SessionManager, auth authContext, u protocol.UpdateMsg) error {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
+	if u.Orphan && u.ParentID != nil {
+		return errors.New("orphan cannot be combined with parent_id")
+	}
+
+	if u.Orphan {
+		target, ok := sm.state.Sessions[u.SessionID]
+		if !ok {
+			return errors.New(orphanDirectParentError)
+		}
+
+		if !auth.authenticated || target.ParentID != auth.sessionID {
+			return errors.New(orphanDirectParentError)
+		}
+	}
 
 	authErr := auth.checkTarget(sm, u.SessionID, authSelfOrDescendant)
 	if authErr == nil && u.ParentID != nil {
@@ -167,15 +184,32 @@ func handleUpdate(sm *SessionManager, auth authContext, send func(string, any), 
 		return
 	}
 
+	parentID := u.ParentID
+
+	var expectedParentID *string
+
+	if u.Orphan {
+		empty := ""
+		parent := auth.sessionID
+		parentID = &empty
+		expectedParentID = &parent
+	}
+
 	updated, err := sm.UpdateMetadata(u.SessionID, SessionUpdate{
-		Name:         u.Name,
-		ParentID:     u.ParentID,
-		Starred:      u.Starred,
-		AddLabels:    u.AddLabels,
-		RemoveLabels: u.RemoveLabels,
+		Name:             u.Name,
+		ParentID:         parentID,
+		ExpectedParentID: expectedParentID,
+		Starred:          u.Starred,
+		AddLabels:        u.AddLabels,
+		RemoveLabels:     u.RemoveLabels,
 	})
 	if err != nil {
-		send("error", protocol.ErrorMsg{Message: err.Error()})
+		message := err.Error()
+		if u.Orphan && errors.Is(err, errParentChangedSinceAuthorization) {
+			message = orphanDirectParentError
+		}
+
+		send("error", protocol.ErrorMsg{Message: message})
 	} else {
 		send("updated", protocol.UpdateResultMsg{
 			SessionID: updated.ID,

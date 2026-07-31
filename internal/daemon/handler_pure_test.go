@@ -345,6 +345,33 @@ func TestAuthorizeUpdateReparentRequiresAuthorityOverNewParent(t *testing.T) {
 	}
 }
 
+func TestAuthorizeUpdateOrphanRequiresDirectParent(t *testing.T) {
+	h := newTestHarness(t)
+	h.addAuthenticatedSession(t, "ben-id", "ben", "tok-ben")
+	h.addAuthenticatedSession(t, "bairn-id", "bairn", "tok-bairn")
+	h.addAuthenticatedSession(t, "wee-id", "wee-bairn", "tok-wee")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["bairn-id"].ParentID = "ben-id"
+	h.sm.state.Sessions["wee-id"].ParentID = "bairn-id"
+	h.sm.mu.Unlock()
+
+	directParent := authContext{role: roleSession, authenticated: true, sessionID: "bairn-id"}
+	if err := authorizeUpdate(h.sm, directParent, protocol.UpdateMsg{SessionID: "wee-id", Orphan: true}); err != nil {
+		t.Fatalf("direct parent orphan denied: %v", err)
+	}
+
+	ancestor := authContext{role: roleSession, authenticated: true, sessionID: "ben-id"}
+	if err := authorizeUpdate(h.sm, ancestor, protocol.UpdateMsg{SessionID: "wee-id", Orphan: true}); err == nil {
+		t.Fatal("expected ancestor orphan to be denied")
+	}
+
+	humanAuth := authContext{role: roleLocalHuman}
+	if err := authorizeUpdate(h.sm, humanAuth, protocol.UpdateMsg{SessionID: "wee-id", Orphan: true}); err == nil {
+		t.Fatal("expected human orphan intent to be denied")
+	}
+}
+
 func TestAuthorizeUpdateLabelsUseMetadataTargetBoundaries(t *testing.T) {
 	h := newTestHarness(t)
 	h.addAuthenticatedSession(t, "ben-id", "ben", "tok-ben")
