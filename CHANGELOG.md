@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.72.1](https://github.com/d0ugal/graith/compare/v0.72.0...v0.72.1) (2026-07-31)
+
+
+### Features
+
+* notify on mainline workflow failures ([#1927](https://github.com/d0ugal/graith/issues/1927)) ([8b1bc6b](https://github.com/d0ugal/graith/commit/8b1bc6b9ca35d340cf828822ed11d87e66b50516))
+
+
+### Bug Fixes
+
+* reconcile managed auto-upgrade readiness ([37155de](https://github.com/d0ugal/graith/commit/37155de6c31bd4410fb524ce08bc2a5411a3ec20))
+
 ## [0.72.0](https://github.com/d0ugal/graith/compare/v0.71.8...v0.72.0) (2026-07-31)
 
 
