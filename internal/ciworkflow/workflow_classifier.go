@@ -284,18 +284,6 @@ func WorkflowModeOutputs(mode WorkflowClassifierMode, result WorkflowClassificat
 	}
 }
 
-func WorkflowClassifierModes() []WorkflowClassifierMode {
-	return []WorkflowClassifierMode{
-		WorkflowClassifierModeCI,
-		WorkflowClassifierModeCoverage,
-		WorkflowClassifierModeSandbox,
-		WorkflowClassifierModeLibghostty,
-		WorkflowClassifierModeDevRelease,
-		WorkflowClassifierModeStable,
-		WorkflowClassifierModeDocsPreview,
-	}
-}
-
 func validatedWorkflowChangedFiles(changedFiles []string) ([]string, error) {
 	files := canonicalChangedFiles(changedFiles)
 	if len(files) == 0 {
