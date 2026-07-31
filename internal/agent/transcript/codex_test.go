@@ -97,7 +97,7 @@ func TestLocateCodexByCwdNewest(t *testing.T) {
 	// Make `newer` the most recently modified matching rollout.
 	bumpModTime(t, newer)
 
-	got, err := locateCodex("", cwd)
+	got, err := locateCodexInRoot("", "", cwd)
 	if err != nil {
 		t.Fatalf("locateCodex: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestLocateCodexByIDCov(t *testing.T) {
 	// A distractor that matches the cwd but has a different id.
 	writeRollout(t, day, "rollout-2-bide.jsonl", "sess-bide", cwd)
 
-	got, err := locateCodex("sess-canny", cwd)
+	got, err := locateCodexInRoot("", "sess-canny", cwd)
 	if err != nil {
 		t.Fatalf("locateCodex by id: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestLocateCodexIDMissFallsBackToCwdCov(t *testing.T) {
 
 	// The requested id is absent, so findCodexRolloutByID returns false and the
 	// cwd scan takes over.
-	got, err := locateCodex("no-such-id-thrawn", cwd)
+	got, err := locateCodexInRoot("", "no-such-id-thrawn", cwd)
 	if err != nil {
 		t.Fatalf("locateCodex fallback: %v", err)
 	}
@@ -374,14 +374,14 @@ func TestLocateCodexSkipsCompressedCov(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := locateCodex("", cwd); err == nil {
+	if _, err := locateCodexInRoot("", "", cwd); err == nil {
 		t.Error("expected no rollout found when only a .jsonl.zst matches")
 	}
 
 	// Adding a real .jsonl for the same cwd is now locatable.
 	writeRollout(t, day, "rollout-2-frost.jsonl", "sess-frost", cwd)
 
-	if _, err := locateCodex("", cwd); err != nil {
+	if _, err := locateCodexInRoot("", "", cwd); err != nil {
 		t.Errorf("expected the uncompressed rollout to be located: %v", err)
 	}
 }
