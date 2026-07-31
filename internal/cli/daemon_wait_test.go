@@ -62,7 +62,7 @@ func TestPollLocalDaemonSucceedsBeforeBudget(t *testing.T) {
 	}}
 
 	calls := 0
-	ok := pollLocalDaemon(func(time.Time) bool {
+	ok := pollLocalDaemonWithin(localDaemonStartTimeout(), func(time.Time) bool {
 		calls++
 
 		return calls == 3
@@ -89,7 +89,7 @@ func TestPollLocalDaemonTimesOutOnConfiguredBudget(t *testing.T) {
 	}}
 
 	calls := 0
-	ok := pollLocalDaemon(func(time.Time) bool {
+	ok := pollLocalDaemonWithin(localDaemonStartTimeout(), func(time.Time) bool {
 		calls++
 
 		return false
@@ -317,7 +317,7 @@ func TestPollLocalDaemonCapsSleepToRemainingBudget(t *testing.T) {
 	start := clk.now
 
 	calls := 0
-	ok := pollLocalDaemon(func(time.Time) bool {
+	ok := pollLocalDaemonWithin(localDaemonStartTimeout(), func(time.Time) bool {
 		calls++
 
 		return false
