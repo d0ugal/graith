@@ -45,10 +45,16 @@ type DaemonIdentity struct {
 // callers must not treat this as an absent daemon and continue destructively.
 type ExistingDaemonHandshakeError struct {
 	ResponseType string
+	Reason       string
 }
 
 func (err *ExistingDaemonHandshakeError) Error() string {
-	return "handshake rejected while connecting to existing daemon: " + err.ResponseType
+	message := "handshake rejected while connecting to existing daemon: " + err.ResponseType
+	if err.Reason != "" {
+		message += ": " + err.Reason
+	}
+
+	return message
 }
 
 func New(cfg *config.Config, paths config.Paths, configFile string) (*Client, error) {
@@ -152,12 +158,31 @@ func ConnectExisting(cfg *config.Config, paths config.Paths) (*Client, error) {
 
 	if response.Type != "handshake_ok" {
 		c.Close()
-		return nil, &ExistingDaemonHandshakeError{ResponseType: response.Type}
+		return nil, existingDaemonHandshakeError(response)
 	}
 
 	_ = conn.SetDeadline(time.Time{})
 
 	return c, nil
+}
+
+func existingDaemonHandshakeError(response protocol.Envelope) *ExistingDaemonHandshakeError {
+	err := &ExistingDaemonHandshakeError{ResponseType: response.Type}
+
+	switch response.Type {
+	case "handshake_err":
+		var hsErr protocol.HandshakeErrMsg
+		if protocol.DecodePayload(response, &hsErr) == nil {
+			err.Reason = hsErr.Reason
+		}
+	case "error":
+		var errorMsg protocol.ErrorMsg
+		if protocol.DecodePayload(response, &errorMsg) == nil {
+			err.Reason = errorMsg.Message
+		}
+	}
+
+	return err
 }
 
 func connect(ctx context.Context, cfg *config.Config, paths config.Paths, configFile string, autoUpgrade bool) (*Client, error) {

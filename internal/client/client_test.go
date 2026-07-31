@@ -1771,11 +1771,23 @@ func TestConnectExistingHandshakeLifecycle(t *testing.T) {
 	tests := []struct {
 		name         string
 		responseType string
+		response     any
 		drop         bool
 		wantError    string
 	}{
 		{name: "connected", responseType: "handshake_ok"},
-		{name: "rejected", responseType: "error", wantError: "handshake rejected"},
+		{
+			name:         "rejected error message",
+			responseType: "error",
+			response:     protocol.ErrorMsg{Message: "dreich daemon"},
+			wantError:    "handshake rejected while connecting to existing daemon: error: dreich daemon",
+		},
+		{
+			name:         "rejected handshake reason",
+			responseType: "handshake_err",
+			response:     protocol.HandshakeErrMsg{Reason: "profile mismatch: client is braw"},
+			wantError:    "handshake rejected while connecting to existing daemon: handshake_err: profile mismatch: client is braw",
+		},
 		{name: "daemon drops handshake", drop: true, wantError: "EOF"},
 	}
 
@@ -1823,7 +1835,12 @@ func TestConnectExistingHandshakeLifecycle(t *testing.T) {
 					return
 				}
 
-				data, err := protocol.EncodeControl(test.responseType, struct{}{})
+				response := test.response
+				if response == nil {
+					response = struct{}{}
+				}
+
+				data, err := protocol.EncodeControl(test.responseType, response)
 				if err == nil {
 					err = protocol.NewFrameWriter(serverConn).WriteFrame(protocol.ChannelControl, data)
 				}
