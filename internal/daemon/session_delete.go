@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,12 +11,16 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	grpty "github.com/d0ugal/graith/internal/pty"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Delete stops a session, removes its worktree/branch, and deletes state.
 // Git teardown is attempted before removing the session from state; if teardown
 // fails the session is kept for retry and the error is returned.
-func (sm *SessionManager) Delete(id string) error {
+func (sm *SessionManager) Delete(id string) (returnErr error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.delete")
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return err
 	}
@@ -94,6 +99,10 @@ func (sm *SessionManager) Delete(id string) error {
 	sessToken := sessState.Token
 	sessionIncludes := make([]IncludedRepoState, len(sessState.Includes))
 	copy(sessionIncludes, sessState.Includes)
+	span.SetAttributes(
+		attribute.Bool("graith.session.was_soft_deleted", wasSoftDeleted),
+	)
+	span.SetAttributes(lifecycleSpanAttrs(sessState.DriverKind, sessState.Sandboxed, shared, readOnlyBranch, inPlace, len(sessionIncludes))...)
 
 	if sessState.Status == StatusCreating {
 		// Session is mid-creation (Phase 2). Remove from state so Phase 3 detects
@@ -723,7 +732,17 @@ func (sm *SessionManager) deleteWithChildrenIncludingSystemRoot(id string) ([]st
 	return sm.deleteWithChildren(id, false, true)
 }
 
-func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystemRoot bool) ([]string, error) {
+func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystemRoot bool) (deletedIDs []string, returnErr error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.delete",
+		attribute.Bool("graith.session.delete_subtree", true),
+		attribute.Bool("graith.session.exclude_root", excludeRoot),
+		attribute.Bool("graith.session.allow_system_root", allowSystemRoot),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("graith.session.deleted", len(deletedIDs)))
+		endDaemonSpan(span, returnErr)
+	}()
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return nil, err
 	}
@@ -1115,7 +1134,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 		}
 	}
 
-	deletedIDs := make([]string, 0, len(creatingDeletes)+len(snaps))
+	deletedIDs = make([]string, 0, len(creatingDeletes)+len(snaps))
 	for _, deleted := range creatingDeletes {
 		deletedIDs = append(deletedIDs, deleted.id)
 	}
@@ -1354,7 +1373,12 @@ func processGroupGone(pgid int, window time.Duration) bool {
 //
 // The caller is responsible for Detach and the "stopping session" audit line;
 // teardownLiveDriver only owns the kill → confirm → close sequence.
-func (sm *SessionManager) teardownLiveDriver(driver sessionDriver) error {
+func (sm *SessionManager) teardownLiveDriver(driver sessionDriver) (returnErr error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.teardown_driver",
+		attribute.Bool("graith.session.driver_already_exited", driver.Exited()),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	if driver.Exited() {
 		driver.Close()
 		return nil
@@ -1389,6 +1413,15 @@ func (sm *SessionManager) teardownLiveDriver(driver sessionDriver) error {
 }
 
 func (sm *SessionManager) killVerifiedProcess(pid int, startTime int64) (killed bool, err error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.kill_orphan",
+		attribute.Bool("graith.process.pid_recorded", pid > 0),
+		attribute.Bool("graith.process.identity_recorded", startTime != 0),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Bool("graith.process.killed", killed))
+		endDaemonSpan(span, err)
+	}()
+
 	if pid <= 0 || !isProcessAlive(pid) {
 		return false, nil
 	}

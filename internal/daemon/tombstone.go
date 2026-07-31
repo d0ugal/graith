@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/git"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // teardownSpec captures everything needed to tear down a session's on-disk
@@ -49,7 +51,18 @@ type tombstone struct {
 // kind. It is idempotent: git.TeardownSession and os.RemoveAll both tolerate
 // already-removed targets, so a resumed teardown after a partial delete is
 // safe.
-func (sm *SessionManager) teardownArtifacts(t teardownSpec) error {
+func (sm *SessionManager) teardownArtifacts(t teardownSpec) (returnErr error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.worktree.teardown",
+		attribute.Bool("graith.session.system", t.SystemKind != ""),
+		attribute.Bool("graith.session.read_only", t.ReadOnlyBranch),
+		attribute.Bool("graith.session.mirror", t.Shared),
+		attribute.Bool("graith.session.in_place", t.InPlace),
+		attribute.Bool("graith.session.has_repo", t.RepoPath != ""),
+		attribute.Bool("graith.session.has_worktree", t.WorktreePath != ""),
+		attribute.Int("graith.session.includes", len(t.Includes)),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	switch {
 	case t.SystemKind == SystemKindOrchestrator:
 		// The orchestrator has no worktree/branch; its scratch + tmp live under

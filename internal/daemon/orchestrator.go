@@ -13,6 +13,7 @@ import (
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/store"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // orchestratorRestartFallbackDelay is the positive delay substituted only when a
@@ -70,7 +71,13 @@ func (sm *SessionManager) findOrchestratorID() string {
 	return ""
 }
 
-func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState, error) {
+func (sm *SessionManager) createOrchestrator(ctx context.Context) (result SessionState, returnErr error) {
+	ctx, span := startDaemonSpan(ctx, "graith.session.create",
+		attribute.Bool("graith.session.system", true),
+		attribute.Bool("graith.session.orchestrator", true),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	cfgSnap := sm.Config()
 	orchCfg := cfgSnap.Orchestrator
 	agentName := orchCfg.AgentName(cfgSnap.DefaultAgent)
@@ -236,7 +243,13 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("validate sandbox grants: %w", err)
 	}
 
+	_, wrapSpan := startDaemonSpan(ctx, "graith.session.sandbox.wrap",
+		attribute.Bool("graith.session.system", true),
+		attribute.Bool("graith.session.orchestrator", true),
+	)
 	command, finalArgs, wrapErr := sandbox.Wrap(agent.Command, expandedArgs, opts)
+	endDaemonSpan(wrapSpan, wrapErr)
+
 	if wrapErr != nil {
 		sm.rollbackOrchestratorCreate(id)
 		return SessionState{}, fmt.Errorf("sandbox wrap: %w", wrapErr)
@@ -252,6 +265,10 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 	historyRows := cfgSnapshot.Terminal.HistoryRowsOrDefault()
 
 	launchStarted := time.Now()
+	_, spawnSpan := startDaemonSpan(ctx, "graith.session.launch.spawn",
+		attribute.Bool("graith.session.system", true),
+		attribute.Bool("graith.session.orchestrator", true),
+	)
 	ptySess, err := newPTYSession(grpty.SessionOpts{
 		ID:                  id,
 		Command:             command,
@@ -267,6 +284,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		TerminalHistoryRows: historyRows,
 	})
 	sm.observeSessionLaunch(metricOperationOrchestratorCreate, DriverPTY, time.Since(launchStarted), err)
+	endDaemonSpan(spawnSpan, err)
 
 	if err != nil {
 		sm.rollbackOrchestratorCreate(id)
@@ -317,7 +335,9 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (SessionState,
 		return SessionState{}, fmt.Errorf("persist orchestrator state: %w", err)
 	}
 
-	result := cloneSessionState(sess)
+	result = cloneSessionState(sess)
+
+	span.SetAttributes(lifecycleSpanAttrs(DriverPTY, sandboxed, false, false, false, 0)...)
 	sm.mu.Unlock()
 
 	// The watcher owns the new session's lifetime and must outlive this create call.

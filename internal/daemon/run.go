@@ -20,6 +20,7 @@ import (
 	"github.com/d0ugal/graith/internal/testprocess"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/d0ugal/graith/internal/version"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sys/unix"
 )
 
@@ -211,7 +212,11 @@ func (sm *SessionManager) runStartupRecoveries(ctx context.Context, recoveries [
 		started := time.Now()
 
 		sm.log.Info("startup recovery started", "recovery", recovery.name)
+		_, span := startDaemonSpan(ctx, "graith.daemon.startup_recovery",
+			attribute.String("graith.daemon.recovery", recovery.name),
+		)
 		recovery.run()
+		endDaemonSpan(span, nil)
 		sm.log.Info("startup recovery completed", "recovery", recovery.name, "duration_ms", time.Since(started).Milliseconds())
 	}
 }
@@ -925,6 +930,12 @@ func run(
 	}
 	defer sm.stopTelemetryRuntime()
 
+	_, daemonSpan := startDaemonSpan(serverCtx, "graith.daemon.start",
+		attribute.Bool("graith.daemon.adopted", adoptFrom != ""),
+		attribute.Bool("graith.daemon.has_startup_recoveries", len(startupRecoveries) > 0),
+	)
+	defer func() { endDaemonSpan(daemonSpan, returnErr) }()
+
 	srv := NewServer(l, func(ctx context.Context, conn net.Conn) {
 		HandleConnection(ctx, conn, ConnOrigin{}, sm, log)
 	}, log)
@@ -1051,15 +1062,22 @@ func run(
 
 		return true
 	}
-	stopBackground := func(ctx context.Context) error {
+	stopBackground := func(ctx context.Context) (returnErr error) {
+		ctx, span := startDaemonSpan(ctx, "graith.daemon.background.drain")
+		defer func() { endDaemonSpan(span, returnErr) }()
+
 		backgroundMu.Lock()
 
 		group := backgroundGroup
 		if group == nil {
 			backgroundMu.Unlock()
+			span.SetAttributes(attribute.Bool("graith.daemon.background_group", false))
+
 			return nil
 		}
 		backgroundMu.Unlock()
+
+		span.SetAttributes(attribute.Bool("graith.daemon.background_group", true))
 		group.BeginDrain()
 
 		if err := group.Wait(ctx); err != nil {
@@ -1178,6 +1196,9 @@ func run(
 		_ = os.Remove(paths.SocketPath)
 		ReleasePIDFile(paths.PIDFile)
 	}, func(request *upgradeRequest) (returnErr error) {
+		_, upgradeSpan := startDaemonSpan(context.Background(), "graith.daemon.upgrade.prepare")
+		defer func() { endDaemonSpan(upgradeSpan, returnErr) }()
+
 		defer sm.endUpgradeAttempt()
 
 		clientExecPath := request.execPath

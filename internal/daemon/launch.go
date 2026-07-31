@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/detector"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // launchThrottle bounds how many agent spawns may be in their startup window at
@@ -133,16 +134,35 @@ func (lt *launchThrottle) release() {
 // position and concurrency so bursts are diagnosable from logs alone. The
 // caller must arrange for the slot to be released: on spawn failure call
 // slot.release() directly; on success hand it to releaseLaunchSlotWhenSettled.
-func (sm *SessionManager) acquireLaunchSlot(ctx context.Context, id, name string) (launchSlot, error) {
+func (sm *SessionManager) acquireLaunchSlot(ctx context.Context, id, name string) (slot launchSlot, returnErr error) {
+	_, span := startDaemonSpan(ctx, "graith.session.launch.slot_wait")
+
+	defer func() {
+		if returnErr == nil {
+			span.SetAttributes(
+				attribute.Int("graith.launch.inflight", slot.inflight),
+				attribute.Int("graith.launch.capacity", slot.capacity),
+				attribute.Int("graith.launch.queued", slot.queued),
+				attribute.Int64("graith.launch.wait_ms", slot.waited.Milliseconds()),
+			)
+		}
+
+		endDaemonSpan(span, returnErr)
+	}()
+
 	// A manager constructed without NewSessionManager (some narrow unit tests)
 	// has no throttle; treat that as unbounded rather than panicking.
 	if sm.launch == nil {
+		span.SetAttributes(attribute.Bool("graith.launch.throttle_configured", false))
+
 		return launchSlot{release: func() {}}, nil
 	}
 
-	slot, err := sm.launch.acquire(ctx)
-	if err != nil {
-		return launchSlot{}, err
+	span.SetAttributes(attribute.Bool("graith.launch.throttle_configured", true))
+
+	slot, returnErr = sm.launch.acquire(ctx)
+	if returnErr != nil {
+		return launchSlot{}, returnErr
 	}
 
 	sm.log.Info("launch slot acquired",

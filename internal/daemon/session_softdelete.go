@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // shouldPurge reports whether a soft-deleted session's recovery window has
@@ -63,7 +65,12 @@ func (sm *SessionManager) SoftDelete(id string) (SessionState, error) {
 // softDelete performs a single soft delete. Subtree operations already hold
 // the ownership invariant at their preflight boundary and may disable the
 // per-node child check while walking leaves-first.
-func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionState, error) {
+func (sm *SessionManager) softDelete(id string, rejectChildren bool) (result SessionState, returnErr error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.soft_delete",
+		attribute.Bool("graith.session.reject_children", rejectChildren),
+	)
+	defer func() { endDaemonSpan(span, returnErr) }()
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return SessionState{}, err
 	}
@@ -125,6 +132,7 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionSta
 
 	orphanPID := sessState.PID
 	orphanStartTime := sessState.PIDStartTime
+	span.SetAttributes(lifecycleSpanAttrs(sessState.DriverKind, sessState.Sandboxed, sessState.Mirror, sessState.ReadOnlyBranch, sessState.InPlace, len(sessState.Includes))...)
 
 	// Persist the marker BEFORE the blocking kill (crash-safety): if the daemon
 	// died mid-kill with DeletedAt unwritten, Reconcile would find a dead PID and
@@ -185,6 +193,10 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionSta
 	killedOK := true
 
 	if hasPTY {
+		_, driverSpan := startDaemonSpan(context.Background(), "graith.session.teardown_driver",
+			attribute.Bool("graith.session.driver_already_exited", ptySess.Exited()),
+			attribute.String("graith.lifecycle.initiator", lifecycleInitiator("soft-delete")),
+		)
 		ptySess.Detach()
 
 		if !ptySess.Exited() {
@@ -199,6 +211,7 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (SessionSta
 		}
 
 		ptySess.Close()
+		endDaemonSpan(driverSpan, nil)
 	} else if orphanPID > 0 {
 		sm.logStoppingPID(id, sm.sessionName(id), StopReasonDelete, "soft-delete-orphan", orphanPID, orphanPID)
 
@@ -272,7 +285,17 @@ func (sm *SessionManager) softDeleteWithChildrenOwned(rootID string, excludeRoot
 	return sm.softDeleteWithChildren(rootID, excludeRoot, owned)
 }
 
-func (sm *SessionManager) softDeleteWithChildren(rootID string, excludeRoot bool, owned func(string, *SessionState) bool) ([]string, error) {
+func (sm *SessionManager) softDeleteWithChildren(rootID string, excludeRoot bool, owned func(string, *SessionState) bool) (deleted []string, returnErr error) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.soft_delete",
+		attribute.Bool("graith.session.delete_subtree", true),
+		attribute.Bool("graith.session.exclude_root", excludeRoot),
+		attribute.Bool("graith.session.has_owner_predicate", owned != nil),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("graith.session.deleted", len(deleted)))
+		endDaemonSpan(span, returnErr)
+	}()
+
 	if err := sm.beginLifecycleOperation(); err != nil {
 		return nil, err
 	}
@@ -346,8 +369,6 @@ func (sm *SessionManager) softDeleteWithChildren(rootID string, excludeRoot bool
 	}()
 
 	deletedSet := make(map[string]bool)
-
-	var deleted []string
 
 	var deleteErrors []error
 
@@ -679,6 +700,18 @@ func sortExpiredPurgeCandidates(candidates []expiredPurgeCandidate) {
 }
 
 func (sm *SessionManager) purgeExpired(now time.Time) {
+	_, span := startDaemonSpan(context.Background(), "graith.session.soft_delete.purge_expired")
+
+	var expiredCount, purgedCount, failureCount int
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("graith.session.expired", expiredCount),
+			attribute.Int("graith.session.purged", purgedCount),
+			attribute.Int("graith.session.failures", failureCount),
+		)
+		endDaemonSpanWithFailures(span, nil, failureCount)
+	}()
+
 	sm.mu.RLock()
 
 	var expired []expiredPurgeCandidate
@@ -720,6 +753,7 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 
 	sm.mu.RUnlock()
 	sortExpiredPurgeCandidates(expired)
+	expiredCount = len(expired)
 
 	processedCycles := make(map[string]bool)
 
@@ -738,7 +772,12 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 
 			sm.log.Info("purging expired ownership cycle", "root", c.cycleRoot)
 
-			if _, err := sm.DeleteWithChildren(c.cycleRoot, false); err != nil {
+			deleted, err := sm.DeleteWithChildren(c.cycleRoot, false)
+			purgedCount += len(deleted)
+
+			if err != nil {
+				failureCount++
+
 				sm.log.Warn("purge of expired ownership cycle failed, will retry", "root", c.cycleRoot, "err", err)
 			}
 
@@ -767,7 +806,11 @@ func (sm *SessionManager) purgeExpired(now time.Time) {
 		sm.log.Info("purging expired soft-deleted session", "id", c.id)
 
 		if err := sm.Delete(c.id); err != nil {
+			failureCount++
+
 			sm.log.Warn("purge of expired session failed, will retry", "id", c.id, "err", err)
+		} else {
+			purgedCount++
 		}
 	}
 }
@@ -831,6 +874,17 @@ func (sm *SessionManager) expiredCycleSubtreeEligible(rootID string, now time.Ti
 // so a soft-deleted (stopped) session with a live PID would otherwise leave an
 // orphaned, invisible agent. Run once at startup, before the first purge sweep.
 func (sm *SessionManager) reconcileSoftDeletedOrphans() {
+	_, span := startDaemonSpan(context.Background(), "graith.session.soft_delete.reconcile_orphans")
+
+	var orphanCount, failureCount int
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("graith.session.orphans", orphanCount),
+			attribute.Int("graith.session.failures", failureCount),
+		)
+		endDaemonSpanWithFailures(span, nil, failureCount)
+	}()
+
 	sm.mu.RLock()
 
 	type orphan struct {
@@ -849,13 +903,18 @@ func (sm *SessionManager) reconcileSoftDeletedOrphans() {
 
 	sm.mu.RUnlock()
 
+	orphanCount = len(orphans)
+
 	for _, o := range orphans {
 		sm.log.Info("re-killing orphaned process on soft-deleted session", "id", o.id, "pid", o.pid)
 
 		if _, err := sm.killVerifiedProcess(o.pid, o.startTime); err != nil {
 			// Leave the PID recorded so a later run can retry; clearing it would
 			// strand a live orphan with no handle to kill it.
+			failureCount++
+
 			sm.log.Warn("failed to re-kill orphan on soft-deleted session", "id", o.id, "pid", o.pid, "err", err)
+
 			continue
 		}
 
