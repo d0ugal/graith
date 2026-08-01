@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.73.2](https://github.com/d0ugal/graith/compare/v0.73.1...v0.73.2) (2026-08-01)
+
+
+### Features
+
+* add optional OTLP tracing exporter ([f714858](https://github.com/d0ugal/graith/commit/f7148581fff933c77078e3990174068afe48bb6f))
+* add safe update orphan flag ([f648e30](https://github.com/d0ugal/graith/commit/f648e30908fbdbe42ab0d92ce4cf235720d269c8))
+* add telemetry runtime plumbing ([3e93b48](https://github.com/d0ugal/graith/commit/3e93b48684e4b69adaab34efc1f38b19865fadc7))
+* expose initial daemon metrics ([beeac2e](https://github.com/d0ugal/graith/commit/beeac2e5cc9221625ab3b61a8576ba27ce0f8cc2))
+* instrument attach latency path ([57781d0](https://github.com/d0ugal/graith/commit/57781d080be65829d6321a6ddb8b02915f9e2992))
+* trace daemon session lifecycle ([8123ec0](https://github.com/d0ugal/graith/commit/8123ec0460c49914f9bb9b4dc14e8a24c14c7a49))
+
+
+### Bug Fixes
+
+* exit mouse scroll mode at bottom ([960727b](https://github.com/d0ugal/graith/commit/960727bf7cc70d9cd468218a5a8f5479785f8bfd))
+* keep daemon reload from auto-upgrading ([d31027d](https://github.com/d0ugal/graith/commit/d31027d05cf3eed6a0f58562dcbdc02e54264c73))
+* report subtree delete root blockers clearly ([190ab4e](https://github.com/d0ugal/graith/commit/190ab4e4b742ba5dfb04ee52157a005975e2f4d4))
+* tighten daemon upgrade handoff boundary ([002327f](https://github.com/d0ugal/graith/commit/002327f45324b2feef8273bd8c7eb5cb336550af))
+* update google.golang.org/genproto/googleapis/api digest to 8efbd57 ([#1987](https://github.com/d0ugal/graith/issues/1987)) ([6bbe4bd](https://github.com/d0ugal/graith/commit/6bbe4bdc61eabe98f466e46f353a1e84cd0c53e2))
+* update google.golang.org/genproto/googleapis/rpc digest to 8efbd57 ([#1988](https://github.com/d0ugal/graith/issues/1988)) ([6d9b107](https://github.com/d0ugal/graith/commit/6d9b107ec4ba6a493b10cc29b10446102f7c887f))
+* update module github.com/cenkalti/backoff/v5 to v7 ([#1991](https://github.com/d0ugal/graith/issues/1991)) ([224220e](https://github.com/d0ugal/graith/commit/224220e17771f5bd15dd3294daf1e726dda4e389))
+* update module github.com/go-logr/logr to v1.4.4 ([#1989](https://github.com/d0ugal/graith/issues/1989)) ([ba79b2f](https://github.com/d0ugal/graith/commit/ba79b2f9e49cb527afcde6df5e53cbfaec17ac91))
+* update module github.com/prometheus/client_golang to v1.24.1 ([#1977](https://github.com/d0ugal/graith/issues/1977)) ([34c9ef9](https://github.com/d0ugal/graith/commit/34c9ef94a98ee4fb99460ce2235792304a073996))
+* update module go.opentelemetry.io/proto/otlp to v1.11.0 ([#1990](https://github.com/d0ugal/graith/issues/1990)) ([a342436](https://github.com/d0ugal/graith/commit/a3424368450ccf5349e8f4d918b3b5e01c4e3c7d))
+
+
+### Documentation
+
+* document Alloy observability collection ([80d9b1a](https://github.com/d0ugal/graith/commit/80d9b1ae1c756528c9c7eb73508cd5dcb0f5b7df))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.5.1 ([#1968](https://github.com/d0ugal/graith/issues/1968)) ([91400d3](https://github.com/d0ugal/graith/commit/91400d32e5e114ae27f3b0a52cbcc948bf77ba39))
+* **deps:** update renovate/renovate docker tag to v44.5.2 ([#1972](https://github.com/d0ugal/graith/issues/1972)) ([131fc3e](https://github.com/d0ugal/graith/commit/131fc3e4e00c3375c0ef42a9b0ce1715980979a9))
+* **deps:** update renovate/renovate docker tag to v44.5.3 ([#1974](https://github.com/d0ugal/graith/issues/1974)) ([fe5810b](https://github.com/d0ugal/graith/commit/fe5810b0a471b1a52ec2f92025f249b69e4dc982))
+
 ## [0.73.1](https://github.com/d0ugal/graith/compare/v0.73.0...v0.73.1) (2026-07-31)
 
 
