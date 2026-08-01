@@ -27,7 +27,7 @@ func (sm *SessionManager) RunDetectionLoop(ctx context.Context) {
 func runDetectionLoop(
 	ctx context.Context,
 	detectionTicker, fetchTicker loopTicker,
-	detect func(),
+	detect func(context.Context),
 	fetch func(context.Context),
 ) {
 	defer detectionTicker.Stop()
@@ -38,7 +38,7 @@ func runDetectionLoop(
 		case <-ctx.Done():
 			return
 		case <-detectionTicker.C():
-			detect()
+			detect(ctx)
 		case <-fetchTicker.C():
 			fetch(ctx)
 		}
@@ -90,7 +90,11 @@ func (sm *SessionManager) fetchRemotes(ctx context.Context) {
 			return
 		}
 
-		if !git.HasRemote(dir, "origin") {
+		if !git.HasRemoteContext(ctx, dir, "origin") {
+			if ctx.Err() != nil {
+				return
+			}
+
 			continue
 		}
 
@@ -168,7 +172,11 @@ func (sm *SessionManager) checkSilentSessionWithThreshold(id, name, agent string
 		"hint", "agent is alive but has rendered nothing — likely blocked on a pre-render prompt or not writing to the PTY (issue #1087)")
 }
 
-func (sm *SessionManager) detectAgentStatuses() {
+func (sm *SessionManager) detectAgentStatuses(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+
 	sm.mu.RLock()
 
 	if sm.upgradePending {
@@ -214,6 +222,10 @@ func (sm *SessionManager) detectAgentStatuses() {
 	var toAutoStop []string
 
 	for _, t := range targets {
+		if ctx.Err() != nil {
+			return
+		}
+
 		sm.checkSilentSession(t.id, t.name, t.agent, t.pty)
 
 		var status string
@@ -252,28 +264,40 @@ func (sm *SessionManager) detectAgentStatuses() {
 
 		if !t.mirror {
 			if t.worktreePath != "" && t.repoPath != "" {
-				if d, err := git.HasUncommittedChanges(t.worktreePath); err == nil {
+				if d, err := git.HasUncommittedChangesContext(ctx, t.worktreePath); err == nil {
 					dirty = d
+				} else if ctx.Err() != nil {
+					return
 				}
 
 				if t.baseBranch != "" {
-					if n, err := git.UnpushedCommitCount(t.worktreePath, t.baseBranch); err == nil {
+					if n, err := git.UnpushedCommitCountContext(ctx, t.worktreePath, t.baseBranch); err == nil {
 						unpushed = n
+					} else if ctx.Err() != nil {
+						return
 					}
 				}
 			}
 
 			for i := range t.includes {
+				if ctx.Err() != nil {
+					return
+				}
+
 				inc := &t.includes[i]
-				if d, err := git.HasUncommittedChanges(inc.WorktreePath); err == nil {
+				if d, err := git.HasUncommittedChangesContext(ctx, inc.WorktreePath); err == nil {
 					inc.dirty = d
 					dirty = dirty || d
+				} else if ctx.Err() != nil {
+					return
 				}
 
 				if inc.BaseBranch != "" {
-					if n, err := git.UnpushedCommitCount(inc.WorktreePath, inc.BaseBranch); err == nil {
+					if n, err := git.UnpushedCommitCountContext(ctx, inc.WorktreePath, inc.BaseBranch); err == nil {
 						inc.unpushed = n
 						unpushed += n
+					} else if ctx.Err() != nil {
+						return
 					}
 				}
 			}
@@ -326,7 +350,7 @@ func (sm *SessionManager) detectAgentStatuses() {
 		sm.mu.Unlock()
 
 		if statusChanged {
-			sm.onAgentStatusChange(t.id, sessionName, oldStatus, status)
+			sm.onAgentStatusChange(ctx, t.id, sessionName, oldStatus, status)
 		}
 	}
 

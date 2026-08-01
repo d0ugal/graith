@@ -42,6 +42,58 @@ func DiscoverDefaultBranch(repoPath string) (string, error) {
 	return "", errors.New("cannot determine default branch; use --base to specify one")
 }
 
+func DiscoverDefaultBranchContext(ctx context.Context, repoPath string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	hasOrigin := HasRemoteContext(ctx, repoPath, "origin")
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	if hasOrigin {
+		out, err := RunOutputContext(ctx, repoPath, "rev-parse", "--abbrev-ref", "origin/HEAD")
+		if err == nil && out != "origin/HEAD" {
+			return strings.TrimPrefix(out, "origin/"), nil
+		}
+
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		for _, branch := range []string{"main", "master"} {
+			if RefExistsContext(ctx, repoPath, "origin/"+branch) {
+				return branch, nil
+			}
+
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+		}
+	}
+
+	for _, branch := range []string{"main", "master"} {
+		if RefExistsContext(ctx, repoPath, branch) {
+			return branch, nil
+		}
+
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+	}
+
+	if branch, ok := unbornBranchContext(ctx, repoPath); ok {
+		return branch, nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	return "", errors.New("cannot determine default branch; use --base to specify one")
+}
+
 func unbornBranch(repoPath string) (string, bool) {
 	if RefExists(repoPath, "HEAD") {
 		return "", false

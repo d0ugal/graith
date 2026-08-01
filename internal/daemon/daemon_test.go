@@ -2562,7 +2562,7 @@ func TestDetectAgentStatuses_MirrorSkipsGit(t *testing.T) {
 	}
 	sm.mu.Unlock()
 
-	sm.detectAgentStatuses()
+	sm.detectAgentStatuses(context.Background())
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -2642,7 +2642,7 @@ func TestDetectAgentStatusesSkipsStateDuringUpgradeReservation(t *testing.T) {
 				}
 			}
 
-			sm.detectAgentStatuses()
+			sm.detectAgentStatuses(context.Background())
 
 			sm.mu.RLock()
 			session := sm.state.Sessions["canny"]
@@ -7828,7 +7828,7 @@ func TestDetectAgentStatusesGitBranchesCov2(t *testing.T) {
 	}
 	sm.mu.Unlock()
 
-	sm.detectAgentStatuses()
+	sm.detectAgentStatuses(context.Background())
 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

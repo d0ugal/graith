@@ -578,7 +578,7 @@ func (sm *SessionManager) HandleHookReport(sr protocol.StatusReportMsg) {
 	}
 
 	if changed {
-		sm.onAgentStatusChange(sr.SessionID, name, oldStatus, status)
+		sm.onAgentStatusChange(context.Background(), sr.SessionID, name, oldStatus, status)
 	}
 }
 

@@ -2347,7 +2347,7 @@ func TestEventsSubStreamsStatusAndPublicMessages(t *testing.T) {
 	h.sendControl(t, "events_sub", protocol.EventsSubMsg{})
 	h.expectType(t, "events_following")
 
-	h.sm.onAgentStatusChange("braw1", "braw-runner", "active", "ready")
+	h.sm.onAgentStatusChange(context.Background(), "braw1", "braw-runner", "active", "ready")
 
 	env := h.expectType(t, "event")
 
@@ -2446,7 +2446,7 @@ func TestEventsSubDoesNotStreamSyntheticExitAsAgentStatus(t *testing.T) {
 	sub, unsub := h.sm.events.Subscribe()
 	defer unsub()
 
-	h.sm.onAgentStatusChange("braw-stop", "braw-stop", "running", "stopped")
+	h.sm.onAgentStatusChange(context.Background(), "braw-stop", "braw-stop", "running", "stopped")
 
 	select {
 	case event := <-sub:

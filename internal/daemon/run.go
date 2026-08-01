@@ -1112,6 +1112,12 @@ func run(
 		group.BeginDrain()
 
 		if err := group.Wait(ctx); err != nil {
+			blockers := group.ActiveTasks(time.Now())
+			log.Warn("background drain still waiting for tasks",
+				"err", err,
+				"task_count", len(blockers),
+				"tasks", formatDaemonTaskGroupBlockers(blockers))
+
 			return err
 		}
 
@@ -1590,6 +1596,15 @@ func run(
 
 		return nil
 	})
+}
+
+func formatDaemonTaskGroupBlockers(tasks []daemonTaskGroupTaskSnapshot) []string {
+	blockers := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		blockers = append(blockers, fmt.Sprintf("%s age=%s", task.Name, task.Age.Round(time.Millisecond)))
+	}
+
+	return blockers
 }
 
 func resolvedUpgradeSnapshotPaths(snapshotCfg *config.Config, configFile string) (UpgradePathDescriptor, error) {

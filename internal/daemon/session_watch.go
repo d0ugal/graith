@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -210,7 +211,7 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 	sm.log.Info("session exited", logAttrs...)
 	sm.logAbnormalExitReport(id, name, stopReason, sess, signalRequest)
 
-	sm.onAgentStatusChange(id, name, "running", "stopped")
+	sm.onAgentStatusChange(context.Background(), id, name, "running", "stopped")
 
 	if isOrchestrator {
 		sm.notifyOrchestratorExit(id)

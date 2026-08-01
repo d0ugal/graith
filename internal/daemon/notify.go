@@ -13,7 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/tools"
 )
 
-func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus, newStatus string) {
+func (sm *SessionManager) onAgentStatusChange(ctx context.Context, sessionID, sessionName, oldStatus, newStatus string) {
 	sm.log.Info("agent status changed",
 		"session", sessionName, "id", sessionID,
 		"from", oldStatus, "to", newStatus)
@@ -48,7 +48,7 @@ func (sm *SessionManager) onAgentStatusChange(sessionID, sessionName, oldStatus,
 		return
 	}
 
-	sm.sendNotification(sessionName, newStatus, notifCfg.Command)
+	sm.sendNotification(ctx, sessionName, newStatus, notifCfg.Command)
 }
 
 func shouldPublishAgentStatusEvent(oldStatus, newStatus string) bool {
@@ -353,7 +353,7 @@ func (sm *SessionManager) InterruptSession(sessionID string) error {
 	return nil
 }
 
-func (sm *SessionManager) sendNotification(sessionName, status, command string) {
+func (sm *SessionManager) sendNotification(ctx context.Context, sessionName, status, command string) {
 	if err := ValidateSessionName(sessionName); err != nil {
 		sm.log.Error("refusing to send notification for unsafe session name", "name", sessionName, "err", err)
 		return
@@ -376,7 +376,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 	fmt.Print("\a")
 
 	if command != "" {
-		sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+		sm.startBackgroundTask(ctx, func(taskCtx context.Context) {
 			cmd := exec.CommandContext(taskCtx, tools.Shell(), "-c", command)
 
 			cmd.Env = append(os.Environ(),
@@ -403,7 +403,7 @@ func (sm *SessionManager) sendNotification(sessionName, status, command string) 
 
 	timeout := sm.Config().Notifications.Timing.DispatchTimeoutDuration()
 
-	sm.startBackgroundTask(context.Background(), func(taskCtx context.Context) {
+	sm.startBackgroundTask(ctx, func(taskCtx context.Context) {
 		if taskCtx.Err() != nil {
 			return
 		}
