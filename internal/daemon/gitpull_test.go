@@ -13,6 +13,7 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/git"
 	"github.com/d0ugal/graith/internal/testutil"
+	"github.com/d0ugal/graith/internal/tools"
 )
 
 func gitRun(t *testing.T, dir string, args ...string) {
@@ -128,6 +129,87 @@ func TestPullIfClean_DirtyWorktree(t *testing.T) {
 
 	if pulled {
 		t.Fatal("expected skip when dirty")
+	}
+}
+
+func TestPullIfCleanHonorsContextDuringDirtyCheck(t *testing.T) {
+	t.Cleanup(tools.Reset)
+
+	dir := t.TempDir()
+	startedPath := filepath.Join(dir, "dirty-check-started")
+	fakeGit := filepath.Join(dir, "canny-git")
+
+	script := `#!/bin/sh
+case "$*" in
+	"rev-parse --is-bare-repository")
+		printf 'false\n'
+		;;
+	"rev-parse --git-dir")
+		printf '.git\n'
+		;;
+	"symbolic-ref -q --short HEAD")
+		printf 'main\n'
+		;;
+	"rev-parse --verify HEAD")
+		exit 0
+		;;
+	"remote")
+		printf 'origin\n'
+		;;
+	"rev-parse --abbrev-ref origin/HEAD")
+		printf 'origin/main\n'
+		;;
+	"status --porcelain")
+		printf started > "$GIT_STUB_DIRTY_STARTED"
+		sleep 30
+		;;
+	*)
+		printf 'unexpected git args: %s\n' "$*" >&2
+		exit 1
+		;;
+esac
+`
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil { //nolint:gosec // G306: stub must be executable for exec
+		t.Fatalf("write fake git: %v", err)
+	}
+
+	tools.Configure(tools.Config{Git: fakeGit})
+	t.Setenv("GIT_STUB_DIRTY_STARTED", startedPath)
+
+	sm := newTestSM(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := sm.pullIfClean(ctx, dir)
+		done <- err
+	}()
+
+	deadline := time.After(time.Second)
+
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatal("fake git dirty check did not start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("pullIfClean returned nil after cancellation")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("pullIfClean did not return promptly after cancellation")
 	}
 }
 

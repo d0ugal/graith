@@ -45,7 +45,7 @@ func TestRunDetectionLoopDispatchesTicksAndStops(t *testing.T) {
 
 	go func() {
 		runDetectionLoop(ctx, detectionTicker, fetchTicker,
-			func() { detected <- struct{}{} },
+			func(context.Context) { detected <- struct{}{} },
 			func(got context.Context) { fetched <- got },
 		)
 		close(done)

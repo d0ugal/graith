@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,6 +88,109 @@ func TestDaemonTaskGroupDrainBeforeActivationLaunchesNothing(t *testing.T) {
 
 	if called.Load() {
 		t.Fatal("canceled pre-activation task launched")
+	}
+}
+
+func TestDaemonTaskGroupReportsActiveDrainBlockers(t *testing.T) {
+	group := newDaemonTaskGroup()
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	if !group.Go(func(context.Context) {
+		close(started)
+		<-release
+	}) {
+		t.Fatal("task was rejected")
+	}
+
+	group.Activate()
+	<-started
+
+	group.BeginDrain()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	if err := group.Wait(ctx); err == nil {
+		t.Fatal("drain returned while a task was active")
+	}
+
+	tasks := group.ActiveTasks(time.Now())
+	if len(tasks) != 1 {
+		t.Fatalf("active tasks = %d, want 1: %+v", len(tasks), tasks)
+	}
+
+	if tasks[0].Age <= 0 {
+		t.Fatalf("active task age = %s, want positive", tasks[0].Age)
+	}
+
+	if !strings.Contains(tasks[0].Name, "TestDaemonTaskGroupReportsActiveDrainBlockers") {
+		t.Fatalf("active task name = %q, want test function name", tasks[0].Name)
+	}
+
+	close(release)
+
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), time.Second)
+	defer finalCancel()
+
+	if err := group.Wait(finalCtx); err != nil {
+		t.Fatalf("final drain: %v", err)
+	}
+
+	if tasks := group.ActiveTasks(time.Now()); len(tasks) != 0 {
+		t.Fatalf("active tasks after drain = %+v, want none", tasks)
+	}
+}
+
+func TestStartBackgroundTaskReportsCallerName(t *testing.T) {
+	sm := sleeperSM(t)
+	group := newDaemonTaskGroup()
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	if !sm.installBackgroundTasks(group) {
+		t.Fatal("background generation was not installed")
+	}
+
+	if !sm.startBackgroundTask(context.Background(), func(context.Context) {
+		close(started)
+		<-release
+	}) {
+		t.Fatal("background task was rejected")
+	}
+
+	group.Activate()
+	<-started
+
+	group.BeginDrain()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	if err := group.Wait(ctx); err == nil {
+		t.Fatal("drain returned while a task was active")
+	}
+
+	tasks := group.ActiveTasks(time.Now())
+	if len(tasks) != 1 {
+		t.Fatalf("active tasks = %d, want 1: %+v", len(tasks), tasks)
+	}
+
+	if strings.Contains(tasks[0].Name, "startBackgroundTask") {
+		t.Fatalf("active task name = %q, want logical caller name", tasks[0].Name)
+	}
+
+	if !strings.Contains(tasks[0].Name, "TestStartBackgroundTaskReportsCallerName") {
+		t.Fatalf("active task name = %q, want test function name", tasks[0].Name)
+	}
+
+	close(release)
+
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), time.Second)
+	defer finalCancel()
+
+	if err := group.Wait(finalCtx); err != nil {
+		t.Fatalf("final drain: %v", err)
 	}
 }
 

@@ -154,14 +154,24 @@ func (sm *SessionManager) pullIfCleanWith(ctx context.Context, repoPath string, 
 
 	// Maintenance can discover the symbolic initial branch in a repository
 	// without commits, but there is no HEAD to compare or fast-forward yet.
-	if !git.RefExists(repoPath, "HEAD") {
+	if !git.RefExistsContext(ctx, repoPath, "HEAD") {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
 		sm.log.Debug("git-pull: skipping unborn HEAD", "repo", repoPath, "branch", branch)
+
 		return false, nil
 	}
 
-	defaultBranch, err := git.DiscoverDefaultBranch(repoPath)
+	defaultBranch, err := git.DiscoverDefaultBranchContext(ctx, repoPath)
 	if err != nil {
+		if ctx.Err() != nil {
+			return false, err
+		}
+
 		sm.log.Warn("git-pull: cannot determine default branch", "repo", repoPath, "err", err)
+
 		return false, nil
 	}
 
@@ -181,7 +191,7 @@ func (sm *SessionManager) pullIfCleanWith(ctx context.Context, repoPath string, 
 		return false, nil
 	}
 
-	dirty, err := git.HasUncommittedChanges(repoPath)
+	dirty, err := git.HasUncommittedChangesContext(ctx, repoPath)
 	if err != nil {
 		return false, fmt.Errorf("checking dirty state: %w", err)
 	}
@@ -209,8 +219,13 @@ func (sm *SessionManager) pullIfCleanWith(ctx context.Context, repoPath string, 
 		mergeTarget = remote + "/" + branch
 	}
 
-	if !git.RefExists(repoPath, mergeTarget) {
+	if !git.RefExistsContext(ctx, repoPath, mergeTarget) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
 		sm.log.Debug("git-pull: remote tracking ref missing after fetch", "repo", repoPath, "ref", mergeTarget)
+
 		return false, nil
 	}
 
@@ -229,17 +244,25 @@ func (sm *SessionManager) pullIfCleanWith(ctx context.Context, repoPath string, 
 		return false, nil
 	}
 
-	if !git.RunCheck(repoPath, "merge-base", "--is-ancestor", "HEAD", mergeTarget) {
-		if git.RunCheck(repoPath, "merge-base", "--is-ancestor", mergeTarget, "HEAD") {
+	if !git.RunCheckContext(ctx, repoPath, "merge-base", "--is-ancestor", "HEAD", mergeTarget) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
+		if git.RunCheckContext(ctx, repoPath, "merge-base", "--is-ancestor", mergeTarget, "HEAD") {
 			sm.log.Debug("git-pull: local ahead of remote", "repo", repoPath)
 		} else {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+
 			sm.log.Debug("git-pull: branches diverged", "repo", repoPath)
 		}
 
 		return false, nil
 	}
 
-	dirty, err = git.HasUncommittedChanges(repoPath)
+	dirty, err = git.HasUncommittedChangesContext(ctx, repoPath)
 	if err != nil {
 		return false, fmt.Errorf("re-checking dirty state: %w", err)
 	}
@@ -351,7 +374,7 @@ func resolveUpstream(ctx context.Context, repoPath, branch string) (remote strin
 		return remote, upstreamRef
 	}
 
-	if git.HasRemote(repoPath, "origin") {
+	if git.HasRemoteContext(ctx, repoPath, "origin") {
 		return "origin", ""
 	}
 

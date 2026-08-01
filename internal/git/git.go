@@ -3,13 +3,19 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/d0ugal/graith/internal/tools"
 )
+
+// contextCommandWaitDelay bounds canceled git commands whose descendants keep
+// stdio pipes open after the direct git process exits.
+var contextCommandWaitDelay = 2 * time.Second
 
 func Run(dir string, args ...string) (string, string, error) {
 	cmd := exec.Command(tools.Git(), args...)
@@ -19,7 +25,7 @@ func Run(dir string, args ...string) (string, string, error) {
 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err := runConfiguredCommand(cmd)
 
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
@@ -27,12 +33,13 @@ func Run(dir string, args ...string) (string, string, error) {
 func RunContext(ctx context.Context, dir string, args ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, tools.Git(), args...)
 	cmd.Dir = dir
+	configureContextCommand(cmd)
 
 	var stdout, stderr bytes.Buffer
 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err := runConfiguredCommand(cmd)
 
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
@@ -40,6 +47,7 @@ func RunContext(ctx context.Context, dir string, args ...string) (string, string
 func RunContextEnv(ctx context.Context, dir string, env []string, args ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, tools.Git(), args...)
 	cmd.Dir = dir
+	configureContextCommand(cmd)
 
 	cmd.Env = append(os.Environ(), env...)
 
@@ -47,7 +55,7 @@ func RunContextEnv(ctx context.Context, dir string, env []string, args ...string
 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err := runConfiguredCommand(cmd)
 
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
@@ -80,8 +88,18 @@ func RunCheck(dir string, args ...string) bool {
 func RunCheckContext(ctx context.Context, dir string, args ...string) bool {
 	cmd := exec.CommandContext(ctx, tools.Git(), args...)
 	cmd.Dir = dir
+	configureContextCommand(cmd)
 
-	return cmd.Run() == nil
+	return runConfiguredCommand(cmd) == nil
+}
+
+func runConfiguredCommand(cmd *exec.Cmd) error {
+	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		return nil
+	}
+
+	return err
 }
 
 func IsInsideGitRepo(dir string) bool {
@@ -135,6 +153,15 @@ func HasUncommittedChanges(dir string) (bool, error) {
 	return len(out) > 0, nil
 }
 
+func HasUncommittedChangesContext(ctx context.Context, dir string) (bool, error) {
+	out, err := RunOutputContext(ctx, dir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+
+	return len(out) > 0, nil
+}
+
 // UnpushedCommitCount returns the number of commits on HEAD that have not been
 // pushed to the remote.
 //
@@ -166,8 +193,50 @@ func UnpushedCommitCount(worktreePath, baseBranch string) (int, error) {
 	return commitCount(worktreePath, baseRef+"..HEAD")
 }
 
+func UnpushedCommitCountContext(ctx context.Context, worktreePath, baseBranch string) (int, error) {
+	branch, err := RunOutputContext(ctx, worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err == nil && branch != "" && branch != "HEAD" {
+		trackingRef := "origin/" + branch
+		if RefExistsContext(ctx, worktreePath, trackingRef) {
+			return commitCountContext(ctx, worktreePath, trackingRef+"..HEAD")
+		}
+
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+	} else if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	// Branch not pushed yet (no tracking ref): count commits ahead of the base.
+	baseRef := "origin/" + baseBranch
+	if !RefExistsContext(ctx, worktreePath, baseRef) {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+
+		baseRef = baseBranch
+	}
+
+	return commitCountContext(ctx, worktreePath, baseRef+"..HEAD")
+}
+
 func commitCount(worktreePath, revRange string) (int, error) {
 	out, err := RunOutput(worktreePath, "rev-list", "--count", revRange)
+	if err != nil {
+		return 0, err
+	}
+
+	var n int
+	if _, err := fmt.Sscanf(out, "%d", &n); err != nil {
+		return 0, fmt.Errorf("parse commit count %q: %w", out, err)
+	}
+
+	return n, nil
+}
+
+func commitCountContext(ctx context.Context, worktreePath, revRange string) (int, error) {
+	out, err := RunOutputContext(ctx, worktreePath, "rev-list", "--count", revRange)
 	if err != nil {
 		return 0, err
 	}

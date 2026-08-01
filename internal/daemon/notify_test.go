@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -26,7 +27,7 @@ func TestOnAgentStatusChange_DisabledNotifications(t *testing.T) {
 		},
 	}
 
-	sm.onAgentStatusChange("braw-id", "bonnie-session", "active", "stopped")
+	sm.onAgentStatusChange(context.Background(), "braw-id", "bonnie-session", "active", "stopped")
 
 	select {
 	case <-dispatched:
@@ -61,7 +62,7 @@ func TestOnAgentStatusChange_DefaultUsesNativeDispatchAndConfiguredTimeout(t *te
 		},
 	}
 
-	sm.onAgentStatusChange("canny-id", "canny-session", "active", "stopped")
+	sm.onAgentStatusChange(context.Background(), "canny-id", "canny-session", "active", "stopped")
 
 	select {
 	case got := <-calls:
@@ -98,7 +99,7 @@ func TestSendNotification_CommandUsesEnvVars(t *testing.T) {
 		},
 	}
 
-	sm.sendNotification("braw-kirk", "stopped", sm.cfg.Notifications.Command)
+	sm.sendNotification(context.Background(), "braw-kirk", "stopped", sm.cfg.Notifications.Command)
 
 	deadline := time.After(5 * time.Second)
 
@@ -148,7 +149,7 @@ func TestSendNotification_CommandInjectionPrevented(t *testing.T) {
 	}
 
 	malicious := "$(touch " + markerFile + ")"
-	sm.sendNotification(malicious, "stopped", sm.cfg.Notifications.Command)
+	sm.sendNotification(context.Background(), malicious, "stopped", sm.cfg.Notifications.Command)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -341,7 +342,7 @@ func TestOnAgentStatusChange_PublishesToMessageStore(t *testing.T) {
 		messages: ms,
 	}
 
-	sm.onAgentStatusChange("braw-sess", "braw-kirk", "active", "error")
+	sm.onAgentStatusChange(context.Background(), "braw-sess", "braw-kirk", "active", "error")
 
 	msgs, err := ms.Read("_system.status", "", false, "")
 	if err != nil {
