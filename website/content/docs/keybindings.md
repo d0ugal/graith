@@ -179,9 +179,11 @@ Terminal control sequences such as Kitty keyboard protocol, paste markers, mouse
 reports, and viewport-owned pager navigation are not raw remappable keybindings.
 Mouse-wheel reports can be mapped only through the typed gestures in
 [`[input.bindings]`]({{< relref "configuration/interface.md#input" >}}), such
-as `mouse_wheel_up = "scroll_mode"`. macOS menu shortcuts use native
-Command-key equivalents in the app; daemon config does not rewrite those
-platform shortcuts.
+as `mouse_wheel_up = "scroll_mode"`. A mouse-opened scrollback pager exits back
+to the live attach when wheel-down reaches the bottom; the prefix-opened pager
+stays open until you quit it. macOS menu shortcuts use native Command-key
+equivalents in the app; daemon config does not rewrite those platform
+shortcuts.
 
 ## macOS menu shortcuts
 

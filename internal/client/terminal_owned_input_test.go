@@ -517,7 +517,7 @@ func TestTerminalOwnedReadOnlyDropsRoutedMouseInput(t *testing.T) {
 	}
 }
 
-func TestTerminalOwnedWheelGestureReturnsScrollMode(t *testing.T) {
+func TestTerminalOwnedWheelGestureReturnsMouseScrollMode(t *testing.T) {
 	clientConn, daemonConn := net.Pipe()
 	defer func() { _ = daemonConn.Close() }()
 
@@ -549,8 +549,8 @@ func TestTerminalOwnedWheelGestureReturnsScrollMode(t *testing.T) {
 	opts := testOpts
 	opts.terminalOwnedInput = router
 
-	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultScrollMode {
-		t.Fatalf("result = %d, want ResultScrollMode (%d)", result, ResultScrollMode)
+	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultMouseScrollMode {
+		t.Fatalf("result = %d, want ResultMouseScrollMode (%d)", result, ResultMouseScrollMode)
 	}
 }
 
@@ -588,8 +588,8 @@ func TestTerminalOwnedWheelGestureForwardsEarlierBytesBeforeScrollMode(t *testin
 	opts.terminalOwnedInput = router
 
 	result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil)
-	if result != ResultScrollMode {
-		t.Fatalf("result = %d, want ResultScrollMode (%d)", result, ResultScrollMode)
+	if result != ResultMouseScrollMode {
+		t.Fatalf("result = %d, want ResultMouseScrollMode (%d)", result, ResultMouseScrollMode)
 	}
 
 	select {
@@ -637,8 +637,8 @@ func TestTerminalOwnedWheelGestureUsesTopChromeTranslatedChildRow(t *testing.T) 
 	opts.terminalOwnedChrome = chrome
 	opts.terminalOwnedInput = router
 
-	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultScrollMode {
-		t.Fatalf("result = %d, want ResultScrollMode (%d)", result, ResultScrollMode)
+	if result := c.runPassthroughLoop(context.Background(), opts, stdinR, stdout, nil); result != ResultMouseScrollMode {
+		t.Fatalf("result = %d, want ResultMouseScrollMode (%d)", result, ResultMouseScrollMode)
 	}
 }
 

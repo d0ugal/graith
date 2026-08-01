@@ -352,6 +352,50 @@ func TestOnScrollModePrefersTerminalHistory(t *testing.T) {
 	}
 }
 
+func TestOnMouseScrollModeUsesMouseScrollView(t *testing.T) {
+	fake := &scriptedConn{responses: []scriptedResp{
+		okResp(terminalOwnedEnv(protocol.SessionInfo{ID: "braw"})),
+	}}
+	withLoopSeams(t, fake)
+
+	origCfg := cfg
+	origScrollView := runScrollView
+	origMouseScrollView := runMouseScrollView
+
+	t.Cleanup(func() {
+		cfg = origCfg
+		runScrollView = origScrollView
+		runMouseScrollView = origMouseScrollView
+	})
+
+	cfg = config.Default()
+	runScrollView = func(string, string, client.ScrollKeys) {
+		t.Fatal("mouse-triggered scroll mode should not use the keyboard scroll view")
+	}
+
+	var viewed string
+
+	runMouseScrollView = func(_ string, content string, _ client.ScrollKeys) {
+		viewed = content
+	}
+
+	l := newLoop("braw", "bothy")
+	l.hasTerminalHistory = true
+	l.terminalHistory = protocol.TerminalHistoryMsg{
+		Lines: []protocol.TerminalHistoryLineMsg{
+			{Frame: "braw"},
+		},
+	}
+
+	if done, err := l.onMouseScrollMode(); done || err != nil {
+		t.Fatalf("onMouseScrollMode() = (%v, %v), want (false, nil)", done, err)
+	}
+
+	if viewed != "braw" {
+		t.Fatalf("mouse scroll view content = %q, want formatted terminal history", viewed)
+	}
+}
+
 func TestOnScrollModeRefreshesTerminalHistoryBeforeRawLogs(t *testing.T) {
 	fake := &scriptedConn{responses: []scriptedResp{
 		okResp(payloadEnv("terminal_owned_attached", protocol.TerminalOwnedAttachSeedMsg{

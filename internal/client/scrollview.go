@@ -130,7 +130,15 @@ type scrollViewModel struct {
 	width    int
 	height   int
 	keys     ScrollKeys
+	mode     scrollViewMode
 }
+
+type scrollViewMode int
+
+const (
+	scrollViewModeKeyboard scrollViewMode = iota
+	scrollViewModeMouse
+)
 
 func newScrollViewModel(title, content string) scrollViewModel {
 	return scrollViewModel{title: title, content: content, keys: DefaultScrollKeys()}
@@ -174,6 +182,19 @@ func (m scrollViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 			return m, nil
 		}
+	case tea.MouseWheelMsg:
+		// Bubbles maps shift+wheel to horizontal scroll; keep that out of the
+		// vertical bottom-to-resume path.
+		if m.mode == scrollViewModeMouse && msg.Button == tea.MouseWheelDown && !msg.Mod.Contains(tea.ModShift) {
+			var cmd tea.Cmd
+
+			m.viewport, cmd = m.viewport.Update(msg)
+			if m.viewport.AtBottom() {
+				return m, tea.Quit
+			}
+
+			return m, cmd
+		}
 	}
 
 	var cmd tea.Cmd
@@ -203,6 +224,10 @@ func (m scrollViewModel) View() tea.View {
 	v := tea.NewView(header + "\n" + m.viewport.View() + "\n" + footer)
 	v.AltScreen = true
 
+	if m.mode == scrollViewModeMouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+
 	return v
 }
 
@@ -210,12 +235,23 @@ func (m scrollViewModel) View() tea.View {
 // and blocks until the user quits. An empty content shows a placeholder so the
 // pager still opens cleanly rather than flashing an empty screen.
 func RunScrollView(title, content string, keys ScrollKeys) {
+	runScrollViewMode(title, content, keys, scrollViewModeKeyboard)
+}
+
+// RunMouseScrollView launches scroll mode entered from a mouse-wheel gesture.
+// A downward wheel gesture that reaches the live bottom exits back to attach.
+func RunMouseScrollView(title, content string, keys ScrollKeys) {
+	runScrollViewMode(title, content, keys, scrollViewModeMouse)
+}
+
+func runScrollViewMode(title, content string, keys ScrollKeys, mode scrollViewMode) {
 	if strings.TrimSpace(content) == "" {
 		content = "(no scrollback captured for this session)"
 	}
 
 	m := newScrollViewModel(title, content)
 	m.keys = keys
+	m.mode = mode
 	p := tea.NewProgram(m)
 	_, _ = p.Run()
 }
