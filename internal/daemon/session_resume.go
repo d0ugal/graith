@@ -975,6 +975,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		InputDelay:          lc.InputDelayDuration(),
 		Logger:              sm.log,
 		TerminalHistoryRows: historyRows,
+		Telemetry:           sm.ptyTelemetryObservers(),
 	})
 	sm.observeSessionLaunch(metricOperationResume, DriverPTY, time.Since(launchStarted), err)
 	endDaemonSpan(spawnSpan, err)

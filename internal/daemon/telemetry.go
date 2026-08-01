@@ -333,7 +333,10 @@ func (sm *SessionManager) startTelemetryRuntime(ctx context.Context) error {
 		sm.metrics.Store(metrics)
 	}
 
+	sm.tracingEnabled.Store(rt != nil && rt.tracing != nil)
+
 	sm.telemetry = rt
+	sm.configureExistingPTYTelemetry()
 
 	return nil
 }
@@ -349,6 +352,8 @@ func (sm *SessionManager) stopTelemetryRuntime() {
 	sm.telemetry.stop(context.Background())
 	sm.telemetry = nil
 	sm.metrics.Store(nil)
+	sm.tracingEnabled.Store(false)
+	sm.configureExistingPTYTelemetry()
 }
 
 func (sm *SessionManager) telemetryMetricsEndpoint() (addr, path string, ok bool) {

@@ -89,7 +89,8 @@ When enabling metrics for local collection, point Alloy or another Prometheus
 scraper at `http://127.0.0.1:4824/metrics` unless you changed the address or
 path.
 
-The initial metric set focuses on daemon and session reliability signals:
+The metric set includes daemon/session reliability signals and focused local
+attach latency segments:
 
 | Metric | Type | Labels |
 |--------|------|--------|
@@ -102,6 +103,12 @@ The initial metric set focuses on daemon and session reliability signals:
 | `graith_session_input_events_total` | counter | `operation`, `result` |
 | `graith_session_input_bytes_total` | counter | `operation`, `result` |
 | `graith_session_input_duration_seconds` | histogram | `operation`, `result` |
+| `graith_session_input_readback_latency_seconds` | histogram | `operation` |
+| `graith_pty_output_read_duration_seconds` | histogram | `result` |
+| `graith_pty_screen_update_duration_seconds` | histogram | `result` |
+| `graith_pty_attach_fanout_duration_seconds` | histogram | `result` |
+| `graith_attach_output_queue_delay_seconds` | histogram | `mode` |
+| `graith_attach_output_write_duration_seconds` | histogram | `mode`, `result` |
 | `graith_screen_snapshot_requests_total` | counter | `kind` |
 | `graith_screen_snapshot_duration_seconds` | histogram | `kind` |
 | `graith_messages_published_total` | counter | `stream_kind`, `sender_kind` |
@@ -113,6 +120,7 @@ Histogram metrics also expose the standard Prometheus `_bucket`, `_sum`, and
 `create`, `fork`, `orchestrator_create`, `resume`, or `unknown`; input
 `operation` uses `attach`, `type`, `type_no_newline`, or `unknown`; `result`
 uses `success` or `error`; snapshot `kind` uses `full`, `delta`, or `unknown`;
+attach output `mode` uses `raw`, `coalesced`, or `unknown`;
 `stream_kind` uses `topic`, `inbox`, `system`, or `unknown`; and `sender_kind`
 uses `session`, `device`, `system`, or `unknown`.
 
@@ -120,10 +128,25 @@ uses `session`, `device`, `system`, or `unknown`.
 status-change events. It can collapse transient internal busy states. For
 `graith_session_input_duration_seconds`, `operation="type"` includes the
 configured `lifecycle.input_delay` between writing the input bytes and
-submitting the trailing carriage return.
+submitting the trailing carriage return. `graith_session_input_readback_latency_seconds`
+records one pending attach input at a time, from the successful PTY write
+attempt to the next eligible PTY output read. `mode="coalesced"` on attach
+output metrics measures daemon delivery of the terminal-owned attach hint frame,
+not the client's final terminal draw.
 
 Graith does not put session IDs, session names, repository paths, worktree
 paths, branch names, prompts, message bodies, or user names in metric labels.
+
+### Local latency diagnostic
+
+From a source checkout, you can run a local terminal-owned attach latency
+diagnostic without enabling telemetry export:
+
+```bash
+GRAITH_INPUT_LATENCY_DIAGNOSTIC=1 go test ./internal/daemon -run TestTerminalOwnedAttachInputLatencyDiagnostic -count=1
+```
+
+Set `GRAITH_INPUT_LATENCY_SAMPLES` to change the sample count.
 
 ## Tracing
 
@@ -165,6 +188,29 @@ Tracing export is optional runtime plumbing for a collector such as Alloy, which
 can forward traces to Tempo. Export failures are reported in the daemon log and
 do not stop the daemon. Graith does not require Grafana Cloud, Alloy, Mimir,
 Loki, Tempo, or any collector to run normally.
+
+When tracing is enabled, Graith emits focused attach/input/render spans:
+
+| Span | Notes |
+|------|-------|
+| `graith.attach.input` | attached client input accepted by the daemon |
+| `graith.pty.input.write` | daemon write into the PTY |
+| `graith.pty.output.read` | PTY output read after readiness notification |
+| `graith.pty.screen.update` | scrollback append and daemon terminal model update |
+| `graith.pty.attach.fanout` | daemon fanout to attached output writers |
+| `graith.session.input.readback` | next eligible PTY output after a successful attach input write |
+| `graith.attach.output.queue_delay` | time an attach output frame waits in the daemon writer queue |
+| `graith.attach.output.write` | daemon write of an attach output frame or terminal-owned hint frame |
+
+Latency span attributes are intentionally bounded: byte counts, attach writer
+counts, attach output mode, and input operation. Graith does not put session IDs,
+session names, repository paths, worktree paths, branch names, prompts, message
+bodies, or user names in span attributes.
+
+Attach latency tracing is per local interactive event and per PTY output chunk.
+High-output sessions can therefore produce many spans while tracing is enabled;
+run it with a local collector that is sized for that volume, or prefer metrics
+when you only need aggregate latency distributions.
 
 ## Collect with Grafana Alloy
 

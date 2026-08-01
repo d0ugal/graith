@@ -70,6 +70,12 @@ func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
 		"# TYPE graith_session_input_events_total counter",
 		"# TYPE graith_session_input_bytes_total counter",
 		"# TYPE graith_session_input_duration_seconds histogram",
+		"# TYPE graith_session_input_readback_latency_seconds histogram",
+		"# TYPE graith_pty_output_read_duration_seconds histogram",
+		"# TYPE graith_pty_screen_update_duration_seconds histogram",
+		"# TYPE graith_pty_attach_fanout_duration_seconds histogram",
+		"# TYPE graith_attach_output_queue_delay_seconds histogram",
+		"# TYPE graith_attach_output_write_duration_seconds histogram",
 		"# TYPE graith_screen_snapshot_requests_total counter",
 		"# TYPE graith_screen_snapshot_duration_seconds histogram",
 		"# TYPE graith_messages_published_total counter",
@@ -121,6 +127,12 @@ func TestTelemetryRuntimeMetricsLabelsStayLowCardinality(t *testing.T) {
 	sm.observeSessionLaunch(metricOperationFork, DriverPTY, time.Millisecond, nil)
 	sm.observeSessionLaunch(metricOperationOrchestratorCreate, DriverPTY, time.Millisecond, nil)
 	sm.observeSessionInput("paste-canny-name", 42, time.Millisecond, nil)
+	sm.observeSessionInputReadback("paste-canny-name", time.Millisecond)
+	sm.observePTYOutputRead(time.Millisecond, errors.New("dreich read"))
+	sm.observePTYScreenUpdate(time.Millisecond, errors.New("dreich screen"))
+	sm.observePTYAttachFanout(time.Millisecond, nil)
+	sm.observeAttachOutputQueueDelay(attachOutputMode("private-mode"), time.Millisecond)
+	sm.observeAttachOutputWrite(attachOutputMode("private-mode"), time.Millisecond, errors.New("dreich write"))
 	sm.observeScreenSnapshot("history-bothy", time.Millisecond)
 	sm.observeSessionLifecycleTransition("fash-from", "thrawn-to")
 	sm.observeSessionLifecycleTransition(string(StatusRunning), string(StatusStopped))
@@ -136,6 +148,12 @@ func TestTelemetryRuntimeMetricsLabelsStayLowCardinality(t *testing.T) {
 		`graith_session_launch_duration_seconds_count{driver_kind="pty",operation="orchestrator_create",result="success"} 1`,
 		`graith_session_launch_duration_seconds_count{driver_kind="unknown",operation="unknown",result="error"} 1`,
 		`graith_session_input_events_total{operation="unknown",result="success"} 1`,
+		`graith_session_input_readback_latency_seconds_count{operation="unknown"} 1`,
+		`graith_pty_output_read_duration_seconds_count{result="error"} 1`,
+		`graith_pty_screen_update_duration_seconds_count{result="error"} 1`,
+		`graith_pty_attach_fanout_duration_seconds_count{result="success"} 1`,
+		`graith_attach_output_queue_delay_seconds_count{mode="unknown"} 1`,
+		`graith_attach_output_write_duration_seconds_count{mode="unknown",result="error"} 1`,
 		`graith_screen_snapshot_requests_total{kind="unknown"} 1`,
 		`graith_session_lifecycle_transitions_total{from="running",to="stopped"} 1`,
 		`graith_messages_published_total{sender_kind="device",stream_kind="inbox"} 1`,
@@ -153,11 +171,30 @@ func TestTelemetryRuntimeMetricsLabelsStayLowCardinality(t *testing.T) {
 		"feature/thrawn",
 		"headless-id",
 		"deleted-name",
+		"paste-canny-name",
+		"private-mode",
 		"fash-from",
 		"thrawn-to",
 		`graith_session_lifecycle_transitions_total{from="unknown",to="unknown"}`,
 	} {
 		assertMetricsNotContain(t, body, secret)
+	}
+}
+
+func TestAttachLatencyTelemetryDisabledObserversAreEmpty(t *testing.T) {
+	sm := newSMWithConfig(t, config.Default())
+
+	if sm.latencyTelemetryEnabled() {
+		t.Fatal("disabled telemetry reported latency telemetry enabled")
+	}
+
+	if observers := sm.ptyTelemetryObservers(); !observers.Empty() {
+		t.Fatalf("disabled telemetry installed PTY observers: %#v", observers)
+	}
+
+	attachTelemetry := sm.attachOutputTelemetry()
+	if attachTelemetry.observesQueueDelay() || attachTelemetry.observesWrite() {
+		t.Fatalf("disabled telemetry installed attach output callbacks: %#v", attachTelemetry)
 	}
 }
 

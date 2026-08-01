@@ -107,6 +107,11 @@ type Session struct {
 	lastOutputMu    sync.Mutex
 	lastOutputAt    time.Time
 	lastUserInputAt time.Time
+	inputReadbackMu sync.Mutex
+	// inputReadback records one pending attached input. It is armed before the
+	// PTY write, committed only after a successful write, and consumed by the
+	// next eligible PTY output read.
+	inputReadback inputReadbackMarker
 	// inputDelay is the pause (in nanoseconds) between typed text and the submit
 	// CR in WriteInputAndSubmit. Seeded at construction from SessionOpts.InputDelay
 	// (or the typeInputDelay default) and updated live by SetInputDelay when the
@@ -124,6 +129,7 @@ type Session struct {
 	userInputCond       *sync.Cond
 	adoptedAt           time.Time
 	createdAt           time.Time
+	telemetryObservers  atomic.Pointer[TelemetryObservers]
 	// log routes this session's diagnostics to the daemon's logger. It is set
 	// once at construction and only read, so it needs no lock. Never nil (falls
 	// back to slog.Default()).
@@ -150,6 +156,9 @@ type SessionOpts struct {
 	// screen backend for terminal-owned attach. Non-positive uses the package
 	// default; the backend may clamp further by viewport width.
 	TerminalHistoryRows int
+	// Telemetry installs daemon-owned callbacks for focused PTY latency
+	// instrumentation. The zero value is inert.
+	Telemetry TelemetryObservers
 }
 
 func NewSession(opts SessionOpts) (*Session, error) {
@@ -239,6 +248,7 @@ func newSessionWithTerminalFactory(
 	}
 	s.inputDelay.Store(int64(inputDelay))
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
+	s.SetTelemetryObservers(opts.Telemetry)
 
 	// The inherited scrollback size distinguishes a fresh log from one reopened
 	// (append) on resume/restart — the append case is the restart path in #1087.
@@ -294,6 +304,9 @@ type AdoptOpts struct {
 	// screen backend for terminal-owned attach. Non-positive uses the package
 	// default; the backend may clamp further by viewport width.
 	TerminalHistoryRows int
+	// Telemetry installs daemon-owned callbacks for focused PTY latency
+	// instrumentation. The zero value is inert.
+	Telemetry TelemetryObservers
 }
 
 func AdoptSession(opts AdoptOpts) (*Session, error) {
@@ -400,6 +413,7 @@ func AdoptSession(opts AdoptOpts) (*Session, error) {
 		adoptedPollInterval: pollInterval,
 	}
 	s.userInputCond = sync.NewCond(&sync.Mutex{})
+	s.SetTelemetryObservers(opts.Telemetry)
 
 	// HydrationBytes < 0 means "use the built-in default"; 0 disables hydration.
 	hydrate := opts.HydrationBytes
@@ -777,6 +791,13 @@ func (s *Session) readLoop() {
 			return
 		}
 
+		observers := s.telemetryObservers.Load()
+
+		var readStarted time.Time
+		if observers != nil {
+			readStarted = time.Now()
+		}
+
 		s.mu.RLock()
 
 		if s.closed || s.Ptmx != ptmx || int(ptmx.Fd()) != fd {
@@ -788,8 +809,26 @@ func (s *Session) readLoop() {
 
 		s.mu.RUnlock()
 
+		var readEnded time.Time
+		if observers != nil {
+			readEnded = time.Now()
+			if observers.OutputRead != nil && (n > 0 || err != nil) {
+				observers.OutputRead(PTYOutputReadObservation{
+					StartedAt: readStarted,
+					EndedAt:   readEnded,
+					Bytes:     n,
+					Err:       err,
+				})
+			}
+		}
+
 		if n > 0 {
 			chunk := buf[:n]
+
+			var screenStarted time.Time
+			if observers != nil && observers.ScreenUpdate != nil {
+				screenStarted = time.Now()
+			}
 
 			s.mu.Lock()
 
@@ -811,6 +850,37 @@ func (s *Session) readLoop() {
 			writers := make([]io.Writer, len(s.writers))
 			copy(writers, s.writers)
 			s.mu.Unlock()
+
+			if observers != nil && observers.InputReadback != nil {
+				if readbackStarted := s.takeInputReadbackStartedAt(readEnded); !readbackStarted.IsZero() {
+					endedAt := readEnded
+					if endedAt.IsZero() {
+						endedAt = time.Now()
+					}
+
+					observers.InputReadback(PTYInputReadbackObservation{
+						StartedAt: readbackStarted,
+						EndedAt:   endedAt,
+						Bytes:     n,
+					})
+				}
+			}
+
+			if !screenStarted.IsZero() {
+				var screenUpdateErr error
+				if appendErr != nil || written != len(chunk) {
+					screenUpdateErr = errors.New("scrollback append failed")
+				}
+
+				screenUpdateErr = errors.Join(screenUpdateErr, screenErr)
+
+				observers.ScreenUpdate(PTYScreenUpdateObservation{
+					StartedAt: screenStarted,
+					EndedAt:   time.Now(),
+					Bytes:     n,
+					Err:       screenUpdateErr,
+				})
+			}
 
 			if appendErr != nil || written != len(chunk) {
 				s.log.Error("scrollback append failed; preserve upgrade disabled", "session", s.ID)
@@ -843,10 +913,32 @@ func (s *Session) readLoop() {
 					"since_launch_ms", sinceLaunch.Milliseconds())
 			}
 
+			var fanoutStarted time.Time
+			if observers != nil && observers.AttachFanout != nil && len(writers) > 0 {
+				fanoutStarted = time.Now()
+			}
+
+			var fanoutErr error
+
 			for _, w := range writers {
 				if w != nil {
-					_, _ = w.Write(chunk)
+					written, writeErr := w.Write(chunk)
+					if writeErr != nil {
+						fanoutErr = errors.Join(fanoutErr, writeErr)
+					} else if written < len(chunk) {
+						fanoutErr = errors.Join(fanoutErr, io.ErrShortWrite)
+					}
 				}
+			}
+
+			if !fanoutStarted.IsZero() {
+				observers.AttachFanout(PTYAttachFanoutObservation{
+					StartedAt: fanoutStarted,
+					EndedAt:   time.Now(),
+					Bytes:     n,
+					Writers:   len(writers),
+					Err:       fanoutErr,
+				})
 			}
 		}
 

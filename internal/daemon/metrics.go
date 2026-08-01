@@ -28,6 +28,9 @@ const (
 	metricSnapshotDelta = "delta"
 	metricSnapshotFull  = "full"
 
+	metricAttachOutputCoalesced = "coalesced"
+	metricAttachOutputRaw       = "raw"
+
 	metricStreamInbox  = "inbox"
 	metricStreamSystem = "system"
 	metricStreamTopic  = "topic"
@@ -56,6 +59,12 @@ type daemonMetrics struct {
 	sessionInputEvents         *prometheus.CounterVec
 	sessionInputBytes          *prometheus.CounterVec
 	sessionInputDuration       *prometheus.HistogramVec
+	sessionInputReadback       *prometheus.HistogramVec
+	ptyOutputReadDuration      *prometheus.HistogramVec
+	ptyScreenUpdateDuration    *prometheus.HistogramVec
+	ptyAttachFanoutDuration    *prometheus.HistogramVec
+	attachOutputQueueDelay     *prometheus.HistogramVec
+	attachOutputWriteDuration  *prometheus.HistogramVec
 	screenSnapshotRequests     *prometheus.CounterVec
 	screenSnapshotDuration     *prometheus.HistogramVec
 	messagesPublished          *prometheus.CounterVec
@@ -125,6 +134,48 @@ func newDaemonMetrics(sm *SessionManager) *daemonMetrics {
 			Help:      "Duration of Graith session input write attempts.",
 			Buckets:   []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
 		}, []string{"operation", "result"}),
+		sessionInputReadback: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "graith",
+			Subsystem: "session",
+			Name:      "input_readback_latency_seconds",
+			Help:      "Duration from a successful session input write attempt to the next eligible PTY output read.",
+			Buckets:   []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		}, []string{"operation"}),
+		ptyOutputReadDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "graith",
+			Subsystem: "pty",
+			Name:      "output_read_duration_seconds",
+			Help:      "Duration from PTY readiness notification to PTY output read completion.",
+			Buckets:   []float64{0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1},
+		}, []string{"result"}),
+		ptyScreenUpdateDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "graith",
+			Subsystem: "pty",
+			Name:      "screen_update_duration_seconds",
+			Help:      "Duration to enter the screen update section, append PTY output, and update the daemon terminal screen model.",
+			Buckets:   []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25},
+		}, []string{"result"}),
+		ptyAttachFanoutDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "graith",
+			Subsystem: "pty",
+			Name:      "attach_fanout_duration_seconds",
+			Help:      "Duration to fan PTY output chunks out to attached daemon writers.",
+			Buckets:   []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25},
+		}, []string{"result"}),
+		attachOutputQueueDelay: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "graith",
+			Subsystem: "attach",
+			Name:      "output_queue_delay_seconds",
+			Help:      "Duration attached output waits in the daemon writer queue before flush begins.",
+			Buckets:   []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		}, []string{"mode"}),
+		attachOutputWriteDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "graith",
+			Subsystem: "attach",
+			Name:      "output_write_duration_seconds",
+			Help:      "Duration to write an attached output frame to the client connection.",
+			Buckets:   []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		}, []string{"mode", "result"}),
 		screenSnapshotRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "graith",
 			Subsystem: "screen",
@@ -160,6 +211,12 @@ func (m *daemonMetrics) register(registry *prometheus.Registry) error {
 		m.sessionInputEvents,
 		m.sessionInputBytes,
 		m.sessionInputDuration,
+		m.sessionInputReadback,
+		m.ptyOutputReadDuration,
+		m.ptyScreenUpdateDuration,
+		m.ptyAttachFanoutDuration,
+		m.attachOutputQueueDelay,
+		m.attachOutputWriteDuration,
 		m.screenSnapshotRequests,
 		m.screenSnapshotDuration,
 		m.messagesPublished,
@@ -210,6 +267,29 @@ func (m *daemonMetrics) initBoundedLabels() {
 			m.sessionInputBytes.WithLabelValues(operation, result)
 			m.sessionInputDuration.WithLabelValues(operation, result)
 		}
+	}
+
+	for _, operation := range []string{
+		metricOperationAttach,
+		metricOperationType,
+		metricOperationTypeNoNewline,
+		metricLabelUnknown,
+	} {
+		m.sessionInputReadback.WithLabelValues(operation)
+	}
+
+	for _, result := range metricResults {
+		m.ptyOutputReadDuration.WithLabelValues(result)
+		m.ptyScreenUpdateDuration.WithLabelValues(result)
+		m.ptyAttachFanoutDuration.WithLabelValues(result)
+
+		for _, mode := range []string{metricAttachOutputRaw, metricAttachOutputCoalesced, metricLabelUnknown} {
+			m.attachOutputWriteDuration.WithLabelValues(mode, result)
+		}
+	}
+
+	for _, mode := range []string{metricAttachOutputRaw, metricAttachOutputCoalesced, metricLabelUnknown} {
+		m.attachOutputQueueDelay.WithLabelValues(mode)
 	}
 
 	for _, kind := range []string{metricSnapshotFull, metricSnapshotDelta, metricLabelUnknown} {
@@ -267,6 +347,84 @@ func (sm *SessionManager) observeSessionInput(operation string, bytes int, durat
 	metrics.sessionInputEvents.WithLabelValues(operation, result).Inc()
 	metrics.sessionInputBytes.WithLabelValues(operation, result).Add(float64(bytes))
 	metrics.sessionInputDuration.WithLabelValues(operation, result).Observe(duration.Seconds())
+}
+
+func (sm *SessionManager) observeSessionInputReadback(operation string, duration time.Duration) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if duration < 0 {
+		duration = 0
+	}
+
+	metrics.sessionInputReadback.WithLabelValues(metricInputOperation(operation)).Observe(duration.Seconds())
+}
+
+func (sm *SessionManager) observePTYOutputRead(duration time.Duration, err error) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if duration < 0 {
+		duration = 0
+	}
+
+	metrics.ptyOutputReadDuration.WithLabelValues(metricResult(err)).Observe(duration.Seconds())
+}
+
+func (sm *SessionManager) observePTYScreenUpdate(duration time.Duration, err error) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if duration < 0 {
+		duration = 0
+	}
+
+	metrics.ptyScreenUpdateDuration.WithLabelValues(metricResult(err)).Observe(duration.Seconds())
+}
+
+func (sm *SessionManager) observePTYAttachFanout(duration time.Duration, err error) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if duration < 0 {
+		duration = 0
+	}
+
+	metrics.ptyAttachFanoutDuration.WithLabelValues(metricResult(err)).Observe(duration.Seconds())
+}
+
+func (sm *SessionManager) observeAttachOutputQueueDelay(mode attachOutputMode, duration time.Duration) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if duration < 0 {
+		duration = 0
+	}
+
+	metrics.attachOutputQueueDelay.WithLabelValues(metricAttachOutputMode(mode)).Observe(duration.Seconds())
+}
+
+func (sm *SessionManager) observeAttachOutputWrite(mode attachOutputMode, duration time.Duration, err error) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if duration < 0 {
+		duration = 0
+	}
+
+	metrics.attachOutputWriteDuration.WithLabelValues(metricAttachOutputMode(mode), metricResult(err)).Observe(duration.Seconds())
 }
 
 func (sm *SessionManager) observeScreenSnapshot(kind string, duration time.Duration) {
@@ -364,6 +522,17 @@ func metricInputOperation(operation string) string {
 	switch operation {
 	case metricOperationAttach, metricOperationType, metricOperationTypeNoNewline:
 		return operation
+	default:
+		return metricLabelUnknown
+	}
+}
+
+func metricAttachOutputMode(mode attachOutputMode) string {
+	switch mode {
+	case attachOutputRaw:
+		return metricAttachOutputRaw
+	case attachOutputCoalesced:
+		return metricAttachOutputCoalesced
 	default:
 		return metricLabelUnknown
 	}

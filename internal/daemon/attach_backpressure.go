@@ -40,6 +40,7 @@ type attachDataWriterConfig struct {
 	MaxChunks     int
 	CoalesceBytes int
 	WriteTimeout  time.Duration
+	Telemetry     attachOutputTelemetry
 
 	writeFrame func([]byte) error
 	closeConn  func() error
@@ -53,6 +54,11 @@ type attachOutputStats struct {
 	coalesced      int64
 	droppedFrames  int64
 	droppedBytes   int64
+}
+
+type attachOutputChunk struct {
+	payload    []byte
+	enqueuedAt time.Time
 }
 
 type boundedAttachDataWriter struct {
@@ -70,8 +76,9 @@ type boundedAttachDataWriter struct {
 	writeFrame    func([]byte) error
 	closeConn     func() error
 	filter        grpty.AttachOutputFilter
+	telemetry     attachOutputTelemetry
 
-	queue       [][]byte
+	queue       []attachOutputChunk
 	queuedBytes int
 	closed      bool
 	overflowed  bool
@@ -139,6 +146,7 @@ func newAttachDataWriter(cfg attachDataWriterConfig) *boundedAttachDataWriter {
 		coalesceBytes: coalesceBytes,
 		writeFrame:    writeFrame,
 		closeConn:     closeConn,
+		telemetry:     cfg.Telemetry,
 		done:          make(chan struct{}),
 	}
 	w.cond = sync.NewCond(&w.mu)
@@ -195,7 +203,10 @@ func (w *boundedAttachDataWriter) Write(p []byte) (int, error) {
 		if w.tryCoalesceRawLocked(payload) {
 			w.stats.coalesced++
 		} else {
-			w.queue = append(w.queue, payload)
+			w.queue = append(w.queue, attachOutputChunk{
+				payload:    payload,
+				enqueuedAt: w.telemetryEnqueueTime(),
+			})
 		}
 
 		w.queuedBytes += len(payload)
@@ -234,7 +245,9 @@ func (w *boundedAttachDataWriter) enqueueCoalesced(bytes int) {
 		return
 	}
 
-	w.queue = append(w.queue, nil)
+	w.queue = append(w.queue, attachOutputChunk{
+		enqueuedAt: w.telemetryEnqueueTime(),
+	})
 	w.stats.enqueuedFrames++
 	w.cond.Signal()
 }
@@ -245,13 +258,21 @@ func (w *boundedAttachDataWriter) tryCoalesceRawLocked(payload []byte) bool {
 	}
 
 	last := w.queue[len(w.queue)-1]
-	if len(last)+len(payload) > w.coalesceBytes {
+	if len(last.payload)+len(payload) > w.coalesceBytes {
 		return false
 	}
 
-	w.queue[len(w.queue)-1] = append(last, payload...)
+	w.queue[len(w.queue)-1].payload = append(last.payload, payload...)
 
 	return true
+}
+
+func (w *boundedAttachDataWriter) telemetryEnqueueTime() time.Time {
+	if w.telemetry.observesQueueDelay() {
+		return time.Now()
+	}
+
+	return time.Time{}
 }
 
 func (w *boundedAttachDataWriter) recordDroppedLocked(bytes int) {
@@ -289,7 +310,7 @@ func (w *boundedAttachDataWriter) run() {
 	defer close(w.done)
 
 	for {
-		payload, ok := w.nextPayload()
+		chunk, ok := w.nextPayload()
 		if !ok {
 			w.mu.Lock()
 			stats := w.stats
@@ -313,7 +334,35 @@ func (w *boundedAttachDataWriter) run() {
 			return
 		}
 
-		if err := w.writeFrame(payload); err != nil {
+		var writeStarted time.Time
+		if !chunk.enqueuedAt.IsZero() || w.telemetry.observesWrite() {
+			writeStarted = time.Now()
+		}
+
+		if !chunk.enqueuedAt.IsZero() {
+			if w.telemetry.observeQueueDelay != nil {
+				w.telemetry.observeQueueDelay(w.mode, writeStarted.Sub(chunk.enqueuedAt))
+			}
+
+			if w.telemetry.traceQueueDelay != nil {
+				w.telemetry.traceQueueDelay(w.mode, chunk.enqueuedAt, writeStarted)
+			}
+		}
+
+		err := w.writeFrame(chunk.payload)
+
+		if !writeStarted.IsZero() {
+			writeEnded := time.Now()
+			if w.telemetry.observeWrite != nil {
+				w.telemetry.observeWrite(w.mode, writeEnded.Sub(writeStarted), err)
+			}
+
+			if w.telemetry.traceWrite != nil {
+				w.telemetry.traceWrite(w.mode, writeStarted, writeEnded, len(chunk.payload), err)
+			}
+		}
+
+		if err != nil {
 			w.mu.Lock()
 			alreadyClosed := w.closed
 			w.closed = true
@@ -337,12 +386,12 @@ func (w *boundedAttachDataWriter) run() {
 
 		w.mu.Lock()
 		w.stats.writtenFrames++
-		w.stats.writtenBytes += int64(len(payload))
+		w.stats.writtenBytes += int64(len(chunk.payload))
 		w.mu.Unlock()
 	}
 }
 
-func (w *boundedAttachDataWriter) nextPayload() ([]byte, bool) {
+func (w *boundedAttachDataWriter) nextPayload() (attachOutputChunk, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -351,16 +400,16 @@ func (w *boundedAttachDataWriter) nextPayload() ([]byte, bool) {
 	}
 
 	if len(w.queue) == 0 {
-		return nil, false
+		return attachOutputChunk{}, false
 	}
 
-	payload := w.queue[0]
+	chunk := w.queue[0]
 	copy(w.queue, w.queue[1:])
-	w.queue[len(w.queue)-1] = nil
+	w.queue[len(w.queue)-1] = attachOutputChunk{}
 	w.queue = w.queue[:len(w.queue)-1]
-	w.queuedBytes -= len(payload)
+	w.queuedBytes -= len(chunk.payload)
 
-	return payload, true
+	return chunk, true
 }
 
 func writeAttachDataFrame(writer *safeFrameWriter, p []byte) error {

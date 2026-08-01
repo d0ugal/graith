@@ -716,6 +716,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		InputDelay:          lc.InputDelayDuration(),
 		Logger:              sm.log,
 		TerminalHistoryRows: historyRows,
+		Telemetry:           sm.ptyTelemetryObservers(),
 	})
 	sm.observeSessionLaunch(metricOperationFork, DriverPTY, time.Since(launchStarted), err)
 	endDaemonSpan(spawnSpan, err)

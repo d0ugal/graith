@@ -261,7 +261,8 @@ type SessionManager struct {
 	telemetry *telemetryRuntime
 	// metrics is nil unless the metrics runtime was explicitly enabled and
 	// started successfully.
-	metrics atomic.Pointer[daemonMetrics]
+	metrics        atomic.Pointer[daemonMetrics]
+	tracingEnabled atomic.Bool
 
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so
 	// that post-exit state writes and status publishes complete before the
@@ -1135,6 +1136,7 @@ func (sm *SessionManager) adoptSessions(
 			DegradedScreen:       true,
 			DeferWait:            true,
 			TerminalHistoryRows:  cfgSnapshot.Terminal.HistoryRowsOrDefault(),
+			Telemetry:            sm.ptyTelemetryObservers(),
 		})
 		if adoptErr != nil {
 			cleaned, cleanupErr := terminateForAdoption(us)

@@ -15,6 +15,7 @@ import (
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // sessionLabel returns a human-friendly identifier for a session, preferring
@@ -550,6 +551,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						Conn:      conn,
 						Log:       log,
 						Mode:      attachOutputCoalesced,
+						Telemetry: sm.attachOutputTelemetry(),
 					})
 					gatedWriter = newGatedDataWriter(liveDataWriter)
 					dataWriter = gatedWriter
@@ -560,6 +562,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						Conn:      conn,
 						Log:       log,
 						Mode:      attachOutputRaw,
+						Telemetry: sm.attachOutputTelemetry(),
 					})
 				}
 
@@ -1122,18 +1125,45 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			if attachedSessionID != "" && sm.IsAttachedClient(attachedSessionID, conn) {
 				if pty, ok := sm.GetPTY(attachedSessionID); ok {
+					spanCtx := ctx
+
+					endInputSpan := func(error) {}
+
+					if sm.tracingEnabled.Load() {
+						spanCtx, endInputSpan = sm.startLatencySpan(ctx, "graith.attach.input",
+							attribute.Int("graith.input.bytes", len(frame.Payload)),
+						)
+					}
+
 					writeStarted := time.Now()
+					completeReadback := sm.beginAttachInputReadback(pty, writeStarted)
+
+					endWriteSpan := func(error) {}
+					if sm.tracingEnabled.Load() {
+						_, endWriteSpan = sm.startLatencySpan(spanCtx, "graith.pty.input.write",
+							attribute.Int("graith.input.bytes", len(frame.Payload)),
+						)
+					}
+
 					err := pty.WriteInput(frame.Payload)
-					sm.observeSessionInput(metricOperationAttach, len(frame.Payload), time.Since(writeStarted), err)
+					writeEnded := time.Now()
+
+					endWriteSpan(err)
+					completeReadback(err, writeEnded)
+					sm.observeSessionInput(metricOperationAttach, len(frame.Payload), writeEnded.Sub(writeStarted), err)
 
 					if err != nil {
+						endInputSpan(err)
 						sendControl("error", protocol.ErrorMsg{Message: "session input was not accepted; reconnect and retry"})
+
 						return
 					}
 
 					if interactive, ok := interactiveCapability(pty); ok {
 						interactive.NotifyUserInput()
 					}
+
+					endInputSpan(nil)
 				}
 			}
 		}
