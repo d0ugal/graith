@@ -19,8 +19,9 @@ var freshClient = func() (attachConn, error) {
 // Production uses the client implementations; tests replace them so the
 // handler can be exercised without dialing a daemon or launching a TUI.
 var (
-	fetchScrollback = client.FetchScrollback
-	runScrollView   = client.RunScrollView
+	fetchScrollback    = client.FetchScrollback
+	runScrollView      = client.RunScrollView
+	runMouseScrollView = client.RunMouseScrollView
 )
 
 func previewFetcher() func(string) string {

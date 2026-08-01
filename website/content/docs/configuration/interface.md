@@ -167,7 +167,10 @@ wheel behavior. Bundled coding agents set
 `mouse_wheel_policy = "respect_terminal_modes"` under `[agents.<name>.input]`:
 wheel-up opens `scroll_mode` only when Graith's terminal mode snapshot says the
 child has not enabled mouse tracking and is not using alternate-screen
-alternate-scroll. `always` makes the configured Graith action win even when a
+alternate-scroll. When `scroll_mode` was opened by a mouse-wheel gesture,
+wheel-down exits back to the live attached session once the pager reaches the
+bottom. The prefix keybinding still opens the explicit pager, which stays open
+until you quit it. `always` makes the configured Graith action win even when a
 child app might otherwise receive wheel events, so use it only when you accept
 that trade-off. Enabling a wheel gesture makes Graith enable mouse reporting for
 the attach so it can observe wheel events; depending on the terminal, plain

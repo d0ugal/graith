@@ -191,6 +191,8 @@ func (l *attachLoop) dispatch(result client.PassthroughResult) (bool, error) {
 		return l.onRenameSession()
 	case client.ResultScrollMode:
 		return l.onScrollMode()
+	case client.ResultMouseScrollMode:
+		return l.onMouseScrollMode()
 	case client.ResultDetached, client.ResultQuit:
 		return true, nil
 	}
@@ -688,6 +690,14 @@ func (l *attachLoop) onRenameSession() (bool, error) {
 }
 
 func (l *attachLoop) onScrollMode() (bool, error) {
+	return l.onScrollModeWithRunner(runScrollView)
+}
+
+func (l *attachLoop) onMouseScrollMode() (bool, error) {
+	return l.onScrollModeWithRunner(runMouseScrollView)
+}
+
+func (l *attachLoop) onScrollModeWithRunner(scrollView func(string, string, client.ScrollKeys)) (bool, error) {
 	scrollback := ""
 
 	if l.hasTerminalHistory {
@@ -704,7 +714,7 @@ func (l *attachLoop) onScrollMode() (bool, error) {
 		scrollback = fetchScrollback(cfg, paths, cfgFile, l.sessionID, 0)
 	}
 
-	runScrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
+	scrollView("Scrollback — "+l.info.Name, scrollback, scrollKeysFromConfig())
 
 	nc, err := freshClient()
 	if err != nil {

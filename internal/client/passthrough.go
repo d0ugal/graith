@@ -33,6 +33,7 @@ const (
 	ResultMessageOverlay
 	ResultRenameSession
 	ResultScrollMode
+	ResultMouseScrollMode
 )
 
 // kittyCtrlSeq returns the Kitty keyboard protocol escape sequence for
@@ -620,7 +621,7 @@ func (c *Client) runPassthroughLoop(ctx context.Context, opts PassthroughOpts, s
 		opts.terminalOwnedInput.setLocalGestureAction(func(action string) bool {
 			switch action {
 			case config.InputActionScrollMode:
-				setResult(ResultScrollMode)
+				setResult(ResultMouseScrollMode)
 
 				return true
 			default:
