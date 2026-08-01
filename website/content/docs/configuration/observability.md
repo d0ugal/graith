@@ -25,9 +25,44 @@ save are not published either. The running daemon stays on the previous
 telemetry runtime. Settings for disabled telemetry features can be edited, but
 they do not start listeners or exporters until the feature is enabled and the
 daemon restarts.
+
 Graith validates telemetry values even when the matching feature is disabled,
 except that `telemetry.tracing.endpoint` is only required when tracing is
 enabled.
+
+## Logs
+
+Graith always writes logs to local files. It does not ship logs to Loki,
+Grafana Cloud, or any other service unless you configure an external collector
+such as Grafana Alloy to read those files.
+
+The default data directory is `~/.local/share/graith` on Linux and other XDG
+platforms, and `~/Library/Application Support/graith` on macOS unless
+`XDG_DATA_HOME` is set. Set `data_dir` in the global config to move it. When
+`GRAITH_PROFILE=<profile>` is set, the app name becomes `graith-<profile>`, so
+the default data directory changes with that profile.
+
+Collect these files when you want Graith logs in Loki:
+
+| Path | Contents |
+|------|----------|
+| `<data_dir>/daemon.log` | Structured daemon log in JSON format |
+| `<data_dir>/daemon.log.N` | Rotated daemon log backups, controlled by `[logging]` |
+| `<data_dir>/daemon.stderr.log` | Daemon stderr, including panic tracebacks, `SIGQUIT` goroutine dumps, and race-detector output |
+| `<data_dir>/logs/<session-id>.log` | Per-session scrollback logs |
+
+The local file table in the [configuration reference]({{< relref "/docs/configuration/_index.md#file-locations" >}})
+lists the default Linux/XDG paths. Use the resolved data directory, not the
+literal examples, when you have a custom `data_dir`, macOS install, or named
+profile.
+
+Per-session scrollback logs contain raw terminal output. They may include
+prompts, source snippets, command output, or secrets printed by programs running
+inside a session. Sending those files to Loki is a deliberate off-machine
+disclosure; collect them only when that exposure is acceptable. Rotated daemon
+logs are useful for local inspection or manual backfill, but a live Alloy tail
+should usually read only `<data_dir>/daemon.log` so rotation does not re-ingest
+old backups.
 
 ## Metrics
 
@@ -130,3 +165,194 @@ Tracing export is optional runtime plumbing for a collector such as Alloy, which
 can forward traces to Tempo. Export failures are reported in the daemon log and
 do not stop the daemon. Graith does not require Grafana Cloud, Alloy, Mimir,
 Loki, Tempo, or any collector to run normally.
+
+## Collect with Grafana Alloy
+
+This example keeps Graith's own defaults local. Graith exposes metrics on
+loopback only and exports traces to a loopback Alloy receiver only after you
+enable those features. Alloy is the process that tails files and sends data to
+Loki, Mimir, and Tempo.
+
+First, enable metrics and tracing in `config.toml`:
+
+```toml
+[telemetry.metrics]
+enabled = true
+bind_address = "127.0.0.1:4824"
+path = "/metrics"
+
+[telemetry.tracing]
+enabled = true
+endpoint = "127.0.0.1:4317"
+protocol = "grpc"
+insecure = true
+timeout = "10s"
+```
+
+Restart the daemon after saving the config:
+
+```bash
+gr daemon restart
+```
+
+The tracing settings above point Graith at Alloy's local OTLP gRPC receiver.
+`insecure = true` is required for this plaintext local gRPC example. To use the
+OTLP HTTP receiver instead, set `protocol = "http/protobuf"` and omit
+`insecure` or leave it `false`; `insecure = true` is rejected for
+`http/protobuf` because the URL scheme controls plaintext HTTP versus HTTPS.
+
+```toml
+[telemetry.tracing]
+enabled = true
+endpoint = "http://127.0.0.1:4318/v1/traces"
+protocol = "http/protobuf"
+insecure = false
+timeout = "10s"
+```
+
+Then configure Alloy. Replace every uppercase placeholder with the full URL,
+username, instance ID, or token for your backend, and set the referenced
+environment variables in Alloy's service environment. The example uses Linux
+default log paths; on macOS use paths under
+`/Users/YOU/Library/Application Support/graith`, and for named profiles use
+`graith-<profile>` instead of `graith`.
+
+```alloy
+local.file_match "graith_logs" {
+  path_targets = [
+    {
+      "__path__"  = "/home/YOU/.local/share/graith/daemon.log",
+      "job"       = "graith",
+      "component" = "daemon",
+    },
+    {
+      "__path__"  = "/home/YOU/.local/share/graith/daemon.stderr.log",
+      "job"       = "graith",
+      "component" = "daemon-stderr",
+    },
+    {
+      "__path__"  = "/home/YOU/.local/share/graith/logs/*.log",
+      "job"       = "graith",
+      "component" = "session",
+    },
+  ]
+}
+
+loki.source.file "graith" {
+  targets    = local.file_match.graith_logs.targets
+  forward_to = [loki.write.graith.receiver]
+}
+
+loki.write "graith" {
+  endpoint {
+    // Example Grafana Cloud URL:
+    // https://logs-prod-REGION.grafana.net/loki/api/v1/push
+    url = "LOKI_PUSH_URL"
+
+    basic_auth {
+      username = "LOKI_USERNAME_OR_INSTANCE_ID"
+      password = sys.env("LOKI_API_TOKEN")
+    }
+  }
+}
+
+prometheus.scrape "graith" {
+  job_name = "graith"
+
+  targets = [{
+    "__address__" = "127.0.0.1:4824",
+  }]
+
+  metrics_path = "/metrics"
+  forward_to   = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    // Example Grafana Cloud URL:
+    // https://prometheus-prod-REGION.grafana.net/api/prom/push
+    url = "MIMIR_REMOTE_WRITE_URL"
+
+    basic_auth {
+      username = "MIMIR_USERNAME_OR_INSTANCE_ID"
+      password = sys.env("MIMIR_API_TOKEN")
+    }
+  }
+}
+
+otelcol.receiver.otlp "graith" {
+  grpc {
+    endpoint = "127.0.0.1:4317"
+  }
+
+  http {
+    endpoint = "127.0.0.1:4318"
+  }
+
+  output {
+    traces = [otelcol.exporter.otlphttp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlphttp "tempo" {
+  client {
+    // Grafana Cloud usually uses an /otlp endpoint. A local Tempo HTTP
+    // endpoint is usually http://tempo:4318.
+    endpoint = "TEMPO_OTLP_HTTP_ENDPOINT"
+    auth     = otelcol.auth.basic.tempo.handler
+  }
+}
+
+otelcol.auth.basic "tempo" {
+  client_auth {
+    username = "TEMPO_USERNAME_OR_INSTANCE_ID"
+    password = sys.env("TEMPO_API_TOKEN")
+  }
+}
+```
+
+This Alloy file is only an example. Graith does not start Alloy, read these
+environment variables, or send any telemetry to the placeholder endpoints.
+
+## Troubleshooting collection
+
+If logs are missing, confirm the data directory and profile first. `data_dir`
+and `GRAITH_PROFILE` change every log path. Check that the daemon has started,
+that `daemon.log` or `daemon.stderr.log` exists, and that the Alloy process can
+read the files. For session logs, make sure the glob points at
+`<data_dir>/logs/*.log`. If Alloy starts after large files already exist,
+consider `loki.source.file` position handling and whether you want to tail from
+the end.
+
+If metrics are missing, confirm `[telemetry.metrics].enabled = true` and that
+you restarted the daemon after changing telemetry settings. Curl the exact
+local target from the Alloy host:
+
+```bash
+curl http://127.0.0.1:4824/metrics
+```
+
+If that fails, check the daemon log for startup errors. A metrics bind failure
+prevents daemon startup after you opt in. If curl succeeds but Mimir has no
+samples, inspect the Alloy `prometheus.scrape` and `prometheus.remote_write`
+components, the `metrics_path`, and the remote-write URL and credentials.
+
+If traces are missing, confirm `[telemetry.tracing].enabled = true`, restart
+the daemon, and match Graith's protocol and endpoint to Alloy's receiver:
+`protocol = "grpc"` uses `127.0.0.1:4317` with `insecure = true` for the
+plaintext local example, while `protocol = "http/protobuf"` uses a full URL
+such as `http://127.0.0.1:4318/v1/traces`. Graith does not read `OTEL_*`
+environment variables for tracing exporter settings. The gRPC exporter dials
+lazily, so the receiver may not see a connection until a span is exported.
+Startup, export, and shutdown issues appear in the daemon log as
+`telemetry tracing exporter started`, `telemetry tracing exporter error`, or
+`telemetry tracing exporter shutdown failed`. Search Tempo for
+`service.name = "graith-daemon"`. Graith emits startup and session lifecycle
+spans, but tracing is batched, so spans may not appear immediately after daemon
+restart or after an operation completes.
+
+If a reload appears to do nothing, remember that runtime-affecting telemetry
+changes are restart-only. `gr daemon reload` rejects enabling or disabling
+metrics or tracing, and rejects changes to settings for a telemetry runtime that
+is currently enabled. Disabled telemetry values may reload, but they still do
+not start listeners or exporters until you enable the feature and restart.

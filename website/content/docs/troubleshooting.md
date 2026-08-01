@@ -76,6 +76,10 @@ Apply config changes without a daemon restart or session disruption:
 gr daemon reload
 ```
 
+Enabling or disabling metrics or tracing, or changing settings for an enabled
+telemetry runtime, requires a daemon restart. For Alloy collection setup and
+missing logs, metrics, or traces checks, see [Observability]({{< relref "/docs/configuration/observability.md#troubleshooting-collection" >}}).
+
 ### Daemon not responding
 
 If `gr` commands hang or return connection errors:
