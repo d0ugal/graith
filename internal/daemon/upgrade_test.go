@@ -329,6 +329,130 @@ func TestPrepareExecUpgradeRejectsBeforeExec(t *testing.T) {
 	}
 }
 
+func TestPreparePreparedUpgradeExecReleasesTerminalPinAfterValidation(t *testing.T) {
+	originalRelease := releasePinnedTerminalExecutableForExec
+
+	t.Cleanup(func() { releasePinnedTerminalExecutableForExec = originalRelease })
+
+	sm := sleeperSM(t)
+
+	executable := filepath.Join(t.TempDir(), "gr")
+	if err := os.WriteFile(executable, []byte("braw"), 0o755); err != nil { // #nosec G306 -- executable upgrade fixture.
+		t.Fatal(err)
+	}
+
+	pin, err := pinUpgradeTarget(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = pin.close() })
+
+	releases := 0
+	releasePinnedTerminalExecutableForExec = func() error {
+		releases++
+
+		return nil
+	}
+
+	target := &upgradeTarget{path: executable, pin: pin}
+
+	manifest := &UpgradeManifest{}
+	if err := sm.preparePreparedUpgradeExec(target, manifest, filepath.Join(t.TempDir(), "upgrade-adoption-braw.pending"), ""); err != nil {
+		t.Fatalf("preparePreparedUpgradeExec() error = %v", err)
+	}
+
+	if releases != 1 {
+		t.Fatalf("terminal executable pin release calls = %d, want 1", releases)
+	}
+}
+
+func TestPreparePreparedUpgradeExecDoesNotReleaseTerminalPinBeforeValidationFailure(t *testing.T) {
+	originalRelease := releasePinnedTerminalExecutableForExec
+
+	t.Cleanup(func() { releasePinnedTerminalExecutableForExec = originalRelease })
+
+	sm := sleeperSM(t)
+	released := false
+	releasePinnedTerminalExecutableForExec = func() error {
+		released = true
+
+		return nil
+	}
+
+	err := sm.preparePreparedUpgradeExec(&upgradeTarget{path: "/bothy/gr"}, &UpgradeManifest{}, "/bothy/upgrade-adoption-canny.pending", "")
+	if err == nil || !strings.Contains(err.Error(), "upgrade target changed after capacity preflight") {
+		t.Fatalf("preparePreparedUpgradeExec() error = %v, want target validation refusal", err)
+	}
+
+	if released {
+		t.Fatal("terminal executable pin was released before target validation succeeded")
+	}
+}
+
+func TestRestoreReleasedTerminalExecutablePinOnPreparedExecAbort(t *testing.T) {
+	originalRestore := restorePinnedTerminalExecutableAfterExec
+
+	t.Cleanup(func() { restorePinnedTerminalExecutableAfterExec = originalRestore })
+
+	restoreCalls := 0
+	restorePinnedTerminalExecutableAfterExec = func() error {
+		restoreCalls++
+
+		return nil
+	}
+
+	cause := errors.New("dreich exec boundary")
+	err := cause
+	released := true
+
+	restoreReleasedTerminalExecutablePin(&err, &released)
+
+	if restoreCalls != 1 {
+		t.Fatalf("restore calls = %d, want 1", restoreCalls)
+	}
+
+	if released {
+		t.Fatal("released marker stayed armed after restore")
+	}
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("restore changed original error: %v", err)
+	}
+
+	err = nil
+	released = true
+	restoreReleasedTerminalExecutablePin(&err, &released)
+
+	if restoreCalls != 1 {
+		t.Fatalf("nil error restore calls = %d, want unchanged 1", restoreCalls)
+	}
+}
+
+func TestRestoreReleasedTerminalExecutablePinJoinsRestoreFailure(t *testing.T) {
+	originalRestore := restorePinnedTerminalExecutableAfterExec
+
+	t.Cleanup(func() { restorePinnedTerminalExecutableAfterExec = originalRestore })
+
+	restorePinnedTerminalExecutableAfterExec = func() error {
+		return errors.New("thrawn restore")
+	}
+
+	cause := errors.New("canny abort")
+	err := cause
+	released := true
+
+	restoreReleasedTerminalExecutablePin(&err, &released)
+
+	if released {
+		t.Fatal("released marker stayed armed after failed restore")
+	}
+
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "restore terminal helper executable pin") {
+		t.Fatalf("joined restore error = %v", err)
+	}
+}
+
 func TestPrepareExecUpgradeUsesRetainedManagedOrigin(t *testing.T) {
 	originalPrepare := prepareManagedUpgradeForExec
 	originalRetained := prepareRetainedManagedUpgradeForExec

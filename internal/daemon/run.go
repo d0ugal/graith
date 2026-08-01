@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,6 +34,19 @@ func publicUpgradeFailure(public string, err error) error {
 	}
 
 	return errors.New(public)
+}
+
+func logUpgradeAdoptionBootstrapStderr(message string, attrs ...any) {
+	var line strings.Builder
+
+	_, _ = fmt.Fprintf(&line, "graith upgrade adoption: %s", message)
+
+	for i := 0; i+1 < len(attrs); i += 2 {
+		_, _ = fmt.Fprintf(&line, " %s=%v", fmt.Sprint(attrs[i]), attrs[i+1])
+	}
+
+	_, _ = fmt.Fprintln(&line)
+	_, _ = os.Stderr.WriteString(line.String())
 }
 
 var validateRetainedAdoptedService = daemonservice.ValidateRetainedAdoptedService
@@ -392,6 +406,23 @@ func runUnmanagedAdoptBootstrap(configFile, adoptFrom string) error {
 }
 
 func runAdoptBootstrap(configFile, adoptFrom string, serviceIdentity AdoptedServiceIdentity) (returnErr error) {
+	bootstrapStarted := time.Now()
+
+	logUpgradeAdoptionBootstrapStderr("started",
+		"pid", os.Getpid(),
+		"version", version.Version,
+		"commit", version.CommitSHA,
+	)
+
+	defer func() {
+		if returnErr != nil {
+			logUpgradeAdoptionBootstrapStderr("failed",
+				"duration_ms", time.Since(bootstrapStarted).Milliseconds(),
+				"err", returnErr,
+			)
+		}
+	}()
+
 	capsuleRaw, ownershipFDRaw := captureUpgradeBootstrapEnvironment()
 
 	owned, capsuleErr := readInheritedOwnershipCapsule(capsuleRaw)
@@ -1239,9 +1270,9 @@ func run(
 			return fail(err.Error(), err)
 		}
 		// The managed service generation is staged before the reservation closes
-		// mutations or any inheritable descriptor is exposed. Rollback is
-		// idempotent because execPreparedUpgrade also owns failure cleanup at its
-		// deeper validation boundaries.
+		// mutations or any inheritable descriptor is exposed. This outer rollback
+		// owns pre-ack validation failures as well as final exec-boundary failures;
+		// rollback remains idempotent for the final barrier's own cleanup.
 		defer func() {
 			returnErr = preparedService.rollbackError(returnErr)
 		}()
@@ -1303,6 +1334,10 @@ func run(
 
 		admissionCtx, admissionCancel := context.WithTimeout(context.Background(), upgradeAdoptionTimeout)
 
+		admissionStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "drain-admitted-work")
+
 		admissionErr := sm.waitMutationIdle(admissionCtx)
 		if admissionErr == nil {
 			admissionErr = sm.waitLifecycleIdle(admissionCtx)
@@ -1311,21 +1346,31 @@ func run(
 		admissionCancel()
 
 		if admissionErr != nil {
+			log.Warn("upgrade stage failed", "stage", "drain-admitted-work", "duration_ms", time.Since(admissionStarted).Milliseconds(), "err", admissionErr)
+
 			return fail("accepted daemon mutations did not drain before upgrade", admissionErr)
 		}
+
+		log.Info("upgrade stage completed", "stage", "drain-admitted-work", "duration_ms", time.Since(admissionStarted).Milliseconds())
 
 		// Background loops are daemon-owned writers. Join them before the frozen
 		// session snapshot so status detection, fetch, purge, or similar work
 		// cannot dirty state at the final exec barrier.
 		backgroundCtx, backgroundCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		backgroundDrainAttempted = true
+		backgroundStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "drain-background-work")
 
 		if err := stopBackground(backgroundCtx); err != nil {
 			backgroundCancel()
+			log.Warn("upgrade stage failed", "stage", "drain-background-work", "duration_ms", time.Since(backgroundStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade background drain failed", fmt.Errorf("upgrade background drain failed: %w", err))
 		}
 
 		backgroundCancel()
+		log.Info("upgrade stage completed", "stage", "drain-background-work", "duration_ms", time.Since(backgroundStarted).Milliseconds())
 
 		if err := sm.preflightUpgradeSessions(target.capacity); err != nil {
 			return fail(err.Error(), err)
@@ -1333,6 +1378,9 @@ func run(
 
 		freezeCtx, freezeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		freezeComplete := make(chan struct{})
+		freezeStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "freeze-terminal-helpers")
 
 		go func() {
 			select {
@@ -1348,8 +1396,12 @@ func run(
 		freezeCancel()
 
 		if err != nil {
+			log.Warn("upgrade stage failed", "stage", "freeze-terminal-helpers", "duration_ms", time.Since(freezeStarted).Milliseconds(), "err", err)
+
 			return fail("terminal helper handoff could not be frozen", err)
 		}
+
+		log.Info("upgrade stage completed", "stage", "freeze-terminal-helpers", "duration_ms", time.Since(freezeStarted).Milliseconds(), "helpers", len(helpers))
 
 		if err := validateUpgradeHelperHandoff(target, helpers); err != nil {
 			return fail(err.Error(), err)
@@ -1377,13 +1429,21 @@ func run(
 
 		listenerFd := listenerFile.Fd()
 
+		manifestStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "prepare-handoff-manifest")
+
 		manifest, err = sm.prepareUpgrade(listenerFd, configFile, target.capacity, helpers, true)
 		if err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade state could not be prepared", err)
 		}
 
 		manifest.Target = target.descriptor()
 		if err := sm.persistFrozenUpgradeState(manifest); err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade state could not be persisted", err)
 		}
 
@@ -1394,6 +1454,8 @@ func run(
 		if manifest.ConfigPresent {
 			snapshotCfg, err = config.LoadBytes(configFile, manifest.ConfigSnapshot)
 			if err != nil {
+				log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 				return fail("upgrade config snapshot could not be validated", err)
 			}
 		}
@@ -1402,30 +1464,61 @@ func run(
 		// removed data_dir even though RunAdoptBootstrap resolves defaults first.
 		snapshotDescriptor, err := resolvedUpgradeSnapshotPaths(snapshotCfg, configFile)
 		if err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade config snapshot paths could not be resolved", err)
 		}
 
 		if snapshotDescriptor != manifest.Paths {
+			configChangedErr := refuseUpgrade("upgrade config changed during preparation")
+
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", configChangedErr)
+
 			return fail("upgrade config snapshot changes the effective daemon paths",
-				refuseUpgrade("upgrade config changed during preparation"))
+				configChangedErr)
 		}
 
 		manifestPath, err = WriteManifest(paths.RuntimeDir, manifest)
 		if err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade manifest could not be written", err)
 		}
 
 		if err := prepareManifestHandoff(manifestPath, manifest); err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade ownership handoff could not be prepared", err)
 		}
 
 		if err := prepareOwnershipCapsule(manifest); err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "err", err)
+
 			return fail("upgrade cleanup capsule could not be prepared", err)
 		}
 
-		if err := target.validateFileIdentity(); err != nil {
+		log.Info("upgrade stage completed", "stage", "prepare-handoff-manifest", "duration_ms", time.Since(manifestStarted).Milliseconds(), "sessions", len(manifest.Sessions), "helpers", len(manifest.Helpers))
+
+		execReadinessStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "prepare-exec-boundary")
+
+		if err := sm.preparePreparedUpgradeExec(target, manifest, manifestPath, configFile, preparedService); err != nil {
+			log.Warn("upgrade stage failed", "stage", "prepare-exec-boundary", "duration_ms", time.Since(execReadinessStarted).Milliseconds(), "err", err)
+
 			return fail(err.Error(), err)
 		}
+
+		terminalPinReleased := true
+		defer func() {
+			restoreReleasedTerminalExecutablePin(&returnErr, &terminalPinReleased)
+		}()
+
+		log.Info("upgrade stage completed", "stage", "prepare-exec-boundary", "duration_ms", time.Since(execReadinessStarted).Milliseconds())
+
+		ackWaitStarted := time.Now()
+
+		log.Info("upgrade awaiting client acknowledgement")
 
 		request.ready <- nil
 
@@ -1435,13 +1528,18 @@ func run(
 			return refuseUpgrade("upgrade requester disconnected before acknowledgement")
 		}
 
-		log.Info("exec-ing new binary", "sessions", len(manifest.Sessions), "active_version", version.Version, "active_commit", version.CommitSHA, "target_version", target.targetVersion, "target_commit", target.targetCommit)
+		log.Info("upgrade client acknowledged", "duration_ms", time.Since(ackWaitStarted).Milliseconds())
+
+		postAckStarted := time.Now()
 
 		// Stop PTY reads and input only at the last reversible moment, after
 		// acknowledgement and every potentially slow background drain. This keeps
 		// terminal I/O flowing throughout preflight and bounds the final gap.
 		ioCtx, ioCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		ioComplete := make(chan struct{})
+		ioStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "quiesce-session-io", "pty_sessions", sessionCount)
 
 		go func() {
 			select {
@@ -1457,8 +1555,27 @@ func run(
 		ioCancel()
 
 		if err != nil {
+			log.Warn("upgrade stage failed", "stage", "quiesce-session-io", "duration_ms", time.Since(ioStarted).Milliseconds(), "err", err)
+
 			return fmt.Errorf("upgrade session I/O drain failed: %w", err)
 		}
+
+		log.Info("upgrade stage completed", "stage", "quiesce-session-io", "duration_ms", time.Since(ioStarted).Milliseconds(), "pty_sessions", sessionCount)
+
+		livenessStarted := time.Now()
+
+		log.Info("upgrade stage started", "stage", "revalidate-session-liveness")
+
+		if err := sm.validateUpgradePlan(manifest); err != nil {
+			log.Warn("upgrade stage failed", "stage", "revalidate-session-liveness", "duration_ms", time.Since(livenessStarted).Milliseconds(), "err", err)
+			releaseSessionIO()
+
+			return fmt.Errorf("upgrade session liveness changed before exec: %w", err)
+		}
+
+		log.Info("upgrade stage completed", "stage", "revalidate-session-liveness", "duration_ms", time.Since(livenessStarted).Milliseconds())
+
+		log.Info("exec-ing new binary", "sessions", len(manifest.Sessions), "active_version", version.Version, "active_commit", version.CommitSHA, "target_version", target.targetVersion, "target_commit", target.targetCommit, "post_ack_duration_ms", time.Since(postAckStarted).Milliseconds())
 
 		execErr := sm.execPreparedUpgrade(target, manifest, manifestPath, configFile, preparedService)
 		// Even fail-closed shutdown must let the PTY reader reach readDone;

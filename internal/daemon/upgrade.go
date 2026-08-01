@@ -282,9 +282,11 @@ type retainedManagedUpgradeOrigin struct {
 }
 
 var (
-	prepareManagedUpgradeForExec         = daemonservice.PrepareManagedUpgrade
-	prepareRetainedManagedUpgradeForExec = daemonservice.PrepareRetainedManagedUpgrade
-	execProcessForUpgrade                = syscall.Exec
+	prepareManagedUpgradeForExec             = daemonservice.PrepareManagedUpgrade
+	prepareRetainedManagedUpgradeForExec     = daemonservice.PrepareRetainedManagedUpgrade
+	execProcessForUpgrade                    = syscall.Exec
+	releasePinnedTerminalExecutableForExec   = grpty.ReleasePinnedTerminalExecutablePathForExec
+	restorePinnedTerminalExecutableAfterExec = grpty.RestorePinnedTerminalExecutableAfterExec
 )
 
 func prepareExecUpgrade(profile, clientExecPath string) (preparedExecUpgrade, error) {
@@ -4133,6 +4135,60 @@ func ExecUpgrade(manifestPath, configFile, clientExecPath string) error {
 	return errors.New("direct upgrade exec is unsupported; use the negotiated daemon upgrade protocol")
 }
 
+// preparePreparedUpgradeExec validates slow or fallible exec prerequisites
+// before the requester is told to proceed. The caller owns rollback of any
+// prepared managed service when this function returns an error.
+func (sm *SessionManager) preparePreparedUpgradeExec(
+	target *upgradeTarget,
+	manifest *UpgradeManifest,
+	manifestPath string,
+	configFile string,
+	preparedService ...preparedExecUpgrade,
+) error {
+	var prepared preparedExecUpgrade
+	if len(preparedService) > 0 {
+		prepared = preparedService[0]
+	}
+
+	// Slow process and executable validation happens before the client
+	// acknowledgement. After the client sees "upgrading", the old daemon should
+	// have only the bounded I/O quiesce, final locked recheck, and exec itself
+	// left to perform.
+	if err := sm.validateUpgradePlan(manifest); err != nil {
+		return err
+	}
+
+	if err := prepared.validateTarget(target); err != nil {
+		return err
+	}
+
+	if err := target.validateFileIdentity(); err != nil {
+		return err
+	}
+
+	if err := validateUpgradeExecBudget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule, prepared); err != nil {
+		return err
+	}
+
+	if err := releasePinnedTerminalExecutableForExec(); err != nil {
+		return refuseUpgrade("terminal helper executable pin could not be released for exec")
+	}
+
+	return nil
+}
+
+func restoreReleasedTerminalExecutablePin(returnErr *error, released *bool) {
+	if returnErr == nil || *returnErr == nil || released == nil || !*released {
+		return
+	}
+
+	if restoreErr := restorePinnedTerminalExecutableAfterExec(); restoreErr != nil {
+		*returnErr = errors.Join(*returnErr, fmt.Errorf("restore terminal helper executable pin: %w", restoreErr))
+	}
+
+	*released = false
+}
+
 func (sm *SessionManager) execPreparedUpgrade(
 	target *upgradeTarget,
 	manifest *UpgradeManifest,
@@ -4147,29 +4203,6 @@ func (sm *SessionManager) execPreparedUpgrade(
 
 	fail := func(err error) error {
 		return prepared.rollbackError(err)
-	}
-
-	// Slow process and executable validation happens before the commit barrier.
-	// The barrier below then prevents an accepted state mutation/save from being
-	// stranded when syscall.Exec replaces the process image.
-	if err := sm.validateUpgradePlan(manifest); err != nil {
-		return fail(err)
-	}
-
-	if err := prepared.validateTarget(target); err != nil {
-		return fail(err)
-	}
-
-	if err := target.validateFileIdentity(); err != nil {
-		return fail(err)
-	}
-
-	if err := validateUpgradeExecBudget(target, manifestPath, configFile, manifest.ownershipFD, manifest.ownershipCapsule, prepared); err != nil {
-		return fail(err)
-	}
-
-	if err := grpty.ReleasePinnedTerminalExecutablePathForExec(); err != nil {
-		return fail(refuseUpgrade("terminal helper executable pin could not be released for exec"))
 	}
 
 	err := sm.withFinalUpgradeBarrier(manifest, func() error {
@@ -4194,10 +4227,6 @@ func (sm *SessionManager) execPreparedUpgrade(
 		return nil
 	})
 	if err != nil {
-		if restoreErr := grpty.RestorePinnedTerminalExecutableAfterExec(); restoreErr != nil {
-			return fail(errors.Join(err, fmt.Errorf("restore terminal helper executable pin: %w", restoreErr)))
-		}
-
 		return fail(err)
 	}
 
