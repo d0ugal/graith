@@ -282,6 +282,7 @@ func (sm *SessionManager) createOrchestrator(ctx context.Context) (result Sessio
 		InputDelay:          lc.InputDelayDuration(),
 		Logger:              sm.log,
 		TerminalHistoryRows: historyRows,
+		Telemetry:           sm.ptyTelemetryObservers(),
 	})
 	sm.observeSessionLaunch(metricOperationOrchestratorCreate, DriverPTY, time.Since(launchStarted), err)
 	endDaemonSpan(spawnSpan, err)

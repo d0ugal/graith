@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"go.opentelemetry.io/otel"
@@ -96,6 +97,37 @@ func TestDaemonSpanFailureCountMarksPartialFailure(t *testing.T) {
 	if status := got.Status(); status.Code != codes.Error || status.Description != "operation.partial_failure" {
 		t.Fatalf("span status = (%v, %q), want error operation.partial_failure", status.Code, status.Description)
 	}
+}
+
+func TestRecordLatencySpanUsesExplicitTimestamps(t *testing.T) {
+	recorder := installDaemonTestTracer(t)
+
+	sm := newSMWithConfig(t, config.Default())
+	sm.tracingEnabled.Store(true)
+
+	startedAt := time.Unix(100, 0)
+	endedAt := startedAt.Add(7 * time.Millisecond)
+	sm.recordLatencySpan("graith.attach.output.write", startedAt, endedAt, nil,
+		attribute.String("graith.attach.output.mode", "raw"),
+		attribute.Int("graith.output.bytes", 42),
+	)
+
+	span := singleEndedSpan(t, recorder)
+	if got := span.Name(); got != "graith.attach.output.write" {
+		t.Fatalf("span name = %q, want graith.attach.output.write", got)
+	}
+
+	if !span.StartTime().Equal(startedAt) {
+		t.Fatalf("span start = %v, want %v", span.StartTime(), startedAt)
+	}
+
+	if !span.EndTime().Equal(endedAt) {
+		t.Fatalf("span end = %v, want %v", span.EndTime(), endedAt)
+	}
+
+	assertSpanAttr(t, span, "graith.attach.output.mode", "raw")
+	assertSpanAttr(t, span, "graith.output.bytes", int64(42))
+	assertSpanAvoidsText(t, span, "sensitive-session-id")
 }
 
 func installDaemonTestTracer(t *testing.T) *tracetest.SpanRecorder {

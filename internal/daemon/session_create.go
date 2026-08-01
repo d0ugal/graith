@@ -1130,6 +1130,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnEr
 			InputDelay:          lc.InputDelayDuration(),
 			Logger:              sm.log,
 			TerminalHistoryRows: cfgSnapshot.Terminal.HistoryRowsOrDefault(),
+			Telemetry:           sm.ptyTelemetryObservers(),
 		})
 	}
 

@@ -3691,6 +3691,7 @@ func TestAttachDataWriterCoalescesTerminalOwnedHints(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	closeOnce := sync.Once{}
+	releaseOnce := sync.Once{}
 
 	writer := newAttachDataWriter(attachDataWriterConfig{
 		SessionID: "canny-owned",
@@ -3709,7 +3710,7 @@ func TestAttachDataWriterCoalescesTerminalOwnedHints(t *testing.T) {
 	})
 
 	defer func() {
-		close(release)
+		releaseOnce.Do(func() { close(release) })
 		writer.Close()
 		writer.wait()
 	}()
@@ -3737,6 +3738,93 @@ func TestAttachDataWriterCoalescesTerminalOwnedHints(t *testing.T) {
 
 	if stats.coalesced != 9 {
 		t.Fatalf("coalesced frames = %d, want 9", stats.coalesced)
+	}
+}
+
+func TestAttachDataWriterObservesQueueDelayAndWriteDuration(t *testing.T) {
+	type writeObservation struct {
+		mode     attachOutputMode
+		duration time.Duration
+		err      error
+	}
+
+	queueDelays := make(chan time.Duration, 1)
+	writes := make(chan writeObservation, 1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	closeOnce := sync.Once{}
+	releaseOnce := sync.Once{}
+
+	writer := newAttachDataWriter(attachDataWriterConfig{
+		SessionID: "braw-observed",
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Mode:      attachOutputRaw,
+		Telemetry: attachOutputTelemetry{
+			observeQueueDelay: func(mode attachOutputMode, duration time.Duration) {
+				if mode != attachOutputRaw {
+					t.Errorf("queue delay mode = %q, want raw", mode)
+				}
+
+				queueDelays <- duration
+			},
+			observeWrite: func(mode attachOutputMode, duration time.Duration, err error) {
+				writes <- writeObservation{mode: mode, duration: duration, err: err}
+			},
+		},
+		writeFrame: func(payload []byte) error {
+			if string(payload) != "braw" {
+				t.Errorf("payload = %q, want braw", payload)
+			}
+
+			closeOnce.Do(func() { close(started) })
+			<-release
+
+			return nil
+		},
+	})
+
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		writer.Close()
+		writer.wait()
+	}()
+
+	if _, err := writer.Write([]byte("braw")); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not start observed write")
+	}
+
+	select {
+	case delay := <-queueDelays:
+		if delay < 0 {
+			t.Fatalf("queue delay = %v, want non-negative", delay)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queue delay was not observed")
+	}
+
+	releaseOnce.Do(func() { close(release) })
+
+	select {
+	case got := <-writes:
+		if got.mode != attachOutputRaw {
+			t.Fatalf("write mode = %q, want raw", got.mode)
+		}
+
+		if got.duration < 0 {
+			t.Fatalf("write duration = %v, want non-negative", got.duration)
+		}
+
+		if got.err != nil {
+			t.Fatalf("write err = %v, want nil", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("write duration was not observed")
 	}
 }
 
