@@ -3172,6 +3172,14 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case stateConfirmDelete:
+			if m.deleteError != "" {
+				m.deleteError = ""
+				m.state = stateList
+				m.resizeList()
+
+				return m, tea.Batch(m.fetchPreviewCmd(), m.refreshSessionsCmd())
+			}
+
 			switch msg.String() {
 			case "y", "Y":
 				if m.refreshDeleted != nil && !m.deletedReady {
@@ -3843,23 +3851,27 @@ func (m *overlayModel) View() tea.View {
 				if m.deleteError != "" {
 					panelContent.WriteString("\n")
 					panelContent.WriteString(lipgloss.NewStyle().Foreground(colorRed).Render("⚠ Delete failed: " + m.deleteError))
-				}
+					panelContent.WriteString("\n")
+					panelContent.WriteString(lipgloss.NewStyle().
+						Foreground(colorRed).
+						Render("Delete blocked. Press any key to return to the list."))
+				} else {
+					prompt := fmt.Sprintf("Delete '%s'? [y/N]", s.Name)
+					if m.refreshDeleted != nil && !m.deletedReady {
+						prompt = "Delete unavailable: waiting for session ownership data"
+					} else if descendants > 0 {
+						noun := "descendant"
+						if descendants != 1 {
+							noun = "descendants"
+						}
 
-				prompt := fmt.Sprintf("Delete '%s'? [y/N]", s.Name)
-				if m.refreshDeleted != nil && !m.deletedReady {
-					prompt = "Delete unavailable: waiting for session ownership data"
-				} else if descendants > 0 {
-					noun := "descendant"
-					if descendants != 1 {
-						noun = "descendants"
+						prompt = fmt.Sprintf("'%s' has %d %s. Delete the entire subtree? [y/N]", s.Name, descendants, noun)
 					}
 
-					prompt = fmt.Sprintf("'%s' has %d %s. Delete the entire subtree? [y/N]", s.Name, descendants, noun)
+					panelContent.WriteString(lipgloss.NewStyle().
+						Foreground(colorRed).
+						Render(prompt))
 				}
-
-				panelContent.WriteString(lipgloss.NewStyle().
-					Foreground(colorRed).
-					Render(prompt))
 			}
 		case stateConfirmStop:
 			if item, ok := m.list.SelectedItem().(sessionItem); ok {

@@ -269,11 +269,13 @@ func softDeletableLocked(sess *SessionState) bool {
 
 // SoftDeleteWithChildren soft-deletes a session and all of its transitive
 // descendants. If excludeRoot is true, the root session itself is left alone.
-// Sessions that are already soft-deleted, starred, system, or mid-creation are
-// skipped. A lightweight sweep re-marks descendants that appear mid-operation
-// (a child agent spawning a new session) so the subtree stays coherent — it
-// only re-marks, never tears down, since deferring teardown is the whole point.
-// Returns the list of session IDs that were soft-deleted.
+// Initial starred, system, creating, or deleting roots/descendants reject the
+// operation rather than leaving protected children under a hidden parent.
+// Already soft-deleted sessions are skipped. A lightweight sweep re-marks
+// descendants that appear mid-operation (a child agent spawning a new session)
+// so the subtree stays coherent — it only re-marks, never tears down, since
+// deferring teardown is the whole point. Returns the list of session IDs that
+// were soft-deleted.
 func (sm *SessionManager) SoftDeleteWithChildren(rootID string, excludeRoot bool) ([]string, error) {
 	return sm.softDeleteWithChildren(rootID, excludeRoot, nil)
 }
@@ -313,7 +315,14 @@ func (sm *SessionManager) softDeleteWithChildren(rootID string, excludeRoot bool
 		return nil, fmt.Errorf("session %q is undergoing subtree deletion", rootID)
 	}
 
-	if err := sm.rejectUnsafeDeleteDescendantsLocked(rootID, excludeRoot, false); err != nil {
+	if !excludeRoot {
+		if err := sm.rejectUnsafeDeleteRootLocked(rootID, false); err != nil {
+			sm.mu.RUnlock()
+			return nil, err
+		}
+	}
+
+	if err := sm.rejectUnsafeDeleteDescendantsLocked(rootID); err != nil {
 		sm.mu.RUnlock()
 		return nil, err
 	}

@@ -174,6 +174,45 @@ func TestHandleDeleteOrchestratorIsFreshReset(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteCreatingOrchestratorIsFreshReset(t *testing.T) {
+	cfg := config.Default()
+	cfg.Orchestrator.Enabled = true
+	h := newTestHarnessWithConfig(t, cfg)
+	h.addStoppedSession(t, "creating-orch", OrchestratorSessionName, 0, "")
+
+	h.sm.mu.Lock()
+	h.sm.state.Sessions["creating-orch"].SystemKind = SystemKindOrchestrator
+	h.sm.state.Sessions["creating-orch"].Status = StatusCreating
+	h.sm.state.Sessions["creating-child"] = &SessionState{
+		ID: "creating-child", Name: "creating-child", Status: StatusStopped, ParentID: "creating-orch",
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControl(t, "delete", protocol.DeleteMsg{SessionID: "creating-orch"})
+
+	env := h.readControlMsg(t)
+	if env.Type != "deleted" {
+		t.Fatalf("expected deleted, got %q", env.Type)
+	}
+
+	var r protocol.DeleteResultMsg
+	if err := protocol.DecodePayload(env, &r); err != nil {
+		t.Fatal(err)
+	}
+
+	if r.Soft {
+		t.Error("creating orchestrator reset should be an immediate hard reset")
+	}
+
+	if _, ok := h.sm.Get("creating-orch"); ok {
+		t.Error("creating orchestrator should be removed so creation aborts and reconciliation can replace it")
+	}
+
+	if _, ok := h.sm.Get("creating-child"); ok {
+		t.Error("creating orchestrator reset should remove its child subtree")
+	}
+}
+
 func TestHandleDeleteOrchestratorWorksWhenRetentionZero(t *testing.T) {
 	cfg := zeroRetentionConfig()
 	cfg.Orchestrator.Enabled = true

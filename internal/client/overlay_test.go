@@ -3175,6 +3175,84 @@ func TestOverlayDeleteSubtreeIncludesSoftDeletedDescendants(t *testing.T) {
 	}
 }
 
+func TestOverlayDeleteFailureShowsBlockerWithoutRepeatingPrompt(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{ID: "root", Name: "ben", Status: "running"},
+		{ID: "child", Name: "bairn", ParentID: "root", Status: "running"},
+	}
+
+	calls := 0
+	refreshed := false
+	m := newOverlayModel(sessions, "", nil, func(_ string, children bool) error {
+		calls++
+
+		if !children {
+			t.Error("subtree delete should pass children=true")
+		}
+
+		return errors.New(`cannot delete root session "ben": session is starred; unstar it first to delete`)
+	}, nil, nil)
+	m.refreshSessions = func() []protocol.SessionInfo {
+		refreshed = true
+		return sessions
+	}
+	m.width, m.height = 120, 40
+
+	updated, _ := sendKey(m, "x")
+	om := asOverlay(updated)
+
+	updated, cmd := sendKey(om, "y")
+	if cmd == nil {
+		t.Fatal("confirming subtree delete should return a command")
+	}
+
+	updated, _ = asOverlay(updated).Update(cmd())
+	om = asOverlay(updated)
+	content := om.View().Content
+
+	if !strings.Contains(content, `Delete failed: cannot delete root session "ben": session is starred`) {
+		t.Fatalf("delete blocker missing from failed-delete view:\n%s", content)
+	}
+
+	if strings.Contains(content, "Delete the entire subtree? [y/N]") {
+		t.Fatalf("failed delete repeated the confirmation prompt:\n%s", content)
+	}
+
+	if !strings.Contains(content, "Delete blocked. Press any key to return to the list.") {
+		t.Fatalf("failed delete view missing acknowledgement prompt:\n%s", content)
+	}
+
+	updated, cmd = sendKey(om, "y")
+	if cmd == nil {
+		t.Fatal("acknowledging a failed delete should request a refresh")
+	}
+
+	msg := cmd()
+	switch msg := msg.(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			if c != nil {
+				_ = c()
+			}
+		}
+	case refreshSessionsMsg:
+	default:
+		t.Fatalf("acknowledging failed delete returned %T, want refresh", msg)
+	}
+
+	if calls != 1 {
+		t.Fatalf("deleteSession called %d times, want 1", calls)
+	}
+
+	if !refreshed {
+		t.Fatal("acknowledging failed delete should refresh sessions")
+	}
+
+	if asOverlay(updated).state != stateList {
+		t.Fatal("acknowledging failed delete should return to list")
+	}
+}
+
 func TestOverlayDeleteWaitsForInitialOwnershipData(t *testing.T) {
 	called := false
 	m := newOverlayModel(
