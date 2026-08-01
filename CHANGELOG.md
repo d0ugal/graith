@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.3](https://github.com/d0ugal/graith/compare/v0.73.2...v0.73.3) (2026-08-01)
+
+
+### Bug Fixes
+
+* bound canceled git maintenance commands ([4700fe1](https://github.com/d0ugal/graith/commit/4700fe1e81af60352831debd684c03f7f459b6ea))
+
 ## [0.73.2](https://github.com/d0ugal/graith/compare/v0.73.1...v0.73.2) (2026-08-01)
 
 
