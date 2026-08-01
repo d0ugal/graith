@@ -331,6 +331,100 @@ func TestSoftDeleteWithChildren(t *testing.T) {
 	}
 }
 
+func TestSoftDeleteWithChildrenReportsRootBlockerAsRoot(t *testing.T) {
+	tests := map[string]struct {
+		configure func(*SessionState)
+		want      string
+	}{
+		"creating root": {
+			configure: func(root *SessionState) {
+				root.Status = StatusCreating
+			},
+			want: "session is still being created",
+		},
+		"deleting root": {
+			configure: func(root *SessionState) {
+				root.Status = StatusDeleting
+			},
+			want: "session is already being deleted",
+		},
+		"starred root": {
+			configure: func(root *SessionState) {
+				root.Starred = true
+			},
+			want: "session is starred",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			root := addStoppedSession(t, sm, "ben-root", "ben")
+			child := addStoppedSession(t, sm, "bairn-id", "bairn")
+
+			sm.mu.Lock()
+			child.ParentID = root.ID
+			test.configure(root)
+			sm.mu.Unlock()
+
+			_, err := sm.SoftDeleteWithChildren(root.ID, false)
+			if err == nil {
+				t.Fatal("SoftDeleteWithChildren succeeded despite a protected root")
+			}
+
+			msg := err.Error()
+			if !strings.Contains(msg, `cannot delete root session "ben"`) || !strings.Contains(msg, test.want) {
+				t.Fatalf("error = %q, want root-specific blocker containing %q", msg, test.want)
+			}
+
+			if strings.Contains(msg, `descendant "ben"`) {
+				t.Fatalf("root was reported as a descendant: %q", msg)
+			}
+
+			if s, ok := sm.Get(root.ID); !ok || s.IsSoftDeleted() {
+				t.Fatalf("root after rejected delete = %+v, ok=%t; want live", s, ok)
+			}
+
+			if s, ok := sm.Get(child.ID); !ok || s.IsSoftDeleted() {
+				t.Fatalf("child after rejected delete = %+v, ok=%t; want live", s, ok)
+			}
+		})
+	}
+}
+
+func TestSoftDeleteWithChildrenStillReportsProtectedDescendant(t *testing.T) {
+	sm := newTestSessionManager(t)
+	root := addStoppedSession(t, sm, "ben-root", "ben")
+	child := addStoppedSession(t, sm, "bairn-id", "bairn")
+
+	sm.mu.Lock()
+	child.ParentID = root.ID
+	child.Starred = true
+	sm.mu.Unlock()
+
+	_, err := sm.SoftDeleteWithChildren(root.ID, false)
+	if err == nil {
+		t.Fatal("SoftDeleteWithChildren succeeded despite a protected descendant")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, `descendant "bairn" is starred`) {
+		t.Fatalf("error = %q, want starred descendant blocker", msg)
+	}
+
+	if strings.Contains(msg, `root session "bairn"`) {
+		t.Fatalf("descendant was reported as root: %q", msg)
+	}
+
+	if s, ok := sm.Get(root.ID); !ok || s.IsSoftDeleted() {
+		t.Fatalf("root after rejected delete = %+v, ok=%t; want live", s, ok)
+	}
+
+	if s, ok := sm.Get(child.ID); !ok || s.IsSoftDeleted() {
+		t.Fatalf("child after rejected delete = %+v, ok=%t; want live", s, ok)
+	}
+}
+
 func TestRestoreWithChildren(t *testing.T) {
 	sm := newTestSessionManager(t)
 	addStoppedSession(t, sm, "brae-root", "brae")

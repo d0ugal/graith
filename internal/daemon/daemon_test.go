@@ -6231,6 +6231,67 @@ func TestDeleteWithChildrenRejectsProtectedDescendants(t *testing.T) {
 	}
 }
 
+func TestDeleteWithChildrenReportsRootBlockerAsRoot(t *testing.T) {
+	tests := map[string]struct {
+		configure func(*SessionState)
+		want      string
+	}{
+		"creating root": {
+			configure: func(root *SessionState) {
+				root.Status = StatusCreating
+			},
+			want: "session is still being created",
+		},
+		"deleting root": {
+			configure: func(root *SessionState) {
+				root.Status = StatusDeleting
+			},
+			want: "session is already being deleted",
+		},
+		"starred root": {
+			configure: func(root *SessionState) {
+				root.Starred = true
+			},
+			want: "session is starred",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			sm := newTestSessionManager(t)
+			root := addStoppedSession(t, sm, "ben-root", "ben")
+			child := addStoppedSession(t, sm, "bairn-id", "bairn")
+
+			sm.mu.Lock()
+			child.ParentID = root.ID
+			test.configure(root)
+			sm.mu.Unlock()
+
+			_, err := sm.DeleteWithChildren(root.ID, false)
+			if err == nil {
+				t.Fatal("DeleteWithChildren succeeded despite a protected root")
+			}
+
+			msg := err.Error()
+			if !strings.Contains(msg, `cannot delete root session "ben"`) || !strings.Contains(msg, test.want) {
+				t.Fatalf("error = %q, want root-specific blocker containing %q", msg, test.want)
+			}
+
+			if strings.Contains(msg, `descendant "ben"`) {
+				t.Fatalf("root was reported as a descendant: %q", msg)
+			}
+
+			if _, ok := sm.state.Sessions[root.ID]; !ok {
+				t.Fatal("root should survive rejected subtree delete")
+			}
+
+			if _, ok := sm.state.Sessions[child.ID]; !ok {
+				t.Fatal("child should survive rejected subtree delete")
+			}
+		})
+	}
+}
+
 func createTestSession(sm *SessionManager, name string) string {
 	id := generateID()
 	sm.state.Sessions[id] = &SessionState{

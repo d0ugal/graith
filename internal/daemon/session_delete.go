@@ -474,13 +474,62 @@ func (sm *SessionManager) subtreeDeleteOverlapsLocked(id string) bool {
 	return false
 }
 
+func deleteBlockerName(id string, sess *SessionState) string {
+	if sess != nil && sess.Name != "" {
+		return sess.Name
+	}
+
+	return id
+}
+
+// rejectUnsafeDeleteRootLocked validates the selected subtree root. Root
+// blockers are reported as target/root blockers, not as descendant blockers.
+// Already-soft-deleted roots remain valid so subtree operations can finish
+// handling hidden descendants. allowSystemRoot preserves the enabled
+// orchestrator reset path: the system root's lifecycle state is handled by the
+// bulk-delete loop while descendants remain protected by the descendant check.
+func (sm *SessionManager) rejectUnsafeDeleteRootLocked(id string, allowSystemRoot bool) error {
+	sess := sm.state.Sessions[id]
+	if sess == nil {
+		return nil
+	}
+
+	name := deleteBlockerName(id, sess)
+
+	if sess.Starred {
+		return fmt.Errorf("cannot delete root session %q: session is starred; unstar it first to delete", name)
+	}
+
+	if IsSystemSession(sess) && allowSystemRoot {
+		return nil
+	}
+
+	if sess.Status == StatusDeleting {
+		return fmt.Errorf("cannot delete root session %q: session is already being deleted; wait for lifecycle completion", name)
+	}
+
+	if sess.IsSoftDeleted() {
+		return nil
+	}
+
+	if IsSystemSession(sess) && !allowSystemRoot {
+		return fmt.Errorf("cannot delete root session %q: session is a protected system session; handle it explicitly before deleting", name)
+	}
+
+	if sess.Status == StatusCreating {
+		return fmt.Errorf("cannot delete root session %q: session is still being created; wait for lifecycle completion", name)
+	}
+
+	return nil
+}
+
 // rejectUnsafeDeleteDescendantsLocked ensures --children cannot partially
 // delete a subtree and leave protected descendants attached to a removed
 // parent. Already-soft-deleted descendants are included in a soft subtree as
 // an already-completed operation and are therefore safe to retain.
-func (sm *SessionManager) rejectUnsafeDeleteDescendantsLocked(id string, excludeRoot, allowSystemRoot bool) error {
+func (sm *SessionManager) rejectUnsafeDeleteDescendantsLocked(id string) error {
 	for _, did := range sm.collectDescendants(id) {
-		if (excludeRoot || allowSystemRoot) && did == id {
+		if did == id {
 			continue
 		}
 
@@ -490,15 +539,23 @@ func (sm *SessionManager) rejectUnsafeDeleteDescendantsLocked(id string, exclude
 		}
 
 		if sess.Status == StatusDeleting {
-			return fmt.Errorf("cannot delete subtree: descendant %q must be handled explicitly first (wait for lifecycle completion or reparent it with `gr update %s --parent <parent>`)", sess.Name, did)
+			return fmt.Errorf("cannot delete subtree: descendant %q is already being deleted and must be handled explicitly first (wait for lifecycle completion or reparent it with `gr update %s --parent <parent>`)", deleteBlockerName(did, sess), did)
 		}
 
 		if sess.IsSoftDeleted() {
 			continue
 		}
 
-		if sess.Starred || IsSystemSession(sess) || sess.Status == StatusCreating {
-			return fmt.Errorf("cannot delete subtree: descendant %q must be handled explicitly first (unstar it, wait for lifecycle completion, or reparent it with `gr update %s --parent <parent>`)", sess.Name, did)
+		if sess.Starred {
+			return fmt.Errorf("cannot delete subtree: descendant %q is starred and must be handled explicitly first (unstar it or reparent it with `gr update %s --parent <parent>`)", deleteBlockerName(did, sess), did)
+		}
+
+		if IsSystemSession(sess) {
+			return fmt.Errorf("cannot delete subtree: descendant %q is a protected system session and must be handled explicitly first (disable its owning config or reparent it with `gr update %s --parent <parent>`)", deleteBlockerName(did, sess), did)
+		}
+
+		if sess.Status == StatusCreating {
+			return fmt.Errorf("cannot delete subtree: descendant %q is still being created and must be handled explicitly first (wait for lifecycle completion or reparent it with `gr update %s --parent <parent>`)", deleteBlockerName(did, sess), did)
 		}
 	}
 
@@ -750,8 +807,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 
 	sm.mu.Lock()
 
-	sess, ok := sm.state.Sessions[id]
-	if !ok {
+	if _, ok := sm.state.Sessions[id]; !ok {
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("session %q not found", id)
 	}
@@ -761,12 +817,14 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 		return nil, fmt.Errorf("session %q is undergoing subtree deletion", id)
 	}
 
-	if !excludeRoot && sess.Starred {
-		sm.mu.Unlock()
-		return nil, fmt.Errorf("session %q is starred; unstar it first to delete", id)
+	if !excludeRoot {
+		if err := sm.rejectUnsafeDeleteRootLocked(id, allowSystemRoot); err != nil {
+			sm.mu.Unlock()
+			return nil, err
+		}
 	}
 
-	if err := sm.rejectUnsafeDeleteDescendantsLocked(id, excludeRoot, allowSystemRoot); err != nil {
+	if err := sm.rejectUnsafeDeleteDescendantsLocked(id); err != nil {
 		sm.mu.Unlock()
 		return nil, err
 	}
