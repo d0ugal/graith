@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.73.4](https://github.com/d0ugal/graith/compare/v0.73.3...v0.73.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* emit notify json and retain macos helper ([8befd51](https://github.com/d0ugal/graith/commit/8befd5174f59674b9dfaa098995e826e1bbc9798))
+* tidy backoff module requirements ([655a3fe](https://github.com/d0ugal/graith/commit/655a3fe5887870dd84bc2ac46d2777b8135abb70))
+* update module github.com/cenkalti/backoff/v5 to v7 ([f4f9890](https://github.com/d0ugal/graith/commit/f4f9890bfcd9fc3a36162db85482d0810e04eedb))
+* update module github.com/lucasb-eyer/go-colorful to v1.4.1 ([#2015](https://github.com/d0ugal/graith/issues/2015)) ([13870e3](https://github.com/d0ugal/graith/commit/13870e38ba04c74ff104ff93ae85529786ae0e12))
+
+
+### Dependencies
+
+* **deps:** update dependency zizmorcore/zizmor to v1.29.0 ([#2011](https://github.com/d0ugal/graith/issues/2011)) ([fe76a9a](https://github.com/d0ugal/graith/commit/fe76a9a1488d6f244e1e30b3337c7dd17ec8dfd5))
+* **deps:** update renovate/renovate docker tag to v44.6.0 ([#2012](https://github.com/d0ugal/graith/issues/2012)) ([5eef5ba](https://github.com/d0ugal/graith/commit/5eef5ba90ca0c784e74c55f09b7c0e1b96d987af))
+* **deps:** update renovate/renovate docker tag to v44.7.0 ([#2016](https://github.com/d0ugal/graith/issues/2016)) ([071f914](https://github.com/d0ugal/graith/commit/071f914b0789dc5ac7a149b05390c789d1c99a73))
+* **deps:** update renovate/renovate docker tag to v44.7.1 ([#2017](https://github.com/d0ugal/graith/issues/2017)) ([a2c922e](https://github.com/d0ugal/graith/commit/a2c922ebf7a3b60842743c35bd2f203142f5fa6a))
+
 ## [0.73.3](https://github.com/d0ugal/graith/compare/v0.73.2...v0.73.3) (2026-08-01)
 
 
