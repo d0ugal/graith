@@ -92,11 +92,30 @@ func writeBundleFixtureFor(t *testing.T, root, version, commit string, payload [
 	return app, standalone
 }
 
+func writeNotifierBundleFixture(t *testing.T, root string) string {
+	t.Helper()
+
+	exe := filepath.Join(root, NotifierAppBundleName, "Contents", "MacOS", NotifierExecutable)
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil { // #nosec G301 -- executable bundle fixture.
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { // #nosec G306 -- executable test fixture.
+		t.Fatal(err)
+	}
+
+	return exe
+}
+
 func bundleExpectations(standalone string) BundleExpectations {
 	return BundleExpectations{
 		Version: testVersion, Commit: testCommit, StandalonePath: standalone,
 		TeamID: testTeam, Requirement: testRequirement,
-		VerifySignature: func(string) (SignatureInfo, error) {
+		VerifySignature: func(path string) (SignatureInfo, error) {
+			if filepath.Base(path) == NotifierAppBundleName {
+				return SignatureInfo{Identifier: NotifierBundleID, TeamID: testTeam, Requirement: "identifier " + NotifierBundleID}, nil
+			}
+
 			return SignatureInfo{Identifier: ServiceManifest().BundleIdentifier, TeamID: testTeam, Requirement: testRequirement}, nil
 		},
 	}
@@ -443,6 +462,236 @@ func TestCacheBundleIsImmutableAndRevalidated(t *testing.T) {
 
 	if _, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache); err == nil {
 		t.Fatal("tampered existing cache accepted")
+	}
+}
+
+func TestCacheBundleCopiesPackagedNativeNotifier(t *testing.T) {
+	sourceRoot := t.TempDir()
+	app, standalone := writeBundleFixture(t, sourceRoot)
+	sourceNotifier := writeNotifierBundleFixture(t, sourceRoot)
+	expectations := bundleExpectations(standalone)
+
+	source, err := ValidateBundle(app, expectations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cachedNotifier := filepath.Join(filepath.Dir(cached.AppPath), NotifierAppBundleName, "Contents", "MacOS", NotifierExecutable)
+	if cachedNotifier == sourceNotifier {
+		t.Fatal("notifier was not copied into the managed service cache")
+	}
+
+	info, err := os.Lstat(cachedNotifier)
+	if err != nil {
+		t.Fatalf("cached native notifier missing: %v", err)
+	}
+
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("cached native notifier mode = %s, want executable regular file", info.Mode())
+	}
+}
+
+func TestCacheBundleBackfillsPackagedNativeNotifier(t *testing.T) {
+	sourceRoot := t.TempDir()
+	app, standalone := writeBundleFixture(t, sourceRoot)
+	expectations := bundleExpectations(standalone)
+
+	source, err := ValidateBundle(app, expectations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cachedNotifier := filepath.Join(filepath.Dir(cached.AppPath), NotifierAppBundleName, "Contents", "MacOS", NotifierExecutable)
+	if _, err := os.Lstat(cachedNotifier); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("notifier unexpectedly exists before source helper is packaged: %v", err)
+	}
+
+	writeNotifierBundleFixture(t, sourceRoot)
+
+	if _, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(cachedNotifier); err != nil {
+		t.Fatalf("cached native notifier was not backfilled: %v", err)
+	}
+}
+
+func TestCacheBundleIgnoresBrokenPackagedNativeNotifier(t *testing.T) {
+	sourceRoot := t.TempDir()
+
+	app, standalone := writeBundleFixture(t, sourceRoot)
+	if err := os.Mkdir(filepath.Join(sourceRoot, NotifierAppBundleName), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	expectations := bundleExpectations(standalone)
+
+	source, err := ValidateBundle(app, expectations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cachedNotifier := filepath.Join(filepath.Dir(cached.AppPath), NotifierAppBundleName)
+	if _, err := os.Lstat(cachedNotifier); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("broken packaged notifier should not be cached: %v", err)
+	}
+}
+
+func TestCacheBundleRepairsInvalidCachedNativeNotifier(t *testing.T) {
+	sourceRoot := t.TempDir()
+	app, standalone := writeBundleFixture(t, sourceRoot)
+	expectations := bundleExpectations(standalone)
+
+	source, err := ValidateBundle(app, expectations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cachedNotifier := filepath.Join(filepath.Dir(cached.AppPath), NotifierAppBundleName)
+
+	invalidExe := filepath.Join(cachedNotifier, "Contents", "MacOS", NotifierExecutable)
+	if err := os.MkdirAll(filepath.Dir(invalidExe), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(invalidExe, []byte("not executable"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	writeNotifierBundleFixture(t, sourceRoot)
+
+	if _, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Lstat(invalidExe)
+	if err != nil {
+		t.Fatalf("cached native notifier was not repaired: %v", err)
+	}
+
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("cached native notifier mode = %s, want executable regular file", info.Mode())
+	}
+}
+
+func TestCacheBundleKeepsExistingNativeNotifierWhenReplacementVerificationFails(t *testing.T) {
+	sourceRoot := t.TempDir()
+	app, standalone := writeBundleFixture(t, sourceRoot)
+	writeNotifierBundleFixture(t, sourceRoot)
+
+	expectations := bundleExpectations(standalone)
+
+	source, err := ValidateBundle(app, expectations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cachedNotifier := filepath.Join(filepath.Dir(cached.AppPath), NotifierAppBundleName, "Contents", "MacOS", NotifierExecutable)
+	if _, err := os.Lstat(cachedNotifier); err != nil {
+		t.Fatalf("cached native notifier missing before replacement attempt: %v", err)
+	}
+
+	flakyExpectations := bundleExpectations(standalone)
+	flakyExpectations.VerifySignature = func(path string) (SignatureInfo, error) {
+		if filepath.Base(path) == NotifierAppBundleName {
+			return SignatureInfo{}, errors.New("codesign verifier unavailable")
+		}
+
+		return SignatureInfo{Identifier: ServiceManifest().BundleIdentifier, TeamID: testTeam, Requirement: testRequirement}, nil
+	}
+
+	if _, err := cacheBundleAtRootContext(context.Background(), source, flakyExpectations, cache); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(cachedNotifier); err != nil {
+		t.Fatalf("cached native notifier was removed after replacement verification failed: %v", err)
+	}
+}
+
+func TestCacheBundleRejectsWrongTeamNativeNotifier(t *testing.T) {
+	sourceRoot := t.TempDir()
+	app, standalone := writeBundleFixture(t, sourceRoot)
+	writeNotifierBundleFixture(t, sourceRoot)
+
+	expectations := bundleExpectations(standalone)
+	expectations.VerifySignature = func(path string) (SignatureInfo, error) {
+		if filepath.Base(path) == NotifierAppBundleName {
+			return SignatureInfo{Identifier: NotifierBundleID, TeamID: "THRAWNTEAM", Requirement: "identifier " + NotifierBundleID}, nil
+		}
+
+		return SignatureInfo{Identifier: ServiceManifest().BundleIdentifier, TeamID: testTeam, Requirement: testRequirement}, nil
+	}
+
+	source, err := ValidateBundle(app, expectations)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := filepath.Join(t.TempDir(), "services")
+	if err := os.Mkdir(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := cacheBundleAtRootContext(context.Background(), source, expectations, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cachedNotifier := filepath.Join(filepath.Dir(cached.AppPath), NotifierAppBundleName)
+	if _, err := os.Lstat(cachedNotifier); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("wrong-team native notifier should not be cached: %v", err)
 	}
 }
 

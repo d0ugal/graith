@@ -454,4 +454,18 @@ gr notify "Morning briefing ready" --priority low
 gr notify "CI failing on main after 3 retries" --priority high
 ```
 
+With `--json`, `gr notify` prints a structured result:
+
+```json
+{
+  "delivered": false,
+  "reason": "suppressed by quiet hours (22:00–07:00); use --priority high to override"
+}
+```
+
+`reason` is an empty string when the notification was delivered, and explains
+suppression or backend failure when `delivered` is `false`. Suppression and
+delivery failure are reported in the JSON result rather than by a non-zero exit
+status.
+
 See [Configuration → Notifications]({{< relref "/docs/configuration/notifications.md#notifications" >}}) for backends, rate limiting, and quiet hours.

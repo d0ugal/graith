@@ -1720,7 +1720,10 @@ func TestDevHomebrewFormulaInstallsMacAppsOnlyOnMacOS(t *testing.T) {
 
 func TestNotifierBuildSupportsOnlyAppleSilicon(t *testing.T) {
 	build := string(mustReadReleaseFile(t, "macos/notifier/build.sh"))
-	for _, required := range []string{"-target arm64-apple-macosx11.0", `-o "$bin"`} {
+	for _, required := range []string{
+		"-target arm64-apple-macosx11.0", `-o "$bin"`, "GRAITH_MACOS_SIGNING_IDENTITY",
+		"--options runtime", "--timestamp", `--sign "$identity"`, "--sign -",
+	} {
 		if !strings.Contains(build, required) {
 			t.Errorf("notifier build missing %q", required)
 		}

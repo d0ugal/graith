@@ -13,10 +13,13 @@ import (
 )
 
 const (
-	DefaultSlot          = "default"
-	ControllerExecutable = "graith-service-controller"
-	DaemonExecutable     = "gr"
-	AppBundleName        = "Graith.app"
+	DefaultSlot           = "default"
+	ControllerExecutable  = "graith-service-controller"
+	DaemonExecutable      = "gr"
+	AppBundleName         = "Graith.app"
+	NotifierAppBundleName = "GraithNotifier.app"
+	NotifierBundleID      = "com.graith.notifier"
+	NotifierExecutable    = "graith-notifier"
 )
 
 //go:embed service_manifest.json

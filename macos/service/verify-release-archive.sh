@@ -19,6 +19,7 @@ trap 'rm -rf "$scratch"' EXIT
 
 listing="$(tar -tzf "$archive")"
 [ "$(printf '%s\n' "$listing" | grep -c 'Graith.app/Contents/Info.plist$')" -eq 1 ] || { echo "$archive has an ambiguous Graith.app" >&2; exit 1; }
+[ "$(printf '%s\n' "$listing" | grep -c 'GraithNotifier.app/Contents/Info.plist$')" -eq 1 ] || { echo "$archive has an ambiguous GraithNotifier.app" >&2; exit 1; }
 tar -xzf "$archive" -C "$scratch"
 
 info_files="$(find "$scratch" -type f -path '*/Graith.app/Contents/Info.plist' -print)"
@@ -26,14 +27,23 @@ info_files="$(find "$scratch" -type f -path '*/Graith.app/Contents/Info.plist' -
 info="$info_files"
 app="$(dirname "$(dirname "$info")")"
 
+notifier_info_files="$(find "$scratch" -type f -path '*/GraithNotifier.app/Contents/Info.plist' -print)"
+[ "$(printf '%s\n' "$notifier_info_files" | grep -c .)" -eq 1 ] || { echo "$archive has an ambiguous GraithNotifier.app" >&2; exit 1; }
+notifier_info="$notifier_info_files"
+notifier_app="$(dirname "$(dirname "$notifier_info")")"
+notifier="$notifier_app/Contents/MacOS/graith-notifier"
+
 standalone_files="$(find "$scratch" -type f \( -name gr -o -name gr-dev \) ! -path '*/Graith.app/*' -print)"
 [ "$(printf '%s\n' "$standalone_files" | grep -c .)" -eq 1 ] || { echo "$archive has an ambiguous standalone Graith CLI" >&2; exit 1; }
 standalone="$standalone_files"
 
 [ "$(find "$app/Contents/Library/LaunchAgents" -type f -name '*.plist' | wc -l | tr -d ' ')" -eq 65 ] || { echo "$archive does not contain the complete signed service slot set" >&2; exit 1; }
 [ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$info")" = true ] || { echo "$archive service app is not headless" >&2; exit 1; }
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$notifier_info")" = com.graith.notifier ] || { echo "$archive notifier app has the wrong bundle identifier" >&2; exit 1; }
+[ -x "$notifier" ] || { echo "$archive notifier executable is missing or not executable" >&2; exit 1; }
 cmp "$standalone" "$app/Contents/MacOS/gr"
 codesign --verify --deep --strict --verbose=2 "$app"
+codesign --verify --deep --strict --verbose=2 "$notifier_app"
 
 verification_kind="development-structure"
 if [ "$snapshot" = false ] || [ "$signed_snapshot" = true ]; then
@@ -48,6 +58,11 @@ if [ "$snapshot" = false ] || [ "$signed_snapshot" = true ]; then
 	actual_requirement="$(printf '%s\n' "$signing_details" | sed -n 's/^designated => //p' | head -1)"
 	[ "$actual_team" = "$GRAITH_SIGNING_TEAM_ID" ] || { echo "$archive service app has the wrong signing team" >&2; exit 1; }
 	[ "$actual_requirement" = "$GRAITH_SIGNING_REQUIREMENT" ] || { echo "$archive service app has the wrong designated requirement" >&2; exit 1; }
+
+	notifier_signing_details="$(codesign -d --verbose=4 -r- "$notifier_app" 2>&1)"
+	notifier_team="$(printf '%s\n' "$notifier_signing_details" | sed -n 's/^TeamIdentifier=//p' | head -1)"
+	[ "$notifier_team" = "$GRAITH_SIGNING_TEAM_ID" ] || { echo "$archive notifier app has the wrong signing team" >&2; exit 1; }
+
 	verification_kind="signed-notarized-service"
 fi
 

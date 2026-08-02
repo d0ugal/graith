@@ -15,6 +15,15 @@ var (
 	notifyPriority string
 )
 
+type notifyConn interface {
+	controlConn
+	Close()
+}
+
+var notifyConnectFn = func(cfg *config.Config, paths config.Paths, cfgFile string) (notifyConn, error) {
+	return client.Connect(cfg, paths, cfgFile)
+}
+
 var notifyCmd = &cobra.Command{
 	Use:   "notify <message>",
 	Short: "Send a proactive desktop/push notification to the user",
@@ -37,55 +46,72 @@ Examples:
   gr notify "Review needed" --title "graith"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if _, ok := config.NormalizeNotifyPriority(notifyPriority); !ok {
-			return fmt.Errorf("invalid --priority %q (want low, normal, or high)", notifyPriority)
-		}
-
-		c, err := client.Connect(cfg, paths, cfgFile)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		if err := c.SendControl("notify", protocol.NotifyMsg{
-			Message:  strings.Join(args, " "),
-			Title:    notifyTitle,
-			Priority: notifyPriority,
-		}); err != nil {
-			return err
-		}
-
-		resp, err := c.ReadControlResponse()
-		if err != nil {
-			return err
-		}
-
-		if resp.Type == "error" {
-			var e protocol.ErrorMsg
-
-			_ = protocol.DecodePayload(resp, &e)
-
-			return fmt.Errorf("%s", e.Message)
-		}
-
-		if resp.Type != "notify_response" {
-			return fmt.Errorf("unexpected response %q from daemon", resp.Type)
-		}
-
-		var r protocol.NotifyResponse
-
-		if err := protocol.DecodePayload(resp, &r); err != nil {
-			return fmt.Errorf("decode notify response: %w", err)
-		}
-
-		if r.Delivered {
-			out.Printf("Notification sent\n")
-		} else {
-			out.Printf("Notification not delivered: %s\n", r.Reason)
-		}
-
-		return nil
+		return runNotify(args)
 	},
+}
+
+type notifyJSONResponse struct {
+	Delivered bool   `json:"delivered"`
+	Reason    string `json:"reason"`
+}
+
+func runNotify(args []string) error {
+	if _, ok := config.NormalizeNotifyPriority(notifyPriority); !ok {
+		return fmt.Errorf("invalid --priority %q (want low, normal, or high)", notifyPriority)
+	}
+
+	c, err := notifyConnectFn(cfg, paths, cfgFile)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	if err := c.SendControl("notify", protocol.NotifyMsg{
+		Message:  strings.Join(args, " "),
+		Title:    notifyTitle,
+		Priority: notifyPriority,
+	}); err != nil {
+		return err
+	}
+
+	resp, err := c.ReadControlResponse()
+	if err != nil {
+		return err
+	}
+
+	if resp.Type == "error" {
+		var e protocol.ErrorMsg
+
+		_ = protocol.DecodePayload(resp, &e)
+
+		return fmt.Errorf("%s", e.Message)
+	}
+
+	if resp.Type != "notify_response" {
+		return fmt.Errorf("unexpected response %q from daemon", resp.Type)
+	}
+
+	var r protocol.NotifyResponse
+
+	if err := protocol.DecodePayload(resp, &r); err != nil {
+		return fmt.Errorf("decode notify response: %w", err)
+	}
+
+	return printNotifyResponse(r)
+}
+
+func printNotifyResponse(r protocol.NotifyResponse) error {
+	if out.IsJSON() {
+		return out.JSON(notifyJSONResponse{Delivered: r.Delivered, Reason: r.Reason})
+	}
+
+	if r.Delivered {
+		out.Printf("Notification sent\n")
+	} else {
+		out.Printf("Notification not delivered: %s\n", r.Reason)
+	}
+
+	return nil
 }
 
 // registerNotifyCmd registers this command on rootCmd. Called from registerCommands.

@@ -57,11 +57,20 @@ swiftc -O \
 # Code signature. UNUserNotificationCenter refuses to deliver from an unsigned
 # bundle, so signing is required — a failure here is fatal, not a warning, so a
 # broken bundle can't be reported as a successful build. Ad-hoc signing
-# (identity "-") suffices for a locally built helper; a distributed build would
-# sign with a real Developer ID.
-if ! codesign --force --sign - "$app"; then
-	echo "build.sh: codesign failed" >&2
-	exit 1
+# (identity "-") suffices for a locally built helper; release builds set
+# GRAITH_MACOS_SIGNING_IDENTITY so the managed daemon can require the expected
+# Developer ID team before copying the helper into its private service cache.
+identity="${GRAITH_MACOS_SIGNING_IDENTITY:--}"
+if [ "$identity" = "-" ]; then
+	if ! codesign --force --sign - "$app"; then
+		echo "build.sh: codesign failed" >&2
+		exit 1
+	fi
+else
+	if ! codesign --force --options runtime --timestamp --sign "$identity" "$app"; then
+		echo "build.sh: codesign failed" >&2
+		exit 1
+	fi
 fi
 
 if ! codesign --verify --deep --strict "$app"; then

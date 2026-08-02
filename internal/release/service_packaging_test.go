@@ -117,8 +117,22 @@ func TestDarwinReleaseBuildIsManagedAndPackagesMatchingApp(t *testing.T) {
 		return false
 	}
 
+	hasNotifierApp := func(files []archiveFile) bool {
+		for _, file := range files {
+			if strings.Contains(file.Src, "GraithNotifier.app") && file.Dst == "GraithNotifier.app/Contents" {
+				return true
+			}
+		}
+
+		return false
+	}
+
 	if !hasServiceApp(archiveFiles["darwin-arm64"]) {
 		t.Error("Darwin arm64 archive does not carry its architecture-specific Graith.app")
+	}
+
+	if !hasNotifierApp(archiveFiles["darwin-arm64"]) {
+		t.Error("Darwin arm64 archive does not carry GraithNotifier.app beside Graith.app")
 	}
 
 	if _, ok := archiveFiles["darwin-amd64"]; ok {
@@ -157,6 +171,10 @@ func TestHomebrewInstallsServiceAppAndDocumentsExplicitUninstall(t *testing.T) {
 
 	if !strings.Contains(formula, `(libexec/"graith").install "Graith.app"`) {
 		t.Fatal("Homebrew formula does not install Graith.app in the discovery layout")
+	}
+
+	if !strings.Contains(formula, `(libexec/"graith").install "GraithNotifier.app"`) {
+		t.Fatal("Homebrew formula does not install GraithNotifier.app beside Graith.app")
 	}
 
 	if !strings.Contains(formula, "gr daemon service remove --all-profiles") || !strings.Contains(strings.ToLower(formula), "before uninstall") {
@@ -298,7 +316,11 @@ func TestServiceBundleBuildContract(t *testing.T) {
 	}
 
 	verify := string(verifyData)
-	for _, required := range []string{"Graith.app/Contents/Info.plist", "LaunchAgents", "-eq 65", "LSUIElement", "codesign --verify --deep --strict", "stapler validate", "spctl --assess", `cmp "$standalone" "$app/Contents/MacOS/gr"`, "GRAITH_SIGNING_REQUIREMENT"} {
+	for _, required := range []string{
+		"Graith.app/Contents/Info.plist", "GraithNotifier.app/Contents/Info.plist", "LaunchAgents", "-eq 65", "LSUIElement",
+		"codesign --verify --deep --strict", "stapler validate", "spctl --assess", `cmp "$standalone" "$app/Contents/MacOS/gr"`,
+		"com.graith.notifier", "notifier_team", "GRAITH_SIGNING_TEAM_ID", "GRAITH_SIGNING_REQUIREMENT",
+	} {
 		if !strings.Contains(verify, required) {
 			t.Errorf("Darwin archive verification script missing %q", required)
 		}

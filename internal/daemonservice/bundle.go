@@ -470,6 +470,10 @@ func cacheBundleAtRootContext(ctx context.Context, source ValidatedBundle, expec
 			return ValidatedBundle{}, fmt.Errorf("validate existing daemon service cache: %w", validateErr)
 		}
 
+		if err := cacheNotifierAppBestEffort(ctx, source.AppPath, destinationDir, expectations); err != nil {
+			return ValidatedBundle{}, fmt.Errorf("cache native notifier app: %w", err)
+		}
+
 		return cached, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return ValidatedBundle{}, err
@@ -495,6 +499,10 @@ func cacheBundleAtRootContext(ctx context.Context, source ValidatedBundle, expec
 		return ValidatedBundle{}, fmt.Errorf("validate copied daemon service bundle: %w", err)
 	}
 
+	if err := cacheNotifierAppBestEffort(ctx, source.AppPath, tempDir, expectations); err != nil {
+		return ValidatedBundle{}, fmt.Errorf("cache native notifier app: %w", err)
+	}
+
 	if expectations.VerifyDistribution != nil {
 		if err := expectations.VerifyDistribution(tempApp); err != nil {
 			return ValidatedBundle{}, fmt.Errorf("validate copied daemon service distribution: %w", err)
@@ -506,6 +514,10 @@ func cacheBundleAtRootContext(ctx context.Context, source ValidatedBundle, expec
 			cached, validateErr := ValidateBundle(destinationApp, expectations)
 			if validateErr != nil {
 				return ValidatedBundle{}, errors.Join(err, validateErr)
+			}
+
+			if err := cacheNotifierAppBestEffort(ctx, source.AppPath, destinationDir, expectations); err != nil {
+				return ValidatedBundle{}, fmt.Errorf("cache native notifier app: %w", err)
 			}
 
 			return cached, nil
@@ -524,6 +536,115 @@ func cacheBundleAtRootContext(ctx context.Context, source ValidatedBundle, expec
 	}
 
 	return cached, nil
+}
+
+func cacheNotifierAppBestEffort(ctx context.Context, sourceAppPath, destinationDir string, expectations BundleExpectations) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	sourceNotifier := filepath.Join(filepath.Dir(sourceAppPath), NotifierAppBundleName)
+
+	if !usableNotifierApp(sourceNotifier) {
+		return nil
+	}
+
+	destinationNotifier := filepath.Join(destinationDir, NotifierAppBundleName)
+
+	if usableNotifierApp(destinationNotifier) && verifiedNotifierSignature(destinationNotifier, expectations) {
+		return nil
+	}
+
+	stageDir, err := os.MkdirTemp(destinationDir, "."+NotifierAppBundleName+".install-")
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = os.RemoveAll(stageDir) }()
+
+	stageNotifier := filepath.Join(stageDir, NotifierAppBundleName)
+	if err := copySignedBundle(ctx, sourceNotifier, stageNotifier); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
+		return nil
+	}
+
+	if !usableNotifierApp(stageNotifier) || !verifiedNotifierSignature(stageNotifier, expectations) {
+		return nil
+	}
+
+	if err := os.RemoveAll(destinationNotifier); err != nil {
+		return nil
+	}
+
+	if err := os.Rename(stageNotifier, destinationNotifier); err != nil {
+		if usableNotifierApp(destinationNotifier) && verifiedNotifierSignature(destinationNotifier, expectations) {
+			return syncDirectory(destinationDir)
+		}
+
+		return nil
+	}
+
+	return syncDirectory(destinationDir)
+}
+
+func usableNotifierApp(appPath string) bool {
+	ok, err := validateNotifierApp(appPath)
+	return err == nil && ok
+}
+
+func verifiedNotifierSignature(appPath string, expectations BundleExpectations) bool {
+	if expectations.VerifySignature == nil {
+		return false
+	}
+
+	signature, err := expectations.VerifySignature(appPath)
+	if err != nil {
+		return false
+	}
+
+	if signature.Identifier != NotifierBundleID || strings.TrimSpace(signature.Requirement) == "" {
+		return false
+	}
+
+	if expectations.TeamID == "" || expectations.Requirement == "" {
+		return expectations.AllowDevelopmentSig
+	}
+
+	return signature.TeamID == expectations.TeamID
+}
+
+func validateNotifierApp(appPath string) (bool, error) {
+	info, err := os.Lstat(appPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false, errors.New("native notifier app must be a real directory")
+	}
+
+	exe := filepath.Join(appPath, "Contents", "MacOS", NotifierExecutable)
+
+	info, err = os.Lstat(exe)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o111 == 0 {
+		return false, errors.New("native notifier executable must be a regular executable file")
+	}
+
+	return true, nil
 }
 
 func ensureCacheRoot(root string, uid int) error {

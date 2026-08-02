@@ -603,6 +603,26 @@ func TestNotifierCandidatesForExe_HomebrewSymlink(t *testing.T) {
 	}
 }
 
+func TestNotifierCandidatesForExe_ManagedServiceSibling(t *testing.T) {
+	root := t.TempDir()
+	serviceGeneration := filepath.Join(root, "Library", "Application Support", "Graith", "services", "1.0-canny")
+	gr := writeExecutable(t, filepath.Join(serviceGeneration, "Graith.app", "Contents", "MacOS", "gr"))
+	appExe := writeExecutable(t, filepath.Join(serviceGeneration, "GraithNotifier.app", macNotifierExecutable))
+
+	var found string
+
+	for _, c := range notifierCandidatesForExe(gr) {
+		if exe, ok := resolveNotifierExecutable(c); ok {
+			found = exe
+			break
+		}
+	}
+
+	if found != appExe {
+		t.Errorf("expected managed service discovery to find %q, got %q", appExe, found)
+	}
+}
+
 func TestFindMacNotifierApp_OverrideBundle(t *testing.T) {
 	dir := t.TempDir()
 	app := filepath.Join(dir, "GraithNotifier.app")
