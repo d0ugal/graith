@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/daemonservice"
 	"github.com/d0ugal/graith/internal/tools"
 )
 
@@ -310,7 +311,7 @@ func dispatchMacNotificationWith(
 
 // macNotifierExecutable is the path, relative to the .app bundle root, of the
 // notifier executable built by macos/notifier/build.sh.
-const macNotifierExecutable = "Contents/MacOS/graith-notifier"
+const macNotifierExecutable = "Contents/MacOS/" + daemonservice.NotifierExecutable
 
 // notifierDeniedExitCode is the exit status the helper uses to signal that the
 // user has explicitly disabled notifications for Graith. It must match
@@ -338,10 +339,10 @@ func findMacNotifierApp() (string, bool) {
 		candidates = append(candidates, notifierCandidatesForExe(exe)...)
 	}
 
-	candidates = append(candidates, "/Applications/GraithNotifier.app")
+	candidates = append(candidates, filepath.Join("/Applications", daemonservice.NotifierAppBundleName))
 
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, "Applications", "GraithNotifier.app"))
+		candidates = append(candidates, filepath.Join(home, "Applications", daemonservice.NotifierAppBundleName))
 	}
 
 	for _, c := range candidates {
@@ -353,12 +354,14 @@ func findMacNotifierApp() (string, bool) {
 	return "", false
 }
 
-// notifierCandidatesForExe returns the bundle locations to probe relative to the
-// gr executable at exe. It searches relative to both the executable's directory
-// and its symlink-resolved directory: Homebrew installs gr as a symlink in
-// <prefix>/bin pointing into the Cellar and drops GraithNotifier.app under the
-// Cellar's libexec/graith, which is only reachable via the resolved path
-// (<prefix>/libexec isn't symlinked, issue #1101).
+// notifierCandidatesForExe returns the bundle locations to probe relative to
+// the gr executable at exe. It searches relative to both the executable's
+// directory and its symlink-resolved directory: Homebrew installs gr as a
+// symlink in <prefix>/bin pointing into the Cellar and drops GraithNotifier.app
+// under the Cellar's libexec/graith, which is only reachable via the resolved
+// path (<prefix>/libexec isn't symlinked, issue #1101). Managed macOS services
+// run from a retained Graith.app copy, so the sibling GraithNotifier.app copied
+// into that service generation is also probed.
 func notifierCandidatesForExe(exe string) []string {
 	var candidates []string
 
@@ -373,10 +376,17 @@ func notifierCandidatesForExe(exe string) []string {
 		seen[dir] = true
 
 		candidates = append(candidates,
-			filepath.Join(dir, "GraithNotifier.app"),
-			filepath.Join(dir, "..", "libexec", "graith", "GraithNotifier.app"),
-			filepath.Join(dir, "..", "share", "graith", "GraithNotifier.app"),
+			filepath.Join(dir, daemonservice.NotifierAppBundleName),
+			filepath.Join(dir, "..", "libexec", "graith", daemonservice.NotifierAppBundleName),
+			filepath.Join(dir, "..", "share", "graith", daemonservice.NotifierAppBundleName),
 		)
+
+		if filepath.Base(dir) == "MacOS" {
+			app := filepath.Dir(filepath.Dir(dir))
+			if filepath.Base(app) == daemonservice.AppBundleName {
+				candidates = append(candidates, filepath.Join(filepath.Dir(app), daemonservice.NotifierAppBundleName))
+			}
+		}
 	}
 
 	return candidates

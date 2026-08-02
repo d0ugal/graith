@@ -70,7 +70,9 @@ bundle identifier `com.graith.notifier`) that posts via
 Settings > Notifications*, where you can configure their style, sounds, and
 Do-Not-Disturb behavior like any other app. Stable and `graith-dev` Homebrew
 installations install this helper automatically on macOS; Linux packages do not
-contain it.
+contain it. Managed macOS daemon services retain the packaged helper beside
+their private `Graith.app` service generation, so the `macos` backend still uses
+Graith's native helper after the daemon starts from its service copy.
 
 Build the helper with `make notifier` (macOS only — a no-op on Linux) and place
 the resulting `macos/build/GraithNotifier.app` where graith can find it:
