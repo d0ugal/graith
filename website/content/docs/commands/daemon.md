@@ -1,7 +1,7 @@
 ---
 weight: 450
 title: "Daemon & other commands"
-description: "Daemon lifecycle, config, completion, and internal commands."
+description: "Daemon lifecycle, config, completion, command discovery, and internal commands."
 icon: "dns"
 toc: true
 draft: false
@@ -318,6 +318,25 @@ Write built-in defaults to the config file.
 ### `gr completion <shell>`
 
 Generate a shell completion script. Supported shells: `bash`, `zsh`, `fish`, `powershell`.
+
+### `gr help-tree [COMMAND...]`
+
+Print a compact command tree for quickly discovering the CLI. By default it
+prints text with two-space indentation, branch command descriptions, and leaf
+command args plus usable non-global flags. Hidden and deprecated commands are omitted.
+
+Pass a command path to inspect only that subtree:
+
+```bash
+gr help-tree msg
+gr help-tree scenario start
+```
+
+| Flag | Description |
+|------|-------------|
+| `--depth <n>` | Limit nesting depth; `1` shows the selected command plus direct children, `0` is unlimited |
+
+Use `--json` for the same tree as structured output.
 
 ### `gr version`
 
