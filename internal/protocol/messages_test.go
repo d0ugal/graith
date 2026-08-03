@@ -115,6 +115,49 @@ func TestCreateMsgLabelsWirePresence(t *testing.T) {
 	}
 }
 
+func TestAgentCatalogResponseWireShape(t *testing.T) {
+	input := AgentCatalogResponseMsg{
+		Agents: []AgentCatalogEntry{
+			{Name: "thrawn", Command: "thrawn-cli", InfoKeys: []string{"model", "version"}},
+			{Name: "strath", Command: "strath-cli"},
+		},
+		DefaultAgent: "thrawn",
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	for _, want := range []string{
+		`"name":"thrawn"`,
+		`"command":"thrawn-cli"`,
+		`"info_keys":["model","version"]`,
+		`"default_agent":"thrawn"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("AgentCatalogResponseMsg JSON = %s, want it to contain %s", data, want)
+		}
+	}
+
+	var got AgentCatalogResponseMsg
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.DefaultAgent != "thrawn" {
+		t.Fatalf("DefaultAgent = %q, want thrawn", got.DefaultAgent)
+	}
+
+	if len(got.Agents) != 2 || got.Agents[0].Name != "thrawn" {
+		t.Fatalf("Agents = %#v, want custom thrawn first", got.Agents)
+	}
+
+	if !reflect.DeepEqual(got.Agents[0].InfoKeys, []string{"model", "version"}) {
+		t.Fatalf("InfoKeys = %#v, want [model version]", got.Agents[0].InfoKeys)
+	}
+}
+
 func TestTriggerBindingDetailWatcherUsageJSON(t *testing.T) {
 	detail := TriggerBindingDetail{
 		SessionID:                    "braw",

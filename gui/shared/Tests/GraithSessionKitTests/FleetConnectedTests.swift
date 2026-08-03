@@ -132,6 +132,21 @@ struct FleetConnectedTests {
         #expect(req?.agentHooks == false)
     }
 
+    @Test func createSessionForwardsEmptyAgentForDaemonDefault() async {
+        let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
+                                                repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],
+                                                )
+        await fleet.connectAll()
+        await withCheckedContinuation { cont in
+            fleet.createSession(name: "canny", agent: "", repoPath: "/tmp/croft",
+                                model: "", prompt: "", hostID: "ben") { _ in
+                cont.resume()
+            }
+        }
+        let req = await mock.lastCreate
+        #expect(req?.agent == "")
+    }
+
     @Test func createSessionRejectsInPlaceWithBase() async {
         let (fleet, mock) = makeFleetWithRemote(sessions: sampleSessions(),
                                                 repos: [RepoEntry(path: "/tmp/croft", name: "croft", recent: true)],

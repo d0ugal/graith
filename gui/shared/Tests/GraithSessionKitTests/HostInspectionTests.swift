@@ -129,7 +129,10 @@ struct AgentCatalogTests {
             defaultAgent: "strath"))
         await fleet.connectAll()
 
-        let catalog = fleet.agentCatalog(hostID: "ben")
+        guard case let .available(catalog) = fleet.agentCatalog(hostID: "ben") else {
+            Issue.record("expected available agent catalog")
+            return
+        }
         #expect(catalog.names == ["croft", "strath"])
         #expect(catalog.defaultAgent == "strath")
         // A custom agent the old hardcoded list never had is offered.
@@ -142,26 +145,90 @@ struct AgentCatalogTests {
             agents: [AgentCatalogEntry(name: "claude"), AgentCatalogEntry(name: "codex")],
             defaultAgent: "codex"))
         await fleet.connectAll()
-        #expect(fleet.agentCatalog(hostID: "ben").resolvedDefault == "codex")
+        guard case let .available(catalog) = fleet.agentCatalog(hostID: "ben") else {
+            Issue.record("expected available agent catalog")
+            return
+        }
+        #expect(catalog.resolvedDefault == "codex")
     }
 
-    @MainActor @Test func fallbackUsedBeforeAnyFetch() {
-        let fleet = makeEmptyFleet()
-        // No connections → the built-in fallback keeps the picker non-empty.
-        let catalog = fleet.agentCatalog(hostID: "nae-sic-host")
-        #expect(!catalog.names.isEmpty)
-        #expect(catalog.names == AgentCatalog.fallback.names)
-        #expect(catalog.resolvedDefault == "claude")
+    @MainActor @Test func noFallbackBeforeAnyFetch() {
+        let (fleet, _) = makeFleetWithRemote()
+        guard case .loading = fleet.agentCatalog(hostID: "ben") else {
+            Issue.record("expected a configured-but-unfetched host to be loading")
+            return
+        }
+
+        guard case let .unavailable(reason) = fleet.agentCatalog(hostID: "nae-sic-host") else {
+            Issue.record("expected an unknown host to be unavailable")
+            return
+        }
+        #expect(reason.contains("host"))
     }
 
-    @MainActor @Test func fetchFailureFallsBackWithoutThrowing() async {
+    @MainActor @Test func fetchFailureReturnsUnavailableWithoutFallback() async {
         let (fleet, mock) = makeFleetWithRemote()
         await fleet.connectAll()
         await mock.setFailAgentCatalog(.daemon("old daemon: no agent_catalog"))
-        // A daemon that can't answer must not throw here — the picker degrades to
-        // the last-known catalog (the one fetched on connect), never empty.
-        let catalog = await fleet.fetchAgentCatalog(hostID: "ben")
-        #expect(!catalog.names.isEmpty)
+        let state = await fleet.fetchAgentCatalog(hostID: "ben")
+        guard case let .unavailable(reason) = state else {
+            Issue.record("expected failed catalog refresh to be unavailable")
+            return
+        }
+        #expect(reason.contains("agent_catalog"))
+    }
+
+    @MainActor @Test func fetchDuringConnectResolvesToAvailableCatalog() async {
+        let client = MockHostClient()
+        await client.setGateConnect(true)
+        await client.setAgentCatalog(AgentCatalogResponseMsg(
+            agents: [AgentCatalogEntry(name: "codex"), AgentCatalogEntry(name: "strath")],
+            defaultAgent: "strath"))
+        let conn = HostConnection(entry: Host(id: "ben", label: "Ben Nevis", kind: .remote,
+                                              magicDNSName: "ben.tail", isPaired: true),
+                                  client: client)
+
+        let connectTask = Task { await conn.connect() }
+        await Task.yield()
+        #expect(conn.state == HostConnection.ConnectionState.connecting)
+
+        let fetchTask = Task { await conn.fetchAgentCatalog() }
+        await Task.yield()
+        guard case .loading = conn.agentCatalogState else {
+            Issue.record("expected catalog fetch to wait in loading while connect is in flight")
+            await client.releaseConnect()
+            await connectTask.value
+            _ = await fetchTask.value
+            return
+        }
+
+        await client.releaseConnect()
+        await connectTask.value
+        let state = await fetchTask.value
+        guard case let .available(catalog) = state else {
+            Issue.record("expected available catalog after connect completed")
+            return
+        }
+        #expect(catalog.resolvedDefault == "strath")
+    }
+
+    @MainActor @Test func fetchFromIdleConnectsBeforeReturningCatalog() async {
+        let client = MockHostClient()
+        await client.setAgentCatalog(AgentCatalogResponseMsg(
+            agents: [AgentCatalogEntry(name: "codex")],
+            defaultAgent: "codex"))
+        let conn = HostConnection(entry: Host(id: "ben", label: "Ben Nevis", kind: .remote,
+                                              magicDNSName: "ben.tail", isPaired: true),
+                                  client: client)
+
+        let state = await conn.fetchAgentCatalog()
+
+        #expect(conn.state == HostConnection.ConnectionState.connected)
+        guard case let .available(catalog) = state else {
+            Issue.record("expected idle fetch to connect and return the catalog")
+            return
+        }
+        #expect(catalog.names == ["codex"])
     }
 
     @Test func resolvedDefaultFallsBackToFirstWhenDefaultMissing() {
@@ -171,5 +238,10 @@ struct AgentCatalogTests {
         // A misconfigured daemon whose default_agent isn't in the catalog still
         // yields a selectable value rather than an empty picker.
         #expect(catalog.resolvedDefault == "bothy")
+    }
+
+    @Test func resolvedDefaultForEmptyCatalogIsEmpty() {
+        let catalog = AgentCatalogResponseMsg(agents: [], defaultAgent: "")
+        #expect(catalog.resolvedDefault == "")
     }
 }

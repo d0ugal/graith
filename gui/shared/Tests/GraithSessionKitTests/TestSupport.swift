@@ -99,6 +99,11 @@ actor MockHostClient: GraithHostClient {
     /// Number of `listSessions()` calls, so a test can assert the in-flight
     /// refresh's single coalesced follow-up actually fired (and only once).
     private(set) var listCallCount = 0
+    /// Blocks `connect()` until `releaseConnect()` — used to assert callers that
+    /// ask for a catalog during an in-flight connect don't observe permanent
+    /// loading.
+    private var connectGate: CheckedContinuation<Void, Never>?
+    private var gateConnect = false
 
     init(sessions: [SessionInfo] = [], repos: [RepoEntry] = [],
          failConnect: GraithClientError? = nil) {
@@ -117,6 +122,12 @@ actor MockHostClient: GraithHostClient {
     func setAgentCatalog(_ c: AgentCatalogResponseMsg) { agentCatalogResponse = c }
     func setFailDiagnostics(_ e: GraithClientError?) { failDiagnostics = e }
     func setGateList(_ on: Bool) { gateList = on }
+    func setGateConnect(_ on: Bool) { gateConnect = on }
+    func releaseConnect() {
+        gateConnect = false
+        connectGate?.resume()
+        connectGate = nil
+    }
     /// Release a gated `listSessions()`. Clears the gate *before* resuming so the
     /// coalesced follow-up call (the in-flight refresh looping once more) runs to
     /// completion instead of re-blocking on a fresh, never-resumed continuation —
@@ -128,6 +139,7 @@ actor MockHostClient: GraithHostClient {
     }
 
     func connect() async throws {
+        if gateConnect { await withCheckedContinuation { connectGate = $0 } }
         if let failConnect { throw failConnect }
         connected = true
     }
@@ -139,6 +151,9 @@ actor MockHostClient: GraithHostClient {
         gateList = false
         listGate?.resume()
         listGate = nil
+        gateConnect = false
+        connectGate?.resume()
+        connectGate = nil
     }
 
     func listSessions() async throws -> [SessionInfo] {
