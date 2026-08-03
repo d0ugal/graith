@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.5](https://github.com/d0ugal/graith/compare/v0.73.4...v0.73.5) (2026-08-03)
+
+
+### Features
+
+* add help-tree command ([e5a66bc](https://github.com/d0ugal/graith/commit/e5a66bca6c324af410b0f79183193596c7710f5d))
+
 ## [0.73.4](https://github.com/d0ugal/graith/compare/v0.73.3...v0.73.4) (2026-08-02)
 
 
