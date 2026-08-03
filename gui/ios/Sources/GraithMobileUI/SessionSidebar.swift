@@ -190,13 +190,13 @@ struct SessionRow: View {
     @State private var showPurgeConfirm = false
 
     /// The session host's agent catalog, driven by daemon config (#1234). Loaded
-    /// when the Migrate sheet is opened; starts on the built-in fallback.
-    @State private var migrateCatalog = AgentCatalog.fallback
+    /// when the Migrate sheet is opened.
+    @State private var migrateCatalogState: AgentCatalogState = .loading
 
     /// Agents offered in the Migrate sheet: the daemon catalog plus the session's
     /// current agent (so it's always shown even if the config later dropped it).
     private var migrateAgents: [String] {
-        var names = migrateCatalog.names
+        var names = migrateCatalogState.catalog?.names ?? []
         if !session.agent.isEmpty, !names.contains(session.agent) { names.append(session.agent) }
         return names
     }
@@ -294,7 +294,12 @@ struct SessionRow: View {
             ) { name in Task { await connection.fork(session, name: name) } }
         }
         .sheet(isPresented: $showMigrate) {
-            MigrateSheet(sessionName: session.name, agents: migrateAgents, currentAgent: session.agent) { agent in
+            MigrateSheet(
+                sessionName: session.name,
+                agents: migrateAgents,
+                catalogState: migrateCatalogState,
+                currentAgent: session.agent
+            ) { agent in
                 Task { await connection.migrate(session, agent: agent) }
             }
         }
@@ -322,7 +327,8 @@ struct SessionRow: View {
         Button { forkName = "\(session.name)-fork"; showFork = true } label: { Label("Fork…", systemImage: "arrow.triangle.branch") }
         Button {
             showMigrate = true
-            Task { migrateCatalog = await connection.fetchAgentCatalog() ?? AgentCatalog.fallback }
+            migrateCatalogState = .loading
+            Task { migrateCatalogState = await connection.fetchAgentCatalog() }
         } label: { Label("Migrate…", systemImage: "arrow.left.arrow.right") }
         Button { statusText = session.summaryText ?? ""; showSetStatus = true } label: {
             Label("Set Status…", systemImage: "text.bubble")
@@ -393,15 +399,18 @@ struct SessionTextPromptSheet: View {
 struct MigrateSheet: View {
     let sessionName: String
     let agents: [String]
+    let catalogState: AgentCatalogState
     let currentAgent: String
     let onConfirm: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedAgent: String
 
-    init(sessionName: String, agents: [String], currentAgent: String, onConfirm: @escaping (String) -> Void) {
+    init(sessionName: String, agents: [String], catalogState: AgentCatalogState,
+         currentAgent: String, onConfirm: @escaping (String) -> Void) {
         self.sessionName = sessionName
         self.agents = agents
+        self.catalogState = catalogState
         self.currentAgent = currentAgent
         self.onConfirm = onConfirm
         _selectedAgent = State(initialValue: currentAgent)
@@ -411,11 +420,22 @@ struct MigrateSheet: View {
         NavigationStack {
             Form {
                 Section("Swap \u{201c}\(sessionName)\u{201d} to a different agent") {
-                    Picker("Agent", selection: $selectedAgent) {
-                        ForEach(agents, id: \.self) { Text($0).tag($0) }
+                    switch catalogState {
+                    case .loading:
+                        ProgressView("Loading agents...")
+                    case .available:
+                        Picker("Agent", selection: $selectedAgent) {
+                            ForEach(agents, id: \.self) { Text($0).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    case let .unavailable(reason):
+                        Text("Agent catalog unavailable.")
+                            .foregroundStyle(.secondary)
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
                 }
             }
             .navigationTitle("Migrate Session")
@@ -428,7 +448,7 @@ struct MigrateSheet: View {
                         onConfirm(selectedAgent)
                         dismiss()
                     }
-                    .disabled(selectedAgent == currentAgent)
+                    .disabled(selectedAgent == currentAgent || !agents.contains(selectedAgent))
                 }
             }
         }

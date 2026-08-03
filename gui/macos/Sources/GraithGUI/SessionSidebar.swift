@@ -593,7 +593,7 @@ struct SessionRow: View {
     @State private var showFork = false
     @State private var forkName = ""
     @State private var showMigrate = false
-    @State private var migrateAgent = "claude"
+    @State private var migrateAgent = ""
     @State private var showDeleteConfirm = false
     @State private var showPurgeConfirm = false
     @State private var showSetStatus = false
@@ -603,13 +603,13 @@ struct SessionRow: View {
     @State private var showMessages = false
 
     /// The session host's agent catalog, driven by daemon config (#1234). Loaded
-    /// when the Migrate sheet is opened; starts on the built-in fallback.
-    @State private var migrateCatalog = AgentCatalog.fallback
+    /// when the Migrate sheet is opened.
+    @State private var migrateCatalogState: AgentCatalogState = .loading
 
     /// Agents offered in the Migrate sheet: the daemon catalog plus the session's
     /// current agent (so it's always shown even if the config later dropped it).
     private var migrateAgents: [String] {
-        var names = migrateCatalog.names
+        var names = migrateCatalogState.catalog?.names ?? []
         if !session.agent.isEmpty, !names.contains(session.agent) { names.append(session.agent) }
         return names
     }
@@ -693,6 +693,7 @@ struct SessionRow: View {
             MigrateSheet(
                 sessionName: session.name,
                 agents: migrateAgents,
+                catalogState: migrateCatalogState,
                 currentAgent: session.agent,
                 selectedAgent: $migrateAgent
             ) { store.migrateSession(session, agent: $0) }
@@ -942,10 +943,11 @@ struct SessionRow: View {
             }
             Button("Migrate…") {
                 migrateAgent = session.agent
+                migrateCatalogState = .loading
                 showMigrate = true
                 Task {
-                    migrateCatalog = await store.connection(ownerOf: session.id)?
-                        .fetchAgentCatalog() ?? AgentCatalog.fallback
+                    migrateCatalogState = await store.connection(ownerOf: session.id)?
+                        .fetchAgentCatalog() ?? .unavailable("That host isn't connected.")
                 }
             }
             Button("Set Status…") {
@@ -1123,6 +1125,7 @@ struct SessionTextPromptSheet: View {
 struct MigrateSheet: View {
     let sessionName: String
     let agents: [String]
+    let catalogState: AgentCatalogState
     let currentAgent: String
     @Binding var selectedAgent: String
     let onConfirm: (String) -> Void
@@ -1146,13 +1149,36 @@ struct MigrateSheet: View {
                 Text("Swap \u{201c}\(sessionName)\u{201d} to a different agent")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(Theme.subtext0)
-                HStack(spacing: 8) {
-                    ForEach(agents, id: \.self) { a in
-                        AgentChip(name: a, isSelected: selectedAgent == a) {
-                            selectedAgent = a
-                        }
+                switch catalogState {
+                case .loading:
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading this host's agents...")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(Theme.overlay0)
                     }
-                    Spacer()
+                case .available:
+                    ScrollView(.vertical) {
+                        FlowLayout(spacing: 8, lineSpacing: 8) {
+                            ForEach(agents, id: \.self) { a in
+                                AgentChip(name: a, isSelected: selectedAgent == a) {
+                                    selectedAgent = a
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 220)
+                case let .unavailable(reason):
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Agent catalog unavailable.")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(Theme.yellow)
+                        Text(reason)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(Theme.overlay0)
+                            .lineLimit(2)
+                    }
                 }
             }
             .padding(20)
@@ -1168,7 +1194,7 @@ struct MigrateSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(selectedAgent == currentAgent)
+                .disabled(selectedAgent == currentAgent || !agents.contains(selectedAgent))
             }
             .padding(20)
         }

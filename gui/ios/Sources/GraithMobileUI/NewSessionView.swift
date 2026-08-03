@@ -24,12 +24,11 @@ struct NewSessionView: View {
     @State private var inPlace = false
     @State private var agentHooks = true
 
-    /// The selected host's agent catalog, driven by daemon config (#1234). Starts
-    /// on the built-in fallback and is replaced once the daemon responds.
-    @State private var catalog: AgentCatalogResponseMsg = AgentCatalog.fallback
+    /// The selected host's daemon-authoritative agent catalog (#1234).
+    @State private var catalogState: AgentCatalogState = .loading
 
     /// Agent names the daemon offers for the selected host.
-    private var agents: [String] { catalog.names }
+    private var agents: [String] { catalogState.catalog?.names ?? [] }
 
     var body: some View {
         NavigationStack {
@@ -61,8 +60,24 @@ struct NewSessionView: View {
                 Section("Session") {
                     TextField("Name", text: $name)
                         .textFieldStyleCompat()
-                    Picker("Agent", selection: $agent) {
-                        ForEach(agents, id: \.self) { Text($0).tag($0) }
+                    switch catalogState {
+                    case .loading:
+                        ProgressView("Loading agents...")
+                    case .available:
+                        if agents.isEmpty {
+                            Text("No agents reported; the daemon will choose its default.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Agent", selection: $agent) {
+                                ForEach(agents, id: \.self) { Text($0).tag($0) }
+                            }
+                        }
+                    case let .unavailable(reason):
+                        Text("Agent catalog unavailable; the daemon will choose its default.")
+                            .foregroundStyle(.secondary)
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                     TextField("Prompt (optional)", text: $prompt, axis: .vertical)
                         .lineLimit(3, reservesSpace: true)
@@ -78,7 +93,7 @@ struct NewSessionView: View {
                 }
                 // Base doesn't apply in-place (no branch created); clear the stale
                 // value rather than leaving it to fail validation on Create.
-                .onChange(of: inPlace) { on in if on { base = "" } }
+                .onChange(of: inPlace) { _, on in if on { base = "" } }
                 if let error {
                     Text(error).foregroundStyle(.red).font(.footnote)
                 }
@@ -95,10 +110,17 @@ struct NewSessionView: View {
             }
             .task {
                 if hostID.isEmpty { hostID = model.connections.first?.id ?? "" }
+                resetHostScopedState()
                 await loadRepos()
                 await loadCatalog()
             }
-            .onChange(of: hostID) { _ in Task { await loadRepos(); await loadCatalog() } }
+            .onChange(of: hostID) { _, _ in
+                resetHostScopedState()
+                Task {
+                    await loadRepos()
+                    await loadCatalog()
+                }
+            }
         }
     }
 
@@ -108,29 +130,46 @@ struct NewSessionView: View {
 
     private func loadRepos() async {
         let requestedHostID = hostID
-        guard let conn = model.connections.first(where: { $0.id == requestedHostID }) else { return }
+        guard let conn = model.connections.first(where: { $0.id == requestedHostID }) else {
+            repos = []
+            selectedRepo = ""
+            loadingRepos = false
+            return
+        }
         loadingRepos = true
-        defer { loadingRepos = false }
         let loaded = await conn.repoList()
         // Drop a late response for a host we've since switched away from —
         // otherwise a slow host's repos could overwrite the current host's list
-        // (and selection) after the user has moved on.
-        guard requestedHostID == hostID else { return }
+        // (or stop the current host's loading indicator) after the user has
+        // moved on.
+        guard !Task.isCancelled, requestedHostID == hostID else { return }
         repos = loaded
         selectedRepo = RepoPickerLogic.resolveSelection(repos: loaded, current: selectedRepo)
+        loadingRepos = false
     }
 
     /// Load the selected host's agent catalog from the daemon (#1234) and seed
     /// the agent selection. Drops a late reply for a host we've switched away
-    /// from, and (re)seeds only when the current pick isn't in the new catalog.
+    /// from. The host-change path clears `agent` first, so an unavailable catalog
+    /// submits an empty agent and lets the daemon resolve its own default.
     private func loadCatalog() async {
         let requestedHostID = hostID
+        catalogState = .loading
         let loaded = await model.fetchAgentCatalog(hostID: requestedHostID)
-        guard requestedHostID == hostID else { return }
-        catalog = loaded
-        if agent.isEmpty || !loaded.names.contains(agent) {
-            agent = loaded.resolvedDefault
+        guard !Task.isCancelled, requestedHostID == hostID else { return }
+        catalogState = loaded
+        if let catalog = loaded.catalog,
+           (agent.isEmpty || !catalog.names.contains(agent)) {
+            agent = catalog.resolvedDefault
         }
+    }
+
+    private func resetHostScopedState() {
+        repos = []
+        selectedRepo = ""
+        loadingRepos = false
+        catalogState = .loading
+        agent = ""
     }
 
     private func create() async {
