@@ -76,7 +76,11 @@ func TestRenderTriggerStatus(t *testing.T) {
 				WorktreePath:                 "/work/croft-a",
 				State:                        "debouncing",
 				RegisteredWatchDirectories:   12,
+				LiveWatchDirectories:         10,
+				StaleWatchDirectories:        2,
 				EstimatedWatchDescriptorCost: 34,
+				LiveEstimatedWatchCost:       30,
+				StaleEstimatedWatchCost:      4,
 				WatchBudgetPercent:           4.25,
 				PendingChanges:               3,
 				DebounceUntil:                "2026-07-15T09:59:00Z",
@@ -97,8 +101,8 @@ func TestRenderTriggerStatus(t *testing.T) {
 	out = buf.String()
 
 	for _, want := range []string{
-		"Watch: repo:/croft", "2 live binding", "SESSION", "WORKTREE", "WATCH DIRS", "WATCH COST", "BUDGET",
-		"braw-runner (braw)", "/work/croft-a", "debouncing", "12", "34", "4.25%", "3", "2026-07-15T09:59:00Z",
+		"Watch: repo:/croft", "2 live binding", "SESSION", "WORKTREE", "WATCH DIRS", "LIVE", "STALE", "WATCH COST", "LIVE COST", "STALE COST", "BUDGET",
+		"braw-runner (braw)", "/work/croft-a", "debouncing", "12", "10", "2", "34", "30", "4", "4.25%", "3", "2026-07-15T09:59:00Z",
 		"dreich-runner (dreich)", "0.00%", "skipped: action already in flight", "degraded: watcher.Add failed", "2026-07-15T10:00:00Z (2)",
 		"Degraded:", "Next retry: 2026-07-15T10:00:00Z", "2 attempt", "Last error: boom",
 	} {

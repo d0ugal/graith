@@ -256,6 +256,12 @@ already-running bindings on the next reconcile: each is rebuilt with the new
 matcher and its backend-specific watch/filter state reconciled — no
 source-session restart needed.
 
+The same reconcile pass prunes stale per-directory registrations on fsnotify
+backends. If a generated tree is removed recursively, replaced, or renamed in a
+way that coalesces file events, missing paths are removed from the binding's
+accounting and backend-dropped paths that still exist are refreshed. This
+releases the reserved watch budget without requiring a session restart.
+
 File-watch bindings are created only for writable, non-mirror sessions. Sessions
 created with `--mirror` and branch-backed `--read-only` sessions are skipped
 before a watcher is bound, so observer and coordination sessions do not
@@ -272,9 +278,9 @@ stream. On macOS builds without cgo, Graith falls back to fsnotify/kqueue and
 keeps the conservative descriptor estimate for directories and their entries.
 On other platforms, fsnotify costs one unit per watched directory. A binding
 that would exceed the remaining budget is marked **degraded**, with the reason
-and current budget shown by `gr trigger status` and `gr doctor`, and retried
-with the normal exponential backoff. This bounds watch backend use before the
-daemon reaches `EMFILE`; it does not silently disable the trigger. Prefer
+and reserved/live/stale budget shown by `gr trigger status` and `gr doctor`, and
+retried with the normal exponential backoff. This bounds watch backend use before
+the daemon reaches `EMFILE`; it does not silently disable the trigger. Prefer
 precise `paths` includes (for example `cmd/**/*.go`) and `ignore` entries for
 generated or dependency trees to keep bindings below the budget. A broad `**/*`
 watch intentionally consumes more of the shared budget on fsnotify backends.

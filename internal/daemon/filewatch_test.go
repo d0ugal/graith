@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 )
 
 type fakeWatchBackend struct {
+	mu      sync.Mutex
 	add     func(string) error
 	watched []string
 }
@@ -34,14 +36,38 @@ func (b *fakeWatchBackend) Add(path string) error {
 		}
 	}
 
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.watched = append(b.watched, path)
 
 	return nil
 }
 
-func (b *fakeWatchBackend) Remove(string) error { return nil }
+func (b *fakeWatchBackend) Remove(path string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-func (b *fakeWatchBackend) WatchList() []string { return append([]string(nil), b.watched...) }
+	clean := filepath.Clean(path)
+
+	filtered := b.watched[:0]
+	for _, watched := range b.watched {
+		if filepath.Clean(watched) != clean {
+			filtered = append(filtered, watched)
+		}
+	}
+
+	b.watched = filtered
+
+	return nil
+}
+
+func (b *fakeWatchBackend) WatchList() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return append([]string(nil), b.watched...)
+}
 
 func (b *fakeWatchBackend) Close() error { return nil }
 
@@ -339,6 +365,459 @@ func TestFileWatchBudgetDegradesAndReleases(t *testing.T) {
 	}
 
 	sm.teardownAllBindings()
+}
+
+func TestReconcileBindingsPrunesMissingWatchPaths(t *testing.T) {
+	worktree := t.TempDir()
+	generated := filepath.Join(worktree, "dreich")
+	nested := filepath.Join(generated, "bothy")
+	keep := filepath.Join(worktree, "braw")
+
+	for _, dir := range []string{nested, keep} {
+		mustMkdir(t, dir)
+	}
+
+	trig := config.TriggerConfig{
+		Name:   "blether",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.watchBackend = func(root string, matcher *watchMatcher) (watchBackend, map[string]int, string) {
+		backend := &fakeWatchBackend{}
+		paths := make(map[string]int)
+
+		return backend, paths, sm.addWatchRecursiveBudgeted(backend, root, matcher, paths)
+	}
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+	t.Cleanup(sm.teardownAllBindings)
+
+	ctx := context.Background()
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	key := bindingKey(trig.Name, "src")
+
+	b := sm.triggers.bindings[key]
+	if b == nil {
+		t.Fatal("expected binding after reconcile")
+	}
+
+	beforePaths := snapshotWatchPaths(b)
+	removedCost := 0
+
+	for p, cost := range beforePaths {
+		if p == generated || strings.HasPrefix(p, generated+string(filepath.Separator)) {
+			removedCost += cost
+		}
+	}
+
+	if removedCost == 0 {
+		t.Fatalf("test did not register generated subtree paths: %#v", beforePaths)
+	}
+
+	beforeUsed := sm.triggers.watchDirs
+
+	if err := os.RemoveAll(generated); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now().Add(time.Second))
+
+	afterPaths := snapshotWatchPaths(b)
+	for p := range afterPaths {
+		if p == generated || strings.HasPrefix(p, generated+string(filepath.Separator)) {
+			t.Fatalf("stale generated path %q still registered after reconcile: %#v", p, afterPaths)
+		}
+	}
+
+	if got, want := sm.triggers.watchDirs, beforeUsed-removedCost; got != want {
+		t.Fatalf("watch budget after pruning = %d, want %d (before %d, removed %d)", got, want, beforeUsed, removedCost)
+	}
+
+	detail := sm.watchBindingDetail(b)
+	if detail.StaleWatchDirectories != 0 || detail.StaleEstimatedWatchCost != 0 {
+		t.Fatalf("pruned binding still reports stale usage: %+v", detail)
+	}
+
+	if detail.LiveWatchDirectories != detail.RegisteredWatchDirectories {
+		t.Fatalf("live dirs = %d, registered dirs = %d after prune", detail.LiveWatchDirectories, detail.RegisteredWatchDirectories)
+	}
+
+	sm.teardownAllBindings()
+
+	if got := sm.triggers.watchDirs; got != 0 {
+		t.Fatalf("teardown double-counted or leaked watch budget: %d", got)
+	}
+}
+
+func TestReconcileBindingsPrunesDirectoryReplacedByFile(t *testing.T) {
+	worktree := t.TempDir()
+	generated := filepath.Join(worktree, "dreich")
+	nested := filepath.Join(generated, "bothy")
+
+	mustMkdir(t, nested)
+
+	trig := config.TriggerConfig{
+		Name:   "bairn",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.watchBackend = func(root string, matcher *watchMatcher) (watchBackend, map[string]int, string) {
+		backend := &fakeWatchBackend{}
+		paths := make(map[string]int)
+
+		return backend, paths, sm.addWatchRecursiveBudgeted(backend, root, matcher, paths)
+	}
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+	t.Cleanup(sm.teardownAllBindings)
+
+	ctx := context.Background()
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	key := bindingKey(trig.Name, "src")
+
+	b := sm.triggers.bindings[key]
+	if b == nil {
+		t.Fatal("expected binding after reconcile")
+	}
+
+	beforePaths := snapshotWatchPaths(b)
+	removedCost := 0
+
+	for p, cost := range beforePaths {
+		if p == generated || strings.HasPrefix(p, generated+string(filepath.Separator)) {
+			removedCost += cost
+		}
+	}
+
+	if removedCost == 0 {
+		t.Fatalf("test did not register generated subtree paths: %#v", beforePaths)
+	}
+
+	beforeUsed := sm.triggers.watchDirs
+
+	if err := os.RemoveAll(generated); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(generated, []byte("thrawn"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now().Add(time.Second))
+
+	afterPaths := snapshotWatchPaths(b)
+	for p := range afterPaths {
+		if p == generated || strings.HasPrefix(p, generated+string(filepath.Separator)) {
+			t.Fatalf("replaced generated path %q still registered after reconcile: %#v", p, afterPaths)
+		}
+	}
+
+	if got, want := sm.triggers.watchDirs, beforeUsed-removedCost; got != want {
+		t.Fatalf("watch budget after file replacement prune = %d, want %d (before %d, removed %d)", got, want, beforeUsed, removedCost)
+	}
+}
+
+func TestReconcileBindingsRefreshesBackendDroppedWatchPath(t *testing.T) {
+	worktree := t.TempDir()
+	generated := filepath.Join(worktree, "dreich")
+	nested := filepath.Join(generated, "bothy")
+
+	mustMkdir(t, nested)
+
+	trig := config.TriggerConfig{
+		Name:   "strath",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	backend := &fakeWatchBackend{}
+	sm.watchBackend = func(root string, matcher *watchMatcher) (watchBackend, map[string]int, string) {
+		paths := make(map[string]int)
+		return backend, paths, sm.addWatchRecursiveBudgeted(backend, root, matcher, paths)
+	}
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+	t.Cleanup(sm.teardownAllBindings)
+
+	ctx := context.Background()
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now())
+
+	key := bindingKey(trig.Name, "src")
+
+	b := sm.triggers.bindings[key]
+	if b == nil {
+		t.Fatal("expected binding after reconcile")
+	}
+
+	beforeUsed := sm.triggers.watchDirs
+
+	beforePaths := snapshotWatchPaths(b)
+	if _, ok := beforePaths[nested]; !ok {
+		t.Fatalf("test did not register nested generated path: %#v", beforePaths)
+	}
+
+	if err := os.RemoveAll(generated); err != nil {
+		t.Fatal(err)
+	}
+
+	mustMkdir(t, nested)
+
+	backend.mu.Lock()
+	backend.watched = []string{worktree}
+	backend.mu.Unlock()
+
+	sm.reconcileBindings(ctx, sm.allTriggers(), time.Now().Add(time.Second))
+
+	if got := sm.triggers.watchDirs; got != beforeUsed {
+		t.Fatalf("refresh should preserve reserved budget, got budget %d want %d", got, beforeUsed)
+	}
+
+	for _, want := range []string{generated, nested} {
+		if !bindingWatches(b, want) {
+			t.Fatalf("refreshed binding does not watch %q; backend has %#v", want, backend.WatchList())
+		}
+	}
+
+	detail := sm.watchBindingDetail(b)
+	if detail.StaleWatchDirectories != 0 || detail.StaleEstimatedWatchCost != 0 {
+		t.Fatalf("refreshed binding still reports stale usage: %+v", detail)
+	}
+}
+
+func TestPruneDetachedWatchPathRefreshFailureKeepsReservation(t *testing.T) {
+	worktree := t.TempDir()
+	detached := filepath.Join(worktree, "dreich")
+	mustMkdir(t, detached)
+
+	trig := config.TriggerConfig{
+		Name:   "thrawn",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x", Deliver: config.DeliverConfig{Topic: "fash"}},
+	}
+	sm := newTriggerTestSM(t, trig)
+	cost := fsnotifyWatchPathCost(detached)
+
+	failRefresh := true
+	backend := &fakeWatchBackend{add: func(string) error {
+		if failRefresh {
+			return errors.New("watch limit dreich")
+		}
+
+		return nil
+	}}
+	b := &watchBinding{
+		triggerName: trig.Name,
+		sessionID:   "src",
+		worktree:    worktree,
+		backend:     backend,
+		watchPaths:  map[string]int{detached: cost},
+		changed:     make(map[string]bool),
+	}
+	sm.triggers.watchDirs = cost
+
+	summary := sm.pruneStaleWatchPaths(b)
+	if summary.detached != 1 || summary.refreshed != 0 || summary.refreshFailed != 1 || summary.releasedCost != 0 {
+		t.Fatalf("failed refresh summary = %+v, want one detached failed refresh with no release", summary)
+	}
+
+	if _, ok := snapshotWatchPaths(b)[detached]; !ok {
+		t.Fatal("failed refresh removed detached path from binding accounting")
+	}
+
+	if got := sm.triggers.watchDirs; got != cost {
+		t.Fatalf("failed refresh released budget = %d, want %d", got, cost)
+	}
+
+	detail := sm.watchBindingDetail(b)
+	if detail.LiveWatchDirectories != 0 || detail.StaleWatchDirectories != 1 || detail.StaleEstimatedWatchCost != cost {
+		t.Fatalf("failed refresh detail = %+v, want stale reservation retained", detail)
+	}
+
+	failRefresh = false
+
+	summary = sm.pruneStaleWatchPaths(b)
+	if summary.detached != 1 || summary.refreshed != 1 || summary.refreshFailed != 0 || summary.releasedCost != 0 {
+		t.Fatalf("retry refresh summary = %+v, want one detached refresh with no release", summary)
+	}
+
+	if !bindingWatches(b, detached) {
+		t.Fatalf("retry refresh did not restore backend watch for %q; backend has %#v", detached, backend.WatchList())
+	}
+
+	detail = sm.watchBindingDetail(b)
+	if detail.LiveWatchDirectories != 1 || detail.StaleWatchDirectories != 0 || detail.LiveEstimatedWatchCost != cost {
+		t.Fatalf("retry refresh detail = %+v, want live reservation restored", detail)
+	}
+
+	sm.unregisterWatchPath(b, detached)
+
+	if got := sm.triggers.watchDirs; got != 0 {
+		t.Fatalf("final unregister released budget = %d, want 0", got)
+	}
+}
+
+func TestRegisterWatchPathRestoresTrackedBackendDrop(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "bothy")
+	mustMkdir(t, dir)
+
+	trig := config.TriggerConfig{Name: "couthy", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+	cost := fsnotifyWatchPathCost(dir)
+	backend := &fakeWatchBackend{}
+	b := &watchBinding{
+		triggerName: trig.Name,
+		sessionID:   "src",
+		worktree:    root,
+		backend:     backend,
+		watchPaths:  map[string]int{dir: cost},
+		changed:     make(map[string]bool),
+	}
+	sm.triggers.watchDirs = cost
+
+	if err := sm.registerWatchPath(b, dir); err != nil {
+		t.Fatalf("registerWatchPath restore failed: %v", err)
+	}
+
+	if !bindingWatches(b, dir) {
+		t.Fatalf("registerWatchPath did not restore backend watch for %q; backend has %#v", dir, backend.WatchList())
+	}
+
+	if got := sm.triggers.watchDirs; got != cost {
+		t.Fatalf("registerWatchPath restore changed budget = %d, want %d", got, cost)
+	}
+}
+
+func TestWatchDiagnosticsReportStaleWatchPaths(t *testing.T) {
+	worktree := t.TempDir()
+	liveDir := filepath.Join(worktree, "braw")
+	missingDir := filepath.Join(worktree, "dreich")
+
+	mustMkdir(t, liveDir)
+
+	trig := config.TriggerConfig{
+		Name:   "croft",
+		Watch:  &config.WatchConfig{Role: "implementer"},
+		Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"},
+	}
+	sm := newTriggerTestSM(t, trig)
+	sm.cfg.TriggersRuntime.Advanced.WatchMaxDirectories = 100
+	sm.state.Sessions["src"] = &SessionState{ID: "src", Name: "ben", Status: StatusRunning, ScenarioRole: "implementer", WorktreePath: worktree}
+
+	liveCost := fsnotifyWatchPathCost(liveDir)
+	staleCost := 7
+	b := &watchBinding{
+		triggerName: trig.Name,
+		sessionID:   "src",
+		worktree:    worktree,
+		backend:     &fakeWatchBackend{watched: []string{liveDir}},
+		watchPaths:  map[string]int{liveDir: liveCost, missingDir: staleCost},
+		changed:     make(map[string]bool),
+	}
+
+	sm.triggers.mu.Lock()
+	sm.triggers.bindings[bindingKey(trig.Name, "src")] = b
+	sm.triggers.watchDirs = liveCost + staleCost
+	sm.triggers.mu.Unlock()
+
+	detail := sm.watchBindingDetail(b)
+	if detail.RegisteredWatchDirectories != 2 || detail.LiveWatchDirectories != 1 || detail.StaleWatchDirectories != 1 {
+		t.Fatalf("watch detail dirs = registered %d live %d stale %d, want 2/1/1: %+v",
+			detail.RegisteredWatchDirectories, detail.LiveWatchDirectories, detail.StaleWatchDirectories, detail)
+	}
+
+	if detail.EstimatedWatchDescriptorCost != liveCost+staleCost ||
+		detail.LiveEstimatedWatchCost != liveCost ||
+		detail.StaleEstimatedWatchCost != staleCost {
+		t.Fatalf("watch detail costs = reserved %d live %d stale %d, want %d/%d/%d: %+v",
+			detail.EstimatedWatchDescriptorCost, detail.LiveEstimatedWatchCost, detail.StaleEstimatedWatchCost,
+			liveCost+staleCost, liveCost, staleCost, detail)
+	}
+
+	diag := sm.watcherDiagnostic()
+	if diag.LiveEstimatedDescriptorCost != liveCost ||
+		diag.StaleEstimatedDescriptorCost != staleCost ||
+		diag.LiveWatchDirectories != 1 ||
+		diag.StaleWatchDirectories != 1 ||
+		!diag.HasStaleRegistrations {
+		t.Fatalf("watcher diagnostic stale summary = %+v, want live/stale attribution", diag)
+	}
+}
+
+func TestRegisterWatchPathConcurrentSamePathChargesOnce(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "canny")
+	mustMkdir(t, dir)
+
+	trig := config.TriggerConfig{Name: "braw", Watch: &config.WatchConfig{Role: "implementer"}, Action: config.ActionConfig{Type: config.ActionMessage, Body: "x"}}
+	sm := newTriggerTestSM(t, trig)
+
+	var addOnce sync.Once
+
+	firstAddStarted := make(chan struct{})
+	releaseFirstAdd := make(chan struct{})
+
+	backend := &fakeWatchBackend{add: func(string) error {
+		addOnce.Do(func() {
+			close(firstAddStarted)
+			<-releaseFirstAdd
+		})
+
+		return nil
+	}}
+	b := &watchBinding{
+		triggerName: trig.Name,
+		sessionID:   "src",
+		worktree:    root,
+		backend:     backend,
+		watchPaths:  make(map[string]int),
+		changed:     make(map[string]bool),
+	}
+
+	var wg sync.WaitGroup
+
+	errs := make(chan error, 2)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		errs <- sm.registerWatchPath(b, dir)
+	}()
+
+	<-firstAddStarted
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		errs <- sm.registerWatchPath(b, dir)
+	}()
+
+	close(releaseFirstAdd)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("registerWatchPath failed: %v", err)
+		}
+	}
+
+	if got := len(backend.WatchList()); got != 1 {
+		t.Fatalf("backend add count = %d, want one watch", got)
+	}
+
+	if got := sm.triggers.watchDirs; got != fsnotifyWatchPathCost(dir) {
+		t.Fatalf("watch budget = %d, want one path cost %d", got, fsnotifyWatchPathCost(dir))
+	}
+
+	sm.unregisterWatchPath(b, dir)
+
+	if got := sm.triggers.watchDirs; got != 0 {
+		t.Fatalf("unregister should release exactly once, got budget %d", got)
+	}
 }
 
 func TestScanNewDirStopsOnContextCanceledWatchRegistration(t *testing.T) {

@@ -1226,12 +1226,23 @@ func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 
 	dc.section("Watcher Resources")
 
-	usage := fmt.Sprintf("%d/%d estimated watch units", watchers.EstimatedDescriptorCost, watchers.Budget)
+	liveCost, staleCost, liveDirs, staleDirs := watcherDiagnosticLiveStaleUsage(watchers)
+	hasStale := watchers.HasStaleRegistrations || staleDirs > 0 || staleCost > 0 || watcherDiagnosticHasStale(watchers.Bindings)
+
+	usage := fmt.Sprintf("%d/%d estimated watch units reserved", watchers.EstimatedDescriptorCost, watchers.Budget)
 	if watchers.Budget > 0 {
 		usage += fmt.Sprintf(" (%.2f%%)", watchers.BudgetPercent)
 	}
 
+	if hasStale {
+		usage += fmt.Sprintf("; live %d unit(s) across %d dir(s), stale %d unit(s) across %d dir(s)", liveCost, liveDirs, staleCost, staleDirs)
+	}
+
 	switch {
+	case watchers.BudgetExhausted && hasStale:
+		dc.warnf("watchers", "File-watch budget exhausted or blocking a binding with stale reservations: %s", usage)
+	case hasStale:
+		dc.warnf("watchers", "File-watch registrations include stale reservations: %s", usage)
 	case watchers.BudgetExhausted:
 		dc.warnf("watchers", "File-watch budget exhausted or blocking a binding: %s", usage)
 	case watchers.NearBudget:
@@ -1258,6 +1269,8 @@ func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 	})
 
 	for _, b := range bindings {
+		liveDirs, staleDirs, liveCost, staleCost := watcherBindingLiveStaleUsage(b)
+
 		who := b.SessionName
 		if who == "" {
 			who = b.SessionID
@@ -1274,6 +1287,11 @@ func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 
 		line := fmt.Sprintf("%q / %q (%s): %d dir(s), estimated cost %d",
 			b.TriggerName, who, b.State, b.RegisteredWatchDirectories, b.EstimatedWatchDescriptorCost)
+		if staleDirs > 0 || staleCost > 0 {
+			line += fmt.Sprintf("; live %d dir(s) cost %d; stale %d dir(s) cost %d",
+				liveDirs, liveCost, staleDirs, staleCost)
+		}
+
 		if watchers.Budget > 0 {
 			line += fmt.Sprintf(" (%.2f%% of budget)", b.WatchBudgetPercent)
 		}
@@ -1295,8 +1313,14 @@ func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 		}
 	}
 
-	if watchers.BudgetExhausted || watchers.NearBudget || watcherDiagnosticHasDegraded(bindings) {
+	if watchers.BudgetExhausted || watchers.NearBudget || hasStale || watcherDiagnosticHasDegraded(bindings) {
 		dc.hintf("Run: gr trigger status <watch-trigger>")
+
+		if hasStale {
+			dc.hintf("Stale file-watch reservations are pruned automatically on reconcile; if they persist, run 'gr daemon restart' to rebuild watcher state")
+			dc.hintf("After stale reservations are released, degraded watch bindings retry automatically on their normal backoff")
+		}
+
 		dc.hintf("On Linux, raise fs.inotify.max_user_watches if the host watch limit is exhausted")
 		dc.hintf("Narrow [trigger.watch] paths or add [trigger.watch] ignore entries for generated and dependency trees")
 		dc.hintf("Stop unnecessary writable sessions; use mirror/read-only sessions when another view is enough")
@@ -1304,9 +1328,75 @@ func (dc *doctorContext) checkWatcherResources(diag *protocol.DiagnosticsMsg) {
 	}
 }
 
+func watcherDiagnosticLiveStaleUsage(w *protocol.WatcherDiagnostic) (int, int, int, int) {
+	liveCost := w.LiveEstimatedDescriptorCost
+	staleCost := w.StaleEstimatedDescriptorCost
+	liveDirs := w.LiveWatchDirectories
+	staleDirs := w.StaleWatchDirectories
+
+	var bindingLiveCost, bindingStaleCost, bindingLiveDirs, bindingStaleDirs int
+
+	for _, b := range w.Bindings {
+		bLiveDirs, bStaleDirs, bLiveCost, bStaleCost := watcherBindingLiveStaleUsage(b)
+		bindingLiveDirs += bLiveDirs
+		bindingStaleDirs += bStaleDirs
+		bindingLiveCost += bLiveCost
+		bindingStaleCost += bStaleCost
+	}
+
+	if liveCost == 0 && staleCost == 0 && (bindingLiveCost > 0 || bindingStaleCost > 0) {
+		liveCost = bindingLiveCost
+		staleCost = bindingStaleCost
+	}
+
+	if liveDirs == 0 && staleDirs == 0 && (bindingLiveDirs > 0 || bindingStaleDirs > 0) {
+		liveDirs = bindingLiveDirs
+		staleDirs = bindingStaleDirs
+	}
+
+	if liveCost == 0 && staleCost == 0 && w.EstimatedDescriptorCost > 0 {
+		liveCost = w.EstimatedDescriptorCost
+	}
+
+	if liveDirs == 0 && staleDirs == 0 {
+		for _, b := range w.Bindings {
+			liveDirs += b.RegisteredWatchDirectories
+		}
+	}
+
+	return liveCost, staleCost, liveDirs, staleDirs
+}
+
+func watcherBindingLiveStaleUsage(b protocol.WatcherBindingDiagnostic) (int, int, int, int) {
+	liveDirs := b.LiveWatchDirectories
+	staleDirs := b.StaleWatchDirectories
+	liveCost := b.LiveEstimatedWatchCost
+	staleCost := b.StaleEstimatedWatchCost
+
+	if liveDirs == 0 && staleDirs == 0 && b.RegisteredWatchDirectories > 0 {
+		liveDirs = b.RegisteredWatchDirectories
+	}
+
+	if liveCost == 0 && staleCost == 0 && b.EstimatedWatchDescriptorCost > 0 {
+		liveCost = b.EstimatedWatchDescriptorCost
+	}
+
+	return liveDirs, staleDirs, liveCost, staleCost
+}
+
 func watcherDiagnosticHasDegraded(bindings []protocol.WatcherBindingDiagnostic) bool {
 	for _, b := range bindings {
 		if b.Degraded != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func watcherDiagnosticHasStale(bindings []protocol.WatcherBindingDiagnostic) bool {
+	for _, b := range bindings {
+		if b.StaleWatchDirectories > 0 || b.StaleEstimatedWatchCost > 0 {
 			return true
 		}
 	}

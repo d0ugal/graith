@@ -6566,7 +6566,35 @@
           "optional": false
         },
         {
+          "name": "live_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
           "name": "estimated_watch_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "live_estimated_watch_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale_estimated_watch_cost",
           "type": {
             "kind": "int"
           },
@@ -7314,7 +7342,35 @@
           "optional": false
         },
         {
+          "name": "live_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
           "name": "estimated_watch_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "live_estimated_watch_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale_estimated_watch_cost",
           "type": {
             "kind": "int"
           },
@@ -7360,6 +7416,41 @@
             "kind": "int"
           },
           "optional": false
+        },
+        {
+          "name": "live_estimated_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale_estimated_descriptor_cost",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "live_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale_watch_directories",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "has_stale_registrations",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
         },
         {
           "name": "budget",

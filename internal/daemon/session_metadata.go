@@ -466,11 +466,23 @@ func (sm *SessionManager) watcherDiagnostic() *protocol.WatcherDiagnostic {
 			WorktreePath:                 detail.WorktreePath,
 			State:                        detail.State,
 			RegisteredWatchDirectories:   detail.RegisteredWatchDirectories,
+			LiveWatchDirectories:         detail.LiveWatchDirectories,
+			StaleWatchDirectories:        detail.StaleWatchDirectories,
 			EstimatedWatchDescriptorCost: detail.EstimatedWatchDescriptorCost,
+			LiveEstimatedWatchCost:       detail.LiveEstimatedWatchCost,
+			StaleEstimatedWatchCost:      detail.StaleEstimatedWatchCost,
 			WatchBudgetPercent:           detail.WatchBudgetPercent,
 			Degraded:                     detail.Degraded,
 			RetryCount:                   detail.DegradedRetryCount,
 			NextRetryAt:                  detail.DegradedRetryAt,
+		}
+		diag.LiveWatchDirectories += binding.LiveWatchDirectories
+		diag.StaleWatchDirectories += binding.StaleWatchDirectories
+		diag.LiveEstimatedDescriptorCost += binding.LiveEstimatedWatchCost
+		diag.StaleEstimatedDescriptorCost += binding.StaleEstimatedWatchCost
+
+		if binding.StaleWatchDirectories > 0 || binding.StaleEstimatedWatchCost > 0 {
+			diag.HasStaleRegistrations = true
 		}
 
 		if strings.Contains(detail.Degraded, "watch backend budget exhausted") ||

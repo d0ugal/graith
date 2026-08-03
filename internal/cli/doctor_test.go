@@ -706,6 +706,20 @@ func TestCheckWatcherResourcesThresholds(t *testing.T) {
 			wantSection: "triggers",
 			wantText:    "Watch trigger \"watch-braw\" degraded on session \"braw-runner\"",
 		},
+		"stale reservations warn": {
+			diag: protocol.WatcherDiagnostic{
+				EstimatedDescriptorCost:      50,
+				LiveEstimatedDescriptorCost:  12,
+				StaleEstimatedDescriptorCost: 38,
+				LiveWatchDirectories:         3,
+				StaleWatchDirectories:        7,
+				HasStaleRegistrations:        true,
+				Budget:                       100,
+				BudgetPercent:                50,
+			},
+			wantLevel: "warn",
+			wantText:  "stale reservations",
+		},
 	}
 
 	for name, test := range tests {
@@ -764,7 +778,11 @@ func TestCheckWatcherResourcesAttributionAndGuidance(t *testing.T) {
 					WorktreePath:                 "/work/braw",
 					State:                        "idle",
 					RegisteredWatchDirectories:   12,
+					LiveWatchDirectories:         10,
+					StaleWatchDirectories:        2,
 					EstimatedWatchDescriptorCost: 91,
+					LiveEstimatedWatchCost:       70,
+					StaleEstimatedWatchCost:      21,
 					WatchBudgetPercent:           91,
 				},
 				{
@@ -792,6 +810,7 @@ func TestCheckWatcherResourcesAttributionAndGuidance(t *testing.T) {
 		"watch-croft",
 		"braw-runner",
 		"12 dir(s), estimated cost 91",
+		"live 10 dir(s) cost 70; stale 2 dir(s) cost 21",
 		"91.00% of budget",
 		"canny-runner",
 		"0 dir(s), estimated cost 0",

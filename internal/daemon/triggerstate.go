@@ -50,6 +50,7 @@ type triggerState struct {
 // rebuilt from live sessions on reconcile.
 type watchBinding struct {
 	bmu                sync.Mutex // guards changed/debounce/inFlight/status fields (per-binding)
+	watchRegMu         sync.Mutex // serializes watchPaths/backend/budget registration transitions
 	triggerName        string
 	sessionID          string
 	worktree           string
@@ -68,6 +69,7 @@ type watchBinding struct {
 	lastResult         string          // concise last result: exit 0, published, skipped, rate-limited, etc.
 	lastError          string          // concise last error, never captured command output
 	watchPaths         map[string]int  // path -> estimated backend cost
+	lastStalePrune     time.Time       // last full on-disk stale-watch sweep
 	canceled           bool            // set on teardown; a pending debounce callback checks it
 	cancel             func()          // stops the binding's event goroutine
 }

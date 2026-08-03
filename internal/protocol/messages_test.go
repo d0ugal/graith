@@ -120,7 +120,11 @@ func TestTriggerBindingDetailWatcherUsageJSON(t *testing.T) {
 		SessionID:                    "braw",
 		State:                        "idle",
 		RegisteredWatchDirectories:   12,
+		LiveWatchDirectories:         10,
+		StaleWatchDirectories:        2,
 		EstimatedWatchDescriptorCost: 34,
+		LiveEstimatedWatchCost:       28,
+		StaleEstimatedWatchCost:      6,
 		WatchBudgetPercent:           4.25,
 	}
 
@@ -136,7 +140,11 @@ func TestTriggerBindingDetailWatcherUsageJSON(t *testing.T) {
 
 	tests := map[string]float64{
 		"registered_watch_directories":    12,
+		"live_watch_directories":          10,
+		"stale_watch_directories":         2,
 		"estimated_watch_descriptor_cost": 34,
+		"live_estimated_watch_cost":       28,
+		"stale_estimated_watch_cost":      6,
 		"watch_budget_percent":            4.25,
 	}
 
