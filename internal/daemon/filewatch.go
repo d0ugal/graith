@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
@@ -59,7 +60,10 @@ func (sm *SessionManager) watchRetryBackoff(attempt int) time.Duration {
 // binding's git ignore matcher and a reconcile of its watched directories.
 const gitignoreFilename = ".gitignore"
 
-const watchRegistrationSkipSampleLimit = 5
+const (
+	watchRegistrationSkipSampleLimit = 5
+	staleWatchFullScanMinInterval    = 30 * time.Second
+)
 
 // mandatoryWatchIgnores are always applied on top of the configurable
 // [triggers.advanced] watch_builtin_ignores list, and can never be un-ignored:
@@ -75,6 +79,14 @@ type watchRegistrationSummary struct {
 	skipped  int
 	samples  []watchRegistrationSkip
 	canceled error
+}
+
+type staleWatchPruneSummary struct {
+	missing       int
+	detached      int
+	refreshed     int
+	refreshFailed int
+	releasedCost  int
 }
 
 func (s *watchRegistrationSummary) record(path string, err error) error {
@@ -206,6 +218,8 @@ func (sm *SessionManager) reconcileBindings(ctx context.Context, triggers []conf
 			// fingerprint reset). A healthy or backoff-waiting binding whose
 			// definition and policy are both unchanged stays put.
 			if !defChanged && existing.builtinFingerprint == builtinFP {
+				sm.reconcileStaleWatchPaths(existing, now)
+
 				continue
 			}
 
@@ -1052,6 +1066,112 @@ func watchBudgetPercent(cost, budget int) float64 {
 	return math.Round(float64(cost)*10000/float64(budget)) / 100
 }
 
+type watchPathUsage struct {
+	registeredDirs int
+	liveDirs       int
+	staleDirs      int
+	estimatedCost  int
+	liveCost       int
+	staleCost      int
+}
+
+func watchBindingUsage(b *watchBinding) watchPathUsage {
+	var usage watchPathUsage
+	if b == nil {
+		return usage
+	}
+
+	paths := snapshotWatchPaths(b)
+	if len(paths) == 0 {
+		return usage
+	}
+
+	backendPaths := backendWatchPathSet(b.backend)
+
+	for p, cost := range paths {
+		usage.registeredDirs++
+		usage.estimatedCost += cost
+
+		if watchPathLive(p, backendPaths) {
+			usage.liveDirs++
+			usage.liveCost += cost
+		} else {
+			usage.staleDirs++
+			usage.staleCost += cost
+		}
+	}
+
+	return usage
+}
+
+func snapshotWatchPaths(b *watchBinding) map[string]int {
+	b.bmu.Lock()
+	defer b.bmu.Unlock()
+
+	paths := make(map[string]int, len(b.watchPaths))
+	for p, cost := range b.watchPaths {
+		paths[p] = cost
+	}
+
+	return paths
+}
+
+func backendWatchPathSet(backend watchBackend) map[string]bool {
+	paths := make(map[string]bool)
+	if backend == nil {
+		return paths
+	}
+
+	for _, p := range backend.WatchList() {
+		paths[filepath.Clean(p)] = true
+	}
+
+	return paths
+}
+
+func watchPathLive(path string, backendPaths map[string]bool) bool {
+	if !backendPaths[filepath.Clean(path)] {
+		return false
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.IsDir()
+}
+
+func watchPathStatMissing(path string, err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) || watchPathAncestorNonDirectory(path)
+}
+
+func watchPathAncestorNonDirectory(path string) bool {
+	cleaned := filepath.Clean(path)
+
+	for {
+		parent := filepath.Dir(cleaned)
+		if parent == cleaned {
+			return false
+		}
+
+		info, err := os.Stat(parent)
+		if err == nil {
+			return !info.IsDir()
+		}
+
+		if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
+			return false
+		}
+
+		cleaned = parent
+	}
+}
+
 func (sm *SessionManager) releaseWatchCount(n int) {
 	if n <= 0 {
 		return
@@ -1067,6 +1187,13 @@ func (sm *SessionManager) releaseWatchCount(n int) {
 }
 
 func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error {
+	if b == nil || b.backend == nil {
+		return context.Canceled
+	}
+
+	b.watchRegMu.Lock()
+	defer b.watchRegMu.Unlock()
+
 	b.bmu.Lock()
 	if b.canceled {
 		b.bmu.Unlock()
@@ -1075,7 +1202,14 @@ func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error 
 
 	if _, ok := b.watchPaths[path]; ok {
 		b.bmu.Unlock()
-		return nil
+
+		if b.backend.Recursive() || backendWatchPathSet(b.backend)[filepath.Clean(path)] {
+			return nil
+		}
+
+		_, err := sm.restoreRegisteredWatchPathLocked(b, path)
+
+		return err
 	}
 	b.bmu.Unlock()
 
@@ -1110,8 +1244,17 @@ func (sm *SessionManager) registerWatchPath(b *watchBinding, path string) error 
 	return nil
 }
 
-func (sm *SessionManager) unregisterWatchPath(b *watchBinding, path string) {
-	_ = b.backend.Remove(path)
+func (sm *SessionManager) unregisterWatchPath(b *watchBinding, path string) int {
+	if b == nil {
+		return 0
+	}
+
+	b.watchRegMu.Lock()
+	defer b.watchRegMu.Unlock()
+
+	if b.backend != nil {
+		_ = b.backend.Remove(path)
+	}
 
 	b.bmu.Lock()
 
@@ -1126,22 +1269,188 @@ func (sm *SessionManager) unregisterWatchPath(b *watchBinding, path string) {
 	if cost > 0 {
 		sm.releaseWatchCount(cost)
 	}
+
+	return cost
 }
 
-func (sm *SessionManager) reapMissingWatchPaths(b *watchBinding) {
-	b.bmu.Lock()
+func (sm *SessionManager) restoreRegisteredWatchPathLocked(b *watchBinding, path string) (bool, error) {
+	_ = b.backend.Remove(path)
+	if err := b.backend.Add(path); err != nil {
+		return false, err
+	}
 
-	paths := make([]string, 0, len(b.watchPaths))
-	for p := range b.watchPaths {
-		paths = append(paths, p)
+	b.bmu.Lock()
+	canceled := b.canceled
+	_, stillRegistered := b.watchPaths[path]
+	b.bmu.Unlock()
+
+	if canceled || !stillRegistered {
+		_ = b.backend.Remove(path)
+
+		if canceled {
+			return false, context.Canceled
+		}
+
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (sm *SessionManager) refreshDetachedWatchPath(b *watchBinding, path string) (bool, error) {
+	if b == nil || b.backend == nil {
+		return false, context.Canceled
+	}
+
+	b.watchRegMu.Lock()
+	defer b.watchRegMu.Unlock()
+
+	b.bmu.Lock()
+	if b.canceled {
+		b.bmu.Unlock()
+
+		return false, context.Canceled
+	}
+
+	if _, ok := b.watchPaths[path]; !ok {
+		b.bmu.Unlock()
+
+		return false, nil
 	}
 	b.bmu.Unlock()
 
-	for _, p := range paths {
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			sm.unregisterWatchPath(b, p)
+	return sm.restoreRegisteredWatchPathLocked(b, path)
+}
+
+func (sm *SessionManager) reapMissingWatchPaths(b *watchBinding) {
+	sm.pruneStaleWatchPathsAt(b, time.Now())
+}
+
+func (sm *SessionManager) reconcileStaleWatchPaths(b *watchBinding, now time.Time) staleWatchPruneSummary {
+	var summary staleWatchPruneSummary
+	if b == nil || b.backend == nil {
+		return summary
+	}
+
+	paths := snapshotWatchPaths(b)
+	if len(paths) == 0 {
+		return summary
+	}
+
+	backendPaths := backendWatchPathSet(b.backend)
+	if len(backendPaths) != len(paths) {
+		return sm.pruneStaleWatchPathsAt(b, now)
+	}
+
+	b.bmu.Lock()
+	last := b.lastStalePrune
+	b.bmu.Unlock()
+
+	if last.IsZero() || !now.Before(last.Add(staleWatchFullScanMinInterval)) {
+		return sm.pruneStaleWatchPathsAt(b, now)
+	}
+
+	return summary
+}
+
+func (sm *SessionManager) pruneStaleWatchPaths(b *watchBinding) staleWatchPruneSummary {
+	return sm.pruneStaleWatchPathsAt(b, time.Now())
+}
+
+func (sm *SessionManager) pruneStaleWatchPathsAt(b *watchBinding, now time.Time) staleWatchPruneSummary {
+	var summary staleWatchPruneSummary
+	if b == nil || b.backend == nil {
+		return summary
+	}
+
+	paths := snapshotWatchPaths(b)
+	if len(paths) == 0 {
+		return summary
+	}
+
+	b.bmu.Lock()
+	b.lastStalePrune = now
+	b.bmu.Unlock()
+
+	backendPaths := backendWatchPathSet(b.backend)
+
+	var detached []string
+
+	for p := range paths {
+		info, err := os.Stat(p)
+		if err != nil && !watchPathStatMissing(p, err) {
+			continue
+		}
+
+		missing := watchPathStatMissing(p, err) || (err == nil && !info.IsDir())
+		if missing {
+			summary.missing++
+			summary.releasedCost += sm.unregisterWatchPath(b, p)
+
+			continue
+		}
+
+		if backendPaths[filepath.Clean(p)] || b.backend.Recursive() {
+			continue
+		}
+
+		detached = append(detached, p)
+	}
+
+	for _, p := range detached {
+		info, err := os.Stat(p)
+		if err != nil && !watchPathStatMissing(p, err) {
+			continue
+		}
+
+		missing := watchPathStatMissing(p, err) || (err == nil && !info.IsDir())
+		if missing {
+			summary.missing++
+			summary.releasedCost += sm.unregisterWatchPath(b, p)
+
+			continue
+		}
+
+		summary.detached++
+
+		refreshed, err := sm.refreshDetachedWatchPath(b, p)
+		if err != nil {
+			summary.refreshFailed++
+
+			if isWatchRegistrationCanceled(err) {
+				continue
+			}
+
+			sm.log.Warn("trigger: stale directory watch refresh failed", "trigger", b.triggerName, "worktree", b.worktree, "path", p, "err", err)
+
+			continue
+		}
+
+		if refreshed {
+			summary.refreshed++
 		}
 	}
+
+	if summary.missing > 0 || summary.detached > 0 || summary.refreshed > 0 || summary.refreshFailed > 0 {
+		watchBudget := sm.Config().TriggersRuntime.WatchMaxDirectories()
+
+		sm.triggers.mu.Lock()
+		watchUsed := sm.triggers.watchDirs
+		sm.triggers.mu.Unlock()
+
+		sm.log.Info("trigger: pruned stale directory watches",
+			"trigger", b.triggerName,
+			"worktree", b.worktree,
+			"missing", summary.missing,
+			"detached", summary.detached,
+			"refreshed", summary.refreshed,
+			"refresh_failed", summary.refreshFailed,
+			"released_cost", summary.releasedCost,
+			"watch_budget_used", watchUsed,
+			"watch_budget", watchBudget)
+	}
+
+	return summary
 }
 
 func (sm *SessionManager) bindingHasWatchPath(b *watchBinding, path string) bool {
@@ -1163,6 +1472,9 @@ func (sm *SessionManager) teardownBinding(key string) {
 	}
 
 	stopWatcherResources(b.cancel, b.backend, &b.bmu, &b.canceled, &b.debounce, &b.debounceUntil, func() {
+		b.watchRegMu.Lock()
+		defer b.watchRegMu.Unlock()
+
 		b.bmu.Lock()
 		cost := watchPathCostSum(b.watchPaths)
 		b.watchPaths = nil

@@ -208,9 +208,11 @@ func renderTriggerBindingDetails(w io.Writer, bindings []protocol.TriggerBinding
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SESSION\tWORKTREE\tSTATE\tWATCH DIRS\tWATCH COST\tBUDGET\tPENDING\tDEBOUNCE\tIN-FLIGHT\tLAST RUN\tRESULT\tRETRY")
+	_, _ = fmt.Fprintln(tw, "SESSION\tWORKTREE\tSTATE\tWATCH DIRS\tLIVE\tSTALE\tWATCH COST\tLIVE COST\tSTALE COST\tBUDGET\tPENDING\tDEBOUNCE\tIN-FLIGHT\tLAST RUN\tRESULT\tRETRY")
 
 	for _, b := range bindings {
+		liveDirs, staleDirs, liveCost, staleCost := triggerBindingLiveStaleUsage(b)
+
 		session := b.SessionName
 		if session == "" {
 			session = b.SessionID
@@ -267,13 +269,33 @@ func renderTriggerBindingDetails(w io.Writer, bindings []protocol.TriggerBinding
 			worktree = "-"
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%.2f%%\t%d\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%.2f%%\t%d\t%s\t%s\t%s\t%s\t%s\n",
 			triggerBindingTableCell(session), triggerBindingTableCell(worktree), b.State,
-			b.RegisteredWatchDirectories, b.EstimatedWatchDescriptorCost, b.WatchBudgetPercent,
+			b.RegisteredWatchDirectories, liveDirs, staleDirs,
+			b.EstimatedWatchDescriptorCost, liveCost, staleCost, b.WatchBudgetPercent,
 			b.PendingChanges, debounce, inFlight, lastRun, result, retry)
 	}
 
 	_ = tw.Flush()
+}
+
+func triggerBindingLiveStaleUsage(b protocol.TriggerBindingDetail) (int, int, int, int) {
+	liveDirs := b.LiveWatchDirectories
+	staleDirs := b.StaleWatchDirectories
+	liveCost := b.LiveEstimatedWatchCost
+	staleCost := b.StaleEstimatedWatchCost
+
+	// Older daemons did not send live/stale fields. Preserve sensible output
+	// when talking to one by treating the legacy registered totals as live.
+	if liveDirs == 0 && staleDirs == 0 && b.RegisteredWatchDirectories > 0 {
+		liveDirs = b.RegisteredWatchDirectories
+	}
+
+	if liveCost == 0 && staleCost == 0 && b.EstimatedWatchDescriptorCost > 0 {
+		liveCost = b.EstimatedWatchDescriptorCost
+	}
+
+	return liveDirs, staleDirs, liveCost, staleCost
 }
 
 func triggerBindingTableCell(s string) string {

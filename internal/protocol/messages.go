@@ -1077,12 +1077,21 @@ type TriggerDiagnostic struct {
 // the directory entries charged by the kqueue-backed estimate, while FSEvents
 // charges one recursive stream.
 type WatcherDiagnostic struct {
-	EstimatedDescriptorCost int                        `json:"estimated_descriptor_cost"`
-	Budget                  int                        `json:"budget"`
-	BudgetPercent           float64                    `json:"budget_percent"`
-	NearBudget              bool                       `json:"near_budget,omitempty"`
-	BudgetExhausted         bool                       `json:"budget_exhausted,omitempty"`
-	Bindings                []WatcherBindingDiagnostic `json:"bindings,omitempty"`
+	EstimatedDescriptorCost int `json:"estimated_descriptor_cost"`
+	// LiveEstimatedDescriptorCost is the portion of EstimatedDescriptorCost that
+	// still has an existing directory and an active backend watch.
+	LiveEstimatedDescriptorCost int `json:"live_estimated_descriptor_cost"`
+	// StaleEstimatedDescriptorCost is budget reserved by bindings for missing or
+	// backend-dropped paths. Current daemons prune it on reconcile.
+	StaleEstimatedDescriptorCost int                        `json:"stale_estimated_descriptor_cost"`
+	LiveWatchDirectories         int                        `json:"live_watch_directories"`
+	StaleWatchDirectories        int                        `json:"stale_watch_directories"`
+	HasStaleRegistrations        bool                       `json:"has_stale_registrations,omitempty"`
+	Budget                       int                        `json:"budget"`
+	BudgetPercent                float64                    `json:"budget_percent"`
+	NearBudget                   bool                       `json:"near_budget,omitempty"`
+	BudgetExhausted              bool                       `json:"budget_exhausted,omitempty"`
+	Bindings                     []WatcherBindingDiagnostic `json:"bindings,omitempty"`
 }
 
 type WatcherBindingDiagnostic struct {
@@ -1092,7 +1101,11 @@ type WatcherBindingDiagnostic struct {
 	WorktreePath                 string  `json:"worktree_path,omitempty"`
 	State                        string  `json:"state"`
 	RegisteredWatchDirectories   int     `json:"registered_watch_directories"`
+	LiveWatchDirectories         int     `json:"live_watch_directories"`
+	StaleWatchDirectories        int     `json:"stale_watch_directories"`
 	EstimatedWatchDescriptorCost int     `json:"estimated_watch_descriptor_cost"`
+	LiveEstimatedWatchCost       int     `json:"live_estimated_watch_cost"`
+	StaleEstimatedWatchCost      int     `json:"stale_estimated_watch_cost"`
 	WatchBudgetPercent           float64 `json:"watch_budget_percent"`
 	Degraded                     string  `json:"degraded,omitempty"`
 	RetryCount                   int     `json:"retry_count,omitempty"`
@@ -1582,15 +1595,25 @@ type TriggerBindingDetail struct {
 	WorktreePath   string `json:"worktree_path,omitempty"`
 	State          string `json:"state"`
 	PendingChanges int    `json:"pending_changes"`
-	// RegisteredWatchDirectories is the legacy-named count of active backend
-	// registrations held by this binding. Degraded bindings hold no active
+	// RegisteredWatchDirectories is the legacy-named count of watch reservations
+	// held by this binding. LiveWatchDirectories and StaleWatchDirectories split
+	// that total by current backend/on-disk state. Degraded bindings hold no
 	// registrations, so this is zero while they wait for retry.
 	RegisteredWatchDirectories int `json:"registered_watch_directories"`
+	// LiveWatchDirectories is the subset of RegisteredWatchDirectories that
+	// still exists on disk and is present in the backend's active watch list.
+	LiveWatchDirectories int `json:"live_watch_directories"`
+	// StaleWatchDirectories is the subset of RegisteredWatchDirectories whose
+	// path disappeared or whose backend watch was dropped while accounting still
+	// retained the reservation. Current daemons prune these on reconcile.
+	StaleWatchDirectories int `json:"stale_watch_directories"`
 	// EstimatedWatchDescriptorCost is the legacy-named budget cost currently
 	// charged to this binding. It matches daemon admission accounting; fsnotify
 	// on macOS can be larger than RegisteredWatchDirectories because directory
 	// entries are included, while FSEvents charges one recursive stream.
 	EstimatedWatchDescriptorCost int     `json:"estimated_watch_descriptor_cost"`
+	LiveEstimatedWatchCost       int     `json:"live_estimated_watch_cost"`
+	StaleEstimatedWatchCost      int     `json:"stale_estimated_watch_cost"`
 	WatchBudgetPercent           float64 `json:"watch_budget_percent"`
 	DebounceUntil                string  `json:"debounce_until,omitempty"` // RFC3339 while armed
 	ActionInFlight               bool    `json:"action_in_flight,omitempty"`

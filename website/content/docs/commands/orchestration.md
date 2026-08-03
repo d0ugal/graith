@@ -89,11 +89,16 @@ List triggers with their source, action, next fire / watch scope, and state.
 Detail for one trigger: next fire, last run/result/error, and (for watch
 triggers) live binding details. Watch status keeps the aggregate binding count
 and prints one row per live binding with session identity, worktree, state,
-registered watch registration count, estimated watcher backend cost, budget
-share, pending change count, debounce deadline, action in-flight marker, last
-per-binding result/error, and degraded retry details. `--json` includes the same
-rows under `trigger.bindings_detail` as
-`registered_watch_directories`, `estimated_watch_descriptor_cost`, and
+registered watch registration count, live and stale registration counts,
+estimated reserved watcher backend cost, live and stale cost, budget share,
+pending change count, debounce deadline, action in-flight marker, last
+per-binding result/error, and degraded retry details. Stale registrations are
+paths still held in the daemon's accounting after the directory disappeared or
+the backend dropped the watch; they are pruned automatically on reconcile.
+`--json` includes the same rows under `trigger.bindings_detail` as
+`registered_watch_directories`, `live_watch_directories`,
+`stale_watch_directories`, `estimated_watch_descriptor_cost`,
+`live_estimated_watch_cost`, `stale_estimated_watch_cost`, and
 `watch_budget_percent`.
 
 ### `gr trigger run <name>`
