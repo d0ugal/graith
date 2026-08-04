@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
-	"math"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
+	"github.com/d0ugal/graith/internal/sessionlabel"
 )
 
 func overlayTestSessions() []protocol.SessionInfo {
@@ -220,6 +220,16 @@ func renderItem(sessions []protocol.SessionInfo, current string, index int) stri
 	d.Render(&buf, l, index, items[index])
 
 	return buf.String()
+}
+
+func firstLineContaining(text, needle string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+
+	return ""
 }
 
 // drain runs queued tea.Cmds to completion, feeding each resulting message
@@ -1135,26 +1145,26 @@ func TestCompactSessionLabelTextLimitsAndTruncates(t *testing.T) {
 	}{
 		"limits labels and reports overflow": {
 			labels:       []string{"strath", "bothy", "canny", "dreich"},
-			wantContains: []string{"[strath]", "+3"},
-			wantAbsent:   []string{"[canny]", "[dreich]"},
+			wantContains: []string{"strath", "+3"},
+			wantAbsent:   []string{"bothy", "canny", "dreich"},
 		},
 		"truncates long labels": {
 			labels:       []string{"strath-label-for-dreich-weather", "bothy", "canny"},
 			wantContains: []string{"…", "+2"},
-			wantAbsent:   []string{"weather", "[canny]"},
+			wantAbsent:   []string{"weather", "bothy", "canny"},
 		},
 		"ignores blank defensive labels": {
 			labels:       []string{" ", "braw"},
-			wantContains: []string{"[braw]"},
-			wantAbsent:   []string{"[]", "+1"},
+			wantContains: []string{"braw"},
+			wantAbsent:   []string{"+1"},
 		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			got := compactSessionLabelText(test.labels)
-			if width := ansi.StringWidth(got); width > compactSessionLabelColumnMaxWidth {
-				t.Fatalf("compact label text width = %d, want <= %d: %q", width, compactSessionLabelColumnMaxWidth, got)
+			if width := labelChipSequenceWidth(compactSessionLabelChips(test.labels)); width > compactSessionLabelColumnMaxWidth {
+				t.Fatalf("compact label chip width = %d, want <= %d: %q", width, compactSessionLabelColumnMaxWidth, got)
 			}
 
 			for _, want := range test.wantContains {
@@ -1178,7 +1188,7 @@ func TestCompactSessionLabelTextTruncatesWideLabels(t *testing.T) {
 		t.Fatal("compact label text should not be empty")
 	}
 
-	if width := ansi.StringWidth(got); width > compactSessionLabelColumnMaxWidth {
+	if width := labelChipSequenceWidth(compactSessionLabelChips([]string{"日本語のラベルはとても長い"})); width > compactSessionLabelColumnMaxWidth {
 		t.Fatalf("wide compact label width = %d, want <= %d: %q", width, compactSessionLabelColumnMaxWidth, got)
 	}
 
@@ -3573,7 +3583,7 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 		"braw-detail",
 		"PR:       #1870 open CI:16/22",
 		"Review:   needed",
-		"Labels:   cli, polish",
+		"Labels:",
 		"Created:",
 		"Attached:",
 		"Changed:",
@@ -3582,6 +3592,11 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Errorf("wide detail view should contain %q:\n%s", want, plain)
 		}
+	}
+
+	labelLine := firstLineContaining(plain, "Labels:")
+	if !strings.Contains(labelLine, "cli") || !strings.Contains(labelLine, "polish") {
+		t.Errorf("wide detail label line should contain coloured label text, got %q:\n%s", labelLine, plain)
 	}
 
 	for _, absent := range []string{
@@ -4095,11 +4110,16 @@ func TestView_WideSelectedSessionDetailFieldsConfig(t *testing.T) {
 	for _, want := range []string{
 		"Selected Session",
 		"Branch:   issue-1870-wide-details",
-		"Labels:   cli, polish",
+		"Labels:",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("custom detail fields should contain %q:\n%s", want, view)
 		}
+	}
+
+	labelLine := firstLineContaining(view, "Labels:")
+	if !strings.Contains(labelLine, "cli") || !strings.Contains(labelLine, "polish") {
+		t.Errorf("custom detail label line should contain label chips, got %q:\n%s", labelLine, view)
 	}
 
 	for _, absent := range []string{
@@ -5178,13 +5198,13 @@ func TestCompactDelegate_RenderCompactLabelsOutsideLabelView(t *testing.T) {
 	}
 
 	line := ansi.Strip(renderItem(sessions, "", 1))
-	for _, want := range []string{"braw", "[strath]", "+3"} {
+	for _, want := range []string{"braw", "strath", "+3"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("rendered row missing %q:\n%s", want, line)
 		}
 	}
 
-	for _, absent := range []string{"[bothy]", "[canny]", "[dreich]"} {
+	for _, absent := range []string{"bothy", "canny", "dreich"} {
 		if strings.Contains(line, absent) {
 			t.Errorf("rendered row should not include overflow label %q:\n%s", absent, line)
 		}
@@ -5216,7 +5236,7 @@ func TestCompactDelegate_RenderCompactLabelsInAllView(t *testing.T) {
 	d.Render(&buf, l, 0, items[0])
 	line := ansi.Strip(buf.String())
 
-	for _, want := range []string{"croft/braw", "[cli]", "[ui]"} {
+	for _, want := range []string{"croft/braw", "cli", "ui"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("all view row missing %q:\n%s", want, line)
 		}
@@ -5252,7 +5272,7 @@ func TestCompactDelegate_SuppressesCompactLabelsInLabelView(t *testing.T) {
 		t.Fatalf("label view row should keep repo-qualified session name:\n%s", line)
 	}
 
-	if strings.Contains(line, "[strath]") || strings.Contains(line, "[bothy]") {
+	if strings.Contains(line, "strath") || strings.Contains(line, "bothy") {
 		t.Fatalf("label view row should not duplicate compact label chips:\n%s", line)
 	}
 }
@@ -5302,18 +5322,128 @@ func TestCompactDelegate_CompactLabelsRespectListWidth(t *testing.T) {
 	}
 }
 
-func TestRenderCompactSessionLabelsStylesSelectedAndUnselected(t *testing.T) {
-	text := "[strath]"
-	width := lipgloss.Width(text)
+func TestRenderCompactSessionLabelsUsesColoredChips(t *testing.T) {
+	chips := compactSessionLabelChips([]string{"strath", "bothy", "canny"})
+	width := labelChipSequenceWidth(chips)
 
-	selected := renderCompactSessionLabels(text, true, width)
-	if !strings.Contains(selected, lipgloss.NewStyle().Foreground(colorSelectDim).Render(text)) {
-		t.Fatalf("selected compact labels should use selected dim colour, got %q", selected)
+	rendered := renderCompactSessionLabels(chips, width)
+	stripped := ansi.Strip(rendered)
+
+	for _, want := range []string{"strath", "+2"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("compact labels should render %q, got %q", want, stripped)
+		}
 	}
 
-	unselected := renderCompactSessionLabels(text, false, width)
-	if !strings.Contains(unselected, lipgloss.NewStyle().Foreground(colorDim).Render(text)) {
-		t.Fatalf("unselected compact labels should use regular dim colour, got %q", unselected)
+	if !strings.Contains(rendered, renderLabelChip(chips[0])) {
+		t.Fatalf("compact labels should render the first label as a coloured chip, got %q", rendered)
+	}
+
+	if got := lipgloss.Width(rendered); got != width {
+		t.Fatalf("compact labels width = %d, want %d", got, width)
+	}
+}
+
+func TestLabelChipColorsAreStableByLabelIdentity(t *testing.T) {
+	tests := map[string]struct {
+		a string
+		b string
+	}{
+		"trim and case": {
+			a: "Strath",
+			b: " strath ",
+		},
+		"micro sign and greek mu": {
+			a: "µ",
+			b: "μ",
+		},
+		"long s and ascii s": {
+			a: "ſ",
+			b: "s",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var (
+				a = strings.TrimSpace(test.a)
+				b = strings.TrimSpace(test.b)
+			)
+
+			if !sessionlabel.Equal(a, b) {
+				t.Fatalf("test labels %q and %q should share label identity", test.a, test.b)
+			}
+
+			fg, bg := labelChipColors(test.a)
+
+			againFG, againBG := labelChipColors(test.b)
+			if fg != againFG || bg != againBG {
+				t.Fatalf("label chip colors should be stable for label identity %q/%q", test.a, test.b)
+			}
+		})
+	}
+}
+
+func TestLabelChipPaletteForegroundsAreReadable(t *testing.T) {
+	backgrounds := append([]color.Color(nil), labelChipPalette...)
+	backgrounds = append(backgrounds, colorLabelChipOverflow)
+
+	for i, bg := range backgrounds {
+		t.Run(fmt.Sprintf("background_%02d", i), func(t *testing.T) {
+			fg := labelChipForeground(bg)
+			if ratio := colorContrastRatio(fg, bg); ratio < 4.5 {
+				t.Fatalf("label chip contrast ratio = %.2f, want at least 4.5", ratio)
+			}
+		})
+	}
+}
+
+func TestAppendDetailLabelChipsUsesColoredLegend(t *testing.T) {
+	var b strings.Builder
+
+	appendDetailLabelChips(&b, []string{"strath", "bothy"}, 42)
+
+	rendered := b.String()
+	if !strings.Contains(rendered, renderLabelChip(newLabelChip("strath", selectedDetailLabelMaxWidth))) {
+		t.Fatalf("detail labels should render the first label as a coloured chip, got %q", rendered)
+	}
+
+	stripped := ansi.Strip(rendered)
+	for _, want := range []string{"Labels:", "strath", "bothy"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("detail labels should include %q, got %q", want, stripped)
+		}
+	}
+}
+
+func TestAppendDetailLabelChipsCapsWrappedLegend(t *testing.T) {
+	var b strings.Builder
+
+	appendDetailLabelChips(&b, []string{
+		"strath",
+		"bothy",
+		"canny",
+		"dreich",
+		"blether",
+		"thrawn",
+		"bairn",
+		"croft",
+		"haar",
+	}, 28)
+
+	lines := strings.Split(strings.TrimPrefix(b.String(), "\n"), "\n")
+	if len(lines) > selectedDetailLabelMaxLines {
+		t.Fatalf("detail label legend line count = %d, want <= %d:\n%s", len(lines), selectedDetailLabelMaxLines, ansi.Strip(b.String()))
+	}
+
+	for _, line := range lines {
+		if width := lipgloss.Width(line); width > 28 {
+			t.Fatalf("detail label legend line width = %d, want <= 28: %q", width, ansi.Strip(line))
+		}
+	}
+
+	if stripped := ansi.Strip(b.String()); !strings.Contains(stripped, "+") {
+		t.Fatalf("capped detail label legend should include overflow chip, got %q", stripped)
 	}
 }
 
@@ -5580,7 +5710,7 @@ func TestSelectedRowDefaultStyleContrast(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := contrastRatio(test.foreground, test.background)
+			got := colorContrastRatio(test.foreground, test.background)
 			if got < test.minRatio {
 				t.Errorf("contrast ratio = %.2f, want at least %.2f", got, test.minRatio)
 			}
@@ -5656,32 +5786,6 @@ func TestHighlightSelectedRow_ZeroWidth(t *testing.T) {
 	if !strings.Contains(out, "\x1b[m"+open) {
 		t.Errorf("zero-width row should still re-open the background after resets, got %q", out)
 	}
-}
-
-func contrastRatio(foreground, background color.Color) float64 {
-	fg, bg := relativeLuminance(foreground), relativeLuminance(background)
-	if bg > fg {
-		fg, bg = bg, fg
-	}
-
-	return (fg + 0.05) / (bg + 0.05)
-}
-
-func relativeLuminance(c color.Color) float64 {
-	r, g, b, _ := c.RGBA()
-
-	return 0.2126*linearizedChannel(r) +
-		0.7152*linearizedChannel(g) +
-		0.0722*linearizedChannel(b)
-}
-
-func linearizedChannel(v uint32) float64 {
-	c := float64(v) / 0xffff
-	if c <= 0.04045 {
-		return c / 12.92
-	}
-
-	return math.Pow((c+0.055)/1.055, 2.4)
 }
 
 func TestCompactDelegate_RenderTruncatesLongLine(t *testing.T) {
