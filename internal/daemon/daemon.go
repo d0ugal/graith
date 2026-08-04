@@ -262,6 +262,7 @@ type SessionManager struct {
 	// metrics is nil unless the metrics runtime was explicitly enabled and
 	// started successfully.
 	metrics        atomic.Pointer[daemonMetrics]
+	logExporter    atomic.Pointer[telemetryLogsRuntime]
 	tracingEnabled atomic.Bool
 
 	// watchers tracks in-flight watchSession goroutines. StopAll waits on it so

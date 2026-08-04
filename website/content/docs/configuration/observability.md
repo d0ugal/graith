@@ -1,19 +1,20 @@
 ---
 weight: 355
 title: "Observability"
-description: "Optional metrics and tracing configuration."
+description: "Optional metrics, tracing, and experimental log export configuration."
 icon: "monitoring"
 toc: true
 draft: false
 ---
 
-Graith keeps logs local by default. Metrics and tracing are also disabled by
-default, and the daemon starts no telemetry listener, exporter, network
-endpoint, or telemetry dial unless you explicitly enable the matching setting.
+Graith keeps logs local by default. Metrics, tracing, and experimental log
+export are disabled by default, and the daemon starts no telemetry listener,
+exporter, network endpoint, or telemetry dial unless you explicitly enable the
+matching setting.
 
 Telemetry runtime settings are read when the daemon starts. Enabling or
-disabling metrics or tracing, or changing settings for a feature that is
-currently enabled, requires a daemon restart:
+disabling metrics, tracing, or log export, or changing settings for a feature
+that is currently enabled, requires a daemon restart:
 
 ```bash
 gr daemon restart
@@ -27,8 +28,8 @@ they do not start listeners or exporters until the feature is enabled and the
 daemon restarts.
 
 Graith validates telemetry values even when the matching feature is disabled,
-except that `telemetry.tracing.endpoint` is only required when tracing is
-enabled.
+except that `telemetry.tracing.endpoint` and `telemetry.logs.endpoint` are only
+required when the matching feature is enabled.
 
 ## Logs
 
@@ -71,6 +72,65 @@ are also a deliberate diagnostic export, not the future safe daemon event
 schema. Rotated daemon logs are useful for local inspection or manual backfill,
 but a live Alloy tail should usually read only `<data_dir>/daemon.log` so
 rotation does not re-ingest old backups.
+
+### Experimental OTLP daemon events
+
+Graith includes an experimental prototype for direct OTLP log export of safe
+daemon events:
+
+```toml
+[telemetry.logs]
+enabled = false
+endpoint = ""
+protocol = "grpc"
+insecure = false
+timeout = "10s"
+export_interval = "1s"
+queue_size = 2048
+batch_size = 512
+
+[telemetry.logs.headers]
+# Add backend-required auth headers here.
+```
+
+This is not a raw log shipper. It does not tail `<data_dir>/daemon.log`,
+`<data_dir>/daemon.stderr.log`, or `<data_dir>/logs/*.log`, and it never exports
+session scrollback, terminal snapshots, prompt text, message bodies, command
+arguments, paths, branch names, raw session names, or raw session IDs. The
+prototype exports only explicitly constructed daemon event records under
+schema `graith.daemon_event.v1`. The initial allowlist is intentionally small:
+
+| Event | Notes |
+|-------|-------|
+| `telemetry.logs_started` | Logs exporter startup, with protocol and buffer sizing only. |
+| `session.exited` | Session exit classification, driver kind, stop reason, exit code/process IDs, sandbox boolean, and a pseudonymous `session.ref`. |
+
+`session.ref` is an HMAC-SHA256 reference truncated to 32 hex characters. The
+daemon creates `<data_dir>/telemetry-logs.key` with owner-only permissions the
+first time log export is enabled and reuses it across restarts. Deleting that
+file intentionally rotates future references and breaks cross-restart
+correlation. The secret is not logged, exported, or shown in config output.
+
+Supported protocols:
+
+| `protocol` | `endpoint` format |
+|------------|-------------------|
+| `"grpc"` | `host:port`, for example `127.0.0.1:4317` |
+| `"http/protobuf"` | full `http` or `https` logs URL ending in `/logs`, used verbatim, for example `http://127.0.0.1:4318/v1/logs` |
+
+Graith passes only the configured endpoint, protocol, timeout, and
+`[telemetry.logs.headers]` values to the exporter; it does not fall back to
+`OTEL_*` environment variables for logs exporter settings. Header values are
+redacted from daemon config responses and local `gr config show`/`diff` output.
+`insecure = true` is valid only with `protocol = "grpc"` for a plaintext
+receiver such as a loopback collector.
+
+Events are queued through a bounded async buffer. If the queue fills, a batch
+export fails, or an OTLP `partial_success` response rejects records, Graith
+drops events, increments drop accounting, and reports drops in the local daemon
+log as `telemetry log export events dropped`. Export failures and shutdown
+flush failures are also reported only to the local daemon log. Log export never
+blocks daemon lifecycle or PTY processing on a remote collector.
 
 ## Metrics
 
@@ -374,6 +434,14 @@ insecure = false
 timeout = "10s"
 ```
 
+To collect the experimental safe daemon event stream through a local Alloy OTLP
+receiver, enable `[telemetry.logs]` separately and point it at `127.0.0.1:4317`
+for gRPC or `http://127.0.0.1:4318/v1/logs` for `http/protobuf`. Raw daemon
+files and per-session scrollback remain separate from that allowlisted event
+stream. The generated Alloy config below covers raw daemon logs, metrics, and
+traces; add a logs output to the generated OTLP receiver only when this
+prototype is explicitly enabled.
+
 Then generate Alloy config from the resolved Graith config instead of copying a
 static path example:
 
@@ -477,8 +545,20 @@ Startup, export, and shutdown issues appear in the daemon log as
 spans, but tracing is batched, so spans may not appear immediately after daemon
 restart or after an operation completes.
 
+If experimental OTLP daemon events are missing, confirm
+`[telemetry.logs].enabled = true`, restart the daemon, and match Graith's
+protocol and endpoint to the collector's logs receiver. For `http/protobuf`,
+use the exact logs path ending in `/logs`, such as
+`http://127.0.0.1:4318/v1/logs`. Graith does not read `OTEL_*` environment
+variables for log exporter settings. Startup, export, drop, and shutdown issues
+appear only in the local daemon log as
+`telemetry logs exporter started`, `telemetry log export failed`,
+`telemetry log export events dropped`, or
+`telemetry logs exporter shutdown failed`.
+
 If a reload appears to do nothing, remember that runtime-affecting telemetry
 changes are restart-only. `gr daemon reload` rejects enabling or disabling
-metrics or tracing, and rejects changes to settings for a telemetry runtime that
-is currently enabled. Disabled telemetry values may reload, but they still do
-not start listeners or exporters until you enable the feature and restart.
+metrics, tracing, or log export, and rejects changes to settings for a
+telemetry runtime that is currently enabled. Disabled telemetry values may
+reload, but they still do not start listeners or exporters until you enable the
+feature and restart.

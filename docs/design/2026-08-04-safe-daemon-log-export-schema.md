@@ -304,6 +304,12 @@ creates another route by which Graith can ship data off-machine.
 OTLP logs are a good future transport once the collector-only event schema is
 validated. They should not be the first implementation.
 
+Issue #2050 intentionally prototypes this transport behind explicit opt-in to
+exercise the schema with OTLP logs without changing the supported v1
+recommendation above. The prototype must still use the allowlisted
+`graith.daemon_event.v1` constructors, keep raw local logs and session
+scrollback out of scope, and document itself as experimental behavior.
+
 ### Proposal 3: Direct Loki Push
 
 Push daemon log records from Graith directly to Loki. This is convenient for a

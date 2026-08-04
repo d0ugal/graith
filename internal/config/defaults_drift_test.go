@@ -169,6 +169,42 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 		if got := d.Telemetry.Tracing.TimeoutDuration(); got != TelemetryTracingTimeoutDefault {
 			t.Errorf("Default().Telemetry.Tracing.TimeoutDuration() = %v, want %v", got, TelemetryTracingTimeoutDefault)
 		}
+
+		if d.Telemetry.Logs.Enabled {
+			t.Error("Default().Telemetry.Logs.Enabled = true, want false")
+		}
+
+		if d.Telemetry.Logs.Endpoint != "" {
+			t.Errorf("Default().Telemetry.Logs.Endpoint = %q, want empty", d.Telemetry.Logs.Endpoint)
+		}
+
+		if d.Telemetry.Logs.Protocol != TelemetryLogsProtocolGRPC {
+			t.Errorf("Default().Telemetry.Logs.Protocol = %q, want %q", d.Telemetry.Logs.Protocol, TelemetryLogsProtocolGRPC)
+		}
+
+		if d.Telemetry.Logs.Timeout != "10s" {
+			t.Errorf("Default().Telemetry.Logs.Timeout = %q, want %q", d.Telemetry.Logs.Timeout, "10s")
+		}
+
+		if got := d.Telemetry.Logs.TimeoutDuration(); got != TelemetryLogsTimeoutDefault {
+			t.Errorf("Default().Telemetry.Logs.TimeoutDuration() = %v, want %v", got, TelemetryLogsTimeoutDefault)
+		}
+
+		if d.Telemetry.Logs.ExportInterval != "1s" {
+			t.Errorf("Default().Telemetry.Logs.ExportInterval = %q, want %q", d.Telemetry.Logs.ExportInterval, "1s")
+		}
+
+		if got := d.Telemetry.Logs.ExportIntervalDuration(); got != TelemetryLogsExportIntervalDefault {
+			t.Errorf("Default().Telemetry.Logs.ExportIntervalDuration() = %v, want %v", got, TelemetryLogsExportIntervalDefault)
+		}
+
+		if d.Telemetry.Logs.QueueSize != TelemetryLogsQueueSizeDefault {
+			t.Errorf("Default().Telemetry.Logs.QueueSize = %d, want %d", d.Telemetry.Logs.QueueSize, TelemetryLogsQueueSizeDefault)
+		}
+
+		if d.Telemetry.Logs.BatchSize != TelemetryLogsBatchSizeDefault {
+			t.Errorf("Default().Telemetry.Logs.BatchSize = %d, want %d", d.Telemetry.Logs.BatchSize, TelemetryLogsBatchSizeDefault)
+		}
 	})
 
 	t.Run("terminal", func(t *testing.T) {

@@ -43,6 +43,8 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 		name                   string
 		deleted                bool
 		isOrchestrator         bool
+		driverKind             string
+		agentKind              string
 		stopReason             string
 		sandboxed              bool
 		prevLifecycleStatus    SessionStatus
@@ -55,6 +57,8 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 		if s, ok := sm.state.Sessions[id]; ok {
 			name = s.Name
 			isOrchestrator = s.SystemKind == SystemKindOrchestrator
+			driverKind = s.DriverKind
+			agentKind = s.Agent
 			prevLifecycleStatus = s.Status
 
 			prevSummary, prevSetAt := sm.prevStopSummaryLocked(s, id)
@@ -209,6 +213,20 @@ func (sm *SessionManager) watchSession(id string, sess sessionDriver) {
 	}
 
 	sm.log.Info("session exited", logAttrs...)
+	sm.emitSessionExitedLogEvent(sessionExitedLogObservation{
+		SessionID:    id,
+		DriverKind:   driverKind,
+		AgentKind:    agentKind,
+		Status:       nextLifecycleStatus,
+		StopReason:   stopReason,
+		ExitCode:     sess.ExitCode(),
+		PID:          sess.ProcessPID(),
+		PGID:         sess.Pgid(),
+		Signal:       sess.ExitSignal(),
+		ExitCategory: category,
+		SignalSource: signalSource,
+		Sandboxed:    sandboxed,
+	})
 	sm.logAbnormalExitReport(id, name, stopReason, sess, signalRequest)
 
 	sm.onAgentStatusChange(context.Background(), id, name, "running", "stopped")

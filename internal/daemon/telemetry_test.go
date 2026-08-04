@@ -3,10 +3,12 @@ package daemon
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,10 @@ import (
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/telemetry"
+	collectorlogpb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestTelemetryRuntimeDisabledStartsNothing(t *testing.T) {
@@ -46,6 +52,14 @@ func TestTelemetryRuntimeDisabledStartsNothing(t *testing.T) {
 
 	if metrics := sm.metrics.Load(); metrics != nil {
 		t.Fatalf("disabled telemetry created metrics registry: %+v", metrics)
+	}
+
+	if logs := sm.logExporter.Load(); logs != nil {
+		t.Fatalf("disabled telemetry created logs exporter: %+v", logs)
+	}
+
+	if _, err := os.Stat(filepath.Join(sm.paths.DataDir, "telemetry-logs.key")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("disabled telemetry log secret stat err = %v, want not exist", err)
 	}
 }
 
@@ -85,6 +99,260 @@ func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
 		"# TYPE graith_messages_published_total counter",
 	} {
 		assertMetricsContain(t, body, want)
+	}
+}
+
+func TestTelemetryRuntimeLogsOptInCreatesExporterAndFlushesStartupEvent(t *testing.T) {
+	receiver := newOTLPLogReceiver(t)
+
+	cfg := config.Default()
+	cfg.Telemetry.Logs.Enabled = true
+	cfg.Telemetry.Logs.Endpoint = receiver.url + "/v1/logs"
+	cfg.Telemetry.Logs.Protocol = config.TelemetryLogsProtocolHTTPProtobuf
+	cfg.Telemetry.Logs.Timeout = "1s"
+	cfg.Telemetry.Logs.ExportInterval = "1h"
+	cfg.Telemetry.Logs.QueueSize = 4
+	cfg.Telemetry.Logs.BatchSize = 4
+	cfg.Telemetry.Logs.Headers = map[string]string{"x-graith": "canny"}
+
+	sm := newSMWithConfig(t, cfg)
+	if err := sm.startTelemetryRuntime(t.Context()); err != nil {
+		t.Fatalf("startTelemetryRuntime() error = %v", err)
+	}
+
+	if logs := sm.logExporter.Load(); logs == nil {
+		t.Fatal("enabled telemetry logs did not store runtime pointer")
+	}
+
+	info, err := os.Stat(filepath.Join(sm.paths.DataDir, "telemetry-logs.key"))
+	if err != nil {
+		t.Fatalf("telemetry logs secret stat: %v", err)
+	}
+
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("telemetry logs secret mode = %v, want 0600", info.Mode().Perm())
+	}
+
+	sm.stopTelemetryRuntime()
+
+	reqs := receiver.requests(t, 1)
+
+	record := findOTLPLogRecord(reqs, "telemetry.logs_started")
+	if record == nil {
+		t.Fatalf("telemetry.logs_started record missing: %s", reqs)
+	}
+
+	attrs := otlpAttrMap(record)
+	if got := otlpString(attrs["telemetry.protocol"]); got != config.TelemetryLogsProtocolHTTPProtobuf {
+		t.Fatalf("telemetry.protocol = %q, want %q", got, config.TelemetryLogsProtocolHTTPProtobuf)
+	}
+
+	if _, ok := attrs["endpoint"]; ok {
+		t.Fatalf("startup event exported endpoint attribute: %#v", attrs["endpoint"])
+	}
+
+	if _, ok := attrs["headers"]; ok {
+		t.Fatalf("startup event exported headers attribute: %#v", attrs["headers"])
+	}
+
+	if got := receiver.header("x-graith"); got != "canny" {
+		t.Fatalf("export HTTP header x-graith = %q, want canny", got)
+	}
+}
+
+func TestSessionExitedLogEventRedactsRawSessionFields(t *testing.T) {
+	receiver := newOTLPLogReceiver(t)
+
+	cfg := config.Default()
+	cfg.Telemetry.Logs.Enabled = true
+	cfg.Telemetry.Logs.Endpoint = receiver.url + "/v1/logs"
+	cfg.Telemetry.Logs.Protocol = config.TelemetryLogsProtocolHTTPProtobuf
+	cfg.Telemetry.Logs.Timeout = "1s"
+	cfg.Telemetry.Logs.ExportInterval = "1h"
+	cfg.Telemetry.Logs.QueueSize = 8
+	cfg.Telemetry.Logs.BatchSize = 8
+
+	sm := newSMWithConfig(t, cfg)
+	sm.paths.Profile = "canny-profile"
+
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable(): %v", err)
+	}
+
+	instanceID := sm.InstanceID()
+
+	if err := sm.startTelemetryRuntime(t.Context()); err != nil {
+		t.Fatalf("startTelemetryRuntime() error = %v", err)
+	}
+
+	id := "braw-sensitive-id"
+	sm.state.Sessions[id] = &SessionState{
+		ID:           id,
+		Name:         "canny-private-name",
+		Status:       StatusRunning,
+		Agent:        "private-agent-name",
+		DriverKind:   DriverPTY,
+		StopReason:   StopReasonUser,
+		RepoPath:     "/repo/private",
+		WorktreePath: "/work/private",
+		Branch:       "feature/private",
+		Sandboxed:    true,
+	}
+
+	sess := newTestPTYSession(t, "true")
+	waitExit(t, sess)
+
+	sm.sessions[id] = sess
+	sm.watchSession(id, sess)
+	sm.stopTelemetryRuntime()
+
+	reqs := receiver.requests(t, 1)
+
+	record := findOTLPLogRecord(reqs, "session.exited")
+	if record == nil {
+		t.Fatalf("session.exited record missing: %s", reqs)
+	}
+
+	attrs := otlpAttrMap(record)
+
+	if got := otlpString(attrs["schema"]); got != telemetry.DaemonLogSchema {
+		t.Fatalf("schema = %q, want %q", got, telemetry.DaemonLogSchema)
+	}
+
+	if got := record.GetBody().GetStringValue(); got != "session.exited" {
+		t.Fatalf("record body = %q, want session.exited", got)
+	}
+
+	if got := record.GetSeverityText(); got != telemetry.LogSeverityInfo {
+		t.Fatalf("severity text = %q, want %q", got, telemetry.LogSeverityInfo)
+	}
+
+	if got := record.GetSeverityNumber(); got != logspb.SeverityNumber_SEVERITY_NUMBER_INFO {
+		t.Fatalf("severity number = %s, want %s", got, logspb.SeverityNumber_SEVERITY_NUMBER_INFO)
+	}
+
+	if record.GetTimeUnixNano() == 0 {
+		t.Fatal("record time is zero")
+	}
+
+	if got := otlpString(attrs["session.driver_kind"]); got != DriverPTY {
+		t.Fatalf("session.driver_kind = %q, want %q", got, DriverPTY)
+	}
+
+	if got := otlpString(attrs["session.stop_reason"]); got != StopReasonUser {
+		t.Fatalf("session.stop_reason = %q, want %q", got, StopReasonUser)
+	}
+
+	if got := otlpString(attrs["agent_kind"]); got != "custom" {
+		t.Fatalf("agent_kind = %q, want custom", got)
+	}
+
+	if got := otlpBool(attrs["session.sandboxed"]); !got {
+		t.Fatal("session.sandboxed = false, want true")
+	}
+
+	ref := otlpString(attrs["session.ref"])
+	if ref == "" {
+		t.Fatal("session.ref missing")
+	}
+
+	if ref == id || strings.Contains(ref, id) {
+		t.Fatalf("session.ref exposed raw id: %q", ref)
+	}
+
+	resourceAttrs := findOTLPLogResourceAttributes(reqs, "session.exited")
+	if got := otlpString(resourceAttrs["profile_kind"]); got != "custom" {
+		t.Fatalf("resource profile_kind = %q, want custom", got)
+	}
+
+	for _, forbidden := range []string{
+		"graith.daemon.instance_id",
+		"graith.profile",
+		"process.executable.name",
+		"service.instance.id",
+	} {
+		if _, ok := resourceAttrs[forbidden]; ok {
+			t.Fatalf("exported forbidden resource attribute %q: %#v", forbidden, resourceAttrs[forbidden])
+		}
+	}
+
+	for _, forbidden := range []string{
+		"id",
+		"name",
+		"session_id",
+		"repo",
+		"worktree",
+		"branch",
+		"path",
+	} {
+		if _, ok := attrs[forbidden]; ok {
+			t.Fatalf("exported forbidden attribute %q: %#v", forbidden, attrs[forbidden])
+		}
+	}
+
+	wire := fmt.Sprint(reqs)
+	for _, forbidden := range []string{
+		id,
+		"canny-private-name",
+		"private-agent-name",
+		"/repo/private",
+		"/work/private",
+		"feature/private",
+		"canny-profile",
+		filepath.Base(executable),
+		instanceID,
+	} {
+		if strings.Contains(wire, forbidden) {
+			t.Fatalf("OTLP request contained forbidden raw value %q: %s", forbidden, wire)
+		}
+	}
+}
+
+func TestTelemetryRuntimeLogsSecretFailureOmitsSessionRef(t *testing.T) {
+	receiver := newOTLPLogReceiver(t)
+
+	cfg := config.Default()
+	cfg.Telemetry.Logs.Enabled = true
+	cfg.Telemetry.Logs.Endpoint = receiver.url + "/v1/logs"
+	cfg.Telemetry.Logs.Protocol = config.TelemetryLogsProtocolHTTPProtobuf
+	cfg.Telemetry.Logs.Timeout = "1s"
+	cfg.Telemetry.Logs.ExportInterval = "1h"
+
+	sm := newSMWithConfig(t, cfg)
+	if err := os.WriteFile(filepath.Join(sm.paths.DataDir, "telemetry-logs.key"), []byte("dreich\n"), 0o600); err != nil {
+		t.Fatalf("write corrupt telemetry logs secret: %v", err)
+	}
+
+	if err := sm.startTelemetryRuntime(t.Context()); err != nil {
+		t.Fatalf("startTelemetryRuntime() error = %v, want degraded logs without session refs", err)
+	}
+
+	sm.emitSessionExitedLogEvent(sessionExitedLogObservation{
+		SessionID:    "braw-sensitive-id",
+		DriverKind:   DriverPTY,
+		Status:       StatusStopped,
+		StopReason:   StopReasonUser,
+		ExitCode:     0,
+		ExitCategory: "exit-clean",
+		SignalSource: "none",
+		AgentKind:    "codex",
+		PID:          0,
+		PGID:         0,
+		Signal:       0,
+	})
+	sm.stopTelemetryRuntime()
+
+	reqs := receiver.requests(t, 1)
+
+	record := findOTLPLogRecord(reqs, "session.exited")
+	if record == nil {
+		t.Fatalf("session.exited record missing: %s", reqs)
+	}
+
+	attrs := otlpAttrMap(record)
+	if _, ok := attrs["session.ref"]; ok {
+		t.Fatalf("session.ref exported despite unavailable secret: %#v", attrs["session.ref"])
 	}
 }
 
@@ -233,6 +501,142 @@ func scrapeTelemetryMetrics(t *testing.T, sm *SessionManager) string {
 	}
 
 	return string(body)
+}
+
+type otlpLogReceiver struct {
+	url      string
+	request  chan *collectorlogpb.ExportLogsServiceRequest
+	headerCh chan http.Header
+}
+
+func newOTLPLogReceiver(t *testing.T) *otlpLogReceiver {
+	t.Helper()
+
+	receiver := &otlpLogReceiver{
+		request:  make(chan *collectorlogpb.ExportLogsServiceRequest, 8),
+		headerCh: make(chan http.Header, 8),
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		var req collectorlogpb.ExportLogsServiceRequest
+		if err := proto.Unmarshal(body, &req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		receiver.headerCh <- r.Header.Clone()
+
+		receiver.request <- &req
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	receiver.url = server.URL
+
+	return receiver
+}
+
+func (r *otlpLogReceiver) requests(t *testing.T, minCount int) []*collectorlogpb.ExportLogsServiceRequest {
+	t.Helper()
+
+	var out []*collectorlogpb.ExportLogsServiceRequest
+
+	timeout := time.After(2 * time.Second)
+
+	for len(out) < minCount {
+		select {
+		case req := <-r.request:
+			out = append(out, req)
+		case <-timeout:
+			t.Fatalf("timed out waiting for %d OTLP log request(s), got %d", minCount, len(out))
+		}
+	}
+
+	for {
+		select {
+		case req := <-r.request:
+			out = append(out, req)
+		default:
+			return out
+		}
+	}
+}
+
+func (r *otlpLogReceiver) header(name string) string {
+	select {
+	case header := <-r.headerCh:
+		return header.Get(name)
+	default:
+		return ""
+	}
+}
+
+func findOTLPLogRecord(reqs []*collectorlogpb.ExportLogsServiceRequest, eventName string) *logspb.LogRecord {
+	for _, req := range reqs {
+		for _, resourceLogs := range req.ResourceLogs {
+			for _, scopeLogs := range resourceLogs.ScopeLogs {
+				for _, record := range scopeLogs.LogRecords {
+					if record.EventName == eventName {
+						return record
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func findOTLPLogResourceAttributes(reqs []*collectorlogpb.ExportLogsServiceRequest, eventName string) map[string]*commonpb.AnyValue {
+	for _, req := range reqs {
+		for _, resourceLogs := range req.ResourceLogs {
+			for _, scopeLogs := range resourceLogs.ScopeLogs {
+				for _, record := range scopeLogs.LogRecords {
+					if record.EventName == eventName && resourceLogs.Resource != nil {
+						return otlpKeyValues(resourceLogs.Resource.Attributes)
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func otlpAttrMap(record *logspb.LogRecord) map[string]*commonpb.AnyValue {
+	return otlpKeyValues(record.Attributes)
+}
+
+func otlpKeyValues(attrs []*commonpb.KeyValue) map[string]*commonpb.AnyValue {
+	out := make(map[string]*commonpb.AnyValue, len(attrs))
+	for _, attr := range attrs {
+		out[attr.Key] = attr.Value
+	}
+
+	return out
+}
+
+func otlpString(value *commonpb.AnyValue) string {
+	if value == nil {
+		return ""
+	}
+
+	return value.GetStringValue()
+}
+
+func otlpBool(value *commonpb.AnyValue) bool {
+	if value == nil {
+		return false
+	}
+
+	return value.GetBoolValue()
 }
 
 func assertMetricsContain(t *testing.T, body, want string) {
@@ -506,6 +910,8 @@ func TestApplyConfigAllowsInactiveTelemetryReload(t *testing.T) {
 	changed.Telemetry.Metrics.BindAddress = "127.0.0.1:9924"
 	changed.Telemetry.Metrics.Path = "/canny/metrics"
 	changed.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+	changed.Telemetry.Logs.Endpoint = "127.0.0.1:4317"
+	changed.Telemetry.Logs.QueueSize = 64
 
 	if err := sm.applyConfig(changed); err != nil {
 		t.Fatalf("applyConfig() error = %v, want inactive telemetry changes to publish", err)
@@ -514,27 +920,62 @@ func TestApplyConfigAllowsInactiveTelemetryReload(t *testing.T) {
 	if got := sm.Config().Telemetry.Metrics.Path; got != "/canny/metrics" {
 		t.Fatalf("inactive telemetry reload was not published; metrics path = %q", got)
 	}
+
+	if got := sm.Config().Telemetry.Logs.QueueSize; got != 64 {
+		t.Fatalf("inactive telemetry reload was not published; logs queue_size = %d", got)
+	}
 }
 
 func TestApplyConfigRejectsEnabledTelemetryRuntimeReload(t *testing.T) {
-	old := config.Default()
-	old.Telemetry.Metrics.Enabled = true
-	old.Telemetry.Metrics.BindAddress = "127.0.0.1:9924"
+	t.Run("metrics", func(t *testing.T) {
+		old := config.Default()
+		old.Telemetry.Metrics.Enabled = true
+		old.Telemetry.Metrics.BindAddress = "127.0.0.1:9924"
 
-	sm := newSMWithConfig(t, old)
+		changed := config.Default()
+		changed.Telemetry.Metrics.Enabled = true
+		changed.Telemetry.Metrics.BindAddress = "127.0.0.1:9925"
 
-	changed := config.Default()
-	changed.Telemetry.Metrics.Enabled = true
-	changed.Telemetry.Metrics.BindAddress = "127.0.0.1:9925"
+		sm := assertApplyConfigRejectsRuntimeTelemetryReload(t, old, changed, "gr daemon restart")
 
-	err := sm.applyConfig(changed)
-	if err == nil || !strings.Contains(err.Error(), "gr daemon restart") {
-		t.Fatalf("applyConfig() error = %v, want restart-only telemetry rejection", err)
+		if got := sm.Config().Telemetry.Metrics.BindAddress; got != "127.0.0.1:9924" {
+			t.Fatalf("rejected telemetry reload was published; bind address = %q", got)
+		}
+	})
+
+	t.Run("logs", func(t *testing.T) {
+		old := config.Default()
+		old.Telemetry.Logs.Enabled = true
+		old.Telemetry.Logs.Endpoint = "127.0.0.1:4317"
+
+		changed := config.Default()
+		changed.Telemetry.Logs.Enabled = true
+		changed.Telemetry.Logs.Endpoint = "127.0.0.1:4318"
+
+		sm := assertApplyConfigRejectsRuntimeTelemetryReload(t, old, changed, "log export")
+
+		if got := sm.Config().Telemetry.Logs.Endpoint; got != "127.0.0.1:4317" {
+			t.Fatalf("rejected telemetry reload was published; logs endpoint = %q", got)
+		}
+	})
+}
+
+func assertApplyConfigRejectsRuntimeTelemetryReload(
+	t *testing.T,
+	oldCfg *config.Config,
+	changedCfg *config.Config,
+	wantErr string,
+) *SessionManager {
+	t.Helper()
+
+	sm := newSMWithConfig(t, oldCfg)
+
+	err := sm.applyConfig(changedCfg)
+	if err == nil || !strings.Contains(err.Error(), wantErr) {
+		t.Fatalf("applyConfig() error = %v, want substring %q", err, wantErr)
 	}
 
-	if got := sm.Config().Telemetry.Metrics.BindAddress; got != "127.0.0.1:9924" {
-		t.Fatalf("rejected telemetry reload was published; bind address = %q", got)
-	}
+	return sm
 }
 
 func TestApplyConfigRejectsEnabledTracingHeaderSourceReload(t *testing.T) {

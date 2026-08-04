@@ -208,7 +208,7 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) (ReloadConfig
 	}
 
 	if !sameTelemetryRuntimeConfig(old.Telemetry, newCfg.Telemetry) {
-		return ReloadConfigResult{}, errors.New("telemetry runtime config changed: run 'gr daemon restart' to apply metrics or tracing runtime changes")
+		return ReloadConfigResult{}, errors.New("telemetry runtime config changed: run 'gr daemon restart' to apply metrics, tracing, or log export runtime changes")
 	}
 
 	var (

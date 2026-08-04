@@ -43,6 +43,34 @@ func TestTelemetryDefaultsDisabled(t *testing.T) {
 		t.Errorf("tracing timeout = %v, want %v", got, TelemetryTracingTimeoutDefault)
 	}
 
+	if cfg.Telemetry.Logs.Enabled {
+		t.Error("default logs must be disabled")
+	}
+
+	if cfg.Telemetry.Logs.Endpoint != "" {
+		t.Errorf("logs endpoint = %q, want empty", cfg.Telemetry.Logs.Endpoint)
+	}
+
+	if cfg.Telemetry.Logs.Protocol != TelemetryLogsProtocolGRPC {
+		t.Errorf("logs protocol = %q, want %q", cfg.Telemetry.Logs.Protocol, TelemetryLogsProtocolGRPC)
+	}
+
+	if got := cfg.Telemetry.Logs.TimeoutDuration(); got != TelemetryLogsTimeoutDefault {
+		t.Errorf("logs timeout = %v, want %v", got, TelemetryLogsTimeoutDefault)
+	}
+
+	if got := cfg.Telemetry.Logs.ExportIntervalDuration(); got != TelemetryLogsExportIntervalDefault {
+		t.Errorf("logs export interval = %v, want %v", got, TelemetryLogsExportIntervalDefault)
+	}
+
+	if got := cfg.Telemetry.Logs.QueueSizeOrDefault(); got != TelemetryLogsQueueSizeDefault {
+		t.Errorf("logs queue size = %d, want %d", got, TelemetryLogsQueueSizeDefault)
+	}
+
+	if got := cfg.Telemetry.Logs.BatchSizeOrDefault(); got != TelemetryLogsBatchSizeDefault {
+		t.Errorf("logs batch size = %d, want %d", got, TelemetryLogsBatchSizeDefault)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("default config validation failed: %v", err)
 	}
@@ -79,6 +107,28 @@ func TestTelemetryConfigValidateAcceptsExplicitValidValues(t *testing.T) {
 				Enabled:  true,
 				Endpoint: "http://127.0.0.1:4318/v1/traces",
 				Protocol: TelemetryTracingProtocolHTTPProtobuf,
+				Timeout:  "250ms",
+			},
+		},
+		"grpc logs": {
+			Logs: TelemetryLogsConfig{
+				Enabled:        true,
+				Endpoint:       "127.0.0.1:4317",
+				Protocol:       TelemetryLogsProtocolGRPC,
+				Timeout:        "5s",
+				ExportInterval: "250ms",
+				QueueSize:      64,
+				BatchSize:      16,
+				Headers: map[string]string{
+					"authorization": "Bearer canny",
+				},
+			},
+		},
+		"http logs": {
+			Logs: TelemetryLogsConfig{
+				Enabled:  true,
+				Endpoint: "http://127.0.0.1:4318/v1/logs",
+				Protocol: TelemetryLogsProtocolHTTPProtobuf,
 				Timeout:  "250ms",
 			},
 		},
@@ -203,6 +253,64 @@ func TestTelemetryConfigValidateRejectsInvalidValues(t *testing.T) {
 				t.Tracing.HeadersEnv = map[string]string{"authorization": "OTLP_BRAW_HEADER"}
 			},
 			wantErr: "header already configured",
+		},
+		"logs enabled requires endpoint": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.Enabled = true },
+			wantErr: "telemetry.logs.endpoint is required",
+		},
+		"logs unknown protocol": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.Protocol = "loki" },
+			wantErr: "telemetry.logs.protocol",
+		},
+		"logs grpc endpoint has scheme": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.Endpoint = "http://127.0.0.1:4317" },
+			wantErr: "grpc endpoints must be host:port",
+		},
+		"logs http endpoint missing path": {
+			mutate: func(t *TelemetryConfig) {
+				t.Logs.Protocol = TelemetryLogsProtocolHTTPProtobuf
+				t.Logs.Endpoint = "http://127.0.0.1:4318"
+			},
+			wantErr: "must include an OTLP logs path",
+		},
+		"logs http endpoint uses traces path": {
+			mutate: func(t *TelemetryConfig) {
+				t.Logs.Protocol = TelemetryLogsProtocolHTTPProtobuf
+				t.Logs.Endpoint = "http://127.0.0.1:4318/v1/traces"
+			},
+			wantErr: "must use an OTLP logs path",
+		},
+		"logs http endpoint with insecure flag": {
+			mutate: func(t *TelemetryConfig) {
+				t.Logs.Protocol = TelemetryLogsProtocolHTTPProtobuf
+				t.Logs.Endpoint = "http://127.0.0.1:4318/v1/logs"
+				t.Logs.Insecure = true
+			},
+			wantErr: "only supported with telemetry.logs.protocol",
+		},
+		"logs timeout zero": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.Timeout = "0" },
+			wantErr: "telemetry.logs.timeout",
+		},
+		"logs export interval zero": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.ExportInterval = "0" },
+			wantErr: "telemetry.logs.export_interval",
+		},
+		"logs queue negative": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.QueueSize = -1 },
+			wantErr: "telemetry.logs.queue_size",
+		},
+		"logs batch larger than queue": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.QueueSize = 2; t.Logs.BatchSize = 3 },
+			wantErr: "telemetry.logs.batch_size",
+		},
+		"logs header bad name": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.Headers = map[string]string{"bad header": "value"} },
+			wantErr: "telemetry.logs.headers",
+		},
+		"logs header control value": {
+			mutate:  func(t *TelemetryConfig) { t.Logs.Headers = map[string]string{"authorization": "Bearer\nbraw"} },
+			wantErr: "telemetry.logs.headers",
 		},
 	}
 
@@ -502,6 +610,65 @@ func TestTelemetryTracingTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestTelemetryLogsRuntimeDefaults(t *testing.T) {
+	tests := map[string]struct {
+		cfg          TelemetryLogsConfig
+		wantQueue    int
+		wantBatch    int
+		wantInterval time.Duration
+		wantTimeout  time.Duration
+	}{
+		"empty": {
+			wantQueue:    TelemetryLogsQueueSizeDefault,
+			wantBatch:    TelemetryLogsBatchSizeDefault,
+			wantInterval: TelemetryLogsExportIntervalDefault,
+			wantTimeout:  TelemetryLogsTimeoutDefault,
+		},
+		"explicit": {
+			cfg: TelemetryLogsConfig{
+				QueueSize:      12,
+				BatchSize:      4,
+				ExportInterval: "250ms",
+				Timeout:        "2s",
+			},
+			wantQueue:    12,
+			wantBatch:    4,
+			wantInterval: 250 * time.Millisecond,
+			wantTimeout:  2 * time.Second,
+		},
+		"batch clamps to queue": {
+			cfg: TelemetryLogsConfig{
+				QueueSize: 2,
+				BatchSize: 4,
+			},
+			wantQueue:    2,
+			wantBatch:    2,
+			wantInterval: TelemetryLogsExportIntervalDefault,
+			wantTimeout:  TelemetryLogsTimeoutDefault,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := test.cfg.QueueSizeOrDefault(); got != test.wantQueue {
+				t.Errorf("QueueSizeOrDefault() = %d, want %d", got, test.wantQueue)
+			}
+
+			if got := test.cfg.BatchSizeOrDefault(); got != test.wantBatch {
+				t.Errorf("BatchSizeOrDefault() = %d, want %d", got, test.wantBatch)
+			}
+
+			if got := test.cfg.ExportIntervalDuration(); got != test.wantInterval {
+				t.Errorf("ExportIntervalDuration() = %v, want %v", got, test.wantInterval)
+			}
+
+			if got := test.cfg.TimeoutDuration(); got != test.wantTimeout {
+				t.Errorf("TimeoutDuration() = %v, want %v", got, test.wantTimeout)
+			}
+		})
+	}
+}
+
 func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 	cfg := Default()
 	cfg.Telemetry.Tracing.Headers = map[string]string{
@@ -512,6 +679,9 @@ func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 	}
 	cfg.Telemetry.Tracing.HeadersFile = map[string]string{
 		"x-file": "/Users/braw/.config/graith/otlp-header",
+	}
+	cfg.Telemetry.Logs.Headers = map[string]string{
+		"x-api-key": "braw",
 	}
 
 	redacted := RedactSecrets(cfg)
@@ -542,6 +712,10 @@ func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 		}
 	}
 
+	if got := redacted.Telemetry.Logs.Headers["x-api-key"]; got != RedactedMask {
+		t.Fatalf("redacted logs header = %q, want %q", got, RedactedMask)
+	}
+
 	if got := cfg.Telemetry.Tracing.Headers["Authorization"]; got != "Bearer thrawn" {
 		t.Fatalf("live config header mutated to %q", got)
 	}
@@ -552,6 +726,10 @@ func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 
 	if got := cfg.Telemetry.Tracing.HeadersFile["x-file"]; got != "/Users/braw/.config/graith/otlp-header" {
 		t.Fatalf("live config file header source mutated to %q", got)
+	}
+
+	if got := cfg.Telemetry.Logs.Headers["x-api-key"]; got != "braw" {
+		t.Fatalf("live config log header mutated to %q", got)
 	}
 }
 

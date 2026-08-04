@@ -122,7 +122,7 @@ reload_debounce = "200ms"  # quiet period after the last write before reloading 
 daemon_max_bytes = 104857600 # daemon.log rotation threshold in bytes (< 0 => default; "0" => unlimited)
 daemon_max_backups = 3       # number of rotated daemon.log.N files to retain (< 0 => default; "0" => none)
 
-# Optional observability endpoints. Metrics and tracing are disabled by default:
+# Optional observability endpoints. Metrics, tracing, and logs are disabled by default:
 # no listener, exporter, dial, or telemetry network endpoint starts unless the
 # matching enabled flag is true when the daemon starts. Runtime-affecting
 # telemetry changes require `gr daemon restart`; `gr daemon reload` rejects those
@@ -147,6 +147,20 @@ timeout = "10s"      # exporter request timeout
 [telemetry.tracing.headers]
 [telemetry.tracing.headers_env]
 [telemetry.tracing.headers_file]
+
+[telemetry.logs]
+enabled = false          # experimental safe daemon event export over OTLP logs
+endpoint = ""            # required when enabled; grpc uses host:port, http/protobuf uses a full http(s) logs URL
+protocol = "grpc"        # "grpc" or "http/protobuf"
+insecure = false         # disable TLS for grpc; http/protobuf uses the endpoint URL scheme
+timeout = "10s"          # exporter request and shutdown timeout
+export_interval = "1s"   # maximum interval between async batches
+queue_size = 2048        # bounded in-memory event queue; full queues drop events with accounting
+batch_size = 512         # maximum events per export batch
+
+# Optional OTLP log headers such as Authorization. Values are redacted in daemon
+# config responses and `gr config show`/`gr config diff` output.
+[telemetry.logs.headers]
 
 # Background auto-pull to keep tracked git-maintenance repos current (NOT session
 # worktrees). Fast-forwards a repo only when it is on its default branch, clean,

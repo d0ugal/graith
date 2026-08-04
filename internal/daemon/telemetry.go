@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/d0ugal/graith/internal/version"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var telemetryListen = net.Listen
@@ -25,6 +29,7 @@ var telemetryListen = net.Listen
 type telemetryRuntime struct {
 	metrics *telemetryMetricsRuntime
 	tracing *telemetryTracingRuntime
+	logs    *telemetryLogsRuntime
 }
 
 func newTelemetryRuntime(
@@ -48,6 +53,41 @@ func newTelemetryRuntime(
 		}
 
 		rt.metrics = metrics
+	}
+
+	if cfg.Logs.Enabled {
+		logs, err := newTelemetryLogsRuntime(ctx, cfg.Logs, resource, log)
+		if err != nil {
+			rt.stop(ctx)
+
+			return nil, err
+		}
+
+		rt.logs = logs
+
+		if log != nil {
+			log.Info("telemetry logs exporter started",
+				"endpoint", cfg.Logs.Endpoint,
+				"protocol", cfg.Logs.ProtocolOrDefault(),
+				"insecure", cfg.Logs.Insecure,
+				"timeout", cfg.Logs.TimeoutDuration(),
+				"queue_size", cfg.Logs.QueueSizeOrDefault(),
+				"batch_size", cfg.Logs.BatchSizeOrDefault())
+		}
+
+		if err := logs.emit(ctx, telemetry.LogEvent{
+			Severity: telemetry.LogSeverityInfo,
+			Domain:   "telemetry",
+			Name:     "telemetry.logs_started",
+			Result:   "success",
+			Attributes: []attribute.KeyValue{
+				attribute.String("telemetry.protocol", cfg.Logs.ProtocolOrDefault()),
+				attribute.Int("queue_size", cfg.Logs.QueueSizeOrDefault()),
+				attribute.Int("batch_size", cfg.Logs.BatchSizeOrDefault()),
+			},
+		}); err != nil && log != nil {
+			log.Warn("telemetry log event rejected", "event", "telemetry.logs_started", "err", err)
+		}
 	}
 
 	if cfg.Tracing.Enabled {
@@ -83,6 +123,10 @@ func (rt *telemetryRuntime) stop(ctx context.Context) {
 
 	if rt.tracing != nil {
 		rt.tracing.stop(ctx)
+	}
+
+	if rt.logs != nil {
+		rt.logs.stop(ctx)
 	}
 }
 
@@ -245,9 +289,85 @@ func (rt *telemetryTracingRuntime) stop(ctx context.Context) {
 	}
 }
 
+type telemetryLogsRuntime struct {
+	cfg    config.TelemetryLogsConfig
+	rt     *telemetry.LoggingRuntime
+	log    *slog.Logger
+	secret []byte
+}
+
+func newTelemetryLogsRuntime(
+	ctx context.Context,
+	cfg config.TelemetryLogsConfig,
+	resource telemetry.ResourceOptions,
+	log *slog.Logger,
+) (*telemetryLogsRuntime, error) {
+	logs, err := telemetry.StartLogging(ctx, telemetry.LoggingOptions{
+		Endpoint:       cfg.Endpoint,
+		Protocol:       cfg.ProtocolOrDefault(),
+		Insecure:       cfg.Insecure,
+		Timeout:        cfg.TimeoutDuration(),
+		Headers:        cfg.Headers,
+		QueueSize:      cfg.QueueSizeOrDefault(),
+		BatchSize:      cfg.BatchSizeOrDefault(),
+		ExportInterval: cfg.ExportIntervalDuration(),
+		Resource:       resource,
+		Logger:         log,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &telemetryLogsRuntime{
+		cfg: config.TelemetryLogsConfig{
+			Enabled:        cfg.Enabled,
+			Endpoint:       cfg.Endpoint,
+			Protocol:       cfg.Protocol,
+			Insecure:       cfg.Insecure,
+			Timeout:        cfg.Timeout,
+			ExportInterval: cfg.ExportInterval,
+			QueueSize:      cfg.QueueSize,
+			BatchSize:      cfg.BatchSize,
+			Headers:        cloneTelemetryHeaders(cfg.Headers),
+		},
+		rt:  logs,
+		log: log,
+	}, nil
+}
+
+func (rt *telemetryLogsRuntime) stop(ctx context.Context) {
+	if rt == nil || rt.rt == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, rt.cfg.TimeoutDuration())
+	defer cancel()
+
+	if err := rt.rt.Shutdown(ctx); err != nil && rt.log != nil {
+		rt.log.Warn("telemetry logs exporter shutdown failed", "err", err, "dropped", rt.rt.Dropped())
+	}
+}
+
+func (rt *telemetryLogsRuntime) emit(ctx context.Context, event telemetry.LogEvent) error {
+	if rt == nil || rt.rt == nil {
+		return nil
+	}
+
+	return rt.rt.Emit(ctx, event)
+}
+
+func (rt *telemetryLogsRuntime) ref(value string) string {
+	if rt == nil {
+		return ""
+	}
+
+	return telemetry.PseudonymousRef(rt.secret, value)
+}
+
 type telemetryRuntimeConfigSnapshot struct {
 	Metrics *telemetryMetricsRuntimeConfigSnapshot
 	Tracing *telemetryTracingRuntimeConfigSnapshot
+	Logs    *telemetryLogsRuntimeConfigSnapshot
 }
 
 type telemetryMetricsRuntimeConfigSnapshot struct {
@@ -263,6 +383,17 @@ type telemetryTracingRuntimeConfigSnapshot struct {
 	Headers     map[string]string
 	HeadersEnv  map[string]string
 	HeadersFile map[string]string
+}
+
+type telemetryLogsRuntimeConfigSnapshot struct {
+	Endpoint       string
+	Protocol       string
+	Insecure       bool
+	Timeout        time.Duration
+	ExportInterval time.Duration
+	QueueSize      int
+	BatchSize      int
+	Headers        map[string]string
 }
 
 func sameTelemetryRuntimeConfig(old, next config.TelemetryConfig) bool {
@@ -291,6 +422,19 @@ func telemetryRuntimeConfigSnapshotFor(cfg config.TelemetryConfig) telemetryRunt
 			Headers:     cloneTelemetryHeaders(cfg.Tracing.Headers),
 			HeadersEnv:  cloneTelemetryHeaders(cfg.Tracing.HeadersEnv),
 			HeadersFile: cloneTelemetryHeaders(cfg.Tracing.HeadersFile),
+		}
+	}
+
+	if cfg.Logs.Enabled {
+		out.Logs = &telemetryLogsRuntimeConfigSnapshot{
+			Endpoint:       cfg.Logs.Endpoint,
+			Protocol:       cfg.Logs.ProtocolOrDefault(),
+			Insecure:       cfg.Logs.Insecure,
+			Timeout:        cfg.Logs.TimeoutDuration(),
+			ExportInterval: cfg.Logs.ExportIntervalDuration(),
+			QueueSize:      cfg.Logs.QueueSizeOrDefault(),
+			BatchSize:      cfg.Logs.BatchSizeOrDefault(),
+			Headers:        cloneTelemetryHeaders(cfg.Logs.Headers),
 		}
 	}
 
@@ -324,8 +468,19 @@ func (sm *SessionManager) startTelemetryRuntime(ctx context.Context) error {
 	}
 
 	resource := telemetry.ResourceOptions{}
-	if cfg.Telemetry.Tracing.Enabled {
+	if cfg.Telemetry.Tracing.Enabled || cfg.Telemetry.Logs.Enabled {
 		resource = sm.telemetryResource()
+	}
+
+	var logsSecret []byte
+
+	if cfg.Telemetry.Logs.Enabled {
+		secret, err := loadOrCreateTelemetryLogsSecret(filepath.Join(sm.paths.DataDir, "telemetry-logs.key"))
+		if err != nil {
+			sm.log.Warn("telemetry logs secret unavailable; session refs omitted", "err", err)
+		} else {
+			logsSecret = secret
+		}
 	}
 
 	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, cfg.SourceDir, metricsGatherer, sm.log, resource)
@@ -333,11 +488,21 @@ func (sm *SessionManager) startTelemetryRuntime(ctx context.Context) error {
 		return err
 	}
 
+	if rt != nil && rt.logs != nil {
+		rt.logs.secret = logsSecret
+	}
+
 	if metrics != nil {
 		sm.metrics.Store(metrics)
 	}
 
 	sm.tracingEnabled.Store(rt != nil && rt.tracing != nil)
+
+	if rt != nil {
+		sm.logExporter.Store(rt.logs)
+	} else {
+		sm.logExporter.Store(nil)
+	}
 
 	sm.telemetry = rt
 	sm.configureExistingPTYTelemetry()
@@ -353,6 +518,7 @@ func (sm *SessionManager) stopTelemetryRuntime() {
 		return
 	}
 
+	sm.logExporter.Store(nil)
 	sm.telemetry.stop(context.Background())
 	sm.telemetry = nil
 	sm.metrics.Store(nil)
@@ -404,4 +570,61 @@ func cloneTelemetryHeaders(headers map[string]string) map[string]string {
 	}
 
 	return out
+}
+
+func loadOrCreateTelemetryLogsSecret(path string) ([]byte, error) {
+	if data, err := os.ReadFile(path); err == nil {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, statErr
+		}
+
+		if info.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("%s must be owner-only", path)
+		}
+
+		decoded, decErr := hex.DecodeString(strings.TrimSpace(string(data)))
+		if decErr != nil {
+			return nil, fmt.Errorf("decode existing secret: %w", decErr)
+		}
+
+		if len(decoded) != 32 {
+			return nil, fmt.Errorf("existing secret has %d bytes, want 32", len(decoded))
+		}
+
+		return decoded, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, err
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return loadOrCreateTelemetryLogsSecret(path)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	_, writeErr := fmt.Fprintf(file, "%s\n", hex.EncodeToString(secret))
+	closeErr := file.Close()
+
+	if writeErr != nil {
+		return nil, writeErr
+	}
+
+	if closeErr != nil {
+		return nil, closeErr
+	}
+
+	return secret, nil
 }
