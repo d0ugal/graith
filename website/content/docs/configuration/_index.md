@@ -16,6 +16,7 @@ gr config show     # print effective (merged) config
 gr config diff     # show changes from defaults
 gr config reset    # write built-in defaults to config file
 gr config alloy    # generate Grafana Alloy config from resolved paths
+gr config render otelcol  # render an OpenTelemetry Collector config
 ```
 
 The daemon reloads config on `gr daemon reload` without restarting, and also

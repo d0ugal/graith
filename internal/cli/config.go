@@ -196,6 +196,8 @@ func registerConfigCmd() {
 	configCmd.AddCommand(configPathCmd)
 	configCmd.AddCommand(configDiffCmd)
 	configCmd.AddCommand(configShowCmd)
+	configCmd.AddCommand(configRenderCmd)
+	configRenderCmd.AddCommand(configRenderOTelCollectorCmd)
 	configAlloyCmd.Flags().StringVar(
 		&configAlloySignals,
 		"signals",
@@ -204,4 +206,13 @@ func registerConfigCmd() {
 	)
 	configResetCmd.Flags().BoolVar(&configForceReset, "force", false, "overwrite without confirmation")
 	configInitCmd.Flags().BoolVar(&configForceReset, "force", false, "overwrite without confirmation")
+	configRenderOTelCollectorCmd.Flags().BoolVar(&configRenderOTelCollectorOpts.includeDaemonLogs, "include-daemon-logs", false, "tail daemon.log and daemon.stderr.log with the file_log receiver")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.scrapeInterval, "scrape-interval", defaultCollectorScrapeInterval, "Prometheus scrape interval for Graith metrics")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.otlpGRPCListen, "otlp-grpc-listen", defaultCollectorOTLPGRPCListen, "OTLP gRPC receiver listen address")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.otlpHTTPListen, "otlp-http-listen", defaultCollectorOTLPHTTPListen, "OTLP HTTP receiver listen address")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.otlpHTTPTracesPath, "otlp-http-traces-path", defaultCollectorOTLPHTTPTracesPath, "OTLP HTTP receiver traces URL path")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.metricsRemoteWriteURL, "metrics-remote-write-url", defaultCollectorMetricsRemoteWrite, "Prometheus remote-write endpoint or environment placeholder")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.metricsAuthHeader, "metrics-auth-header", defaultCollectorMetricsAuthHeader, "Prometheus remote-write Authorization header value or environment placeholder")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.otlpHTTPEndpoint, "otlp-http-endpoint", defaultCollectorOTLPHTTPEndpoint, "OTLP HTTP exporter base endpoint or environment placeholder")
+	configRenderOTelCollectorCmd.Flags().StringVar(&configRenderOTelCollectorOpts.otlpAuthHeader, "otlp-auth-header", defaultCollectorOTLPHTTPAuthHeader, "OTLP HTTP exporter Authorization header value or environment placeholder")
 }

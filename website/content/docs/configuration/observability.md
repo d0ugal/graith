@@ -306,6 +306,116 @@ Endpoint details are documented by
 and the
 [OpenTelemetry OTLP exporter configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/).
 
+## Choose a collector
+
+Use Grafana Alloy when you want the Grafana-native collector path, River
+configuration, Loki/Mimir/Tempo examples that match Grafana Cloud docs, or a
+future Graith-managed collector lifecycle. Alloy is the best fit when the rest
+of the observability stack is Grafana LGTM and you want one collector process
+to tail files, scrape metrics, receive OTLP, and forward to Grafana backends.
+
+Use the OpenTelemetry Collector when your environment already standardizes on
+OTel Collector distributions, you need vendor-neutral Collector pipelines, or
+you want to share Graith telemetry through existing OTLP processors and
+exporters. The generated OTel Collector config uses the standard Prometheus
+receiver for Graith metrics and an OTLP receiver/exporter path for traces.
+Daemon file tailing is opt-in, and session scrollback logs are not included.
+
+Graith does not start or supervise either collector. In both cases, queue,
+retry, storage, resource limits, credentials, and backend URLs belong to the
+collector process and its service environment.
+
+## Generate OpenTelemetry Collector config
+
+Render an OTel Collector config from the resolved Graith config and paths:
+
+```bash
+gr config render otelcol > otelcol-graith.yaml
+```
+
+The generated file includes:
+
+- a Prometheus scrape of the Graith metrics endpoint;
+- an OTLP gRPC and HTTP receiver for Graith traces;
+- remote exporters with environment-variable placeholders for endpoint and
+  authorization values;
+- memory limiter, batch, queue, and retry settings with comments about tuning
+  and optional WAL/persistent queues.
+
+Use `otelcol-contrib`, or a custom Collector distribution containing the
+`prometheus` receiver and `prometheus_remote_write` exporter. Daemon log
+tailing also needs the contrib `file_log` receiver and `file_storage`
+extension. The base Collector distribution does not include every component
+used by the generated config. The generated YAML uses current component type
+names such as `otlp_http`, `prometheus_remote_write`, and `file_log`; older
+Collector builds that only expose legacy aliases may reject it.
+
+The Graith tracing endpoint is used only to derive a local loopback Collector
+receiver. Backend exporter URLs and credentials are not copied from
+`telemetry.tracing.endpoint` or `telemetry.tracing.headers`; set them in the
+collector service environment or pass the exporter flags explicitly. If the
+local Graith trace endpoint uses TLS, the generated receiver includes
+`GRAITH_OTLP_RECEIVER_TLS_CERT_FILE` and
+`GRAITH_OTLP_RECEIVER_TLS_KEY_FILE` environment placeholders for the
+certificate and key paths. The `otlp_http/graith` exporter is shared by traces
+and optional daemon logs, so point it at an OTLP endpoint that accepts both
+signals or edit the generated exporters and pipelines for split Tempo/Loki
+backends.
+
+The command does not enable telemetry, start `otelcol`, create directories, or
+send anything to a backend. Enable the matching Graith telemetry features first
+and restart the daemon:
+
+```toml
+[telemetry.metrics]
+enabled = true
+bind_address = "127.0.0.1:4824"
+path = "/metrics"
+
+[telemetry.tracing]
+enabled = true
+endpoint = "127.0.0.1:4317"
+protocol = "grpc"
+insecure = true
+timeout = "10s"
+```
+
+```bash
+gr daemon restart
+```
+
+By default, the renderer excludes every log file. Add daemon diagnostic log
+tailing only when you intentionally want those raw local logs in your backend:
+
+```bash
+gr config render otelcol --include-daemon-logs > otelcol-graith.yaml
+```
+
+That opt-in tails only `<data_dir>/daemon.log` and
+`<data_dir>/daemon.stderr.log`. It does not tail rotated daemon logs or
+`<data_dir>/logs/*.log` session scrollback files. The daemon-log mode also
+requires the OTel Collector contrib `file_log` receiver and `file_storage`
+extension; when you run the collector, that extension may create
+`<data_dir>/otelcol/file-storage`.
+
+Useful render flags:
+
+| Flag | Default |
+|------|---------|
+| `--include-daemon-logs` | `false` |
+| `--scrape-interval` | `15s`; Prometheus duration syntax such as `30s`, `5m`, or `1h30m` |
+| `--otlp-grpc-listen` | `127.0.0.1:4317`, or the configured loopback Graith gRPC trace endpoint |
+| `--otlp-http-listen` | `127.0.0.1:4318`, or the host from the configured loopback Graith OTLP HTTP trace endpoint |
+| `--otlp-http-traces-path` | `/v1/traces`, or the path from the configured loopback Graith OTLP HTTP trace endpoint |
+| `--metrics-remote-write-url` | `${env:GRAITH_MIMIR_REMOTE_WRITE_URL}` |
+| `--metrics-auth-header` | `${env:GRAITH_MIMIR_AUTH_HEADER}` |
+| `--otlp-http-endpoint` | `${env:GRAITH_OTLP_HTTP_ENDPOINT}` |
+| `--otlp-auth-header` | `${env:GRAITH_OTLP_AUTH_HEADER}` |
+
+For Grafana Cloud, set the environment placeholders in the collector's service
+environment. The auth placeholders should contain complete header values, for
+example `Basic ...`; do not put secrets in generated examples or shell history.
+
 ## Collect with Grafana Alloy
 
 This example keeps Graith's own defaults local. Graith exposes metrics on

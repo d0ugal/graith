@@ -321,6 +321,27 @@ Write built-in defaults to the config file.
 |------|-------------|
 | `--force` | Overwrite without confirmation |
 
+### `gr config render otelcol`
+
+Render an OpenTelemetry Collector YAML config for Graith observability. The
+output scrapes the configured Graith metrics endpoint, receives Graith OTLP
+traces, and forwards to placeholder backend exporters. It does not enable
+telemetry, start a collector, or ship data.
+
+Aliases: `otel-collector`, `otelcol-contrib`.
+
+| Flag | Description |
+|------|-------------|
+| `--include-daemon-logs` | Add daemon.log and daemon.stderr.log file tailing; session logs remain excluded |
+| `--scrape-interval <duration>` | Prometheus scrape interval, using Prometheus duration syntax |
+| `--otlp-grpc-listen <host:port>` | OTLP gRPC receiver listen address |
+| `--otlp-http-listen <host:port>` | OTLP HTTP receiver listen address |
+| `--otlp-http-traces-path <path>` | OTLP HTTP receiver traces URL path |
+| `--metrics-remote-write-url <value>` | Prometheus remote-write endpoint or environment placeholder |
+| `--metrics-auth-header <value>` | Prometheus remote-write Authorization header value or environment placeholder |
+| `--otlp-http-endpoint <value>` | OTLP HTTP exporter base endpoint or environment placeholder |
+| `--otlp-auth-header <value>` | OTLP HTTP exporter Authorization header value or environment placeholder |
+
 ### `gr completion <shell>`
 
 Generate a shell completion script. Supported shells: `bash`, `zsh`, `fish`, `powershell`.
