@@ -311,8 +311,11 @@ The Session Navigator has a **Labels** view, grouping matching sessions across r
 boundaries and displaying each match as `repo/session`. Each label group preserves
 parent/child relationships, including those crossing repositories. Search also
 matches label text; if filtering removes a parent, its matching child becomes a
-tree root. The macOS and iOS sidebars use the same shared label filter and expose
-label fields when creating or editing a session.
+tree root. Other Navigator views show a compact rightmost label field, such as
+`[cli] +2`, so label context is visible without duplicating the grouped Labels
+view; the field is width-limited and elided before higher-priority row details.
+The macOS and iOS sidebars use the same shared label filter and expose label
+fields when creating or editing a session.
 
 ## Scrollback
 

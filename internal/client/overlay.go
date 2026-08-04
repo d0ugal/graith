@@ -55,6 +55,9 @@ const (
 	wideDetailMinPanelWidth            = 38
 	wideDetailDefaultMaxPanelWidth     = 54
 	wideDetailGap                      = 2
+	compactSessionLabelLimit           = 2
+	compactSessionLabelMaxWidth        = 12
+	compactSessionLabelColumnMaxWidth  = 12
 )
 
 var defaultSelectedDetailFields = []string{
@@ -268,6 +271,93 @@ func (s sessionItem) displayName() string {
 	return s.info.Name
 }
 
+func compactSessionLabelText(labels []string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+
+	clean := make([]string, 0, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label != "" {
+			clean = append(clean, label)
+		}
+	}
+
+	if len(clean) == 0 {
+		return ""
+	}
+
+	limit := min(compactSessionLabelLimit, len(clean))
+	parts := make([]string, 0, limit+1)
+
+	for _, label := range clean[:limit] {
+		parts = append(parts, compactSessionLabelChip(label, compactSessionLabelMaxWidth))
+	}
+
+	if overflow := len(clean) - limit; overflow > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", overflow))
+	}
+
+	text := strings.Join(parts, " ")
+	if ansi.StringWidth(text) <= compactSessionLabelColumnMaxWidth {
+		return text
+	}
+
+	if len(clean) > 1 {
+		suffix := fmt.Sprintf(" +%d", len(clean)-1)
+
+		labelWidth := compactSessionLabelColumnMaxWidth - ansi.StringWidth(suffix) - 2
+		if labelWidth > 0 {
+			return compactSessionLabelChip(clean[0], labelWidth) + suffix
+		}
+	}
+
+	return compactSessionLabelChip(clean[0], compactSessionLabelColumnMaxWidth-2)
+}
+
+func compactSessionLabelChip(label string, width int) string {
+	if width < 1 {
+		return ""
+	}
+
+	if ansi.StringWidth(label) > width {
+		label = ansi.Truncate(label, width, "…")
+	}
+
+	return "[" + label + "]"
+}
+
+func compactSessionLabelTextForItem(item sessionItem) string {
+	// labelGroup is set only in the explicit Labels view, whose group headers
+	// already provide the label context. Other views get the compact column.
+	if item.labelGroup != "" {
+		return ""
+	}
+
+	return compactSessionLabelText(item.info.Labels)
+}
+
+func renderCompactSessionLabels(text string, selected bool, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	text = fitStyledLine(text, width)
+
+	cell := pad(text, width)
+	if text == "" {
+		return cell
+	}
+
+	style := lipgloss.NewStyle().Foreground(colorDim)
+	if selected {
+		style = lipgloss.NewStyle().Foreground(colorSelectDim)
+	}
+
+	return style.Render(cell)
+}
+
 func sessionRepositoryLabel(s protocol.SessionInfo) string {
 	if s.SystemKind != "" {
 		return "System"
@@ -297,6 +387,7 @@ type columnWidths struct {
 	git        int
 	pr         int
 	output     int
+	labels     int
 	// trailing holds the computed width of every ShowTUI column keyed by
 	// SessionColumn.Key. The named fields above mirror the well-known columns
 	// for convenience (and test stability); trailing is the generic lookup the
@@ -312,13 +403,18 @@ func (cw columnWidths) col(key string) int {
 func (cw columnWidths) totalWidth() int {
 	// "  N ★▸● " (9) + treeIndent + name, then "  " + width for every TUI column
 	// (sourced from the shared registry so a new ShowTUI column extends the
-	// panel automatically rather than being silently truncated), + margin(4).
+	// panel automatically rather than being silently truncated), then an optional
+	// bounded compact-label column at the far right, + margin(4).
 	// These constants are layout invariants, not user preferences: they must
 	// match the per-row render arithmetic in compactDelegate.Render exactly, so
 	// they are deliberately excluded from the [terminal] config block (#1254).
 	width := 9 + cw.treeIndent + cw.name + 4
 	for _, c := range tuiColumns() {
 		width += 2 + cw.col(c.Key)
+	}
+
+	if cw.labels > 0 {
+		width += 2 + cw.labels
 	}
 
 	return width
@@ -1693,6 +1789,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		}
 	}
 
+	if d.cols.labels > 0 {
+		b.WriteString(sep)
+		b.WriteString(renderCompactSessionLabels(compactSessionLabelTextForItem(si), selected, d.cols.labels))
+	}
+
 	line := b.String()
 
 	if width > 0 && lipgloss.Width(line) > width {
@@ -2421,6 +2522,27 @@ func maxSessionNameWidthFromItems(items []list.Item, minimum int) int {
 	return maxWidth
 }
 
+func maxCompactSessionLabelWidthFromItems(items []list.Item) int {
+	maxWidth := 0
+
+	for _, item := range items {
+		si, ok := item.(sessionItem)
+		if !ok {
+			continue
+		}
+
+		if width := lipgloss.Width(compactSessionLabelTextForItem(si)); width > maxWidth {
+			maxWidth = width
+		}
+	}
+
+	if maxWidth > 0 {
+		maxWidth = max(maxWidth, lipgloss.Width("Labels"))
+	}
+
+	return min(maxWidth, compactSessionLabelColumnMaxWidth)
+}
+
 func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, fetchPreview func(sessionID string) string, deleteSession func(sessionID string, children bool) error, collapsed map[string]bool, shortcutKeys []rune) *overlayModel {
 	if collapsed == nil {
 		collapsed = make(map[string]bool)
@@ -2432,6 +2554,7 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 	cols := computeColumnWidths(sessions, currentSessionID)
 	cols.name = maxSessionNameWidthFromItems(items, cols.name)
 	cols.treeIndent = maxTreeIndentFromItems(items)
+	cols.labels = maxCompactSessionLabelWidthFromItems(items)
 	contentWidth := cols.totalWidth()
 
 	delegate := compactDelegate{cols: cols, currentSessionID: currentSessionID, shortcutKeys: shortcutKeys}
@@ -2706,6 +2829,7 @@ func (m *overlayModel) rebuildForView() {
 	m.cols.name = maxSessionNameWidthFromItems(items, m.cols.name)
 
 	m.cols.treeIndent = maxTreeIndentFromItems(items)
+	m.cols.labels = maxCompactSessionLabelWidthFromItems(items)
 
 	m.contentWidth = m.cols.totalWidth()
 	m.resizeFilterInput()
@@ -3664,13 +3788,18 @@ func (m *overlayModel) View() tea.View {
 		tuiCols := tuiColumns()
 		for i, c := range tuiCols {
 			w := m.cols.col(c.Key)
-			if i == len(tuiCols)-1 {
+			if i == len(tuiCols)-1 && m.cols.labels == 0 {
 				headerCells = append(headerCells, c.Header)
 			} else {
 				headerCells = append(headerCells, pad(c.Header, w))
 			}
 
 			sepCells = append(sepCells, strings.Repeat("─", w))
+		}
+
+		if m.cols.labels > 0 {
+			headerCells = append(headerCells, "Labels")
+			sepCells = append(sepCells, strings.Repeat("─", m.cols.labels))
 		}
 
 		headerLine := headerPrefix + strings.Join(headerCells, "  ")
