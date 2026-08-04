@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	collectortracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
@@ -43,43 +44,60 @@ func TestTracerIsSafeWithoutStartedRuntime(t *testing.T) {
 
 func TestStartTracingPassesExplicitOptions(t *testing.T) {
 	tests := map[string]struct {
-		protocol string
-		endpoint string
-		insecure bool
+		protocol    string
+		endpoint    string
+		insecure    bool
+		compression string
 	}{
 		"grpc": {
-			protocol: ProtocolGRPC,
-			endpoint: "127.0.0.1:4317",
-			insecure: true,
+			protocol:    ProtocolGRPC,
+			endpoint:    "127.0.0.1:4317",
+			insecure:    true,
+			compression: CompressionNone,
 		},
 		"http": {
-			protocol: ProtocolHTTPProtobuf,
-			endpoint: "http://127.0.0.1:4318/v1/traces",
+			protocol:    ProtocolHTTPProtobuf,
+			endpoint:    "http://127.0.0.1:4318/v1/traces",
+			compression: CompressionGzip,
 		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			var got TracingOptions
+			var gotProvider traceProviderOptions
 
 			oldExporter := newTraceExporter
+			oldProvider := newTraceProvider
 			newTraceExporter = func(_ context.Context, opts TracingOptions) (sdktrace.SpanExporter, error) {
 				got = opts
 
 				return &noopSpanExporter{}, nil
 			}
+			newTraceProvider = func(exporter sdktrace.SpanExporter, res *resource.Resource, opts traceProviderOptions) *sdktrace.TracerProvider {
+				gotProvider = opts
+
+				return sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter), sdktrace.WithResource(res))
+			}
 
 			t.Cleanup(func() {
 				newTraceExporter = oldExporter
+				newTraceProvider = oldProvider
 
 				otel.SetTracerProvider(noop.NewTracerProvider())
 			})
 
+			samplingRatio := 0.25
 			rt, err := StartTracing(t.Context(), TracingOptions{
-				Endpoint: test.endpoint,
-				Protocol: test.protocol,
-				Insecure: test.insecure,
-				Timeout:  25 * time.Millisecond,
+				Endpoint:           test.endpoint,
+				Protocol:           test.protocol,
+				Insecure:           test.insecure,
+				Timeout:            25 * time.Millisecond,
+				SamplingRatio:      &samplingRatio,
+				QueueSize:          128,
+				MaxExportBatchSize: 32,
+				ScheduleDelay:      15 * time.Millisecond,
+				Compression:        test.compression,
 				Headers: map[string]string{
 					"authorization": "Bearer braw",
 				},
@@ -108,6 +126,42 @@ func TestStartTracingPassesExplicitOptions(t *testing.T) {
 
 			if got.Headers["authorization"] != "Bearer braw" {
 				t.Errorf("Headers not passed through: %#v", got.Headers)
+			}
+
+			if got.SamplingRatio == nil || *got.SamplingRatio != 0.25 {
+				t.Errorf("SamplingRatio = %v, want 0.25", got.SamplingRatio)
+			}
+
+			if got.QueueSize != 128 {
+				t.Errorf("QueueSize = %d, want 128", got.QueueSize)
+			}
+
+			if got.MaxExportBatchSize != 32 {
+				t.Errorf("MaxExportBatchSize = %d, want 32", got.MaxExportBatchSize)
+			}
+
+			if got.ScheduleDelay != 15*time.Millisecond {
+				t.Errorf("ScheduleDelay = %v, want 15ms", got.ScheduleDelay)
+			}
+
+			if got.Compression != test.compression {
+				t.Errorf("Compression = %q, want %q", got.Compression, test.compression)
+			}
+
+			if gotProvider.SamplingRatio != 0.25 {
+				t.Errorf("provider SamplingRatio = %v, want 0.25", gotProvider.SamplingRatio)
+			}
+
+			if gotProvider.QueueSize != 128 {
+				t.Errorf("provider QueueSize = %d, want 128", gotProvider.QueueSize)
+			}
+
+			if gotProvider.MaxExportBatchSize != 32 {
+				t.Errorf("provider MaxExportBatchSize = %d, want 32", gotProvider.MaxExportBatchSize)
+			}
+
+			if gotProvider.ScheduleDelay != 15*time.Millisecond {
+				t.Errorf("provider ScheduleDelay = %v, want 15ms", gotProvider.ScheduleDelay)
 			}
 		})
 	}
@@ -211,6 +265,43 @@ func TestHTTPExporterIgnoresOTLPEnvironment(t *testing.T) {
 	}
 }
 
+func TestHTTPExporterUsesConfiguredGzipCompression(t *testing.T) {
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		requests <- r.Header.Get("content-encoding")
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	rt, err := StartTracing(t.Context(), TracingOptions{
+		Endpoint:    server.URL + "/v1/traces",
+		Protocol:    ProtocolHTTPProtobuf,
+		Timeout:     500 * time.Millisecond,
+		Compression: CompressionGzip,
+	})
+	if err != nil {
+		t.Fatalf("StartTracing() error = %v", err)
+	}
+
+	_, span := Tracer("braw").Start(t.Context(), "blether")
+	span.End()
+
+	if err := rt.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+
+	select {
+	case got := <-requests:
+		if got != "gzip" {
+			t.Fatalf("content-encoding = %q, want gzip", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for OTLP HTTP request")
+	}
+}
+
 func TestGRPCExporterIgnoresOTLPEnvironmentAndDialsLazily(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "127.0.0.1:1")
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "127.0.0.1:1")
@@ -292,7 +383,7 @@ func TestStartTracingResourceAttributes(t *testing.T) {
 	newTraceExporter = func(context.Context, TracingOptions) (sdktrace.SpanExporter, error) {
 		return &noopSpanExporter{}, nil
 	}
-	newTraceProvider = func(exporter sdktrace.SpanExporter, res *resource.Resource, _ time.Duration) *sdktrace.TracerProvider {
+	newTraceProvider = func(exporter sdktrace.SpanExporter, res *resource.Resource, _ traceProviderOptions) *sdktrace.TracerProvider {
 		got = res
 
 		return sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter), sdktrace.WithResource(res))
@@ -332,6 +423,51 @@ func TestStartTracingResourceAttributes(t *testing.T) {
 	assertResourceAttr(t, got, "graith.process.kind", "daemon")
 	assertResourceAttr(t, got, "process.pid", int64(123))
 	assertResourceAttr(t, got, "process.executable.name", "gr")
+}
+
+func TestStartTracingUsesParentBasedSamplingRatio(t *testing.T) {
+	oldExporter := newTraceExporter
+	newTraceExporter = func(context.Context, TracingOptions) (sdktrace.SpanExporter, error) {
+		return &noopSpanExporter{}, nil
+	}
+
+	t.Cleanup(func() {
+		newTraceExporter = oldExporter
+
+		otel.SetTracerProvider(noop.NewTracerProvider())
+	})
+
+	samplingRatio := 0.0
+	rt, err := StartTracing(t.Context(), TracingOptions{
+		Endpoint:      "127.0.0.1:4317",
+		Protocol:      ProtocolGRPC,
+		SamplingRatio: &samplingRatio,
+	})
+	if err != nil {
+		t.Fatalf("StartTracing() error = %v", err)
+	}
+
+	t.Cleanup(func() { _ = rt.Shutdown(context.Background()) })
+
+	_, root := Tracer("braw").Start(t.Context(), "root")
+	if root.IsRecording() {
+		t.Fatal("root span recorded with sampling ratio 0")
+	}
+	root.End()
+
+	parent := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID:    oteltrace.TraceID{0x1},
+		SpanID:     oteltrace.SpanID{0x2},
+		TraceFlags: oteltrace.FlagsSampled,
+		Remote:     true,
+	})
+	ctx := oteltrace.ContextWithRemoteSpanContext(t.Context(), parent)
+
+	_, child := Tracer("braw").Start(ctx, "remote-sampled-child")
+	if !child.IsRecording() {
+		t.Fatal("child span with a sampled remote parent did not record")
+	}
+	child.End()
 }
 
 func TestShutdownIsBounded(t *testing.T) {

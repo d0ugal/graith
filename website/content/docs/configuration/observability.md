@@ -173,6 +173,11 @@ endpoint = ""
 protocol = "grpc"
 insecure = false
 timeout = "10s"
+sampling_ratio = 1.0
+queue_size = 2048
+max_export_batch_size = 512
+schedule_delay = "5s"
+compression = "none"
 
 [telemetry.tracing.headers]
 # Add backend-required auth headers here.
@@ -197,6 +202,21 @@ Supported protocols:
 be greater than zero when set. It bounds exporter setup, export requests, and
 shutdown flushing. `insecure` disables TLS for the `grpc` exporter only; HTTP
 endpoints use the scheme in the configured trace URL.
+
+`sampling_ratio` is a parent-based root trace sampling ratio from `0.0` to
+`1.0`. The default `1.0` preserves every root trace when tracing is enabled,
+while child spans follow their parent trace's sampled decision. `queue_size`
+caps the number of ended spans buffered in memory before export, and
+`max_export_batch_size` caps a single export request. The batch size must be
+less than or equal to the queue size. `schedule_delay` is the maximum time a
+queued batch waits before export. The defaults match OpenTelemetry's bounded
+batcher defaults: `queue_size = 2048`, `max_export_batch_size = 512`, and
+`schedule_delay = "5s"`.
+
+`compression = "gzip"` enables gzip request compression for `http/protobuf`
+trace export. The default `compression = "none"` sends uncompressed OTLP HTTP
+payloads. Compression is not supported for Graith's `grpc` tracing protocol
+setting.
 
 Tracing export is optional runtime plumbing for direct OTLP trace export or for a
 collector such as Alloy, which can forward traces to Tempo. Export failures are
@@ -224,7 +244,15 @@ bodies, or user names in span attributes.
 Attach latency tracing is per local interactive event and per PTY output chunk.
 High-output sessions can therefore produce many spans while tracing is enabled;
 run it with a local collector that is sized for that volume, or prefer metrics
-when you only need aggregate latency distributions.
+when you only need aggregate latency distributions. For direct export during
+high-output sessions, start by reducing `sampling_ratio`, then tune
+`queue_size`, `max_export_batch_size`, and `schedule_delay` together. A full
+queue drops spans rather than blocking session I/O, so increasing `queue_size`
+absorbs bursts at a memory cost, while lowering it makes loss happen sooner.
+Smaller batches reduce request size but increase request count; longer schedule
+delays reduce request count but delay visibility. Use `compression = "gzip"`
+with `protocol = "http/protobuf"` when network egress is the bottleneck and the
+collector accepts compressed OTLP HTTP requests.
 
 ### Direct trace export
 
@@ -247,6 +275,7 @@ endpoint = "127.0.0.1:4317"
 protocol = "grpc"
 insecure = true
 timeout = "10s"
+sampling_ratio = 1.0
 ```
 
 The gRPC endpoint is `host:port`; do not add a URL scheme or an OTLP HTTP path
@@ -265,12 +294,15 @@ enabled = true
 endpoint = "http://127.0.0.1:4318/v1/traces"
 protocol = "http/protobuf"
 timeout = "10s"
+compression = "gzip"
 ```
 
 The `http/protobuf` endpoint must be the full trace URL and is used exactly as
 configured. Tempo commonly accepts OTLP/gRPC on port `4317`; enable and expose
 the Tempo OTLP HTTP receiver before using port `4318`. For `http/protobuf`,
-omit `insecure` or leave it `false`; the URL scheme controls TLS.
+omit `insecure` or leave it `false`; the URL scheme controls TLS. Use
+`compression = "gzip"` only if the receiver accepts compressed OTLP HTTP
+requests.
 
 For Grafana Cloud OTLP HTTP, copy the OTLP gateway details from your stack's
 OpenTelemetry tile and use the full trace URL:
@@ -281,6 +313,7 @@ enabled = true
 endpoint = "https://otlp-gateway-prod-us-east-0.grafana.net/otlp/v1/traces"
 protocol = "http/protobuf"
 timeout = "10s"
+compression = "gzip"
 
 [telemetry.tracing.headers]
 # Authorization = "Basic <value from your Grafana Cloud OpenTelemetry tile>"

@@ -95,6 +95,11 @@ endpoint = ""
 protocol = "grpc"
 insecure = false
 timeout = "10s"
+sampling_ratio = 1.0
+queue_size = 2048
+max_export_batch_size = 512
+schedule_delay = "5s"
+compression = "none"
 
 [telemetry.tracing.headers]
 ```
@@ -105,6 +110,10 @@ the OTLP traces path and are used verbatim by later exporter work. The
 `insecure` setting applies to `grpc`; `http/protobuf` uses the URL scheme.
 Headers are accepted as a map so credentials can be provided without embedding
 them in URLs; config rendering redacts their values.
+The trace provider uses parent-based ratio sampling, bounded batch processing,
+and optional gzip compression for `http/protobuf` export. Defaults preserve the
+initial all-root-spans behavior while matching OpenTelemetry's bounded batcher
+defaults.
 
 Telemetry runtime changes are restart-only. `gr daemon reload` and the config
 watcher compare the old and new active telemetry runtime shape before mutating
@@ -144,8 +153,8 @@ The tracing runtime installs an OpenTelemetry SDK tracer provider and OTLP
 exporter only when `[telemetry.tracing] enabled = true`. It always passes the
 configured endpoint to the exporter and does not rely on `OTEL_*` environment
 variables for exporter endpoint, headers, TLS certificates, compression,
-timeout, or proxy settings, so enabling tracing without an endpoint fails
-validation rather than falling back to an ambient exporter.
+timeout, sampler, batcher, or proxy settings, so enabling tracing without an
+endpoint fails validation rather than falling back to an ambient exporter.
 Telemetry values are validated even when the matching sub-runtime is disabled,
 except that the tracing endpoint is required only when tracing is enabled; this
 catches invalid saved settings before the restart that activates them.

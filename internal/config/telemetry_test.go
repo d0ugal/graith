@@ -41,6 +41,26 @@ func TestTelemetryDefaultsDisabled(t *testing.T) {
 		t.Errorf("tracing timeout = %v, want %v", got, TelemetryTracingTimeoutDefault)
 	}
 
+	if got := cfg.Telemetry.Tracing.SamplingRatioOrDefault(); got != TelemetryTracingSamplingRatioDefault {
+		t.Errorf("tracing sampling ratio = %v, want %v", got, TelemetryTracingSamplingRatioDefault)
+	}
+
+	if got := cfg.Telemetry.Tracing.QueueSizeOrDefault(); got != TelemetryTracingQueueSizeDefault {
+		t.Errorf("tracing queue size = %d, want %d", got, TelemetryTracingQueueSizeDefault)
+	}
+
+	if got := cfg.Telemetry.Tracing.MaxExportBatchSizeOrDefault(); got != TelemetryTracingMaxExportBatchSizeDefault {
+		t.Errorf("tracing max export batch size = %d, want %d", got, TelemetryTracingMaxExportBatchSizeDefault)
+	}
+
+	if got := cfg.Telemetry.Tracing.ScheduleDelayDuration(); got != TelemetryTracingScheduleDelayDefault {
+		t.Errorf("tracing schedule delay = %v, want %v", got, TelemetryTracingScheduleDelayDefault)
+	}
+
+	if got := cfg.Telemetry.Tracing.CompressionOrDefault(); got != TelemetryTracingCompressionNone {
+		t.Errorf("tracing compression = %q, want %q", got, TelemetryTracingCompressionNone)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("default config validation failed: %v", err)
 	}
@@ -57,10 +77,15 @@ func TestTelemetryConfigValidateAcceptsExplicitValidValues(t *testing.T) {
 		},
 		"grpc tracing": {
 			Tracing: TelemetryTracingConfig{
-				Enabled:  true,
-				Endpoint: "127.0.0.1:4317",
-				Protocol: TelemetryTracingProtocolGRPC,
-				Timeout:  "5s",
+				Enabled:            true,
+				Endpoint:           "127.0.0.1:4317",
+				Protocol:           TelemetryTracingProtocolGRPC,
+				Timeout:            "5s",
+				SamplingRatio:      float64Pointer(0.5),
+				QueueSize:          intPointer(1024),
+				MaxExportBatchSize: intPointer(128),
+				ScheduleDelay:      "1s",
+				Compression:        TelemetryTracingCompressionNone,
 				Headers: map[string]string{
 					"authorization": "Bearer canny",
 				},
@@ -68,10 +93,11 @@ func TestTelemetryConfigValidateAcceptsExplicitValidValues(t *testing.T) {
 		},
 		"http tracing": {
 			Tracing: TelemetryTracingConfig{
-				Enabled:  true,
-				Endpoint: "http://127.0.0.1:4318/v1/traces",
-				Protocol: TelemetryTracingProtocolHTTPProtobuf,
-				Timeout:  "250ms",
+				Enabled:     true,
+				Endpoint:    "http://127.0.0.1:4318/v1/traces",
+				Protocol:    TelemetryTracingProtocolHTTPProtobuf,
+				Timeout:     "250ms",
+				Compression: TelemetryTracingCompressionGzip,
 			},
 		},
 	}
@@ -181,6 +207,49 @@ func TestTelemetryConfigValidateRejectsInvalidValues(t *testing.T) {
 			mutate:  func(t *TelemetryConfig) { t.Tracing.Headers = map[string]string{"authorization": "Bearer\nbraw"} },
 			wantErr: "telemetry.tracing.headers",
 		},
+		"tracing sampling ratio negative while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.SamplingRatio = float64Pointer(-0.1) },
+			wantErr: "telemetry.tracing.sampling_ratio",
+		},
+		"tracing sampling ratio above one while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.SamplingRatio = float64Pointer(1.1) },
+			wantErr: "telemetry.tracing.sampling_ratio",
+		},
+		"tracing queue size zero while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.QueueSize = intPointer(0) },
+			wantErr: "telemetry.tracing.queue_size",
+		},
+		"tracing max export batch size zero while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.MaxExportBatchSize = intPointer(0) },
+			wantErr: "telemetry.tracing.max_export_batch_size",
+		},
+		"tracing max export batch exceeds queue while disabled": {
+			mutate: func(t *TelemetryConfig) {
+				t.Tracing.QueueSize = intPointer(128)
+				t.Tracing.MaxExportBatchSize = intPointer(256)
+			},
+			wantErr: "less than or equal",
+		},
+		"tracing schedule delay zero while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.ScheduleDelay = "0" },
+			wantErr: "telemetry.tracing.schedule_delay",
+		},
+		"tracing schedule delay invalid while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.ScheduleDelay = "dreich" },
+			wantErr: "telemetry.tracing.schedule_delay",
+		},
+		"tracing compression unknown while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.Compression = "br" },
+			wantErr: "telemetry.tracing.compression",
+		},
+		"tracing compression whitespace while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.Compression = " gzip" },
+			wantErr: "telemetry.tracing.compression",
+		},
+		"tracing gzip compression requires http while disabled": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.Compression = TelemetryTracingCompressionGzip },
+			wantErr: "only supported",
+		},
 	}
 
 	for name, test := range tests {
@@ -221,6 +290,36 @@ func TestTelemetryTracingTimeoutDuration(t *testing.T) {
 	}
 }
 
+func TestTelemetryTracingSamplingAndBatcherAccessors(t *testing.T) {
+	cfg := TelemetryTracingConfig{
+		SamplingRatio:      float64Pointer(0),
+		QueueSize:          intPointer(64),
+		MaxExportBatchSize: intPointer(32),
+		ScheduleDelay:      "750ms",
+		Compression:        TelemetryTracingCompressionGzip,
+	}
+
+	if got := cfg.SamplingRatioOrDefault(); got != 0 {
+		t.Errorf("SamplingRatioOrDefault() = %v, want 0", got)
+	}
+
+	if got := cfg.QueueSizeOrDefault(); got != 64 {
+		t.Errorf("QueueSizeOrDefault() = %d, want 64", got)
+	}
+
+	if got := cfg.MaxExportBatchSizeOrDefault(); got != 32 {
+		t.Errorf("MaxExportBatchSizeOrDefault() = %d, want 32", got)
+	}
+
+	if got := cfg.ScheduleDelayDuration(); got != 750*time.Millisecond {
+		t.Errorf("ScheduleDelayDuration() = %v, want 750ms", got)
+	}
+
+	if got := cfg.CompressionOrDefault(); got != TelemetryTracingCompressionGzip {
+		t.Errorf("CompressionOrDefault() = %q, want %q", got, TelemetryTracingCompressionGzip)
+	}
+}
+
 func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 	cfg := Default()
 	cfg.Telemetry.Tracing.Headers = map[string]string{
@@ -235,4 +334,12 @@ func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 	if got := cfg.Telemetry.Tracing.Headers["Authorization"]; got != "Bearer thrawn" {
 		t.Fatalf("live config header mutated to %q", got)
 	}
+}
+
+func float64Pointer(v float64) *float64 {
+	return &v
+}
+
+func intPointer(v int) *int {
+	return &v
 }

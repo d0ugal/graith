@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -14,9 +15,15 @@ const (
 	TelemetryMetricsBindAddressDefault = "127.0.0.1:4824"
 	TelemetryMetricsPathDefault        = "/metrics"
 
-	TelemetryTracingProtocolGRPC         = "grpc"
-	TelemetryTracingProtocolHTTPProtobuf = "http/protobuf"
-	TelemetryTracingTimeoutDefault       = 10 * time.Second
+	TelemetryTracingProtocolGRPC              = "grpc"
+	TelemetryTracingProtocolHTTPProtobuf      = "http/protobuf"
+	TelemetryTracingTimeoutDefault            = 10 * time.Second
+	TelemetryTracingSamplingRatioDefault      = 1.0
+	TelemetryTracingQueueSizeDefault          = 2048
+	TelemetryTracingMaxExportBatchSizeDefault = 512
+	TelemetryTracingScheduleDelayDefault      = 5 * time.Second
+	TelemetryTracingCompressionNone           = "none"
+	TelemetryTracingCompressionGzip           = "gzip"
 )
 
 // TelemetryConfig is the [telemetry] block. Metrics and tracing are independent
@@ -80,12 +87,17 @@ func (m TelemetryMetricsConfig) Validate() error {
 // TelemetryTracingConfig controls optional trace export. The exporter is wired
 // by daemon runtime code; instrumentation remains dormant unless enabled is true.
 type TelemetryTracingConfig struct {
-	Enabled  bool              `toml:"enabled"`
-	Endpoint string            `toml:"endpoint"`
-	Protocol string            `toml:"protocol"`
-	Insecure bool              `toml:"insecure"`
-	Timeout  string            `toml:"timeout"`
-	Headers  map[string]string `toml:"headers"`
+	Enabled            bool              `toml:"enabled"`
+	Endpoint           string            `toml:"endpoint"`
+	Protocol           string            `toml:"protocol"`
+	Insecure           bool              `toml:"insecure"`
+	Timeout            string            `toml:"timeout"`
+	SamplingRatio      *float64          `toml:"sampling_ratio"`
+	QueueSize          *int              `toml:"queue_size"`
+	MaxExportBatchSize *int              `toml:"max_export_batch_size"`
+	ScheduleDelay      string            `toml:"schedule_delay"`
+	Compression        string            `toml:"compression"`
+	Headers            map[string]string `toml:"headers"`
 }
 
 func (t TelemetryTracingConfig) ProtocolOrDefault() string {
@@ -98,6 +110,47 @@ func (t TelemetryTracingConfig) ProtocolOrDefault() string {
 
 func (t TelemetryTracingConfig) TimeoutDuration() time.Duration {
 	return positiveDurationOrDefault(t.Timeout, TelemetryTracingTimeoutDefault)
+}
+
+func (t TelemetryTracingConfig) SamplingRatioOrDefault() float64 {
+	if t.SamplingRatio == nil {
+		return TelemetryTracingSamplingRatioDefault
+	}
+
+	ratio := *t.SamplingRatio
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0 || ratio > 1 {
+		return TelemetryTracingSamplingRatioDefault
+	}
+
+	return ratio
+}
+
+func (t TelemetryTracingConfig) QueueSizeOrDefault() int {
+	if t.QueueSize == nil || *t.QueueSize < 1 {
+		return TelemetryTracingQueueSizeDefault
+	}
+
+	return *t.QueueSize
+}
+
+func (t TelemetryTracingConfig) MaxExportBatchSizeOrDefault() int {
+	if t.MaxExportBatchSize == nil || *t.MaxExportBatchSize < 1 {
+		return TelemetryTracingMaxExportBatchSizeDefault
+	}
+
+	return *t.MaxExportBatchSize
+}
+
+func (t TelemetryTracingConfig) ScheduleDelayDuration() time.Duration {
+	return positiveDurationOrDefault(t.ScheduleDelay, TelemetryTracingScheduleDelayDefault)
+}
+
+func (t TelemetryTracingConfig) CompressionOrDefault() string {
+	if strings.TrimSpace(t.Compression) == "" {
+		return TelemetryTracingCompressionNone
+	}
+
+	return t.Compression
 }
 
 func (t TelemetryTracingConfig) Validate() error {
@@ -147,6 +200,50 @@ func (t TelemetryTracingConfig) Validate() error {
 		} else if d <= 0 {
 			errs = append(errs, fmt.Errorf("telemetry.tracing.timeout %q: must be greater than zero", t.Timeout))
 		}
+	}
+
+	if t.SamplingRatio != nil {
+		ratio := *t.SamplingRatio
+		if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0 || ratio > 1 {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.sampling_ratio %v: must be between 0 and 1 inclusive", ratio))
+		}
+	}
+
+	if t.QueueSize != nil && *t.QueueSize < 1 {
+		errs = append(errs, fmt.Errorf("telemetry.tracing.queue_size %d: must be greater than zero", *t.QueueSize))
+	}
+
+	if t.MaxExportBatchSize != nil && *t.MaxExportBatchSize < 1 {
+		errs = append(errs, fmt.Errorf("telemetry.tracing.max_export_batch_size %d: must be greater than zero", *t.MaxExportBatchSize))
+	}
+
+	if t.MaxExportBatchSizeOrDefault() > t.QueueSizeOrDefault() {
+		errs = append(errs, fmt.Errorf("telemetry.tracing.max_export_batch_size %d: must be less than or equal to telemetry.tracing.queue_size %d",
+			t.MaxExportBatchSizeOrDefault(), t.QueueSizeOrDefault()))
+	}
+
+	if s := strings.TrimSpace(t.ScheduleDelay); s != "" {
+		if d, err := ParseDurationWithDays(s); err != nil {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.schedule_delay %q: %w", t.ScheduleDelay, err))
+		} else if d <= 0 {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.schedule_delay %q: must be greater than zero", t.ScheduleDelay))
+		}
+	}
+
+	compression := t.CompressionOrDefault()
+	if t.Compression != "" && t.Compression != strings.TrimSpace(t.Compression) {
+		errs = append(errs, fmt.Errorf("telemetry.tracing.compression %q: must not have leading or trailing whitespace", t.Compression))
+	}
+
+	switch compression {
+	case TelemetryTracingCompressionNone:
+	case TelemetryTracingCompressionGzip:
+		if protocol != TelemetryTracingProtocolHTTPProtobuf {
+			errs = append(errs, errors.New("telemetry.tracing.compression = \"gzip\" is only supported with telemetry.tracing.protocol = \"http/protobuf\""))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("telemetry.tracing.compression %q: must be one of %q, %q",
+			t.Compression, TelemetryTracingCompressionNone, TelemetryTracingCompressionGzip))
 	}
 
 	for name, value := range t.Headers {

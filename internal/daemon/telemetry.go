@@ -64,7 +64,12 @@ func newTelemetryRuntime(
 				"endpoint", cfg.Tracing.Endpoint,
 				"protocol", cfg.Tracing.ProtocolOrDefault(),
 				"insecure", cfg.Tracing.Insecure,
-				"timeout", cfg.Tracing.TimeoutDuration())
+				"timeout", cfg.Tracing.TimeoutDuration(),
+				"sampling_ratio", cfg.Tracing.SamplingRatioOrDefault(),
+				"queue_size", cfg.Tracing.QueueSizeOrDefault(),
+				"max_export_batch_size", cfg.Tracing.MaxExportBatchSizeOrDefault(),
+				"schedule_delay", cfg.Tracing.ScheduleDelayDuration(),
+				"compression", cfg.Tracing.CompressionOrDefault())
 		}
 	}
 
@@ -205,14 +210,21 @@ func newTelemetryTracingRuntime(
 	resource telemetry.ResourceOptions,
 	log *slog.Logger,
 ) (*telemetryTracingRuntime, error) {
+	samplingRatio := cfg.SamplingRatioOrDefault()
+
 	tracing, err := telemetry.StartTracing(ctx, telemetry.TracingOptions{
-		Endpoint: cfg.Endpoint,
-		Protocol: cfg.ProtocolOrDefault(),
-		Insecure: cfg.Insecure,
-		Timeout:  cfg.TimeoutDuration(),
-		Headers:  cfg.Headers,
-		Resource: resource,
-		Logger:   log,
+		Endpoint:           cfg.Endpoint,
+		Protocol:           cfg.ProtocolOrDefault(),
+		Insecure:           cfg.Insecure,
+		Timeout:            cfg.TimeoutDuration(),
+		Headers:            cfg.Headers,
+		SamplingRatio:      &samplingRatio,
+		QueueSize:          cfg.QueueSizeOrDefault(),
+		MaxExportBatchSize: cfg.MaxExportBatchSizeOrDefault(),
+		ScheduleDelay:      cfg.ScheduleDelayDuration(),
+		Compression:        cfg.CompressionOrDefault(),
+		Resource:           resource,
+		Logger:             log,
 	})
 	if err != nil {
 		return nil, err
@@ -220,12 +232,17 @@ func newTelemetryTracingRuntime(
 
 	return &telemetryTracingRuntime{
 		cfg: config.TelemetryTracingConfig{
-			Enabled:  cfg.Enabled,
-			Endpoint: cfg.Endpoint,
-			Protocol: cfg.Protocol,
-			Insecure: cfg.Insecure,
-			Timeout:  cfg.Timeout,
-			Headers:  cloneTelemetryHeaders(cfg.Headers),
+			Enabled:            cfg.Enabled,
+			Endpoint:           cfg.Endpoint,
+			Protocol:           cfg.Protocol,
+			Insecure:           cfg.Insecure,
+			Timeout:            cfg.Timeout,
+			SamplingRatio:      cloneFloat64Ptr(cfg.SamplingRatio),
+			QueueSize:          cloneIntPtr(cfg.QueueSize),
+			MaxExportBatchSize: cloneIntPtr(cfg.MaxExportBatchSize),
+			ScheduleDelay:      cfg.ScheduleDelay,
+			Compression:        cfg.Compression,
+			Headers:            cloneTelemetryHeaders(cfg.Headers),
 		},
 		rt:  tracing,
 		log: log,
@@ -256,11 +273,16 @@ type telemetryMetricsRuntimeConfigSnapshot struct {
 }
 
 type telemetryTracingRuntimeConfigSnapshot struct {
-	Endpoint string
-	Protocol string
-	Insecure bool
-	Timeout  time.Duration
-	Headers  map[string]string
+	Endpoint           string
+	Protocol           string
+	Insecure           bool
+	Timeout            time.Duration
+	SamplingRatio      float64
+	QueueSize          int
+	MaxExportBatchSize int
+	ScheduleDelay      time.Duration
+	Compression        string
+	Headers            map[string]string
 }
 
 func sameTelemetryRuntimeConfig(old, next config.TelemetryConfig) bool {
@@ -282,11 +304,16 @@ func telemetryRuntimeConfigSnapshotFor(cfg config.TelemetryConfig) telemetryRunt
 
 	if cfg.Tracing.Enabled {
 		out.Tracing = &telemetryTracingRuntimeConfigSnapshot{
-			Endpoint: cfg.Tracing.Endpoint,
-			Protocol: cfg.Tracing.ProtocolOrDefault(),
-			Insecure: cfg.Tracing.Insecure,
-			Timeout:  cfg.Tracing.TimeoutDuration(),
-			Headers:  cloneTelemetryHeaders(cfg.Tracing.Headers),
+			Endpoint:           cfg.Tracing.Endpoint,
+			Protocol:           cfg.Tracing.ProtocolOrDefault(),
+			Insecure:           cfg.Tracing.Insecure,
+			Timeout:            cfg.Tracing.TimeoutDuration(),
+			SamplingRatio:      cfg.Tracing.SamplingRatioOrDefault(),
+			QueueSize:          cfg.Tracing.QueueSizeOrDefault(),
+			MaxExportBatchSize: cfg.Tracing.MaxExportBatchSizeOrDefault(),
+			ScheduleDelay:      cfg.Tracing.ScheduleDelayDuration(),
+			Compression:        cfg.Tracing.CompressionOrDefault(),
+			Headers:            cloneTelemetryHeaders(cfg.Tracing.Headers),
 		}
 	}
 
@@ -400,4 +427,24 @@ func cloneTelemetryHeaders(headers map[string]string) map[string]string {
 	}
 
 	return out
+}
+
+func cloneFloat64Ptr(in *float64) *float64 {
+	if in == nil {
+		return nil
+	}
+
+	out := *in
+
+	return &out
+}
+
+func cloneIntPtr(in *int) *int {
+	if in == nil {
+		return nil
+	}
+
+	out := *in
+
+	return &out
 }

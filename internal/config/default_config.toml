@@ -133,11 +133,16 @@ bind_address = "127.0.0.1:4824"  # TCP host:port to bind; 0.0.0.0, [::], or :por
 path = "/metrics"                # literal scrape path served by the metrics listener
 
 [telemetry.tracing]
-enabled = false      # prepare trace export over OTLP
-endpoint = ""        # required when enabled; grpc uses host:port, http/protobuf uses a full http(s) trace URL
-protocol = "grpc"    # "grpc" or "http/protobuf"
-insecure = false     # disable TLS for grpc; http/protobuf uses the endpoint URL scheme
-timeout = "10s"      # exporter request timeout
+enabled = false              # prepare trace export over OTLP
+endpoint = ""                # required when enabled; grpc uses host:port, http/protobuf uses a full http(s) trace URL
+protocol = "grpc"            # "grpc" or "http/protobuf"
+insecure = false             # disable TLS for grpc; http/protobuf uses the endpoint URL scheme
+timeout = "10s"              # exporter request timeout
+sampling_ratio = 1.0         # parent-based root trace sampling ratio, 0.0 to 1.0
+queue_size = 2048            # max ended spans buffered before export
+max_export_batch_size = 512  # max spans sent in one export request; must be <= queue_size
+schedule_delay = "5s"        # max delay before a queued batch is exported
+compression = "none"         # "none" or "gzip"; gzip applies only to http/protobuf
 
 # Optional OTLP headers such as Authorization. Values are redacted in daemon
 # config responses and `gr config show`/`gr config diff` output.

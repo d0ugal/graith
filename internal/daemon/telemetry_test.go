@@ -436,3 +436,70 @@ func TestApplyConfigRejectsEnabledTelemetryRuntimeReload(t *testing.T) {
 		t.Fatalf("rejected telemetry reload was published; bind address = %q", got)
 	}
 }
+
+func TestApplyConfigRejectsEnabledTracingKnobReload(t *testing.T) {
+	tests := map[string]struct {
+		oldMutate     func(*config.TelemetryTracingConfig)
+		changedMutate func(*config.TelemetryTracingConfig)
+	}{
+		"sampling ratio": {
+			changedMutate: func(c *config.TelemetryTracingConfig) {
+				ratio := 0.5
+				c.SamplingRatio = &ratio
+			},
+		},
+		"queue size": {
+			changedMutate: func(c *config.TelemetryTracingConfig) {
+				queueSize := 1024
+				c.QueueSize = &queueSize
+			},
+		},
+		"max export batch size": {
+			changedMutate: func(c *config.TelemetryTracingConfig) {
+				batchSize := 256
+				c.MaxExportBatchSize = &batchSize
+			},
+		},
+		"schedule delay": {
+			changedMutate: func(c *config.TelemetryTracingConfig) {
+				c.ScheduleDelay = "1s"
+			},
+		},
+		"compression": {
+			oldMutate: func(c *config.TelemetryTracingConfig) {
+				c.Endpoint = "http://127.0.0.1:4318/v1/traces"
+				c.Protocol = config.TelemetryTracingProtocolHTTPProtobuf
+			},
+			changedMutate: func(c *config.TelemetryTracingConfig) {
+				c.Endpoint = "http://127.0.0.1:4318/v1/traces"
+				c.Protocol = config.TelemetryTracingProtocolHTTPProtobuf
+				c.Compression = config.TelemetryTracingCompressionGzip
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			old := config.Default()
+			old.Telemetry.Tracing.Enabled = true
+			old.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+			if test.oldMutate != nil {
+				test.oldMutate(&old.Telemetry.Tracing)
+			}
+
+			changed := config.Default()
+			changed.Telemetry.Tracing.Enabled = true
+			changed.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+			if test.changedMutate != nil {
+				test.changedMutate(&changed.Telemetry.Tracing)
+			}
+
+			sm := newSMWithConfig(t, old)
+
+			err := sm.applyConfig(changed)
+			if err == nil || !strings.Contains(err.Error(), "gr daemon restart") {
+				t.Fatalf("applyConfig() error = %v, want restart-only telemetry rejection", err)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"sync"
@@ -29,6 +30,14 @@ const (
 
 	ProtocolGRPC         = "grpc"
 	ProtocolHTTPProtobuf = "http/protobuf"
+
+	SamplingRatioDefault       = 1.0
+	BatchQueueSizeDefault      = 2048
+	BatchMaxExportBatchDefault = 512
+	BatchScheduleDelayDefault  = 5 * time.Second
+
+	CompressionNone = "none"
+	CompressionGzip = "gzip"
 )
 
 // TracingOptions are the daemon-supplied settings for optional OTLP trace
@@ -36,13 +45,18 @@ const (
 // this package overrides OpenTelemetry environment-derived exporter settings
 // with Graith's explicit config before starting an exporter.
 type TracingOptions struct {
-	Endpoint string
-	Protocol string
-	Insecure bool
-	Timeout  time.Duration
-	Headers  map[string]string
-	Resource ResourceOptions
-	Logger   *slog.Logger
+	Endpoint           string
+	Protocol           string
+	Insecure           bool
+	Timeout            time.Duration
+	Headers            map[string]string
+	SamplingRatio      *float64
+	QueueSize          int
+	MaxExportBatchSize int
+	ScheduleDelay      time.Duration
+	Compression        string
+	Resource           ResourceOptions
+	Logger             *slog.Logger
 }
 
 type ResourceOptions struct {
@@ -62,6 +76,14 @@ type TracingRuntime struct {
 	errorHandlerInstalled bool
 	stopOnce              sync.Once
 	stopErr               error
+}
+
+type traceProviderOptions struct {
+	SamplingRatio      float64
+	QueueSize          int
+	MaxExportBatchSize int
+	ScheduleDelay      time.Duration
+	ExportTimeout      time.Duration
 }
 
 var (
@@ -84,16 +106,8 @@ func StartTracing(ctx context.Context, opts TracingOptions) (*TracingRuntime, er
 		return nil, errors.New("telemetry tracing endpoint is required")
 	}
 
-	if opts.Protocol == "" {
-		opts.Protocol = ProtocolGRPC
-	}
-
+	opts = resolveTracingOptions(opts)
 	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-
-	opts.Timeout = timeout
 
 	setupCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -112,7 +126,13 @@ func StartTracing(ctx context.Context, opts TracingOptions) (*TracingRuntime, er
 		}))
 	}
 
-	provider := newTraceProvider(exporter, newTracingResource(opts.Resource), timeout)
+	provider := newTraceProvider(exporter, newTracingResource(opts.Resource), traceProviderOptions{
+		SamplingRatio:      *opts.SamplingRatio,
+		QueueSize:          opts.QueueSize,
+		MaxExportBatchSize: opts.MaxExportBatchSize,
+		ScheduleDelay:      opts.ScheduleDelay,
+		ExportTimeout:      timeout,
+	})
 	otel.SetTracerProvider(provider)
 
 	return &TracingRuntime{
@@ -120,6 +140,43 @@ func StartTracing(ctx context.Context, opts TracingOptions) (*TracingRuntime, er
 		timeout:               timeout,
 		errorHandlerInstalled: errorHandlerInstalled,
 	}, nil
+}
+
+func resolveTracingOptions(opts TracingOptions) TracingOptions {
+	if opts.Protocol == "" {
+		opts.Protocol = ProtocolGRPC
+	}
+
+	if opts.Timeout <= 0 {
+		opts.Timeout = 10 * time.Second
+	}
+
+	if opts.SamplingRatio == nil || math.IsNaN(*opts.SamplingRatio) || math.IsInf(*opts.SamplingRatio, 0) || *opts.SamplingRatio < 0 || *opts.SamplingRatio > 1 {
+		ratio := SamplingRatioDefault
+		opts.SamplingRatio = &ratio
+	}
+
+	if opts.QueueSize <= 0 {
+		opts.QueueSize = BatchQueueSizeDefault
+	}
+
+	if opts.MaxExportBatchSize <= 0 {
+		opts.MaxExportBatchSize = BatchMaxExportBatchDefault
+	}
+
+	if opts.MaxExportBatchSize > opts.QueueSize {
+		opts.MaxExportBatchSize = opts.QueueSize
+	}
+
+	if opts.ScheduleDelay <= 0 {
+		opts.ScheduleDelay = BatchScheduleDelayDefault
+	}
+
+	if opts.Compression == "" {
+		opts.Compression = CompressionNone
+	}
+
+	return opts
 }
 
 func (rt *TracingRuntime) Shutdown(ctx context.Context) error {
@@ -170,6 +227,10 @@ func resetTraceErrorHandler() {
 func newOTLPTraceExporter(ctx context.Context, opts TracingOptions) (sdktrace.SpanExporter, error) {
 	switch opts.Protocol {
 	case ProtocolGRPC:
+		if opts.Compression != CompressionNone {
+			return nil, fmt.Errorf("tracing compression %q is only supported with %s", opts.Compression, ProtocolHTTPProtobuf)
+		}
+
 		transportCredentials := credentials.NewTLS(nil)
 		if opts.Insecure {
 			transportCredentials = insecure.NewCredentials()
@@ -200,10 +261,15 @@ func newOTLPTraceExporter(ctx context.Context, opts TracingOptions) (sdktrace.Sp
 			conn:     conn,
 		}, nil
 	case ProtocolHTTPProtobuf:
+		compression, err := httpTraceCompression(opts.Compression)
+		if err != nil {
+			return nil, err
+		}
+
 		exporterOpts := []otlptracehttp.Option{
 			otlptracehttp.WithEndpointURL(opts.Endpoint),
 			otlptracehttp.WithHeaders(cloneHeaders(opts.Headers)),
-			otlptracehttp.WithCompression(otlptracehttp.NoCompression),
+			otlptracehttp.WithCompression(compression),
 			otlptracehttp.WithHTTPClient(newTraceHTTPClient(opts.Timeout)),
 			otlptracehttp.WithTimeout(opts.Timeout),
 		}
@@ -211,6 +277,17 @@ func newOTLPTraceExporter(ctx context.Context, opts TracingOptions) (sdktrace.Sp
 		return otlptracehttp.New(ctx, exporterOpts...)
 	default:
 		return nil, fmt.Errorf("unsupported tracing protocol %q", opts.Protocol)
+	}
+}
+
+func httpTraceCompression(compression string) (otlptracehttp.Compression, error) {
+	switch compression {
+	case CompressionNone:
+		return otlptracehttp.NoCompression, nil
+	case CompressionGzip:
+		return otlptracehttp.GzipCompression, nil
+	default:
+		return otlptracehttp.NoCompression, fmt.Errorf("unsupported tracing compression %q", compression)
 	}
 }
 
@@ -258,11 +335,16 @@ func newTraceHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-func newSDKTraceProvider(exporter sdktrace.SpanExporter, res *resource.Resource, timeout time.Duration) *sdktrace.TracerProvider {
+func newSDKTraceProvider(exporter sdktrace.SpanExporter, res *resource.Resource, opts traceProviderOptions) *sdktrace.TracerProvider {
 	return sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter, sdktrace.WithExportTimeout(timeout)),
+		sdktrace.WithBatcher(exporter,
+			sdktrace.WithExportTimeout(opts.ExportTimeout),
+			sdktrace.WithMaxQueueSize(opts.QueueSize),
+			sdktrace.WithMaxExportBatchSize(opts.MaxExportBatchSize),
+			sdktrace.WithBatchTimeout(opts.ScheduleDelay),
+		),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(opts.SamplingRatio))),
 	)
 }
 

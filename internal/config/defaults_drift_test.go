@@ -169,6 +169,30 @@ func TestEmbeddedDefaultsCarryPolicyValues(t *testing.T) {
 		if got := d.Telemetry.Tracing.TimeoutDuration(); got != TelemetryTracingTimeoutDefault {
 			t.Errorf("Default().Telemetry.Tracing.TimeoutDuration() = %v, want %v", got, TelemetryTracingTimeoutDefault)
 		}
+
+		if got := d.Telemetry.Tracing.SamplingRatioOrDefault(); got != TelemetryTracingSamplingRatioDefault {
+			t.Errorf("Default().Telemetry.Tracing.SamplingRatioOrDefault() = %v, want %v", got, TelemetryTracingSamplingRatioDefault)
+		}
+
+		if got := d.Telemetry.Tracing.QueueSizeOrDefault(); got != TelemetryTracingQueueSizeDefault {
+			t.Errorf("Default().Telemetry.Tracing.QueueSizeOrDefault() = %d, want %d", got, TelemetryTracingQueueSizeDefault)
+		}
+
+		if got := d.Telemetry.Tracing.MaxExportBatchSizeOrDefault(); got != TelemetryTracingMaxExportBatchSizeDefault {
+			t.Errorf("Default().Telemetry.Tracing.MaxExportBatchSizeOrDefault() = %d, want %d", got, TelemetryTracingMaxExportBatchSizeDefault)
+		}
+
+		if d.Telemetry.Tracing.ScheduleDelay != "5s" {
+			t.Errorf("Default().Telemetry.Tracing.ScheduleDelay = %q, want %q", d.Telemetry.Tracing.ScheduleDelay, "5s")
+		}
+
+		if got := d.Telemetry.Tracing.ScheduleDelayDuration(); got != TelemetryTracingScheduleDelayDefault {
+			t.Errorf("Default().Telemetry.Tracing.ScheduleDelayDuration() = %v, want %v", got, TelemetryTracingScheduleDelayDefault)
+		}
+
+		if got := d.Telemetry.Tracing.CompressionOrDefault(); got != TelemetryTracingCompressionNone {
+			t.Errorf("Default().Telemetry.Tracing.CompressionOrDefault() = %q, want %q", got, TelemetryTracingCompressionNone)
+		}
 	})
 
 	t.Run("terminal", func(t *testing.T) {
