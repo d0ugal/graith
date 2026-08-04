@@ -36,20 +36,27 @@ Graith always writes logs to local files. It does not ship logs to Loki,
 Grafana Cloud, or any other service unless you configure an external collector
 such as Grafana Alloy to read those files.
 
+The files listed here are raw local diagnostics, not a redacted telemetry
+stream. Daemon logs can include absolute paths, worktree names, session names,
+branch or PR details, command arguments, notification text, remote user or
+device labels, and raw error strings. Daemon stderr can include panic traces,
+race-detector output, and process diagnostics. Export these files only when
+that raw diagnostic content is acceptable for your backend and retention policy.
+
 The default data directory is `~/.local/share/graith` on Linux and other XDG
 platforms, and `~/Library/Application Support/graith` on macOS unless
 `XDG_DATA_HOME` is set. Set `data_dir` in the global config to move it. When
 `GRAITH_PROFILE=<profile>` is set, the app name becomes `graith-<profile>`, so
 the default data directory changes with that profile.
 
-Collect these files when you want Graith logs in Loki:
+Collect these raw diagnostic files when you want Graith local logs in Loki:
 
 | Path | Contents |
 |------|----------|
-| `<data_dir>/daemon.log` | Structured daemon log in JSON format |
-| `<data_dir>/daemon.log.N` | Rotated daemon log backups, controlled by `[logging]` |
-| `<data_dir>/daemon.stderr.log` | Daemon stderr, including panic tracebacks, `SIGQUIT` goroutine dumps, and race-detector output |
-| `<data_dir>/logs/<session-id>.log` | Per-session scrollback logs |
+| `<data_dir>/daemon.log` | Raw structured daemon diagnostics in JSON format |
+| `<data_dir>/daemon.log.N` | Rotated raw daemon diagnostic backups, controlled by `[logging]` |
+| `<data_dir>/daemon.stderr.log` | Raw daemon stderr, including panic tracebacks, `SIGQUIT` goroutine dumps, and race-detector output |
+| `<data_dir>/logs/<session-id>.log` | Raw per-session scrollback logs |
 
 The local file table in the [configuration reference]({{< relref "/docs/configuration/_index.md#file-locations" >}})
 lists the default Linux/XDG paths. Use the resolved data directory, not the
@@ -59,10 +66,11 @@ profile.
 Per-session scrollback logs contain raw terminal output. They may include
 prompts, source snippets, command output, or secrets printed by programs running
 inside a session. Sending those files to Loki is a deliberate off-machine
-disclosure; collect them only when that exposure is acceptable. Rotated daemon
-logs are useful for local inspection or manual backfill, but a live Alloy tail
-should usually read only `<data_dir>/daemon.log` so rotation does not re-ingest
-old backups.
+disclosure; collect them only when that exposure is acceptable. Raw daemon logs
+are also a deliberate diagnostic export, not the future safe daemon event
+schema. Rotated daemon logs are useful for local inspection or manual backfill,
+but a live Alloy tail should usually read only `<data_dir>/daemon.log` so
+rotation does not re-ingest old backups.
 
 ## Metrics
 
@@ -256,7 +264,8 @@ insecure = false
 timeout = "10s"
 ```
 
-Then configure Alloy. Replace every uppercase placeholder with the full URL,
+Then configure Alloy. This example intentionally exports the raw diagnostic log
+files described above. Replace every uppercase placeholder with the full URL,
 username, instance ID, or token for your backend, and set the referenced
 environment variables in Alloy's service environment. The example uses Linux
 default log paths; on macOS use paths under
