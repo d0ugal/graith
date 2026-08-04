@@ -161,7 +161,7 @@ insecure = false
 timeout = "10s"
 
 [telemetry.tracing.headers]
-# Authorization = "Bearer ..."
+# Add backend-required auth headers here.
 ```
 
 `enabled` must be set to `true` before the daemon installs an OpenTelemetry
@@ -184,10 +184,10 @@ be greater than zero when set. It bounds exporter setup, export requests, and
 shutdown flushing. `insecure` disables TLS for the `grpc` exporter only; HTTP
 endpoints use the scheme in the configured trace URL.
 
-Tracing export is optional runtime plumbing for a collector such as Alloy, which
-can forward traces to Tempo. Export failures are reported in the daemon log and
-do not stop the daemon. Graith does not require Grafana Cloud, Alloy, Mimir,
-Loki, Tempo, or any collector to run normally.
+Tracing export is optional runtime plumbing for direct OTLP trace export or for a
+collector such as Alloy, which can forward traces to Tempo. Export failures are
+reported in the daemon log and do not stop the daemon. Graith does not require
+Grafana Cloud, Alloy, Mimir, Loki, Tempo, or any collector to run normally.
 
 When tracing is enabled, Graith emits focused attach/input/render spans:
 
@@ -211,6 +211,86 @@ Attach latency tracing is per local interactive event and per PTY output chunk.
 High-output sessions can therefore produce many spans while tracing is enabled;
 run it with a local collector that is sized for that volume, or prefer metrics
 when you only need aggregate latency distributions.
+
+### Direct trace export
+
+Direct trace export points Graith's trace exporter straight at an OTLP trace
+backend. It is trace-only: it does not tail Graith log files, expose or scrape
+metrics, start Alloy, or forward anything to Loki or Mimir. Use the
+[Alloy collector example](#collect-with-grafana-alloy) when you want collector
+buffering, enrichment, sampling, redaction, log collection, or metric scraping.
+
+The opt-in boundary is unchanged. Graith still ships no telemetry until you set
+`enabled = true` under `[telemetry.tracing]` with a valid endpoint and restart
+the daemon (`gr daemon restart`).
+
+For a self-hosted Tempo OTLP gRPC receiver:
+
+```toml
+[telemetry.tracing]
+enabled = true
+endpoint = "127.0.0.1:4317"
+protocol = "grpc"
+insecure = true
+timeout = "10s"
+```
+
+The gRPC endpoint is `host:port`; do not add a URL scheme or an OTLP HTTP path
+such as `/v1/traces`. Use `insecure = true` only for a plaintext receiver, such
+as a loopback Tempo endpoint. Leave it `false` when the gRPC endpoint uses TLS.
+With TLS, Graith validates the server certificate against the host system trust
+store; there is no Graith setting for a custom CA bundle or client certificate.
+If your self-hosted Tempo requires extra headers, such as `X-Scope-OrgID` for
+multi-tenant Tempo, put them under `[telemetry.tracing.headers]`.
+
+For a self-hosted Tempo OTLP HTTP receiver:
+
+```toml
+[telemetry.tracing]
+enabled = true
+endpoint = "http://127.0.0.1:4318/v1/traces"
+protocol = "http/protobuf"
+timeout = "10s"
+```
+
+The `http/protobuf` endpoint must be the full trace URL and is used exactly as
+configured. Tempo commonly accepts OTLP/gRPC on port `4317`; enable and expose
+the Tempo OTLP HTTP receiver before using port `4318`. For `http/protobuf`,
+omit `insecure` or leave it `false`; the URL scheme controls TLS.
+
+For Grafana Cloud OTLP HTTP, copy the OTLP gateway details from your stack's
+OpenTelemetry tile and use the full trace URL:
+
+```toml
+[telemetry.tracing]
+enabled = true
+endpoint = "https://otlp-gateway-prod-us-east-0.grafana.net/otlp/v1/traces"
+protocol = "http/protobuf"
+timeout = "10s"
+
+[telemetry.tracing.headers]
+# Authorization = "Basic <value from your Grafana Cloud OpenTelemetry tile>"
+```
+
+Replace the endpoint with the exact URL for your stack and region; Grafana Cloud
+hosts can differ by region and stack age. If the OpenTelemetry tile shows a
+generic `OTEL_EXPORTER_OTLP_ENDPOINT` base URL ending in `/otlp`, keep that
+stack-specific base URL and append `/v1/traces`; Graith uses the configured
+HTTP trace URL verbatim. Put Grafana Cloud auth in `[telemetry.tracing.headers]`,
+not in the endpoint URL. If the tile shows an
+`OTEL_EXPORTER_OTLP_HEADERS` value such as `Authorization=Basic ...`, copy only
+the header value after `Authorization=` into TOML and use a literal space after
+`Basic`, not a percent-encoded space. Use a token with `traces:write`
+permission, and keep the real value out of examples, screenshots, and bug
+reports. Graith redacts header values in daemon config responses and local
+`gr config show`/`diff` output, but the config file still contains whatever
+secret value you save there.
+
+Endpoint details are documented by
+[Grafana Tempo](https://grafana.com/docs/tempo/latest/set-up-for-tracing/instrument-send/set-up-collector/otel-collector/),
+[Grafana Cloud OTLP](https://grafana.com/docs/grafana-cloud/observe-and-act/send-data/otlp/send-data-otlp/),
+and the
+[OpenTelemetry OTLP exporter configuration](https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/).
 
 ## Collect with Grafana Alloy
 
