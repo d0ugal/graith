@@ -175,16 +175,41 @@ insecure = false
 timeout = "10s"
 
 [telemetry.tracing.headers]
-# Add backend-required auth headers here.
+# Authorization = "Bearer ..."
+
+[telemetry.tracing.headers_env]
+# Authorization = "OTLP_AUTH_HEADER"
+
+[telemetry.tracing.headers_file]
+# Authorization = "~/.config/graith/otlp-auth-header"
 ```
 
 `enabled` must be set to `true` before the daemon installs an OpenTelemetry
 tracer provider and OTLP exporter. `endpoint` is required when tracing is
 enabled; Graith passes the configured endpoint to the exporter and does not fall
 back to `OTEL_*` environment variables for endpoint, headers, TLS certificates,
-compression, timeout, sampler behavior, or proxy settings. Credentials belong in
-`[telemetry.tracing.headers]`, not in the endpoint URL, and header values are
-redacted from daemon config responses and local `gr config show`/`diff` output.
+compression, timeout, sampler behavior, or proxy settings. Credentials belong
+in tracing header config, not in the endpoint URL, and header values and
+credential-source references are redacted from daemon config responses and local
+`gr config show`/`diff` output.
+
+Use `[telemetry.tracing.headers]` only when you are comfortable keeping the full
+header value in `config.toml`. To keep the value outside the config file, map a
+header name to an environment variable under `[telemetry.tracing.headers_env]`
+or to a token file under `[telemetry.tracing.headers_file]`. The referenced env
+var or file must contain the complete header value, for example
+`Bearer <token>` or `Basic <base64 username:token>`. Token-file values are read
+when tracing starts. Graith accepts only regular token files with no group or
+other permissions, limits each file to 16 KiB, ignores a UTF-8 BOM and
+surrounding whitespace, and rejects empty or multi-line values. Relative
+token-file paths are resolved from the directory containing `config.toml`.
+
+For packaged macOS daemon installs, launchd does not inherit arbitrary shell
+variables. If you use `headers_env`, also add the variable name to
+`[daemon_service].inherit_env` before restarting the daemon. Use an application
+name such as `OTLP_AUTH_HEADER`; `GRAITH_*` names are reserved and cannot be
+projected into the managed daemon. Token files are often simpler for managed
+daemon installs because the daemon can read them directly.
 
 Supported protocols:
 
@@ -282,23 +307,22 @@ endpoint = "https://otlp-gateway-prod-us-east-0.grafana.net/otlp/v1/traces"
 protocol = "http/protobuf"
 timeout = "10s"
 
-[telemetry.tracing.headers]
-# Authorization = "Basic <value from your Grafana Cloud OpenTelemetry tile>"
+[telemetry.tracing.headers_env]
+Authorization = "OTLP_AUTH_HEADER"
 ```
 
 Replace the endpoint with the exact URL for your stack and region; Grafana Cloud
 hosts can differ by region and stack age. If the OpenTelemetry tile shows a
 generic `OTEL_EXPORTER_OTLP_ENDPOINT` base URL ending in `/otlp`, keep that
 stack-specific base URL and append `/v1/traces`; Graith uses the configured
-HTTP trace URL verbatim. Put Grafana Cloud auth in `[telemetry.tracing.headers]`,
-not in the endpoint URL. If the tile shows an
-`OTEL_EXPORTER_OTLP_HEADERS` value such as `Authorization=Basic ...`, copy only
-the header value after `Authorization=` into TOML and use a literal space after
+HTTP trace URL verbatim. Put Grafana Cloud auth in tracing headers, not in the
+endpoint URL. If the tile shows an `OTEL_EXPORTER_OTLP_HEADERS` value such as
+`Authorization=Basic ...`, put only the header value after `Authorization=` in
+the referenced environment variable or token file, and use a literal space after
 `Basic`, not a percent-encoded space. Use a token with `traces:write`
 permission, and keep the real value out of examples, screenshots, and bug
-reports. Graith redacts header values in daemon config responses and local
-`gr config show`/`diff` output, but the config file still contains whatever
-secret value you save there.
+reports. Graith redacts inline header values and credential-source references
+in daemon config responses and local `gr config show`/`diff` output.
 
 Endpoint details are documented by
 [Grafana Tempo](https://grafana.com/docs/tempo/latest/set-up-for-tracing/instrument-send/set-up-collector/otel-collector/),
@@ -438,7 +462,15 @@ refuses remote tracing endpoints and HTTP/protobuf URLs without an explicit
 port because Alloy receivers listen locally on `host:port`. Graith does not
 read `OTEL_*` environment variables for tracing exporter settings. The gRPC
 exporter dials lazily, so the receiver may not see a connection until a span is
-exported. Startup, export, and shutdown issues appear in the daemon log as
+exported.
+
+If tracing uses `headers_env` or `headers_file`, a missing variable, missing
+file, unsafe token-file mode, empty source, or invalid multi-line value prevents
+the daemon from starting. Fix the source, then run `gr daemon restart`; the
+daemon reports the exact configured source to fix. Header values are not printed
+in config output, diffs, doctor output, or daemon logs.
+
+Startup, export, and shutdown issues appear in the daemon log as
 `telemetry tracing exporter started`, `telemetry tracing exporter error`, or
 `telemetry tracing exporter shutdown failed`. Search Tempo for
 `service.name = "graith-daemon"`. Graith emits startup and session lifecycle

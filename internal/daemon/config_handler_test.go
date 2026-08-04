@@ -137,3 +137,55 @@ func TestConfigHandlerRedactsEnvSecrets(t *testing.T) {
 		t.Errorf("live config env was mutated by redaction: got %q, want %q", got, envVal)
 	}
 }
+
+func TestConfigHandlerRedactsTelemetryTracingHeaderSources(t *testing.T) {
+	h := newTestHarness(t)
+
+	const (
+		inlineSecret = "Bearer canny-inline-secret" // #nosec G101 -- fixture exercises config output redaction.
+		envName      = "OTLP_BRAW_HEADER"
+		filePath     = "/Users/braw/.config/graith/otlp-header"
+	)
+
+	h.addAuthenticatedSession(t, "canny-id", "canny", "tok-canny")
+
+	h.sm.mu.Lock()
+	h.sm.cfg.Telemetry.Tracing.Headers = map[string]string{
+		"authorization": inlineSecret,
+	}
+	h.sm.cfg.Telemetry.Tracing.HeadersEnv = map[string]string{
+		"x-env": envName,
+	}
+	h.sm.cfg.Telemetry.Tracing.HeadersFile = map[string]string{
+		"x-file": filePath,
+	}
+	h.sm.mu.Unlock()
+
+	h.sendControlWithToken(t, "config", struct{}{}, "tok-canny")
+	env := h.expectType(t, "config_response")
+
+	var resp protocol.ConfigResponseMsg
+	if err := protocol.DecodePayload(env, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, forbidden := range []string{inlineSecret, envName, filePath} {
+		if strings.Contains(resp.EffectiveTOML, forbidden) {
+			t.Errorf("effective TOML leaked telemetry tracing source %q:\n%s", forbidden, resp.EffectiveTOML)
+		}
+
+		if strings.Contains(resp.DiffFromDefaults, forbidden) {
+			t.Errorf("diff leaked telemetry tracing source %q:\n%s", forbidden, resp.DiffFromDefaults)
+		}
+	}
+
+	for _, want := range []string{"authorization", "x-env", "x-file", config.RedactedMask} {
+		if !strings.Contains(resp.EffectiveTOML, want) {
+			t.Errorf("effective TOML missing redacted telemetry tracing shape %q:\n%s", want, resp.EffectiveTOML)
+		}
+	}
+
+	if got := h.sm.Config().Telemetry.Tracing.Headers["authorization"]; got != inlineSecret {
+		t.Errorf("live config tracing header mutated by redaction: got %q, want %q", got, inlineSecret)
+	}
+}

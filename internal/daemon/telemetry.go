@@ -30,6 +30,7 @@ type telemetryRuntime struct {
 func newTelemetryRuntime(
 	ctx context.Context,
 	cfg config.TelemetryConfig,
+	sourceDir string,
 	metricsGatherer prometheus.Gatherer,
 	log *slog.Logger,
 	resource telemetry.ResourceOptions,
@@ -50,7 +51,7 @@ func newTelemetryRuntime(
 	}
 
 	if cfg.Tracing.Enabled {
-		tracing, err := newTelemetryTracingRuntime(ctx, cfg.Tracing, resource, log)
+		tracing, err := newTelemetryTracingRuntime(ctx, cfg.Tracing, sourceDir, resource, log)
 		if err != nil {
 			rt.stop(ctx)
 
@@ -194,23 +195,29 @@ func (rt *telemetryMetricsRuntime) endpoint() (addr, path string) {
 }
 
 type telemetryTracingRuntime struct {
-	cfg config.TelemetryTracingConfig
-	rt  *telemetry.TracingRuntime
-	log *slog.Logger
+	shutdownTimeout time.Duration
+	rt              *telemetry.TracingRuntime
+	log             *slog.Logger
 }
 
 func newTelemetryTracingRuntime(
 	ctx context.Context,
 	cfg config.TelemetryTracingConfig,
+	sourceDir string,
 	resource telemetry.ResourceOptions,
 	log *slog.Logger,
 ) (*telemetryTracingRuntime, error) {
+	headers, err := cfg.ResolvedHeaders(sourceDir)
+	if err != nil {
+		return nil, err
+	}
+
 	tracing, err := telemetry.StartTracing(ctx, telemetry.TracingOptions{
 		Endpoint: cfg.Endpoint,
 		Protocol: cfg.ProtocolOrDefault(),
 		Insecure: cfg.Insecure,
 		Timeout:  cfg.TimeoutDuration(),
-		Headers:  cfg.Headers,
+		Headers:  headers,
 		Resource: resource,
 		Logger:   log,
 	})
@@ -219,16 +226,9 @@ func newTelemetryTracingRuntime(
 	}
 
 	return &telemetryTracingRuntime{
-		cfg: config.TelemetryTracingConfig{
-			Enabled:  cfg.Enabled,
-			Endpoint: cfg.Endpoint,
-			Protocol: cfg.Protocol,
-			Insecure: cfg.Insecure,
-			Timeout:  cfg.Timeout,
-			Headers:  cloneTelemetryHeaders(cfg.Headers),
-		},
-		rt:  tracing,
-		log: log,
+		shutdownTimeout: cfg.TimeoutDuration(),
+		rt:              tracing,
+		log:             log,
 	}, nil
 }
 
@@ -237,7 +237,7 @@ func (rt *telemetryTracingRuntime) stop(ctx context.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, rt.cfg.TimeoutDuration())
+	ctx, cancel := context.WithTimeout(ctx, rt.shutdownTimeout)
 	defer cancel()
 
 	if err := rt.rt.Shutdown(ctx); err != nil && rt.log != nil {
@@ -256,11 +256,13 @@ type telemetryMetricsRuntimeConfigSnapshot struct {
 }
 
 type telemetryTracingRuntimeConfigSnapshot struct {
-	Endpoint string
-	Protocol string
-	Insecure bool
-	Timeout  time.Duration
-	Headers  map[string]string
+	Endpoint    string
+	Protocol    string
+	Insecure    bool
+	Timeout     time.Duration
+	Headers     map[string]string
+	HeadersEnv  map[string]string
+	HeadersFile map[string]string
 }
 
 func sameTelemetryRuntimeConfig(old, next config.TelemetryConfig) bool {
@@ -282,11 +284,13 @@ func telemetryRuntimeConfigSnapshotFor(cfg config.TelemetryConfig) telemetryRunt
 
 	if cfg.Tracing.Enabled {
 		out.Tracing = &telemetryTracingRuntimeConfigSnapshot{
-			Endpoint: cfg.Tracing.Endpoint,
-			Protocol: cfg.Tracing.ProtocolOrDefault(),
-			Insecure: cfg.Tracing.Insecure,
-			Timeout:  cfg.Tracing.TimeoutDuration(),
-			Headers:  cloneTelemetryHeaders(cfg.Tracing.Headers),
+			Endpoint:    cfg.Tracing.Endpoint,
+			Protocol:    cfg.Tracing.ProtocolOrDefault(),
+			Insecure:    cfg.Tracing.Insecure,
+			Timeout:     cfg.Tracing.TimeoutDuration(),
+			Headers:     cloneTelemetryHeaders(cfg.Tracing.Headers),
+			HeadersEnv:  cloneTelemetryHeaders(cfg.Tracing.HeadersEnv),
+			HeadersFile: cloneTelemetryHeaders(cfg.Tracing.HeadersFile),
 		}
 	}
 
@@ -324,7 +328,7 @@ func (sm *SessionManager) startTelemetryRuntime(ctx context.Context) error {
 		resource = sm.telemetryResource()
 	}
 
-	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, metricsGatherer, sm.log, resource)
+	rt, err := newTelemetryRuntime(ctx, cfg.Telemetry, cfg.SourceDir, metricsGatherer, sm.log, resource)
 	if err != nil {
 		return err
 	}

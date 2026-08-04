@@ -97,14 +97,23 @@ insecure = false
 timeout = "10s"
 
 [telemetry.tracing.headers]
+
+[telemetry.tracing.headers_env]
+
+[telemetry.tracing.headers_file]
 ```
 
 `protocol` is deliberately small: `grpc` endpoints are `host:port`, and
 `http/protobuf` endpoints are full `http` or `https` trace URLs that include
 the OTLP traces path and are used verbatim by later exporter work. The
 `insecure` setting applies to `grpc`; `http/protobuf` uses the URL scheme.
-Headers are accepted as a map so credentials can be provided without embedding
-them in URLs; config rendering redacts their values.
+Inline headers are accepted as a map so credentials can be provided without
+embedding them in URLs; config rendering redacts their values. Env-backed and
+token-file-backed header maps keep credential values out of `config.toml` while
+remaining explicit by header name. The daemon resolves those sources only when
+tracing is enabled at startup, and missing sources fail before the exporter is
+installed. Token-file sources must be regular owner-only files and are bounded
+before their values are passed to the exporter.
 
 Telemetry runtime changes are restart-only. `gr daemon reload` and the config
 watcher compare the old and new active telemetry runtime shape before mutating

@@ -103,11 +103,13 @@ func StartTracing(ctx context.Context, opts TracingOptions) (*TracingRuntime, er
 		return nil, fmt.Errorf("create OTLP trace exporter: %w", err)
 	}
 
-	errorHandlerInstalled := opts.Logger != nil
+	logger := opts.Logger
+
+	errorHandlerInstalled := logger != nil
 	if errorHandlerInstalled {
 		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
 			if err != nil {
-				opts.Logger.Warn("telemetry tracing exporter error", "err", err)
+				logger.Warn("telemetry tracing exporter error", "err", err)
 			}
 		}))
 	}
