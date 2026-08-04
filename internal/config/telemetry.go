@@ -463,87 +463,118 @@ func validateMetricsPath(field, path string) error {
 }
 
 func validateOTLPGRPCEndpoint(endpoint string) error {
+	displayEndpoint := redactedTelemetryTracingEndpoint(endpoint)
+
 	if endpoint != strings.TrimSpace(endpoint) || containsControl(endpoint) {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace or control characters", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace or control characters", displayEndpoint)
 	}
 
 	if strings.ContainsAny(endpoint, " \t\r\n") {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace", displayEndpoint)
 	}
 
 	if strings.Contains(endpoint, "://") {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: grpc endpoints must be host:port without a URL scheme", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: grpc endpoints must be host:port without a URL scheme", displayEndpoint)
 	}
 
 	host, port, err := net.SplitHostPort(endpoint)
 	if err != nil {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: grpc endpoints must be in host:port form", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: grpc endpoints must be in host:port form", displayEndpoint)
 	}
 
 	if strings.TrimSpace(host) == "" {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: host is required", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: host is required", displayEndpoint)
 	}
 
 	if strings.ContainsAny(host, " \t\r\n") {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: host must not contain whitespace", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: host must not contain whitespace", displayEndpoint)
 	}
 
-	return validateTCPPort("telemetry.tracing.endpoint", endpoint, port, false)
+	return validateTCPPort("telemetry.tracing.endpoint", displayEndpoint, port, false)
 }
 
 func validateOTLPHTTPProtobufEndpoint(endpoint string) error {
+	displayEndpoint := redactedTelemetryTracingEndpoint(endpoint)
+
 	if endpoint != strings.TrimSpace(endpoint) || containsControl(endpoint) {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace or control characters", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace or control characters", displayEndpoint)
 	}
 
 	if strings.ContainsAny(endpoint, " \t\r\n") {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: must not contain whitespace", displayEndpoint)
 	}
 
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid port") {
-			return fmt.Errorf("telemetry.tracing.endpoint %q: port must be numeric", endpoint)
+			return fmt.Errorf("telemetry.tracing.endpoint %q: port must be numeric", displayEndpoint)
 		}
 
-		return fmt.Errorf("telemetry.tracing.endpoint %q: invalid URL: %w", endpoint, err)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: invalid URL", displayEndpoint)
 	}
 
 	switch u.Scheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("telemetry.tracing.endpoint %q: http/protobuf endpoints must use http or https", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: http/protobuf endpoints must use http or https", displayEndpoint)
 	}
 
 	if u.Host == "" || strings.TrimSpace(u.Hostname()) == "" {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: host is required", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: host is required", displayEndpoint)
 	}
 
 	if strings.ContainsAny(u.Host, " \t\r\n") {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: host must not contain whitespace", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: host must not contain whitespace", displayEndpoint)
 	}
 
 	if u.User != nil {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: credentials belong in telemetry.tracing.headers, not the URL", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: credentials belong in telemetry.tracing.headers, not the URL", displayEndpoint)
 	}
 
 	if u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: query strings and fragments are not supported", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: query strings and fragments are not supported", displayEndpoint)
 	}
 
 	if u.Path == "" || u.Path == "/" {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: http/protobuf endpoints must include an OTLP traces path such as /v1/traces", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: http/protobuf endpoints must include an OTLP traces path such as /v1/traces", displayEndpoint)
 	}
 
 	if port := u.Port(); port != "" {
-		if err := validateTCPPort("telemetry.tracing.endpoint", endpoint, port, false); err != nil {
+		if err := validateTCPPort("telemetry.tracing.endpoint", displayEndpoint, port, false); err != nil {
 			return err
 		}
 	} else if strings.Contains(u.Host, ":") && strings.LastIndex(u.Host, ":") > strings.LastIndex(u.Host, "]") {
-		return fmt.Errorf("telemetry.tracing.endpoint %q: port must be numeric", endpoint)
+		return fmt.Errorf("telemetry.tracing.endpoint %q: port must be numeric", displayEndpoint)
 	}
 
 	return nil
+}
+
+func redactedTelemetryTracingEndpoint(endpoint string) string {
+	value := strings.TrimSpace(endpoint)
+
+	if u, err := url.Parse(value); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
+		u.User = nil
+		u.RawQuery = ""
+		u.Fragment = ""
+
+		return u.String()
+	}
+
+	for _, scheme := range []string{"http://", "https://"} {
+		if rest, ok := strings.CutPrefix(value, scheme); ok {
+			rest, _, _ = strings.Cut(rest, "?")
+
+			rest, _, _ = strings.Cut(rest, "#")
+			if _, after, ok := strings.Cut(rest, "@"); ok {
+				rest = after
+			}
+
+			return scheme + rest
+		}
+	}
+
+	return value
 }
 
 func validHTTPHeaderName(name string) bool {

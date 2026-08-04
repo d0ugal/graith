@@ -350,6 +350,22 @@ Show info for the current session, auto-detected by matching the working directo
 
 Run health checks and diagnostics: daemon status, safehouse availability, orphaned worktrees, oversized scrollback files, and stale PID files.
 
+Pass `--tracing` to add direct OTLP trace-export checks. This opt-in section
+reports whether `[telemetry.tracing]` is enabled, validates the configured
+protocol and endpoint, checks environment-variable and token-file header
+sources without printing header values, and warns about common endpoint shape
+issues. It does not send a test span or call Tempo, Grafana Cloud, or any other
+remote backend.
+
+Pass `--alloy` to add local Grafana Alloy collection checks. This opt-in
+section finds Alloy on `PATH` or at `--alloy-binary`, reports `alloy
+--version`, validates either a supplied `--alloy-config` path or a temporary
+`gr config alloy` rendering when the installed Alloy supports `alloy validate`,
+checks selected daemon log files and the loopback metrics scrape endpoint, and
+reports likely local service state when macOS or Linux exposes it without root.
+It does not start Alloy, read credential files, print backend secrets, or call
+Loki, Mimir, Tempo, or Grafana Cloud.
+
 The **Daemon** section reports the active terminal-screen backend. The stable
 values are `libghostty-helper` for the
 process-isolated native backend. Unsupported builds fail closed. For scripts, use the top-level
@@ -380,7 +396,12 @@ The on-disk size walk is opt-in — it can take tens of seconds on a large insta
 | Flag | Description |
 |------|-------------|
 | `--autofix` | Automatically fix issues |
+| `--alloy` | Run local Grafana Alloy collection checks |
+| `--alloy-binary <path-or-command>` | Alloy executable to inspect (default searches `PATH` for `alloy`) |
+| `--alloy-config <path>` | Alloy config file or directory to validate (default validates generated config) |
+| `--alloy-signals <list>` | Alloy signals to check: `daemon-logs`, `metrics`, `traces`, or `all`; default is `metrics,traces` |
 | `--disk` | Measure on-disk sizes (walks the data dir; can be slow on large installs) |
+| `--tracing` | Run direct OTLP trace export configuration checks |
 
 ### `gr sandbox explain`
 

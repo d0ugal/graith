@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	configAlloyDefaultSignals        = "daemon-logs,metrics,traces"
+	configAlloyDefaultSignals        = "metrics,traces"
 	configAlloyDefaultTraceGRPC      = "127.0.0.1:4317"
 	configAlloyDefaultTraceHTTPProto = "http://127.0.0.1:4318/v1/traces"
 )
@@ -53,7 +53,9 @@ var configAlloyCmd = &cobra.Command{
 	Use:   "alloy",
 	Short: "Generate Grafana Alloy config",
 	Long: "Generate Grafana Alloy config for local Graith observability collection.\n\n" +
-		"The generated config can include daemon logs, metrics, and traces. Backend\n" +
+		"The default generated config includes metrics and traces. Add\n" +
+		"--signals daemon-logs,metrics,traces to explicitly include raw daemon\n" +
+		"log files. Backend\n" +
 		"URLs and credentials are emitted as sys.env(...) references for Alloy's\n" +
 		"service environment; Graith never reads or inlines Loki, Mimir, or Tempo\n" +
 		"secrets. Session scrollback logs are intentionally omitted.",
