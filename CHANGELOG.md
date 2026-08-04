@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.73.7](https://github.com/d0ugal/graith/compare/v0.73.6...v0.73.7) (2026-08-04)
+
+
+### Features
+
+* add session navigator PR screenshots ([5509a8c](https://github.com/d0ugal/graith/commit/5509a8cf91a3cc63a0d122b8a1c3b5ffe57bbe7d))
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.6 ([#2071](https://github.com/d0ugal/graith/issues/2071)) ([c41f1f4](https://github.com/d0ugal/graith/commit/c41f1f4f163a90a4dc9bda1a8f665ef14b29b584))
+
 ## [0.73.6](https://github.com/d0ugal/graith/compare/v0.73.5...v0.73.6) (2026-08-04)
 
 
