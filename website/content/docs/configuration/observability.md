@@ -350,120 +350,71 @@ insecure = false
 timeout = "10s"
 ```
 
-Then configure Alloy. This example intentionally exports the raw diagnostic log
-files described above. Replace every uppercase placeholder with the full URL,
-username, instance ID, or token for your backend, and set the referenced
-environment variables in Alloy's service environment. The example uses Linux
-default log paths; on macOS use paths under
-`/Users/YOU/Library/Application Support/graith`, and for named profiles use
-`graith-<profile>` instead of `graith`.
+Then generate Alloy config from the resolved Graith config instead of copying a
+static path example:
 
-```alloy
-local.file_match "graith_logs" {
-  path_targets = [
-    {
-      "__path__"  = "/home/YOU/.local/share/graith/daemon.log",
-      "job"       = "graith",
-      "component" = "daemon",
-    },
-    {
-      "__path__"  = "/home/YOU/.local/share/graith/daemon.stderr.log",
-      "job"       = "graith",
-      "component" = "daemon-stderr",
-    },
-    {
-      "__path__"  = "/home/YOU/.local/share/graith/logs/*.log",
-      "job"       = "graith",
-      "component" = "session",
-    },
-  ]
-}
-
-loki.source.file "graith" {
-  targets    = local.file_match.graith_logs.targets
-  forward_to = [loki.write.graith.receiver]
-}
-
-loki.write "graith" {
-  endpoint {
-    // Example Grafana Cloud URL:
-    // https://logs-prod-REGION.grafana.net/loki/api/v1/push
-    url = "LOKI_PUSH_URL"
-
-    basic_auth {
-      username = "LOKI_USERNAME_OR_INSTANCE_ID"
-      password = sys.env("LOKI_API_TOKEN")
-    }
-  }
-}
-
-prometheus.scrape "graith" {
-  job_name = "graith"
-
-  targets = [{
-    "__address__" = "127.0.0.1:4824",
-  }]
-
-  metrics_path = "/metrics"
-  forward_to   = [prometheus.remote_write.mimir.receiver]
-}
-
-prometheus.remote_write "mimir" {
-  endpoint {
-    // Example Grafana Cloud URL:
-    // https://prometheus-prod-REGION.grafana.net/api/prom/push
-    url = "MIMIR_REMOTE_WRITE_URL"
-
-    basic_auth {
-      username = "MIMIR_USERNAME_OR_INSTANCE_ID"
-      password = sys.env("MIMIR_API_TOKEN")
-    }
-  }
-}
-
-otelcol.receiver.otlp "graith" {
-  grpc {
-    endpoint = "127.0.0.1:4317"
-  }
-
-  http {
-    endpoint = "127.0.0.1:4318"
-  }
-
-  output {
-    traces = [otelcol.exporter.otlphttp.tempo.input]
-  }
-}
-
-otelcol.exporter.otlphttp "tempo" {
-  client {
-    // Grafana Cloud usually uses an /otlp endpoint. A local Tempo HTTP
-    // endpoint is usually http://tempo:4318.
-    endpoint = "TEMPO_OTLP_HTTP_ENDPOINT"
-    auth     = otelcol.auth.basic.tempo.handler
-  }
-}
-
-otelcol.auth.basic "tempo" {
-  client_auth {
-    username = "TEMPO_USERNAME_OR_INSTANCE_ID"
-    password = sys.env("TEMPO_API_TOKEN")
-  }
-}
+```bash
+gr config alloy > config.alloy
 ```
 
-This Alloy file is only an example. Graith does not start Alloy, read these
-environment variables, or send any telemetry to the placeholder endpoints.
+The generator resolves Linux and macOS data paths, `GRAITH_PROFILE`, and a
+custom `data_dir` before writing the file. It also uses the configured metrics
+bind address/path and the configured tracing protocol/endpoint. For traces,
+that endpoint must be a concrete loopback `host:port` listener where the
+generated Alloy config will receive Graith spans. If your current tracing
+endpoint points at a remote collector, change Graith to send to a local Alloy
+receiver first, then let Alloy forward to the remote backend. Select a subset
+when you do not want every signal:
+
+When metrics are bound to a wildcard listener such as `:4824`,
+`0.0.0.0:4824`, or `[::]:4824`, the generated Prometheus scrape target uses the
+same port on loopback (`127.0.0.1` or `::1`) so Alloy dials the local daemon
+rather than a non-dialable listener address.
+
+```bash
+gr config alloy --signals daemon-logs,metrics
+gr config alloy --signals traces
+```
+
+`--signals` accepts `daemon-logs`, `metrics`, `traces`, or `all`; the default is
+all three. The generated log pipeline includes `daemon.log` and
+`daemon.stderr.log` only. It deliberately omits per-session scrollback log globs.
+
+Set the generated backend environment variables in Alloy's service environment:
+
+| Signal | Environment variables used by generated config |
+|--------|------------------------------------------------|
+| Daemon logs | `GRAITH_LOKI_URL`, `GRAITH_LOKI_USERNAME`, `GRAITH_LOKI_TOKEN` |
+| Metrics | `GRAITH_MIMIR_URL`, `GRAITH_MIMIR_USERNAME`, `GRAITH_MIMIR_TOKEN` |
+| Traces | `GRAITH_TEMPO_OTLP_ENDPOINT`, `GRAITH_TEMPO_USERNAME`, `GRAITH_TEMPO_TOKEN` |
+
+If Graith's tracing endpoint is still empty, `gr config alloy` renders the
+standard local OTLP endpoint for the selected protocol and includes a comment
+showing the matching `[telemetry.tracing]` setting to enable before restarting
+the daemon. For TLS-enabled local OTLP receivers, the generated receiver uses
+`GRAITH_OTLP_RECEIVER_TLS_CERT_FILE` and
+`GRAITH_OTLP_RECEIVER_TLS_KEY_FILE`.
+
+If metrics or tracing are selected but disabled in Graith's config, the
+generated Alloy section stays present and includes a comment telling you to
+enable that telemetry setting and restart the daemon before running Alloy. Use
+a current Grafana Alloy release; the generated config uses current `sys.env`,
+`loki.source.file.file_match`, and `otelcol.auth.basic.client_auth` syntax.
+
+Graith does not start Alloy, read these environment variables, or send any
+telemetry to the generated backend endpoints. Only Alloy uses them when you run
+Alloy with the generated file.
 
 ## Troubleshooting collection
 
 If logs are missing, confirm the data directory and profile first. `data_dir`
-and `GRAITH_PROFILE` change every log path. Check that the daemon has started,
-that `daemon.log` or `daemon.stderr.log` exists, and that the Alloy process can
-read the files. For session logs, make sure the glob points at
-`<data_dir>/logs/*.log`. If Alloy starts after large files already exist,
-consider `loki.source.file` position handling and whether you want to tail from
-the end.
+and `GRAITH_PROFILE` change every log path; regenerate with `gr config alloy`
+after changing either. Check that the daemon has started, that `daemon.log` or
+`daemon.stderr.log` exists, and that the Alloy process can read the files. If
+you deliberately add session scrollback logs to your own Alloy config, point the
+glob at `<data_dir>/logs/*.log` and treat those files as sensitive terminal
+output. If Alloy starts after large files already exist, consider
+`loki.source.file` position handling and whether you want to tail from the end.
 
 If metrics are missing, confirm `[telemetry.metrics].enabled = true` and that
 you restarted the daemon after changing telemetry settings. Curl the exact
@@ -482,10 +433,12 @@ If traces are missing, confirm `[telemetry.tracing].enabled = true`, restart
 the daemon, and match Graith's protocol and endpoint to Alloy's receiver:
 `protocol = "grpc"` uses `127.0.0.1:4317` with `insecure = true` for the
 plaintext local example, while `protocol = "http/protobuf"` uses a full URL
-such as `http://127.0.0.1:4318/v1/traces`. Graith does not read `OTEL_*`
-environment variables for tracing exporter settings. The gRPC exporter dials
-lazily, so the receiver may not see a connection until a span is exported.
-Startup, export, and shutdown issues appear in the daemon log as
+such as `http://127.0.0.1:4318/v1/traces`. `gr config alloy --signals traces`
+refuses remote tracing endpoints and HTTP/protobuf URLs without an explicit
+port because Alloy receivers listen locally on `host:port`. Graith does not
+read `OTEL_*` environment variables for tracing exporter settings. The gRPC
+exporter dials lazily, so the receiver may not see a connection until a span is
+exported. Startup, export, and shutdown issues appear in the daemon log as
 `telemetry tracing exporter started`, `telemetry tracing exporter error`, or
 `telemetry tracing exporter shutdown failed`. Search Tempo for
 `service.name = "graith-daemon"`. Graith emits startup and session lifecycle
