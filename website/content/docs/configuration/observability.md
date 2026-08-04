@@ -33,8 +33,8 @@ enabled.
 ## Logs
 
 Graith always writes logs to local files. It does not ship logs to Loki,
-Grafana Cloud, or any other service unless you configure an external collector
-such as Grafana Alloy to read those files.
+Grafana Cloud, or any other service unless you explicitly configure an external
+collector such as Grafana Alloy to read those files.
 
 The files listed here are raw local diagnostics, not a redacted telemetry
 stream. Daemon logs can include absolute paths, worktree names, session names,
@@ -49,14 +49,14 @@ platforms, and `~/Library/Application Support/graith` on macOS unless
 `GRAITH_PROFILE=<profile>` is set, the app name becomes `graith-<profile>`, so
 the default data directory changes with that profile.
 
-Collect these raw diagnostic files when you want Graith local logs in Loki:
+These raw diagnostic files are available locally:
 
 | Path | Contents |
 |------|----------|
 | `<data_dir>/daemon.log` | Raw structured daemon diagnostics in JSON format |
 | `<data_dir>/daemon.log.N` | Rotated raw daemon diagnostic backups, controlled by `[logging]` |
 | `<data_dir>/daemon.stderr.log` | Raw daemon stderr, including panic tracebacks, `SIGQUIT` goroutine dumps, and race-detector output |
-| `<data_dir>/logs/<session-id>.log` | Raw per-session scrollback logs |
+| `<data_dir>/logs/<session-id>.log` | Raw per-session scrollback logs; never included by generated Alloy config |
 
 The local file table in the [configuration reference]({{< relref "/docs/configuration/_index.md#file-locations" >}})
 lists the default Linux/XDG paths. Use the resolved data directory, not the
@@ -65,12 +65,11 @@ profile.
 
 Per-session scrollback logs contain raw terminal output. They may include
 prompts, source snippets, command output, or secrets printed by programs running
-inside a session. Sending those files to Loki is a deliberate off-machine
-disclosure; collect them only when that exposure is acceptable. Raw daemon logs
-are also a deliberate diagnostic export, not the future safe daemon event
-schema. Rotated daemon logs are useful for local inspection or manual backfill,
-but a live Alloy tail should usually read only `<data_dir>/daemon.log` so
-rotation does not re-ingest old backups.
+inside a session. Generated Alloy config never includes session scrollback
+globs. Raw daemon logs are also a deliberate diagnostic export. Rotated daemon
+logs are useful for local inspection or manual backfill, but a live Alloy tail
+should usually read only `<data_dir>/daemon.log` so rotation does not re-ingest
+old backups.
 
 ## Metrics
 
@@ -334,8 +333,9 @@ and the
 
 This example keeps Graith's own defaults local. Graith exposes metrics on
 loopback only and exports traces to a loopback Alloy receiver only after you
-enable those features. Alloy is the process that tails files and sends data to
-Loki, Mimir, and Tempo.
+enable those features. Alloy is the process that sends data to Mimir and Tempo.
+Daemon logs can also be collected, but that is an explicit raw diagnostic export
+instead of the default generated config.
 
 First, enable metrics and tracing in `config.toml`:
 
@@ -381,34 +381,38 @@ static path example:
 gr config alloy > config.alloy
 ```
 
-The generator resolves Linux and macOS data paths, `GRAITH_PROFILE`, and a
-custom `data_dir` before writing the file. It also uses the configured metrics
-bind address/path and the configured tracing protocol/endpoint. For traces,
-that endpoint must be a concrete loopback `host:port` listener where the
-generated Alloy config will receive Graith spans. If your current tracing
-endpoint points at a remote collector, change Graith to send to a local Alloy
-receiver first, then let Alloy forward to the remote backend. Select a subset
-when you do not want every signal:
+By default, `gr config alloy` renders metrics and traces only. The generator
+resolves Linux and macOS data paths, `GRAITH_PROFILE`, and a custom `data_dir`
+before writing the file. It also uses the configured metrics bind address/path
+and the configured tracing protocol/endpoint. For traces, that endpoint must be
+a concrete loopback `host:port` listener where the generated Alloy config will
+receive Graith spans. If your current tracing endpoint points at a remote
+collector, change Graith to send to a local Alloy receiver first, then let Alloy
+forward to the remote backend.
 
 When metrics are bound to a wildcard listener such as `:4824`,
 `0.0.0.0:4824`, or `[::]:4824`, the generated Prometheus scrape target uses the
 same port on loopback (`127.0.0.1` or `::1`) so Alloy dials the local daemon
 rather than a non-dialable listener address.
 
+To include raw daemon logs, ask for them explicitly:
+
 ```bash
-gr config alloy --signals daemon-logs,metrics
-gr config alloy --signals traces
+gr config alloy --signals daemon-logs,metrics,traces > config.alloy
+gr config alloy --signals daemon-logs,metrics > config.alloy
+gr config alloy --signals traces > config.alloy
 ```
 
 `--signals` accepts `daemon-logs`, `metrics`, `traces`, or `all`; the default is
-all three. The generated log pipeline includes `daemon.log` and
-`daemon.stderr.log` only. It deliberately omits per-session scrollback log globs.
+`metrics,traces`. The generated log pipeline, when selected, includes
+`daemon.log` and `daemon.stderr.log` only. It deliberately omits per-session
+scrollback log globs.
 
 Set the generated backend environment variables in Alloy's service environment:
 
 | Signal | Environment variables used by generated config |
 |--------|------------------------------------------------|
-| Daemon logs | `GRAITH_LOKI_URL`, `GRAITH_LOKI_USERNAME`, `GRAITH_LOKI_TOKEN` |
+| Daemon logs, when explicitly selected | `GRAITH_LOKI_URL`, `GRAITH_LOKI_USERNAME`, `GRAITH_LOKI_TOKEN` |
 | Metrics | `GRAITH_MIMIR_URL`, `GRAITH_MIMIR_USERNAME`, `GRAITH_MIMIR_TOKEN` |
 | Traces | `GRAITH_TEMPO_OTLP_ENDPOINT`, `GRAITH_TEMPO_USERNAME`, `GRAITH_TEMPO_TOKEN` |
 
@@ -431,14 +435,16 @@ Alloy with the generated file.
 
 ## Troubleshooting collection
 
-If logs are missing, confirm the data directory and profile first. `data_dir`
-and `GRAITH_PROFILE` change every log path; regenerate with `gr config alloy`
-after changing either. Check that the daemon has started, that `daemon.log` or
-`daemon.stderr.log` exists, and that the Alloy process can read the files. If
-you deliberately add session scrollback logs to your own Alloy config, point the
-glob at `<data_dir>/logs/*.log` and treat those files as sensitive terminal
-output. If Alloy starts after large files already exist, consider
-`loki.source.file` position handling and whether you want to tail from the end.
+If logs are missing, first confirm that you generated Alloy config with
+`--signals daemon-logs,...`; the default config does not include logs. Then
+confirm the data directory and profile. `data_dir` and `GRAITH_PROFILE` change
+every log path; regenerate with `gr config alloy` after changing either. Check
+that the daemon has started, that `daemon.log` or `daemon.stderr.log` exists,
+and that the Alloy process can read the files. If you deliberately add session
+scrollback logs to your own Alloy config, point the glob at
+`<data_dir>/logs/*.log` and treat those files as sensitive terminal output. If
+Alloy starts after large files already exist, consider `loki.source.file`
+position handling and whether you want to tail from the end.
 
 If metrics are missing, confirm `[telemetry.metrics].enabled = true` and that
 you restarted the daemon after changing telemetry settings. Curl the exact

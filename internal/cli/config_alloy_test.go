@@ -195,6 +195,29 @@ func TestConfigAlloyCommandResolvesProfilePathAndSignalsFlag(t *testing.T) {
 	}
 }
 
+func TestConfigAlloyCommandDefaultSignalsExcludeDaemonLogs(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(dir, "run"))
+	unsetGraithSessionID(t)
+
+	got := runConfigAlloyCLI(t, "config", "alloy")
+
+	if strings.Contains(got, "loki.source.file") || strings.Contains(got, "GRAITH_LOKI_") {
+		t.Fatalf("default generated Alloy config included daemon log export:\n%s", got)
+	}
+
+	if !strings.Contains(got, "prometheus.scrape") {
+		t.Fatalf("default generated Alloy config omitted metrics:\n%s", got)
+	}
+
+	if !strings.Contains(got, "otelcol.receiver.otlp") {
+		t.Fatalf("default generated Alloy config omitted traces:\n%s", got)
+	}
+}
+
 func TestConfigAlloyCommandConfigFlagDataDirOverridesProfile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "config.toml")

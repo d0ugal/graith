@@ -27,17 +27,18 @@ be configured away from their defaults.
 ## Problem
 
 Users have to copy an Alloy example, replace paths and endpoints by hand, and
-remember that session scrollback logs are sensitive. A wrong path silently drops
-logs. A stale metrics path breaks scraping. Including session log globs by
-default can ship raw terminal output off the machine.
+remember that log files are sensitive. A wrong path silently drops logs. A stale
+metrics path breaks scraping. Including logs in the easiest generated path can
+make a beginner setup feel like Graith is shipping diagnostics by default.
 
 ## Goals
 
-- Render Alloy config for daemon logs, metrics, and traces.
+- Render Alloy config for metrics and traces by default.
+- Render daemon log collection only when the user selects it explicitly.
 - Use Graith's resolved path model, including Linux, macOS, profiles, and
   custom `data_dir`.
 - Use current telemetry metrics bind/path and tracing protocol/endpoint values.
-- Keep session scrollback logs out of generated output by default.
+- Keep session scrollback logs out of generated output.
 - Keep backend URLs and credentials as Alloy environment references or obvious
   placeholders, never values read from Graith config.
 - Make the renderer deterministic and covered by golden tests.
@@ -46,7 +47,7 @@ default can ship raw terminal output off the machine.
 
 - Install, bundle, start, stop, or supervise Alloy.
 - Enable Graith metrics or tracing.
-- Include session log collection by default.
+- Include session log collection in generated output.
 - Validate a user's remote Grafana Cloud, Loki, Mimir, or Tempo credentials.
 
 ## Platform support
@@ -69,12 +70,16 @@ the easiest copy/paste path.
 
 Add `gr config alloy` with a `--signals` comma list. The command loads the
 effective local Graith config, resolves paths, applies a configured `data_dir`
-the same way the root command does, and writes Alloy text to stdout. The render
-logic is pure: tests pass a `config.Config`, `config.Paths`, and selected
-signals, then compare exact golden output.
+the same way the root command does, and writes Alloy text to stdout. The default
+signal set is metrics plus traces. Daemon logs are available through
+`--signals daemon-logs,metrics,traces` or `--signals all`, but the beginner path
+does not include raw diagnostic file export. The render logic is pure: tests
+pass a `config.Config`, `config.Paths`, and selected signals, then compare exact
+golden output.
 
-Daemon logs use `<data_dir>/daemon.log` and `<data_dir>/daemon.stderr.log`.
-Session scrollback logs under `<data_dir>/logs/*.log` are deliberately omitted.
+When selected, daemon logs use `<data_dir>/daemon.log` and
+`<data_dir>/daemon.stderr.log`. Session scrollback logs under
+`<data_dir>/logs/*.log` are deliberately omitted.
 Metrics use `telemetry.metrics.BindAddressOrDefault()` and
 `PathOrDefault()`. Traces use `telemetry.tracing.ProtocolOrDefault()` and the
 configured endpoint when that endpoint is a concrete loopback listener for the
@@ -109,5 +114,5 @@ also would not help operators inspect the config they should run locally.
 Golden tests cover representative Linux, macOS, profile/custom-path output, and
 the gRPC TLS receiver branch. Focused unit tests cover signal parsing,
 command-level `data_dir` and profile resolution, wildcard metrics scrape
-targets, local tracing endpoint validation, disabled telemetry comments, and
-the default exclusion of session log globs.
+targets, local tracing endpoint validation, disabled telemetry comments, the
+default exclusion of daemon log export, and the exclusion of session log globs.

@@ -310,8 +310,9 @@ Show changes from built-in defaults.
 ### `gr config alloy`
 
 Generate Grafana Alloy config from the resolved local Graith config. Use
-`--signals daemon-logs,metrics,traces` to select signals; the default is all
-three. Session scrollback log globs are not included.
+`--signals daemon-logs,metrics,traces` to select signals; the default is
+`metrics,traces`. Daemon logs are included only when explicitly selected.
+Session scrollback log globs are not included.
 
 ### `gr config reset`
 
