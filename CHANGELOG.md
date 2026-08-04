@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.73.6](https://github.com/d0ugal/graith/compare/v0.73.5...v0.73.6) (2026-08-04)
+
+
+### Features
+
+* generate Alloy config from local config ([a6d4183](https://github.com/d0ugal/graith/commit/a6d4183c253801992cf3ec5f46bf640ab4770b66)), closes [#2042](https://github.com/d0ugal/graith/issues/2042)
+* render navigator labels as compact chips ([9cf8f13](https://github.com/d0ugal/graith/commit/9cf8f13d958b960864a160874355f7fd68b9f099))
+* show compact labels in session navigator ([e2de577](https://github.com/d0ugal/graith/commit/e2de577c5471a893629ca8d49b380bf96f8cb108))
+* support tracing header credential sources ([f500ddb](https://github.com/d0ugal/graith/commit/f500ddbd2bc5f62d717568bc5256882c1343ad20)), closes [#2039](https://github.com/d0ugal/graith/issues/2039)
+
+
+### Bug Fixes
+
+* **gui:** use daemon agent catalog in gui ([3fbdead](https://github.com/d0ugal/graith/commit/3fbdeadaf529a13837090b76a96258cee8d7a9c8))
+* prune stale file-watch registrations ([416a26d](https://github.com/d0ugal/graith/commit/416a26d0721eed11367beaf2b09e1b353615d3b8))
+* update github.com/charmbracelet/ultraviolet digest to 8b69304 ([#2024](https://github.com/d0ugal/graith/issues/2024)) ([337a8f7](https://github.com/d0ugal/graith/commit/337a8f7ad6db83884719804facd431823355b78e))
+* update google.golang.org/genproto/googleapis/api digest to 6ac0973 ([#2030](https://github.com/d0ugal/graith/issues/2030)) ([1297542](https://github.com/d0ugal/graith/commit/129754224866f6409e2bbc3407921628db039246))
+* update google.golang.org/genproto/googleapis/rpc digest to 6ac0973 ([#2031](https://github.com/d0ugal/graith/issues/2031)) ([c7a0c87](https://github.com/d0ugal/graith/commit/c7a0c87f592a73cc9a3fb938c20b16b0a08f0690))
+* update module modernc.org/sqlite to v1.56.0 ([#2033](https://github.com/d0ugal/graith/issues/2033)) ([c52d030](https://github.com/d0ugal/graith/commit/c52d030974344875a1754aa3320c463c0fd91063))
+* update opentelemetry-go monorepo to v1.45.0 ([#2035](https://github.com/d0ugal/graith/issues/2035)) ([838f847](https://github.com/d0ugal/graith/commit/838f847b790c0fab4907c60d2d43b17e49421df1))
+
+
+### Documentation
+
+* define safe daemon log export schema ([488c3c4](https://github.com/d0ugal/graith/commit/488c3c4310d7bd1a0b65b8b89a3c97c28d333219)), closes [#2049](https://github.com/d0ugal/graith/issues/2049)
+* design managed external collector lifecycle ([eaeb56e](https://github.com/d0ugal/graith/commit/eaeb56e7587406e4c2ae4a4bfa153aed01c12261)), closes [#2047](https://github.com/d0ugal/graith/issues/2047)
+* document direct OTLP trace export ([aaa4d20](https://github.com/d0ugal/graith/commit/aaa4d20a72e02a38fd18ac07cfc9f69761917c4b)), closes [#2038](https://github.com/d0ugal/graith/issues/2038)
+* record collector metrics decision ([b6d0342](https://github.com/d0ugal/graith/commit/b6d0342c617003fa3191dad912fc86398cc4a4de)), closes [#2051](https://github.com/d0ugal/graith/issues/2051)
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.5 ([#2025](https://github.com/d0ugal/graith/issues/2025)) ([01e34fb](https://github.com/d0ugal/graith/commit/01e34fbd7b235aead0bfcc880b5f4d1f33fff9e1))
+* **deps:** update renovate/renovate docker tag to v44.10.0 ([#2034](https://github.com/d0ugal/graith/issues/2034)) ([756ae11](https://github.com/d0ugal/graith/commit/756ae118e247011452d7b35c3d7a5ebe9f3bec16))
+* **deps:** update renovate/renovate docker tag to v44.11.0 ([#2036](https://github.com/d0ugal/graith/issues/2036)) ([707cd24](https://github.com/d0ugal/graith/commit/707cd24ef85b3e3a8b1963f4da7dec26c8e861b1))
+* **deps:** update renovate/renovate docker tag to v44.11.1 ([#2052](https://github.com/d0ugal/graith/issues/2052)) ([d12f634](https://github.com/d0ugal/graith/commit/d12f63410e04f1d2be8a9232ed8027a81509abee))
+* **deps:** update renovate/renovate docker tag to v44.11.3 ([#2066](https://github.com/d0ugal/graith/issues/2066)) ([155a2f1](https://github.com/d0ugal/graith/commit/155a2f1478d1a462dbc482a733dfa77878ee87fa))
+* **deps:** update renovate/renovate docker tag to v44.11.4 ([#2070](https://github.com/d0ugal/graith/issues/2070)) ([b85f3af](https://github.com/d0ugal/graith/commit/b85f3af8b9b97c3094bf9c9976cc1b40c3e6d098))
+* **deps:** update renovate/renovate docker tag to v44.8.0 ([#2029](https://github.com/d0ugal/graith/issues/2029)) ([bd06c4e](https://github.com/d0ugal/graith/commit/bd06c4ed47ae4f1728c6bca3725a7aa7bf6f90bd))
+* **deps:** update renovate/renovate docker tag to v44.9.0 ([#2032](https://github.com/d0ugal/graith/issues/2032)) ([f334889](https://github.com/d0ugal/graith/commit/f334889fd96eea93dd4f1d5253a60dcc1a10d20e))
+
 ## [0.73.5](https://github.com/d0ugal/graith/compare/v0.73.4...v0.73.5) (2026-08-03)
 
 
