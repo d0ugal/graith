@@ -139,9 +139,14 @@ protocol = "grpc"    # "grpc" or "http/protobuf"
 insecure = false     # disable TLS for grpc; http/protobuf uses the endpoint URL scheme
 timeout = "10s"      # exporter request timeout
 
-# Optional OTLP headers such as Authorization. Values are redacted in daemon
-# config responses and `gr config show`/`gr config diff` output.
+# Optional OTLP headers such as Authorization. Inline values and credential
+# source references are redacted in daemon config responses and `gr config
+# show`/`gr config diff` output. Source tables map header names to an
+# environment variable name or owner-only regular token file path; values are
+# resolved only when tracing is enabled and the daemon starts.
 [telemetry.tracing.headers]
+[telemetry.tracing.headers_env]
+[telemetry.tracing.headers_file]
 
 # Background auto-pull to keep tracked git-maintenance repos current (NOT session
 # worktrees). Fast-forwards a repo only when it is on its default branch, clean,

@@ -3,11 +3,17 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -17,6 +23,8 @@ const (
 	TelemetryTracingProtocolGRPC         = "grpc"
 	TelemetryTracingProtocolHTTPProtobuf = "http/protobuf"
 	TelemetryTracingTimeoutDefault       = 10 * time.Second
+
+	telemetryTracingHeaderFileMaxBytes = 16 * 1024
 )
 
 // TelemetryConfig is the [telemetry] block. Metrics and tracing are independent
@@ -80,12 +88,14 @@ func (m TelemetryMetricsConfig) Validate() error {
 // TelemetryTracingConfig controls optional trace export. The exporter is wired
 // by daemon runtime code; instrumentation remains dormant unless enabled is true.
 type TelemetryTracingConfig struct {
-	Enabled  bool              `toml:"enabled"`
-	Endpoint string            `toml:"endpoint"`
-	Protocol string            `toml:"protocol"`
-	Insecure bool              `toml:"insecure"`
-	Timeout  string            `toml:"timeout"`
-	Headers  map[string]string `toml:"headers"`
+	Enabled     bool              `toml:"enabled"`
+	Endpoint    string            `toml:"endpoint"`
+	Protocol    string            `toml:"protocol"`
+	Insecure    bool              `toml:"insecure"`
+	Timeout     string            `toml:"timeout"`
+	Headers     map[string]string `toml:"headers"`
+	HeadersEnv  map[string]string `toml:"headers_env"`
+	HeadersFile map[string]string `toml:"headers_file"`
 }
 
 func (t TelemetryTracingConfig) ProtocolOrDefault() string {
@@ -149,17 +159,249 @@ func (t TelemetryTracingConfig) Validate() error {
 		}
 	}
 
-	for name, value := range t.Headers {
+	errs = append(errs, validateTelemetryTracingHeaderMap("telemetry.tracing.headers", t.Headers)...)
+
+	for _, name := range sortedHeaderKeys(t.HeadersEnv) {
+		envName := t.HeadersEnv[name]
 		if !validHTTPHeaderName(name) {
-			errs = append(errs, fmt.Errorf("telemetry.tracing.headers[%q]: header name must be a valid HTTP token", name))
+			errs = append(errs, fmt.Errorf("telemetry.tracing.headers_env[%q]: header name must be a valid HTTP token", name))
 		}
 
-		if containsControl(value) || strings.ContainsAny(value, "\r\n") {
-			errs = append(errs, fmt.Errorf("telemetry.tracing.headers[%q]: header value must not contain control characters", name))
+		if !validEnvironmentName(envName) {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.headers_env[%q] %q: must be a valid environment variable name", name, envName))
 		}
 	}
 
+	for _, name := range sortedHeaderKeys(t.HeadersFile) {
+		path := t.HeadersFile[name]
+		if !validHTTPHeaderName(name) {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.headers_file[%q]: header name must be a valid HTTP token", name))
+		}
+
+		if path == "" || path != strings.TrimSpace(path) || containsControl(path) {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.headers_file[%q]: file path must not be empty, have leading or trailing whitespace, or contain control characters", name))
+		}
+	}
+
+	errs = append(errs, t.validateHeaderSourceConflicts()...)
+
 	return errors.Join(errs...)
+}
+
+// ResolvedHeaders returns the OTLP headers with inline values plus any
+// configured external credential sources. Source values are read only when the
+// tracing runtime starts; config rendering and diffing should not call this.
+func (t TelemetryTracingConfig) ResolvedHeaders(sourceDir string) (map[string]string, error) {
+	return t.resolveHeaders(sourceDir, os.LookupEnv, openTelemetryTracingHeaderFile)
+}
+
+func (t TelemetryTracingConfig) resolveHeaders(
+	sourceDir string,
+	lookupEnv func(string) (string, bool),
+	openFile func(string) (*os.File, error),
+) (map[string]string, error) {
+	total := len(t.Headers) + len(t.HeadersEnv) + len(t.HeadersFile)
+	if total == 0 {
+		return nil, nil
+	}
+
+	headers := make(map[string]string, total)
+	for _, name := range sortedHeaderKeys(t.Headers) {
+		headers[name] = t.Headers[name]
+	}
+
+	var errs []error
+
+	for _, name := range sortedHeaderKeys(t.HeadersEnv) {
+		envName := t.HeadersEnv[name]
+
+		value, err := resolveTelemetryTracingEnvHeader(name, envName, lookupEnv)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		headers[name] = value
+	}
+
+	for _, name := range sortedHeaderKeys(t.HeadersFile) {
+		path, err := resolveTelemetryTracingHeaderFilePath(t.HeadersFile[name], sourceDir)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("telemetry.tracing.headers_file[%q]: %w", name, err))
+			continue
+		}
+
+		value, err := resolveTelemetryTracingFileHeader(name, path, openFile)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+
+		headers[name] = value
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
+func resolveTelemetryTracingEnvHeader(
+	name string,
+	envName string,
+	lookupEnv func(string) (string, bool),
+) (string, error) {
+	value, ok := lookupEnv(envName)
+	if !ok {
+		return "", fmt.Errorf("telemetry.tracing.headers_env[%q]: environment variable %q is not set; set it before starting tracing or remove this header source", name, envName)
+	}
+
+	if value == "" {
+		return "", fmt.Errorf("telemetry.tracing.headers_env[%q]: environment variable %q is empty; set a header value before starting tracing or remove this header source", name, envName)
+	}
+
+	if err := validateTelemetryTracingHeaderValue("telemetry.tracing.headers_env", name, value); err != nil {
+		return "", fmt.Errorf("%w (from environment variable %q)", err, envName)
+	}
+
+	return value, nil
+}
+
+func resolveTelemetryTracingFileHeader(
+	name string,
+	path string,
+	openFile func(string) (*os.File, error),
+) (string, error) {
+	file, err := openFile(path)
+	if err != nil {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: open token file %q: %w; create an owner-only regular file before starting tracing or remove this header source", name, path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: stat token file %q: %w; fix the file before starting tracing or remove this header source", name, path, err)
+	}
+
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: token file %q is not a regular file; use an owner-only regular file or remove this header source", name, path)
+	}
+
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: token file %q has insecure mode %04o; remove group/other permissions or remove this header source", name, path, perm)
+	}
+
+	if info.Size() > telemetryTracingHeaderFileMaxBytes {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: token file %q exceeds %d byte limit; use a single header value or remove this header source", name, path, telemetryTracingHeaderFileMaxBytes)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, telemetryTracingHeaderFileMaxBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: read token file %q: %w; fix the file before starting tracing or remove this header source", name, path, err)
+	}
+
+	if len(data) > telemetryTracingHeaderFileMaxBytes {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: token file %q exceeds %d byte limit; use a single header value or remove this header source", name, path, telemetryTracingHeaderFileMaxBytes)
+	}
+
+	value := strings.TrimSpace(string(data))
+	value = strings.TrimPrefix(value, "\ufeff")
+	value = strings.TrimSpace(value)
+
+	if value == "" {
+		return "", fmt.Errorf("telemetry.tracing.headers_file[%q]: token file %q is empty after trimming whitespace; write a header value before starting tracing or remove this header source", name, path)
+	}
+
+	if err := validateTelemetryTracingHeaderValue("telemetry.tracing.headers_file", name, value); err != nil {
+		return "", fmt.Errorf("%w (from token file %q)", err, path)
+	}
+
+	return value, nil
+}
+
+func openTelemetryTracingHeaderFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+}
+
+func resolveTelemetryTracingHeaderFilePath(path, sourceDir string) (string, error) {
+	if strings.HasPrefix(path, "~/") || filepath.IsAbs(path) {
+		return ExpandPath(path), nil
+	}
+
+	if sourceDir == "" {
+		return "", fmt.Errorf("relative token file path %q requires a config file directory; use an absolute path, a ~/ path, or load config from disk", path)
+	}
+
+	return ExpandPath(filepath.Join(sourceDir, path)), nil
+}
+
+func validateTelemetryTracingHeaderMap(field string, headers map[string]string) []error {
+	var errs []error
+
+	for _, name := range sortedHeaderKeys(headers) {
+		if !validHTTPHeaderName(name) {
+			errs = append(errs, fmt.Errorf("%s[%q]: header name must be a valid HTTP token", field, name))
+		}
+
+		if err := validateTelemetryTracingHeaderValue(field, name, headers[name]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errs
+}
+
+func validateTelemetryTracingHeaderValue(field, name, value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("%s[%q]: header value must be valid UTF-8", field, name)
+	}
+
+	if containsControl(value) || strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("%s[%q]: header value must not contain control characters", field, name)
+	}
+
+	return nil
+}
+
+func (t TelemetryTracingConfig) validateHeaderSourceConflicts() []error {
+	var errs []error
+
+	seen := map[string]string{}
+	add := func(field string, headers map[string]string) {
+		for _, name := range sortedHeaderKeys(headers) {
+			key := strings.ToLower(name)
+			if previous, ok := seen[key]; ok {
+				source := fmt.Sprintf("%s[%q]", field, name)
+				errs = append(errs, fmt.Errorf("%s: header already configured by %s; configure each OTLP header in only one telemetry.tracing header source", source, previous))
+
+				continue
+			}
+
+			seen[key] = fmt.Sprintf("%s[%q]", field, name)
+		}
+	}
+
+	add("telemetry.tracing.headers", t.Headers)
+	add("telemetry.tracing.headers_env", t.HeadersEnv)
+	add("telemetry.tracing.headers_file", t.HeadersFile)
+
+	return errs
+}
+
+func sortedHeaderKeys(headers map[string]string) []string {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	return keys
 }
 
 func validateTCPBindAddress(field, raw string, allowPortZero bool) error {

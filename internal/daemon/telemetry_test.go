@@ -1,10 +1,14 @@
 package daemon
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -326,6 +330,102 @@ func TestTelemetryRuntimeTracingOnlyDoesNotListen(t *testing.T) {
 	}
 }
 
+func TestTelemetryRuntimeTracingMissingHeaderSourcesFail(t *testing.T) {
+	const envName = "OTLP_MISSING_BRAW_HEADER"
+
+	unsetEnvForDaemonTest(t, envName)
+
+	sourceDir := t.TempDir()
+	cfg := config.Default()
+	cfg.SourceDir = sourceDir
+	cfg.Telemetry.Tracing.Enabled = true
+	cfg.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+	cfg.Telemetry.Tracing.HeadersEnv = map[string]string{
+		"authorization": envName,
+	}
+	cfg.Telemetry.Tracing.HeadersFile = map[string]string{
+		"x-file": "missing-header",
+	}
+
+	sm := newSMWithConfig(t, cfg)
+
+	err := sm.startTelemetryRuntime(t.Context())
+	if err == nil {
+		t.Fatal("startTelemetryRuntime() error = nil, want missing header source errors")
+	}
+
+	for _, want := range []string{
+		`telemetry.tracing.headers_env["authorization"]`,
+		envName,
+		`telemetry.tracing.headers_file["x-file"]`,
+		filepath.Join(sourceDir, "missing-header"),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("startTelemetryRuntime() error = %v, want substring %q", err, want)
+		}
+	}
+
+	if sm.telemetry != nil {
+		t.Fatalf("failed start retained runtime: %+v", sm.telemetry)
+	}
+
+	if sm.tracingEnabled.Load() {
+		t.Fatal("failed tracing start left tracing enabled")
+	}
+}
+
+func TestTelemetryRuntimeTracingHeaderSecretsAreNotLogged(t *testing.T) {
+	const (
+		inlineSecret = "Bearer canny-inline-secret" // #nosec G101 -- fixture exercises log redaction.
+		envSecret    = "Bearer braw-env-secret"     // #nosec G101 -- fixture exercises log redaction.
+		fileSecret   = "Bearer dreich-file-secret"  // #nosec G101 -- fixture exercises log redaction.
+	)
+
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "otlp-header"), []byte(fileSecret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OTLP_BRAW_HEADER", envSecret)
+
+	cfg := config.Default()
+	cfg.SourceDir = sourceDir
+	cfg.Telemetry.Tracing.Enabled = true
+	cfg.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+	cfg.Telemetry.Tracing.Headers = map[string]string{
+		"x-inline": inlineSecret,
+	}
+	cfg.Telemetry.Tracing.HeadersEnv = map[string]string{
+		"x-env": "OTLP_BRAW_HEADER",
+	}
+	cfg.Telemetry.Tracing.HeadersFile = map[string]string{
+		"x-file": "otlp-header",
+	}
+
+	sm := newSMWithConfig(t, cfg)
+
+	var logs bytes.Buffer
+
+	sm.log = slog.New(slog.NewTextHandler(&logs, nil))
+
+	if err := sm.startTelemetryRuntime(t.Context()); err != nil {
+		t.Fatalf("startTelemetryRuntime() error = %v", err)
+	}
+
+	t.Cleanup(sm.stopTelemetryRuntime)
+
+	got := logs.String()
+	if !strings.Contains(got, "telemetry tracing exporter started") {
+		t.Fatalf("startup log missing tracing start message:\n%s", got)
+	}
+
+	for _, forbidden := range []string{inlineSecret, envSecret, fileSecret, "OTLP_BRAW_HEADER", "otlp-header"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("startup log leaked %q:\n%s", forbidden, got)
+		}
+	}
+}
+
 func TestTelemetryRuntimeTracingResource(t *testing.T) {
 	sm := newSMWithConfig(t, config.Default())
 	sm.paths.Profile = "canny"
@@ -435,4 +535,49 @@ func TestApplyConfigRejectsEnabledTelemetryRuntimeReload(t *testing.T) {
 	if got := sm.Config().Telemetry.Metrics.BindAddress; got != "127.0.0.1:9924" {
 		t.Fatalf("rejected telemetry reload was published; bind address = %q", got)
 	}
+}
+
+func TestApplyConfigRejectsEnabledTracingHeaderSourceReload(t *testing.T) {
+	old := config.Default()
+	old.Telemetry.Tracing.Enabled = true
+	old.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+	old.Telemetry.Tracing.HeadersEnv = map[string]string{
+		"authorization": "OTLP_BRAW_HEADER",
+	}
+
+	sm := newSMWithConfig(t, old)
+
+	changed := config.Default()
+	changed.Telemetry.Tracing.Enabled = true
+	changed.Telemetry.Tracing.Endpoint = "127.0.0.1:4317"
+	changed.Telemetry.Tracing.HeadersEnv = map[string]string{
+		"authorization": "OTLP_CANNY_HEADER",
+	}
+
+	err := sm.applyConfig(changed)
+	if err == nil || !strings.Contains(err.Error(), "gr daemon restart") {
+		t.Fatalf("applyConfig() error = %v, want restart-only telemetry rejection", err)
+	}
+
+	if got := sm.Config().Telemetry.Tracing.HeadersEnv["authorization"]; got != "OTLP_BRAW_HEADER" {
+		t.Fatalf("rejected telemetry reload was published; header env = %q", got)
+	}
+}
+
+func unsetEnvForDaemonTest(t *testing.T, name string) {
+	t.Helper()
+
+	value, ok := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("unset %s: %v", name, err)
+	}
+
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(name, value)
+			return
+		}
+
+		_ = os.Unsetenv(name)
+	})
 }

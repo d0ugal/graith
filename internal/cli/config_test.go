@@ -209,6 +209,23 @@ func writeTelemetryHeaderConfig(t *testing.T, secret string) string {
 	return target
 }
 
+func writeTelemetryHeaderSourceConfig(t *testing.T) (target, envName, filePath string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	target = filepath.Join(dir, "config.toml")
+	envName = "OTLP_BRAW_HEADER"
+	filePath = "/Users/braw/.config/graith/otlp-header"
+	body := "[telemetry.tracing.headers_env]\nAuthorization = \"" + envName + "\"\n\n" +
+		"[telemetry.tracing.headers_file]\nX-Graith-Auth = \"" + filePath + "\"\n"
+
+	if err := os.WriteFile(target, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return target, envName, filePath
+}
+
 func assertRedactedTelemetryHeaderOutput(t *testing.T, name, got, secret string) {
 	t.Helper()
 
@@ -391,6 +408,17 @@ func TestConfigShowRedactsTelemetryHeaders(t *testing.T) {
 	assertRedactedTelemetryHeaderOutput(t, "config show", got, secret)
 }
 
+func TestConfigShowRedactsTelemetryHeaderSources(t *testing.T) {
+	target, envName, filePath := writeTelemetryHeaderSourceConfig(t)
+	got := captureConfigCommandForFile(t, target, "show", func() error {
+		return configShowCmd.RunE(configShowCmd, nil)
+	})
+
+	for _, forbidden := range []string{envName, filePath} {
+		assertRedactedTelemetryHeaderOutput(t, "config show", got, forbidden)
+	}
+}
+
 func TestConfigShowCovMissingFileUsesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "nope.toml")
@@ -468,6 +496,17 @@ func TestConfigDiffRedactsTelemetryHeaders(t *testing.T) {
 	})
 
 	assertRedactedTelemetryHeaderOutput(t, "config diff", got, secret)
+}
+
+func TestConfigDiffRedactsTelemetryHeaderSources(t *testing.T) {
+	target, envName, filePath := writeTelemetryHeaderSourceConfig(t)
+	got := captureConfigCommandForFile(t, target, "diff", func() error {
+		return configDiffCmd.RunE(configDiffCmd, nil)
+	})
+
+	for _, forbidden := range []string{envName, filePath} {
+		assertRedactedTelemetryHeaderOutput(t, "config diff", got, forbidden)
+	}
 }
 
 func TestConfigDiffCovMissingFile(t *testing.T) {

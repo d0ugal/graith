@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +65,12 @@ func TestTelemetryConfigValidateAcceptsExplicitValidValues(t *testing.T) {
 				Timeout:  "5s",
 				Headers: map[string]string{
 					"authorization": "Bearer canny",
+				},
+				HeadersEnv: map[string]string{
+					"x-braw-env": "OTLP_BRAW_HEADER",
+				},
+				HeadersFile: map[string]string{
+					"x-braw-file": "~/Library/Application Support/Graith/braw-otlp-header",
 				},
 			},
 		},
@@ -181,6 +189,21 @@ func TestTelemetryConfigValidateRejectsInvalidValues(t *testing.T) {
 			mutate:  func(t *TelemetryConfig) { t.Tracing.Headers = map[string]string{"authorization": "Bearer\nbraw"} },
 			wantErr: "telemetry.tracing.headers",
 		},
+		"tracing env header bad name": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.HeadersEnv = map[string]string{"authorization": "1BAD"} },
+			wantErr: "telemetry.tracing.headers_env",
+		},
+		"tracing file header empty path": {
+			mutate:  func(t *TelemetryConfig) { t.Tracing.HeadersFile = map[string]string{"authorization": ""} },
+			wantErr: "telemetry.tracing.headers_file",
+		},
+		"tracing duplicate header source": {
+			mutate: func(t *TelemetryConfig) {
+				t.Tracing.Headers = map[string]string{"Authorization": "Bearer braw"}
+				t.Tracing.HeadersEnv = map[string]string{"authorization": "OTLP_BRAW_HEADER"}
+			},
+			wantErr: "header already configured",
+		},
 	}
 
 	for name, test := range tests {
@@ -195,6 +218,264 @@ func TestTelemetryConfigValidateRejectsInvalidValues(t *testing.T) {
 
 			if !strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("Validate() = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestTelemetryTracingResolvedHeaders(t *testing.T) {
+	sourceDir := t.TempDir()
+
+	headerDir := filepath.Join(sourceDir, "headers")
+	if err := os.Mkdir(headerDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(headerDir, "authorization"), []byte("\ufeffBearer thrawn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OTLP_BRAW_HEADER", "braw-env-value")
+
+	cfg := TelemetryTracingConfig{
+		Headers: map[string]string{
+			"x-inline": "inline-canny",
+		},
+		HeadersEnv: map[string]string{
+			"x-env": "OTLP_BRAW_HEADER",
+		},
+		HeadersFile: map[string]string{
+			"authorization": "headers/authorization",
+		},
+	}
+
+	got, err := cfg.ResolvedHeaders(sourceDir)
+	if err != nil {
+		t.Fatalf("ResolvedHeaders() error = %v", err)
+	}
+
+	want := map[string]string{
+		"x-inline":      "inline-canny",
+		"x-env":         "braw-env-value",
+		"authorization": "Bearer thrawn",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("ResolvedHeaders() returned %d headers, want %d: %#v", len(got), len(want), got)
+	}
+
+	for name, wantValue := range want {
+		if got[name] != wantValue {
+			t.Errorf("ResolvedHeaders()[%q] = %q, want %q", name, got[name], wantValue)
+		}
+	}
+}
+
+func TestTelemetryTracingResolvedHeadersAcceptsAbsoluteAndHomeTokenFiles(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	homeHeaderPath := filepath.Join(homeDir, "headers", "authorization")
+	if err := os.MkdirAll(filepath.Dir(homeHeaderPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(homeHeaderPath, []byte("Bearer braw\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	absoluteHeaderPath := filepath.Join(t.TempDir(), "otlp-header")
+	if err := os.WriteFile(absoluteHeaderPath, []byte("Bearer canny\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := TelemetryTracingConfig{
+		HeadersFile: map[string]string{
+			"x-home":     "~/headers/authorization",
+			"x-absolute": absoluteHeaderPath,
+		},
+	}
+
+	got, err := cfg.ResolvedHeaders(t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolvedHeaders() error = %v", err)
+	}
+
+	want := map[string]string{
+		"x-home":     "Bearer braw",
+		"x-absolute": "Bearer canny",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("ResolvedHeaders() returned %d headers, want %d: %#v", len(got), len(want), got)
+	}
+
+	for name, wantValue := range want {
+		if got[name] != wantValue {
+			t.Errorf("ResolvedHeaders()[%q] = %q, want %q", name, got[name], wantValue)
+		}
+	}
+}
+
+func TestTelemetryTracingResolvedHeadersRejectsMissingSources(t *testing.T) {
+	const envName = "OTLP_MISSING_BRAW_HEADER"
+
+	unsetEnvForTest(t, envName)
+
+	sourceDir := t.TempDir()
+	cfg := TelemetryTracingConfig{
+		HeadersEnv: map[string]string{
+			"authorization": envName,
+		},
+		HeadersFile: map[string]string{
+			"x-file": "missing-header",
+		},
+	}
+
+	_, err := cfg.ResolvedHeaders(sourceDir)
+	if err == nil {
+		t.Fatal("ResolvedHeaders() error = nil, want missing source errors")
+	}
+
+	for _, want := range []string{
+		`telemetry.tracing.headers_env["authorization"]`,
+		envName,
+		`telemetry.tracing.headers_file["x-file"]`,
+		filepath.Join(sourceDir, "missing-header"),
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ResolvedHeaders() error = %v, want substring %q", err, want)
+		}
+	}
+}
+
+func TestTelemetryTracingResolvedHeadersRejectsInvalidSourceValues(t *testing.T) {
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "empty-header"), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("OTLP_DREICH_HEADER", "Bearer\ndreich")
+
+	cfg := TelemetryTracingConfig{
+		HeadersEnv: map[string]string{
+			"authorization": "OTLP_DREICH_HEADER",
+		},
+		HeadersFile: map[string]string{
+			"x-file": "empty-header",
+		},
+	}
+
+	_, err := cfg.ResolvedHeaders(sourceDir)
+	if err == nil {
+		t.Fatal("ResolvedHeaders() error = nil, want invalid source value errors")
+	}
+
+	for _, want := range []string{
+		"header value must not contain control characters",
+		"empty after trimming whitespace",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ResolvedHeaders() error = %v, want substring %q", err, want)
+		}
+	}
+}
+
+func TestTelemetryTracingResolvedHeadersRejectsUnsafeTokenFiles(t *testing.T) {
+	tests := map[string]struct {
+		sourceDir string
+		path      string
+		setup     func(*testing.T, string)
+		wantErr   string
+	}{
+		"relative path without source directory": {
+			path:    "headers/authorization",
+			wantErr: "relative token file path",
+		},
+		"group readable file": {
+			sourceDir: t.TempDir(),
+			path:      "authorization",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+
+				if err := os.WriteFile(path, []byte("Bearer braw"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // deliberately over-permissive fixture.
+					t.Fatal(err)
+				}
+			},
+			wantErr: "insecure mode",
+		},
+		"directory": {
+			sourceDir: t.TempDir(),
+			path:      "authorization",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "not a regular file",
+		},
+		"oversized file": {
+			sourceDir: t.TempDir(),
+			path:      "authorization",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+
+				data := strings.Repeat("a", telemetryTracingHeaderFileMaxBytes+1)
+				if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "exceeds",
+		},
+		"symlink": {
+			sourceDir: t.TempDir(),
+			path:      "authorization",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+
+				realPath := filepath.Join(filepath.Dir(path), "real-authorization")
+				if err := os.WriteFile(realPath, []byte("Bearer canny"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := os.Symlink(realPath, path); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			},
+			wantErr: "open token file",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := test.path
+			if test.sourceDir != "" {
+				path = filepath.Join(test.sourceDir, test.path)
+			}
+
+			if test.setup != nil {
+				test.setup(t, path)
+			}
+
+			cfg := TelemetryTracingConfig{
+				HeadersFile: map[string]string{
+					"authorization": test.path,
+				},
+			}
+
+			_, err := cfg.ResolvedHeaders(test.sourceDir)
+			if err == nil {
+				t.Fatal("ResolvedHeaders() error = nil, want unsafe token file error")
+			}
+
+			if !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("ResolvedHeaders() error = %v, want substring %q", err, test.wantErr)
 			}
 		})
 	}
@@ -226,13 +507,70 @@ func TestRedactSecretsMasksTelemetryTracingHeaders(t *testing.T) {
 	cfg.Telemetry.Tracing.Headers = map[string]string{
 		"Authorization": "Bearer thrawn",
 	}
+	cfg.Telemetry.Tracing.HeadersEnv = map[string]string{
+		"x-env": "OTLP_BRAW_HEADER",
+	}
+	cfg.Telemetry.Tracing.HeadersFile = map[string]string{
+		"x-file": "/Users/braw/.config/graith/otlp-header",
+	}
 
 	redacted := RedactSecrets(cfg)
 	if got := redacted.Telemetry.Tracing.Headers["Authorization"]; got != RedactedMask {
 		t.Fatalf("redacted tracing header = %q, want %q", got, RedactedMask)
 	}
 
+	if got := redacted.Telemetry.Tracing.HeadersEnv["x-env"]; got != RedactedMask {
+		t.Fatalf("redacted tracing env header source = %q, want %q", got, RedactedMask)
+	}
+
+	if got := redacted.Telemetry.Tracing.HeadersFile["x-file"]; got != RedactedMask {
+		t.Fatalf("redacted tracing file header source = %q, want %q", got, RedactedMask)
+	}
+
+	data, err := EffectiveTOML(redacted)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, forbidden := range []string{
+		"Bearer thrawn",
+		"OTLP_BRAW_HEADER",
+		"/Users/braw/.config/graith/otlp-header",
+	} {
+		if strings.Contains(string(data), forbidden) {
+			t.Fatalf("redacted TOML leaked %q:\n%s", forbidden, data)
+		}
+	}
+
 	if got := cfg.Telemetry.Tracing.Headers["Authorization"]; got != "Bearer thrawn" {
 		t.Fatalf("live config header mutated to %q", got)
 	}
+
+	if got := cfg.Telemetry.Tracing.HeadersEnv["x-env"]; got != "OTLP_BRAW_HEADER" {
+		t.Fatalf("live config env header source mutated to %q", got)
+	}
+
+	if got := cfg.Telemetry.Tracing.HeadersFile["x-file"]; got != "/Users/braw/.config/graith/otlp-header" {
+		t.Fatalf("live config file header source mutated to %q", got)
+	}
+}
+
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+
+	// t.Setenv cannot unset a variable, and these tests must verify the missing
+	// source path without depending on the developer's shell environment.
+	value, ok := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("unset %s: %v", name, err)
+	}
+
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(name, value)
+			return
+		}
+
+		_ = os.Unsetenv(name)
+	})
 }
