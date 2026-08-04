@@ -15,6 +15,7 @@ Manage config with:
 gr config show     # print effective (merged) config
 gr config diff     # show changes from defaults
 gr config reset    # write built-in defaults to config file
+gr config alloy    # generate Grafana Alloy config from resolved paths
 ```
 
 The daemon reloads config on `gr daemon reload` without restarting, and also

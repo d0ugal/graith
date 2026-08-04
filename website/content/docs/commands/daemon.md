@@ -307,6 +307,12 @@ Print the effective (merged) configuration.
 
 Show changes from built-in defaults.
 
+### `gr config alloy`
+
+Generate Grafana Alloy config from the resolved local Graith config. Use
+`--signals daemon-logs,metrics,traces` to select signals; the default is all
+three. Session scrollback log globs are not included.
+
 ### `gr config reset`
 
 Write built-in defaults to the config file.

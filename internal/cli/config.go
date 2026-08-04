@@ -192,9 +192,16 @@ func registerConfigCmd() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configResetCmd)
 	configCmd.AddCommand(configInitCmd)
+	configCmd.AddCommand(configAlloyCmd)
 	configCmd.AddCommand(configPathCmd)
 	configCmd.AddCommand(configDiffCmd)
 	configCmd.AddCommand(configShowCmd)
+	configAlloyCmd.Flags().StringVar(
+		&configAlloySignals,
+		"signals",
+		configAlloyDefaultSignals,
+		"comma-separated signals to generate (daemon-logs,metrics,traces,all)",
+	)
 	configResetCmd.Flags().BoolVar(&configForceReset, "force", false, "overwrite without confirmation")
 	configInitCmd.Flags().BoolVar(&configForceReset, "force", false, "overwrite without confirmation")
 }
