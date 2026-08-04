@@ -67,13 +67,18 @@ func TestLibghosttyNativePathRouting(t *testing.T) {
 	repoRoot := p11RepoRoot()
 	native := readPolicyFile(t, filepath.Join(repoRoot, ".github/workflows/libghostty-native.yml"))
 
-	tests := map[string]bool{
-		"website/content/docs/troubleshooting.md":             false,
-		"docs/design/2026-07-18-libghostty-daemon-backend.md": false,
-		"internal/pty/terminal_backend_ghostty.go":            true,
-		"internal/integration/daemon_test.go":                 true,
-		"libghostty-native.lock.json":                         true,
-		"go.sum":                                              true,
+	tests := map[string]struct {
+		native         bool
+		dependencyUnit bool
+	}{
+		"website/content/docs/troubleshooting.md":             {},
+		"docs/design/2026-07-18-libghostty-daemon-backend.md": {},
+		"internal/pty/terminal_backend_ghostty.go":            {native: true},
+		"internal/integration/daemon_test.go":                 {native: true},
+		"libghostty-native.lock.json":                         {native: true, dependencyUnit: true},
+		"go.sum":                                              {native: true},
+		"cmd/ciclassify/main.go":                              {native: true},
+		".github/workflows/session-navigator-preview.yml":     {native: true},
 	}
 
 	for path, want := range tests {
@@ -82,8 +87,12 @@ func TestLibghosttyNativePathRouting(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if got := classification.LibghosttyNative; got != want {
-			t.Fatalf("native path matcher for %s = %t, want %t", path, got, want)
+		if got := classification.LibghosttyNative; got != want.native {
+			t.Fatalf("native path matcher for %s = %t, want %t", path, got, want.native)
+		}
+
+		if got := classification.LibghosttyDependencyUnit; got != want.dependencyUnit {
+			t.Fatalf("dependency-unit path matcher for %s = %t, want %t", path, got, want.dependencyUnit)
 		}
 	}
 

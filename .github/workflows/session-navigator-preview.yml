@@ -1,0 +1,311 @@
+name: Session Navigator Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'internal/client/**'
+      - 'internal/config/**'
+      - 'internal/sessionlabel/**'
+      - 'internal/protocol/messages.go'
+      - 'cmd/ciclassify/**'
+      - 'cmd/docsdiff/**'
+      - 'cmd/docspreview/**'
+      - 'cmd/sessionnavshots/**'
+      - 'internal/ciworkflow/**'
+      - 'internal/docspreview/**'
+      - 'scripts/session-navigator-terminal-screenshot.sh'
+      - 'Makefile'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/session-navigator-preview.yml'
+  # Safety-net prune of stale screenshot dirs. The docs-preview workflow also
+  # prunes this shared branch; keeping this workflow self-contained makes the
+  # Session Navigator preview independent of docs-only workflow changes.
+  schedule:
+    - cron: '47 4 * * *'
+
+# Screenshots are rendered by the PR-head job, then published by a separate
+# trusted-base job to the orphan `screenshots` branch and sticky PR comment.
+# Same-repo PRs only (fork PRs get a read-only token and cannot push the branch
+# or comment).
+permissions:
+  contents: read
+
+concurrency:
+  group: session-navigator-preview-${{ github.event.pull_request.number || github.event_name }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  changes:
+    name: Detect Session Navigator preview changes
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      trigger: ${{ steps.filter.outputs.trigger }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
+            echo "trigger=true" >> "$GITHUB_OUTPUT"
+            echo "Could not list PR files; running Session Navigator preview to be safe."
+            exit 0
+          fi
+          if ! classification="$(go run ./cmd/ciclassify -mode session-navigator-preview <<<"$files")"; then
+            echo "trigger=true" >> "$GITHUB_OUTPUT"
+            echo "Shared classifier failed; running Session Navigator preview to be safe."
+            exit 0
+          fi
+          echo "$classification" >> "$GITHUB_OUTPUT"
+          if grep -qx 'trigger=true' <<<"$classification"; then
+            echo "Session-Navigator-preview-relevant files changed: rendering screenshots."
+          else
+            echo "No Session-Navigator-preview-relevant files changed: skipping screenshots."
+          fi
+
+  preview:
+    name: Screenshot Session Navigator
+    needs: changes
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      (needs.changes.result != 'success' || needs.changes.outputs.trigger != 'false')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # This job executes PR-controlled rendering code. Keep it read-only and
+    # hand the generated diff assets to the trusted publisher via artifacts.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install terminal screenshot dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fonts-dejavu-core \
+            imagemagick \
+            xdotool \
+            xterm \
+            xvfb
+
+      - name: Render head and base snapshots
+        id: render
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p nav/head-ansi nav/base-ansi nav/head nav/base nav/out
+
+          go run ./cmd/sessionnavshots \
+            -out "$PWD/nav/head-ansi" \
+            -pages "$PWD/nav/pages.json" \
+            -viewports "$PWD/nav/viewports.json"
+
+          has_base=0
+          if git cat-file -e "$BASE_SHA:cmd/sessionnavshots/main.go" 2>/dev/null &&
+             git cat-file -e "$BASE_SHA:internal/client/testdata/session_navigator_screenshot_fixture.json" 2>/dev/null; then
+            if git worktree add --detach /tmp/base-tree "$BASE_SHA"; then
+              base_out="$PWD/nav/base-ansi"
+              base_pages="$PWD/nav/base-pages.json"
+              base_viewports="$PWD/nav/base-viewports.json"
+              (
+                cd /tmp/base-tree
+                go run ./cmd/sessionnavshots \
+                  -out "$base_out" \
+                  -pages "$base_pages" \
+                  -viewports "$base_viewports"
+              ) && has_base=1 || echo "Base Session Navigator snapshot render failed; treating screenshots as new."
+            else
+              echo "Base Session Navigator worktree setup failed; treating screenshots as new."
+            fi
+          else
+            echo "Base commit does not have Session Navigator snapshot tooling; treating screenshots as new."
+          fi
+
+          if [ "$has_base" = "1" ]; then
+            jq 'map(.hasBase = true)' nav/pages.json > nav/pages-with-base.json
+          else
+            jq 'map(.hasBase = false)' nav/pages.json > nav/pages-with-base.json
+          fi
+          mv nav/pages-with-base.json nav/pages.json
+          echo "has_base=$has_base" >> "$GITHUB_OUTPUT"
+          echo "Pages:"; cat nav/pages.json
+          echo "Viewports:"; cat nav/viewports.json
+
+      - name: Screenshot head and base with xterm
+        env:
+          HAS_BASE: ${{ steps.render.outputs.has_base }}
+        run: |
+          set -euo pipefail
+          xvfb-run -a --server-args="-screen 0 4096x1600x24 -nolisten tcp" \
+            scripts/session-navigator-terminal-screenshot.sh \
+            "$PWD/nav/head-ansi" "$PWD/nav/head" "$PWD/nav/pages.json" "$PWD/nav/viewports.json"
+          if [ "$HAS_BASE" = "1" ]; then
+            xvfb-run -a --server-args="-screen 0 4096x1600x24 -nolisten tcp" \
+              scripts/session-navigator-terminal-screenshot.sh \
+              "$PWD/nav/base-ansi" "$PWD/nav/base" "$PWD/nav/base-pages.json" "$PWD/nav/base-viewports.json"
+          fi
+          ls -R nav
+
+      - name: Build diffs
+        run: |
+          go run ./cmd/docsdiff \
+            nav/pages.json "$PWD/nav/base" "$PWD/nav/head" "$PWD/nav/out"
+          echo "Published diff assets:"; ls -la nav/out
+
+      - name: Upload diff assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: session-navigator-preview-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nav/out
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    name: Publish Session Navigator screenshots
+    needs: preview
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      needs.preview.result == 'success' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Rewrites the screenshots branch and upserts the sticky PR comment. This
+    # job must run trusted base code only; the downloaded artifact is treated as
+    # untrusted input and validated by docspreview before publication.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            cmd/docspreview
+            internal/docspreview
+            go.mod
+            go.sum
+      - name: Check trusted publisher support
+        id: trusted-publisher
+        run: |
+          if grep -Rqs 'session-navigator' cmd/docspreview internal/docspreview; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "Trusted base checkout does not yet support Session Navigator preview; skipping publish."
+          fi
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.trusted-publisher.outputs.supported == 'true'
+        with:
+          go-version-file: go.mod
+      - name: Download diff assets
+        if: steps.trusted-publisher.outputs.supported == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: session-navigator-preview-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nav/out
+      - name: Publish screenshots and comment
+        if: steps.trusted-publisher.outputs.supported == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./cmd/docspreview publish -suite session-navigator -manifest nav/out/manifest.json -assets nav/out
+
+  cleanup:
+    name: Clean up screenshots
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Rewrites the screenshots branch and updates the sticky PR comment.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Only the docs-preview Go command is needed — check it out sparsely
+      # (screenshots are read/written via the API, never the working tree) and
+      # don't persist git credentials. Pin to the PR *base* SHA: this job runs
+      # with a write-scoped token and then executes checked-out code, so it
+      # must run the trusted base version, never PR-controlled code from the
+      # default merge ref (the workflow YAML itself is already taken from the
+      # base).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            cmd/docspreview
+            internal/docspreview
+            go.mod
+            go.sum
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Remove PR screenshots from the screenshots branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if grep -Rqs 'session-navigator' cmd/docspreview internal/docspreview; then
+            go run ./cmd/docspreview cleanup -suite session-navigator
+          else
+            echo "Trusted base checkout does not yet support Session Navigator preview; skipping cleanup."
+          fi
+
+  prune:
+    name: Prune stale screenshots
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Rewrites the screenshots branch only (no PR comment on the schedule run).
+    permissions:
+      contents: write
+    steps:
+      # Only the docs-preview Go command is needed — see the cleanup job's
+      # checkout note.
+      # No `ref` pin needed here: the schedule trigger checks out the default
+      # branch (trusted), never PR-controlled content.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            cmd/docspreview
+            internal/docspreview
+            go.mod
+            go.sum
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Remove screenshot dirs older than 30 days
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: go run ./cmd/docspreview prune

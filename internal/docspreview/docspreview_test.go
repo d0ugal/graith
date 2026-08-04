@@ -1,9 +1,13 @@
 package docspreview
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"sort"
@@ -129,6 +133,55 @@ func TestIsSameRepoPR(t *testing.T) {
 
 			if got := IsSameRepoPR(test.event, testRepo); got != test.want {
 				t.Fatalf("IsSameRepoPR() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPreviewSuiteByName(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		name    string
+		want    string
+		wantErr string
+	}{
+		"braw default docs": {
+			want: "docs",
+		},
+		"canny docs": {
+			name: "docs",
+			want: "docs",
+		},
+		"dreich session navigator": {
+			name: "session-navigator",
+			want: "session-navigator",
+		},
+		"thrawn unknown": {
+			name:    "unknown",
+			wantErr: "unknown preview suite",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := PreviewSuiteByName(test.name)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("PreviewSuiteByName() error = %v, want %q", err, test.wantErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got.Name != test.want {
+				t.Fatalf("suite name = %q, want %q", got.Name, test.want)
 			}
 		})
 	}
@@ -421,6 +474,68 @@ func TestCleanup(t *testing.T) {
 		}
 	})
 
+	t.Run("updates session navigator sticky comment", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.seedScreenshotsBranch([]TreeEntry{
+			blobEntry("pr-42/session/nav.png"),
+			blobEntry("pr-7/docs/keep.png"),
+		})
+		github.comments[42] = []Comment{
+			{ID: 99, Body: SessionNavigatorStickyMarker + "\nold navigator body"},
+			{ID: 100, Body: StickyMarker + "\nold docs body"},
+		}
+
+		err := Cleanup(context.Background(), CleanupOptions{
+			Client: github,
+			Repo:   testRepo,
+			Event:  prEvent(42, "clachan/croft"),
+			Suite:  SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got := entryPaths(github.treeAtRef(t, "heads/"+ScreenshotsBranch)); !equalStrings(got, []string{"pr-7/docs/keep.png"}) {
+			t.Fatalf("tree paths = %v, want only pr-7", got)
+		}
+
+		if got := github.comments[42][0].Body; !strings.Contains(got, "Session Navigator preview") || !strings.Contains(got, "cleaned up after it was closed") {
+			t.Fatalf("navigator sticky comment body = %q, want cleanup note", got)
+		}
+
+		if got := github.comments[42][1].Body; got != StickyMarker+"\nold docs body" {
+			t.Fatalf("docs sticky comment was changed: %q", got)
+		}
+	})
+
+	t.Run("updates sticky comment when screenshots were already removed", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.seedScreenshotsBranch([]TreeEntry{blobEntry("pr-7/docs/keep.png")})
+		github.comments[42] = []Comment{{ID: 99, Body: SessionNavigatorStickyMarker + "\nold navigator body"}}
+
+		err := Cleanup(context.Background(), CleanupOptions{
+			Client: github,
+			Repo:   testRepo,
+			Event:  prEvent(42, "clachan/croft"),
+			Suite:  SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.updateRef != 0 || github.calls.createTree != 0 {
+			t.Fatalf("branch writes = %+v, want none", github.calls)
+		}
+
+		if got := github.comments[42][0].Body; !strings.Contains(got, "Session Navigator preview") || !strings.Contains(got, "cleaned up after it was closed") {
+			t.Fatalf("navigator sticky comment body = %q, want cleanup note", got)
+		}
+	})
+
 	t.Run("noops when branch is absent or PR has no screenshots", func(t *testing.T) {
 		t.Parallel()
 
@@ -697,6 +812,7 @@ func TestPublish(t *testing.T) {
 			"deleted-page</b> \u2014 removed",
 			"Pages removed in this PR are shown as their last render on `main`",
 			"https://raw.githubusercontent.com/clachan/croft/screenshots/" + wantPaths[0],
+			`<a href="https://raw.githubusercontent.com/clachan/croft/screenshots/` + wantPaths[0],
 			"_Screenshots stored on the [`screenshots`]",
 		} {
 			if !strings.Contains(body, want) {
@@ -707,6 +823,63 @@ func TestPublish(t *testing.T) {
 		commit := github.commits[github.refs["heads/"+ScreenshotsBranch]]
 		if len(commit.Parents) != 0 {
 			t.Fatalf("root publish parents = %v, want none", commit.Parents)
+		}
+	})
+
+	t.Run("creates session navigator sticky comment", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"session-navigator-all": {
+				"small":  {Kind: "diff", File: "session-navigator-all-small.png"},
+				"normal": {Kind: "same"},
+				"wide":   {Kind: "new", File: "session-navigator-all-wide.png"},
+			},
+		}, map[string]string{
+			"session-navigator-all-small.png": "small-image",
+			"session-navigator-all-wide.png":  "wide-image",
+		})
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "81",
+			RunAttempt:   "2",
+			Now:          now,
+			Suite:        SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		body := github.comments[42][0].Body
+		for _, want := range []string{
+			SessionNavigatorStickyMarker,
+			"Session Navigator preview",
+			"session-navigator-all",
+			"| Small | Normal | Wide |",
+			"_Snapshots new in this PR",
+			"https://raw.githubusercontent.com/clachan/croft/screenshots/pr-42/20260726-abcdef1-81.2/session-navigator-all-small.png",
+			`<a href="https://raw.githubusercontent.com/clachan/croft/screenshots/pr-42/20260726-abcdef1-81.2/session-navigator-all-small.png"`,
+			"https://raw.githubusercontent.com/clachan/croft/screenshots/pr-42/20260726-abcdef1-81.2/session-navigator-all-wide.png",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("comment body missing %q:\n%s", want, body)
+			}
+		}
+
+		if strings.Contains(body, StickyMarker) {
+			t.Fatalf("session navigator comment should not use docs marker:\n%s", body)
+		}
+
+		commit := github.commits[github.refs["heads/"+ScreenshotsBranch]]
+		if !strings.Contains(commit.Message, "session navigator preview: PR #42 @ abcdef1") {
+			t.Fatalf("commit message = %q, want session navigator prefix", commit.Message)
 		}
 	})
 
@@ -754,10 +927,45 @@ func TestPublish(t *testing.T) {
 		}
 	})
 
-	t.Run("same-only manifest comments without branch write", func(t *testing.T) {
+	t.Run("same-only manifest noops without existing sticky comment", func(t *testing.T) {
 		t.Parallel()
 
 		github := newFakeGitHub()
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "same"},
+				"mobile":  {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.createBlob != 0 || github.calls.createTree != 0 || github.calls.createRef != 0 {
+			t.Fatalf("branch writes = %+v, want none for same-only manifest", github.calls)
+		}
+
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want no new sticky comment for same-only manifest", github.comments[42])
+		}
+	})
+
+	t.Run("same-only manifest updates existing sticky comment without branch write", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{{ID: 44, Body: StickyMarker + "\nold"}}
 		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
 			"dreich-page": {
 				"desktop": {Kind: "same"},
@@ -836,6 +1044,158 @@ func TestPublish(t *testing.T) {
 
 		if github.calls.totalWrites() != 0 || github.calls.getRef != 0 {
 			t.Fatalf("calls = %+v, want no GitHub traffic for malformed manifest", github.calls)
+		}
+	})
+
+	t.Run("unsafe manifest asset fails without writing", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "diff", File: "../dreich.png"},
+			},
+		}, map[string]string{"dreich.png": "image-bytes"})
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "84",
+			Now:          now,
+		})
+		if err == nil || !strings.Contains(err.Error(), "unsafe asset filename") {
+			t.Fatalf("Publish() error = %v, want unsafe asset failure", err)
+		}
+
+		if github.calls.totalWrites() != 0 || github.calls.getRef != 0 {
+			t.Fatalf("calls = %+v, want no GitHub traffic for unsafe manifest", github.calls)
+		}
+	})
+
+	t.Run("unsafe manifest metadata fails without writing", func(t *testing.T) {
+		t.Parallel()
+
+		tests := map[string]struct {
+			manifest PreviewManifest
+			files    map[string]string
+			wantErr  string
+		}{
+			"missing changed asset": {
+				manifest: PreviewManifest{"dreich-page": {"desktop": {Kind: "diff"}}},
+				wantErr:  "missing asset filename",
+			},
+			"same entry with asset": {
+				manifest: PreviewManifest{"dreich-page": {"desktop": {Kind: "same", File: "dreich.png"}}},
+				files:    map[string]string{"dreich.png": "image-bytes"},
+				wantErr:  "unexpected asset filename",
+			},
+			"unsafe page": {
+				manifest: PreviewManifest{"../dreich": {"desktop": {Kind: "same"}}},
+				wantErr:  "unsafe page name",
+			},
+			"unsafe viewport": {
+				manifest: PreviewManifest{"dreich-page": {"../desktop": {Kind: "same"}}},
+				wantErr:  "unsafe viewport label",
+			},
+			"unknown kind": {
+				manifest: PreviewManifest{"dreich-page": {"desktop": {Kind: "changed", File: "dreich.png"}}},
+				files:    map[string]string{"dreich.png": "image-bytes"},
+				wantErr:  "unknown screenshot kind",
+			},
+		}
+
+		for name, test := range tests {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				github := newFakeGitHub()
+				assetsDir, manifestPath := writePreviewAssets(t, test.manifest, test.files)
+
+				err := Publish(context.Background(), PublishOptions{
+					Client:       github,
+					Repo:         testRepo,
+					Event:        prEvent(42, "clachan/croft"),
+					ManifestPath: manifestPath,
+					AssetsDir:    assetsDir,
+					SHA:          "abcdef123456",
+					RunID:        "84",
+					Now:          now,
+				})
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("Publish() error = %v, want %q", err, test.wantErr)
+				}
+
+				if github.calls.totalWrites() != 0 || github.calls.getRef != 0 {
+					t.Fatalf("calls = %+v, want no GitHub traffic for unsafe manifest", github.calls)
+				}
+			})
+		}
+	})
+
+	t.Run("invalid preview asset fails without writing", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "diff", File: "dreich.png"},
+			},
+		}, map[string]string{"dreich.png": "image-bytes"})
+		if err := os.WriteFile(filepath.Join(assetsDir, "dreich.png"), []byte("not a png"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "84",
+			Now:          now,
+		})
+		if err == nil || !strings.Contains(err.Error(), "not a valid PNG") {
+			t.Fatalf("Publish() error = %v, want invalid PNG failure", err)
+		}
+
+		if github.calls.totalWrites() != 0 || github.calls.getRef != 0 {
+			t.Fatalf("calls = %+v, want no GitHub traffic for invalid preview asset", github.calls)
+		}
+	})
+
+	t.Run("duplicate manifest asset fails without writing", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "diff", File: "dreich.png"},
+				"mobile":  {Kind: "diff", File: "dreich.png"},
+			},
+		}, map[string]string{"dreich.png": "image-bytes"})
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "84",
+			Now:          now,
+		})
+		if err == nil || !strings.Contains(err.Error(), "duplicated") {
+			t.Fatalf("Publish() error = %v, want duplicate asset failure", err)
+		}
+
+		if github.calls.totalWrites() != 0 || github.calls.getRef != 0 {
+			t.Fatalf("calls = %+v, want no GitHub traffic for duplicate manifest", github.calls)
 		}
 	})
 
@@ -929,18 +1289,35 @@ func writePreviewAssets(t *testing.T, manifest PreviewManifest, files map[string
 		t.Fatal(err)
 	}
 
-	for name, content := range files {
+	for name := range files {
 		path := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		if err := os.WriteFile(path, previewPNGBytes(t), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	return dir, manifestPath
+}
+
+func previewPNGBytes(t *testing.T) []byte {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{R: 0x30, G: 0x36, B: 0x40, A: 0xff})
+	img.Set(1, 0, color.RGBA{R: 0xd8, G: 0xde, B: 0xe9, A: 0xff})
+	img.Set(0, 1, color.RGBA{R: 0x61, G: 0xaf, B: 0xef, A: 0xff})
+	img.Set(1, 1, color.RGBA{R: 0xc6, G: 0x78, B: 0xdd, A: 0xff})
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+
+	return buf.Bytes()
 }
 
 type fakeGitHub struct {

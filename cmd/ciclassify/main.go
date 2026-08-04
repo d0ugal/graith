@@ -23,7 +23,7 @@ func main() {
 
 func run(args []string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet("ciclassify", flag.ContinueOnError)
-	mode := flags.String("mode", "", "classifier mode: ci, coverage, sandbox, libghostty, dev-release, stable-release, docs-preview")
+	mode := flags.String("mode", "", "classifier mode: ci, coverage, sandbox, libghostty, dev-release, stable-release, docs-preview, session-navigator-preview")
 	changedFilesPath := flags.String("changed-files", "", "newline-delimited changed file list; stdin when empty")
 	githubOutput := flags.String("github-output", "", "append GitHub Actions outputs to this file")
 	jsonOutput := flags.Bool("json", false, "write full classifier result as JSON")

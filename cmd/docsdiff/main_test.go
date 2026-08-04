@@ -396,6 +396,121 @@ func TestRunBatchPreservesManifestCountsAndPageKinds(t *testing.T) {
 	assertPixel(t, composite, 4, 2, [4]byte{0xe2, 0xe2, 0xe2, 0xff})
 }
 
+func TestRunBatchUsesCustomViewportLabels(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	baseDir := filepath.Join(dir, "base")
+	headDir := filepath.Join(dir, "head")
+	outDir := filepath.Join(dir, "out")
+
+	for _, path := range []string{baseDir, headDir} {
+		if err := os.MkdirAll(path, 0o750); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+	}
+
+	pagesJSON := `[
+  {"name":"canny","hasBase":true,"deleted":false,"viewports":["small","wide"]}
+]`
+
+	pagesPath := filepath.Join(dir, "pages.json")
+	if err := os.WriteFile(pagesPath, []byte(pagesJSON), 0o600); err != nil {
+		t.Fatalf("write pages.json: %v", err)
+	}
+
+	base := rowImage([]byte{1, 2, 3, 4, 5, 6, 7, 8}, 2)
+	head := rowImage([]byte{1, 2, 90, 91, 92, 93, 7, 8}, 2)
+
+	writePNGForTest(t, filepath.Join(baseDir, "canny-small.png"), base)
+	writePNGForTest(t, filepath.Join(headDir, "canny-small.png"), base)
+	writePNGForTest(t, filepath.Join(baseDir, "canny-wide.png"), base)
+	writePNGForTest(t, filepath.Join(headDir, "canny-wide.png"), head)
+
+	var (
+		stdout bytes.Buffer
+		stderr bytes.Buffer
+	)
+	if got := run([]string{pagesPath, baseDir, headDir, outDir}, &stdout, &stderr); got != 0 {
+		t.Fatalf("batch run exit = %d, want 0; stderr=%q", got, stderr.String())
+	}
+
+	if got, want := stdout.String(), "docs-diff: {\"same\":1,\"diff\":1}\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+
+	manifestData, err := os.ReadFile(filepath.Join(outDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+
+	wantManifest := `{
+  "canny": {
+    "small": {
+      "kind": "same"
+    },
+    "wide": {
+      "kind": "diff",
+      "file": "canny-wide.png"
+    }
+  }
+}`
+	if string(manifestData) != wantManifest {
+		t.Fatalf("manifest mismatch:\ngot:\n%s\nwant:\n%s", manifestData, wantManifest)
+	}
+
+	if _, err := os.Stat(filepath.Join(outDir, "canny-small.png")); !os.IsNotExist(err) {
+		t.Fatalf("same custom viewport wrote image, stat error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outDir, "canny-wide.png")); err != nil {
+		t.Fatalf("missing diff image: %v", err)
+	}
+}
+
+func TestRunBatchRejectsUnsafeNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		pagesJSON string
+		want      string
+	}{
+		"canny viewport": {
+			pagesJSON: `[{"name":"canny","viewports":["../wide"]}]`,
+			want:      "unsafe viewport label",
+		},
+		"dreich page": {
+			pagesJSON: `[{"name":"../canny","viewports":["wide"]}]`,
+			want:      "unsafe page name",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			pagesPath := filepath.Join(dir, "pages.json")
+			if err := os.WriteFile(pagesPath, []byte(test.pagesJSON), 0o600); err != nil {
+				t.Fatalf("write pages.json: %v", err)
+			}
+
+			var (
+				stdout bytes.Buffer
+				stderr bytes.Buffer
+			)
+			if got := run([]string{pagesPath, dir, dir, filepath.Join(dir, "out")}, &stdout, &stderr); got == 0 {
+				t.Fatalf("batch run exit = 0, want failure; stdout=%q", stdout.String())
+			}
+
+			if !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), test.want)
+			}
+		})
+	}
+}
+
 func assertSegments(t *testing.T, got, want []segment) {
 	t.Helper()
 

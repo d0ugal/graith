@@ -1,0 +1,270 @@
+{
+  "now": "2026-08-04T12:00:00Z",
+  "home_dir": "/Users/dougalmatthews",
+  "profile": "preview",
+  "current_session_id": "orchestrator-root",
+  "shortcut_keys": "123456789",
+  "preview": "$ go test ./internal/client\nok  github.com/d0ugal/graith/internal/client  0.123s\n\n$ go run ./cmd/sessionnavshots -sizes small:80x24,normal:120x30,wide:240x40\nsessionnavshots: rendered 4 page(s) across 3 terminal size(s)\n\nWaiting for visual diff artifacts...",
+  "collapsed": {
+    "read-only-audit": true
+  },
+  "sessions": [
+    {
+      "id": "orchestrator-root",
+      "name": "orchestrator",
+      "labels": ["scenario", "ship-it"],
+      "status": "running",
+      "agent_status": "active",
+      "agent": "graith",
+      "tool_name": "graith",
+      "system_kind": "orchestrator",
+      "scenario_id": "scenario-navigator-screenshots",
+      "scenario_name": "navigator screenshot CI",
+      "created_at": "2026-08-04T09:50:00Z",
+      "last_attached_at": "2026-08-04T11:58:00Z",
+      "status_changed_at": "2026-08-04T09:50:00Z",
+      "last_output_at": "2026-08-04T11:56:00Z",
+      "summary_text": "Coordinating investigation, implementation, review, and CI for navigator screenshots.",
+      "todo_done": 4,
+      "todo_total": 7
+    },
+    {
+      "id": "feature-navigator-shots",
+      "parent_id": "orchestrator-root",
+      "name": "session-navigator-screenshots-with-a-deliberately-long-name",
+      "labels": ["ci", "review-needed", "visual-regression", "very-long-label-for-chip-overflow"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/navigator-screenshot-ci",
+      "cwd": "/Users/dougalmatthews/src/graith",
+      "branch": "d0ugal/graith/session-navigator-preview",
+      "base_branch": "main",
+      "agent": "codex",
+      "agent_session_id": "codex-snapshot-001",
+      "status": "running",
+      "agent_status": "thinking",
+      "created_at": "2026-08-04T10:30:00Z",
+      "last_attached_at": "2026-08-04T11:45:00Z",
+      "status_changed_at": "2026-08-04T11:52:00Z",
+      "last_output_at": "2026-08-04T11:59:30Z",
+      "dirty": true,
+      "unpushed_count": 2,
+      "sandboxed": true,
+      "model": "gpt-5",
+      "config_stale": true,
+      "starred": true,
+      "summary_text": "Implement deterministic Session Navigator screenshots with fake session data, multiple terminal sizes, and sticky PR comments.",
+      "pull_request": {
+        "number": 1870,
+        "state": "open",
+        "url": "https://github.com/d0ugal/graith/pull/1870",
+        "review_decision": "review_required"
+      },
+      "ci": {
+        "state": "pending",
+        "passed": 16,
+        "total": 22
+      },
+      "tokens": {
+        "input": 481000,
+        "output": 92000,
+        "cache_creation": 12000,
+        "cache_read": 776000,
+        "total": 1361000
+      },
+      "context_pressure": true,
+      "sub_agent_count": 2,
+      "todo_done": 3,
+      "todo_total": 8
+    },
+    {
+      "id": "child-reviewer",
+      "parent_id": "feature-navigator-shots",
+      "name": "reviewer-follow-up",
+      "labels": ["review-needed", "tribunal"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/reviewer-follow-up",
+      "branch": "d0ugal/graith/session-navigator-preview-review",
+      "base_branch": "main",
+      "agent": "claude",
+      "status": "running",
+      "agent_status": "blocked",
+      "created_at": "2026-08-04T10:45:00Z",
+      "last_attached_at": "2026-08-04T11:20:00Z",
+      "status_changed_at": "2026-08-04T11:35:00Z",
+      "last_output_at": "2026-08-04T11:48:00Z",
+      "dirty": false,
+      "unpushed_count": 0,
+      "model": "claude-opus-4.1",
+      "summary_text": "Reviewing the screenshot publisher and checking whether the sticky comment stays readable.",
+      "pull_request": {
+        "number": 1871,
+        "state": "draft",
+        "url": "https://github.com/d0ugal/graith/pull/1871",
+        "review_decision": "changes_requested",
+        "conflicting": true
+      },
+      "ci": {
+        "state": "failing",
+        "failing_checks": ["go test ./...", "workflow policy"],
+        "passed": 19,
+        "total": 22
+      },
+      "tokens": {
+        "input": 21000,
+        "output": 5300,
+        "total": 26300,
+        "degraded": true
+      }
+    },
+    {
+      "id": "docs-merged",
+      "parent_id": "orchestrator-root",
+      "name": "docs-preview-existing-pattern",
+      "labels": ["docs", "visual-regression"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/docs-preview",
+      "branch": "d0ugal/graith/docs-preview",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "stopped",
+      "agent_status": "done",
+      "exit_code": 0,
+      "created_at": "2026-08-03T15:30:00Z",
+      "last_attached_at": "2026-08-04T08:00:00Z",
+      "status_changed_at": "2026-08-04T08:10:00Z",
+      "last_output_at": "2026-08-04T08:10:00Z",
+      "model": "gpt-5",
+      "summary_text": "Existing docs screenshots publish through an orphan screenshots branch and sticky PR comment.",
+      "summary_faded": true,
+      "pull_request": {
+        "number": 1822,
+        "state": "merged",
+        "url": "https://github.com/d0ugal/graith/pull/1822",
+        "review_decision": "approved"
+      },
+      "ci": {
+        "state": "pending",
+        "passed": 16,
+        "total": 22
+      }
+    },
+    {
+      "id": "read-only-audit",
+      "parent_id": "orchestrator-root",
+      "name": "read-only-audit",
+      "labels": ["security", "audit"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith",
+      "branch": "main",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "running",
+      "agent_status": "reading",
+      "created_at": "2026-08-04T07:20:00Z",
+      "last_attached_at": "2026-08-04T10:15:00Z",
+      "status_changed_at": "2026-08-04T10:20:00Z",
+      "last_output_at": "2026-08-04T11:40:00Z",
+      "read_only_branch": true,
+      "read_only_revision": "9cf8f13d",
+      "model": "gpt-5",
+      "summary_text": "Collapsed read-only audit parent with hidden descendants so review can catch fold indicator changes."
+    },
+    {
+      "id": "read-only-child",
+      "parent_id": "read-only-audit",
+      "name": "hidden-read-only-child",
+      "labels": ["security"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "branch": "main",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "running",
+      "agent_status": "active",
+      "created_at": "2026-08-04T08:00:00Z",
+      "last_output_at": "2026-08-04T09:00:00Z",
+      "summary_text": "This child is hidden by the collapsed parent in the default all view."
+    },
+    {
+      "id": "mirror-playback",
+      "name": "mirror-playback",
+      "labels": ["mirror", "read-only"],
+      "repo_name": "no-repo",
+      "agent": "codex",
+      "status": "stopped",
+      "agent_status": "done",
+      "created_at": "2026-08-02T12:00:00Z",
+      "last_output_at": "2026-08-02T12:20:00Z",
+      "mirror": true,
+      "summary_text": "Mirror session without branch or git state.",
+      "summary_faded": true
+    },
+    {
+      "id": "in-place-debug",
+      "name": "in-place-debug",
+      "labels": ["debug", "local"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith",
+      "agent": "codex",
+      "status": "error",
+      "agent_status": "errored",
+      "exit_code": 1,
+      "created_at": "2026-08-04T06:15:00Z",
+      "last_attached_at": "2026-08-04T06:30:00Z",
+      "status_changed_at": "2026-08-04T06:35:00Z",
+      "last_output_at": "2026-08-04T06:35:00Z",
+      "in_place": true,
+      "summary_text": "Errored in-place debugging session with no PR."
+    }
+  ],
+  "deleted_sessions": [
+    {
+      "id": "deleted-stopped",
+      "name": "deleted-stopped-session",
+      "labels": ["cleanup", "deleted"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/deleted-stopped",
+      "branch": "d0ugal/graith/deleted-stopped",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "stopped",
+      "agent_status": "done",
+      "created_at": "2026-08-01T12:00:00Z",
+      "last_attached_at": "2026-08-02T12:00:00Z",
+      "status_changed_at": "2026-08-02T12:05:00Z",
+      "last_output_at": "2026-08-02T12:05:00Z",
+      "deleted_at": "2026-08-04T11:30:00Z",
+      "delete_expires_at": "2026-08-11T11:30:00Z",
+      "summary_text": "Soft-deleted stopped session retained for recovery."
+    }
+  ],
+  "scenes": [
+    {
+      "name": "session-navigator-all",
+      "view": "all",
+      "session_id": "feature-navigator-shots"
+    },
+    {
+      "name": "session-navigator-repo",
+      "view": "repo",
+      "session_id": "feature-navigator-shots"
+    },
+    {
+      "name": "session-navigator-labels",
+      "view": "labels",
+      "session_id": "feature-navigator-shots",
+      "label_group": "visual-regression"
+    },
+    {
+      "name": "session-navigator-deleted",
+      "view": "deleted",
+      "session_id": "deleted-stopped"
+    }
+  ]
+}

@@ -3540,6 +3540,8 @@ func TestView_SessionNavigatorContextAtCompactAndWideSizes(t *testing.T) {
 }
 
 func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
+	const terminalWidth = 240
+
 	now := time.Now()
 	sessions := []protocol.SessionInfo{
 		{
@@ -3563,7 +3565,7 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 	}
 
 	m := newOverlayModel(sessions, "braw-wide-detail", noopFetchPreview, nil, nil, nil)
-	updated, _ := sendWindowSize(m, 160, 40)
+	updated, _ := sendWindowSize(m, terminalWidth, 40)
 	om := asOverlay(updated)
 	updated, _ = om.Update(previewMsg{
 		sessionID: "braw-wide-detail",
@@ -3611,8 +3613,8 @@ func TestView_WideSelectedSessionDetailPanel(t *testing.T) {
 	}
 
 	for i, line := range strings.Split(view, "\n") {
-		if width := ansi.StringWidth(line); width > 160 {
-			t.Errorf("line %d width = %d, want <= 160: %q", i+1, width, line)
+		if width := ansi.StringWidth(line); width > terminalWidth {
+			t.Errorf("line %d width = %d, want <= %d: %q", i+1, width, terminalWidth, line)
 		}
 	}
 }
@@ -3631,7 +3633,7 @@ func TestView_WideSelectedSessionDetailShowsFullStatusAtBottom(t *testing.T) {
 	}}
 
 	m := newOverlayModel(sessions, "braw-full-status", nil, nil, nil, nil)
-	updated, _ := sendWindowSize(m, 160, 40)
+	updated, _ := sendWindowSize(m, 240, 40)
 	view := ansi.Strip(asOverlay(updated).View().Content)
 
 	if !strings.Contains(view, "Selected Session") {
@@ -3666,7 +3668,7 @@ func TestView_WideSelectedSessionDetailVeryLongStatusKeepsHelpVisible(t *testing
 	}}
 
 	m := newOverlayModel(sessions, "braw-long-status", nil, nil, nil, nil)
-	updated, _ := sendWindowSize(m, 160, 24)
+	updated, _ := sendWindowSize(m, 240, 24)
 	view := ansi.Strip(asOverlay(updated).View().Content)
 
 	for _, want := range []string{
@@ -3681,8 +3683,8 @@ func TestView_WideSelectedSessionDetailVeryLongStatusKeepsHelpVisible(t *testing
 	}
 
 	for i, line := range strings.Split(asOverlay(updated).View().Content, "\n") {
-		if width := ansi.StringWidth(line); width > 160 {
-			t.Fatalf("line %d width = %d, want <= 160: %q", i+1, width, line)
+		if width := ansi.StringWidth(line); width > 240 {
+			t.Fatalf("line %d width = %d, want <= 240: %q", i+1, width, line)
 		}
 	}
 }
@@ -4104,7 +4106,7 @@ func TestView_WideSelectedSessionDetailFieldsConfig(t *testing.T) {
 	m := newOverlayModel(sessions, "braw-field-detail", nil, nil, nil, nil)
 	m.selectedDetail.Fields = []string{"branch", "labels"}
 
-	updated, _ := sendWindowSize(m, 160, 40)
+	updated, _ := sendWindowSize(m, 240, 40)
 	view := ansi.Strip(asOverlay(updated).View().Content)
 
 	for _, want := range []string{
@@ -4338,12 +4340,12 @@ func TestView_ShowsGroupHeaders(t *testing.T) {
 
 func TestView_ShowsColumnHeaders(t *testing.T) {
 	m := newOverlayModel(overlayTestSessions(), "", nil, nil, nil, nil)
-	updated, _ := sendWindowSize(m, 150, 40)
+	updated, _ := sendWindowSize(m, m.contentWidth+8, 40)
 	view := asOverlay(updated).View().Content
 
 	for _, header := range []string{"Session", "Status", "Summary", "Git", "PR", "Output"} {
 		if !strings.Contains(view, header) {
-			t.Errorf("view should contain column header %q", header)
+			t.Errorf("view should contain column header %q:\n%s", header, ansi.Strip(view))
 		}
 	}
 }
@@ -6686,6 +6688,16 @@ func TestColumnWidths_TotalWidthCountsAllTUIColumns(t *testing.T) {
 
 	if base.totalWidth() != want {
 		t.Errorf("totalWidth = %d, want %d (all TUI columns counted)", base.totalWidth(), want)
+	}
+}
+
+func TestComputeColumnWidthsIncludesTUIHeaders(t *testing.T) {
+	cols := computeColumnWidths(nil, "")
+
+	for _, c := range tuiColumns() {
+		if got, want := cols.col(c.Key), lipgloss.Width(c.Header); got < want {
+			t.Errorf("column %q width = %d, want at least header width %d", c.Key, got, want)
+		}
 	}
 }
 

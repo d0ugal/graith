@@ -9,6 +9,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -254,6 +256,31 @@ var (
 		lipgloss.Color("#7f1d1d"),
 	}
 )
+
+var (
+	overlayNowValue         atomic.Value
+	overlayUserHomeDirValue atomic.Value
+	overlayProvidersOnce    sync.Once
+)
+
+func ensureOverlayProviders() {
+	overlayProvidersOnce.Do(func() {
+		overlayNowValue.Store(time.Now)
+		overlayUserHomeDirValue.Store(os.UserHomeDir)
+	})
+}
+
+func overlayNow() time.Time {
+	ensureOverlayProviders()
+
+	return overlayNowValue.Load().(func() time.Time)()
+}
+
+func overlayUserHomeDir() (string, error) {
+	ensureOverlayProviders()
+
+	return overlayUserHomeDirValue.Load().(func() (string, error))()
+}
 
 type sessionItem struct {
 	info            protocol.SessionInfo
@@ -849,7 +876,7 @@ func displayLastOutput(s protocol.SessionInfo) string {
 	}
 
 	if t, err := time.Parse(time.RFC3339, ts); err == nil {
-		return ShortDuration(time.Since(t))
+		return ShortDuration(overlayNow().Sub(t))
 	}
 
 	return ""
@@ -876,7 +903,7 @@ func TruncateSummary(text string, width int) string {
 }
 
 func shortenPath(p string) string {
-	home, err := os.UserHomeDir()
+	home, err := overlayUserHomeDir()
 	if err == nil && strings.HasPrefix(p, home) {
 		return "~" + p[len(home):]
 	}
@@ -988,6 +1015,10 @@ func computeColumnWidths(sessions []protocol.SessionInfo, _ string) columnWidths
 	}
 
 	for _, c := range tuiCols {
+		if n := lipgloss.Width(c.Header); n > widths[c.Key] {
+			widths[c.Key] = n
+		}
+
 		if widths[c.Key] < c.MinWidth {
 			widths[c.Key] = c.MinWidth
 		}
@@ -1927,7 +1958,7 @@ func detailTimestamp(value string) string {
 		return value
 	}
 
-	now := time.Now()
+	now := overlayNow()
 	delta := now.Sub(t)
 	suffix := " ago"
 
@@ -1937,11 +1968,13 @@ func detailTimestamp(value string) string {
 	}
 
 	layout := "Jan 2 15:04"
-	if t.Local().Year() != now.Local().Year() {
+
+	local := t.In(now.Location())
+	if local.Year() != now.Year() {
 		layout = "Jan 2 2006 15:04"
 	}
 
-	return fmt.Sprintf("%s (%s%s)", t.Local().Format(layout), ShortDuration(delta), suffix)
+	return fmt.Sprintf("%s (%s%s)", local.Format(layout), ShortDuration(delta), suffix)
 }
 
 func renderedBlockWidth(lines []string) int {
@@ -3005,6 +3038,57 @@ func newOverlayModel(sessions []protocol.SessionInfo, currentSessionID string, f
 		keySearch:           "/",
 		keyCancel:           []string{"q", "esc", "ctrl+c"},
 	}
+}
+
+type sessionNavigatorModelOptions struct {
+	Sessions         []protocol.SessionInfo
+	DeletedSessions  []protocol.SessionInfo
+	CurrentSessionID string
+	FetchPreview     func(sessionID string) string
+	RefreshSessions  func() []protocol.SessionInfo
+	RefreshDeleted   func() []protocol.SessionInfo
+	DeleteSession    func(sessionID string, children bool) error
+	RestartSession   func(sessionID string) error
+	StopSession      func(sessionID string) error
+	ToggleStar       func(sessionID string, star bool) error
+	RestoreSession   func(sessionID string) error
+	Profile          string
+	Collapsed        map[string]bool
+	State            SessionNavigatorState
+	RepoSuggestions  []RepoSuggestion
+	ShortcutKeys     string
+	Agents           []string
+	DefaultAgent     string
+	Keys             SessionNavigatorKeys
+	Help             SessionNavigatorHelp
+	SelectedDetail   *SelectedDetailConfig
+}
+
+func newSessionNavigatorModel(opts sessionNavigatorModelOptions) *overlayModel {
+	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
+	m.refreshSessions = opts.RefreshSessions
+	m.refreshDeleted = opts.RefreshDeleted
+	m.refreshDeletedNow()
+
+	if opts.DeletedSessions != nil {
+		m.deletedSessions = opts.DeletedSessions
+		m.deletedReady = true
+	}
+
+	m.restartSession = opts.RestartSession
+	m.stopSession = opts.StopSession
+	m.toggleStar = opts.ToggleStar
+	m.restoreSession = opts.RestoreSession
+	m.profile = opts.Profile
+	m.repoSuggestions = opts.RepoSuggestions
+	m.agents = opts.Agents
+	m.defaultAgent = opts.DefaultAgent
+	m.selectedDetail = selectedDetailConfigOrDefault(opts.SelectedDetail)
+	m.applyKeys(opts.Keys)
+	m.applyHelp(opts.Help)
+	m.restoreSessionNavigatorState(opts.State)
+
+	return m
 }
 
 // descendantCount returns the complete live subtree below sessionID. It uses
@@ -4163,11 +4247,11 @@ func (m *overlayModel) View() tea.View {
 		}
 
 		headerLine := headerPrefix + strings.Join(headerCells, "  ")
-		panelContent.WriteString(dim.Render(headerLine))
+		panelContent.WriteString(fitStyledLine(dim.Render(headerLine), panelInnerWidth))
 		panelContent.WriteString("\n")
 
 		sepLine := headerPrefix + strings.Join(sepCells, "  ")
-		panelContent.WriteString(dim.Render(sepLine))
+		panelContent.WriteString(fitStyledLine(dim.Render(sepLine), panelInnerWidth))
 		panelContent.WriteString("\n")
 
 		if len(m.list.Items()) == 0 {
@@ -4296,7 +4380,7 @@ func (m *overlayModel) View() tea.View {
 				}
 
 				if t, err := time.Parse(time.RFC3339, s.CreatedAt); err == nil {
-					line2 = append(line2, "created "+ShortDuration(time.Since(t))+" ago")
+					line2 = append(line2, "created "+ShortDuration(overlayNow().Sub(t))+" ago")
 				}
 
 				if len(line2) > 0 {
@@ -4594,22 +4678,28 @@ type RunSessionNavigatorOpts struct {
 
 // RunSessionNavigator launches the Bubble Tea Session Navigator.
 func RunSessionNavigator(opts RunSessionNavigatorOpts) *SessionNavigatorResult {
-	m := newOverlayModel(opts.Sessions, opts.CurrentSessionID, opts.FetchPreview, opts.DeleteSession, opts.Collapsed, []rune(opts.ShortcutKeys))
-	m.refreshSessions = opts.RefreshSessions
-	m.refreshDeleted = opts.RefreshDeleted
-	m.refreshDeletedNow()
-	m.restoreSessionNavigatorState(opts.State)
-	m.restartSession = opts.RestartSession
-	m.stopSession = opts.StopSession
-	m.toggleStar = opts.ToggleStar
-	m.restoreSession = opts.RestoreSession
-	m.profile = opts.Profile
-	m.repoSuggestions = opts.RepoSuggestions
-	m.agents = opts.Agents
-	m.defaultAgent = opts.DefaultAgent
-	m.selectedDetail = selectedDetailConfigOrDefault(opts.SelectedDetail)
-	m.applyKeys(opts.Keys)
-	m.applyHelp(opts.Help)
+	m := newSessionNavigatorModel(sessionNavigatorModelOptions{
+		Sessions:         opts.Sessions,
+		CurrentSessionID: opts.CurrentSessionID,
+		FetchPreview:     opts.FetchPreview,
+		RefreshSessions:  opts.RefreshSessions,
+		RefreshDeleted:   opts.RefreshDeleted,
+		DeleteSession:    opts.DeleteSession,
+		RestartSession:   opts.RestartSession,
+		StopSession:      opts.StopSession,
+		ToggleStar:       opts.ToggleStar,
+		RestoreSession:   opts.RestoreSession,
+		Profile:          opts.Profile,
+		Collapsed:        opts.Collapsed,
+		State:            opts.State,
+		RepoSuggestions:  opts.RepoSuggestions,
+		ShortcutKeys:     opts.ShortcutKeys,
+		Agents:           opts.Agents,
+		DefaultAgent:     opts.DefaultAgent,
+		Keys:             opts.Keys,
+		Help:             opts.Help,
+		SelectedDetail:   opts.SelectedDetail,
+	})
 	p := tea.NewProgram(m)
 
 	final, err := p.Run()
