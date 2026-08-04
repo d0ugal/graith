@@ -89,6 +89,12 @@ When enabling metrics for local collection, point Alloy or another Prometheus
 scraper at `http://127.0.0.1:4824/metrics` unless you changed the address or
 path.
 
+Graith deliberately keeps metrics collector-based: a collector such as
+Prometheus or Alloy owns remote-write delivery to Mimir or other long-term
+storage. See the
+[collector-based metrics shipping decision](https://github.com/d0ugal/graith/blob/main/docs/design/2026-08-04-collector-based-metrics-shipping.md)
+for why.
+
 The metric set includes daemon/session reliability signals and focused local
 attach latency segments:
 
