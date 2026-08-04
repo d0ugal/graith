@@ -29,6 +29,11 @@ import (
 var (
 	doctorAutofix bool
 	doctorDisk    bool
+
+	doctorAlloy        bool
+	doctorAlloyBinary  string
+	doctorAlloyConfig  string
+	doctorAlloySignals = configAlloyDefaultSignals
 )
 
 const (
@@ -131,6 +136,10 @@ var doctorCmd = &cobra.Command{
 		dc.checkEnvironment()
 		dc.checkDaemonService()
 		dc.checkHumanToken()
+
+		if doctorAlloy {
+			dc.checkAlloy()
+		}
 
 		diag := dc.checkDaemon(probe)
 		if diag != nil {
@@ -1669,4 +1678,8 @@ func registerDoctorCmd() {
 	rootCmd.AddCommand(doctorCmd)
 	doctorCmd.Flags().BoolVar(&doctorAutofix, "autofix", false, "auto-fix issues")
 	doctorCmd.Flags().BoolVar(&doctorDisk, "disk", false, "measure on-disk sizes (walks the data dir; can be slow on large installs)")
+	doctorCmd.Flags().BoolVar(&doctorAlloy, "alloy", false, "run local Grafana Alloy collection checks")
+	doctorCmd.Flags().StringVar(&doctorAlloyBinary, "alloy-binary", "", "Alloy executable path or command name (default searches PATH for alloy)")
+	doctorCmd.Flags().StringVar(&doctorAlloyConfig, "alloy-config", "", "Alloy config file or directory to validate (default validates generated config)")
+	doctorCmd.Flags().StringVar(&doctorAlloySignals, "alloy-signals", configAlloyDefaultSignals, "comma-separated Alloy signals to check (daemon-logs,metrics,traces,all)")
 }

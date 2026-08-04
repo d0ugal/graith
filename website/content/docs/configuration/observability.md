@@ -405,20 +405,51 @@ Graith does not start Alloy, read these environment variables, or send any
 telemetry to the generated backend endpoints. Only Alloy uses them when you run
 Alloy with the generated file.
 
+Before blaming a backend, run the local Alloy diagnostics:
+
+```bash
+gr doctor --alloy
+gr doctor --alloy --alloy-config ./config.alloy
+gr doctor --alloy --alloy-binary /opt/homebrew/bin/alloy --alloy-signals daemon-logs,metrics
+```
+
+`gr doctor --alloy` looks for Alloy on `PATH` unless `--alloy-binary` is set,
+reports `alloy --version`, and validates a temporary `gr config alloy` rendering
+when the installed Alloy supports local `alloy validate`. With
+`--alloy-config`, it validates that supplied file or directory instead. The
+validation process receives placeholder values for the generated `GRAITH_*`
+backend variables so the check does not hand current shell secrets to Alloy.
+Doctor does not print Alloy validation output because config diagnostics can
+include user-authored snippets.
+
+The same section checks selected daemon log files for existence and readability,
+checks the metrics scrape endpoint when the metrics signal is selected and
+`[telemetry.metrics] enabled = true`, and verifies common URL shapes for
+`GRAITH_LOKI_URL`, `GRAITH_MIMIR_URL`, and
+`GRAITH_TEMPO_OTLP_ENDPOINT` without printing userinfo, query strings,
+fragments, usernames, or tokens. Missing backend URL variables are warnings
+because the current shell may not be the Alloy service environment.
+
+On macOS and Linux, doctor also reports likely Alloy service state when it can
+ask Homebrew, launchd, or systemd without root. This is read-only diagnostics:
+Graith does not install, start, stop, restart, reload, or manage Alloy.
+
 ## Troubleshooting collection
 
 If logs are missing, confirm the data directory and profile first. `data_dir`
 and `GRAITH_PROFILE` change every log path; regenerate with `gr config alloy`
-after changing either. Check that the daemon has started, that `daemon.log` or
-`daemon.stderr.log` exists, and that the Alloy process can read the files. If
-you deliberately add session scrollback logs to your own Alloy config, point the
-glob at `<data_dir>/logs/*.log` and treat those files as sensitive terminal
-output. If Alloy starts after large files already exist, consider
+after changing either. `gr doctor --alloy --alloy-signals daemon-logs` checks
+that `daemon.log` and `daemon.stderr.log` exist and are readable by the current
+user. If you deliberately add session scrollback logs to your own Alloy config,
+point the glob at `<data_dir>/logs/*.log` and treat those files as sensitive
+terminal output. If Alloy starts after large files already exist, consider
 `loki.source.file` position handling and whether you want to tail from the end.
 
 If metrics are missing, confirm `[telemetry.metrics].enabled = true` and that
-you restarted the daemon after changing telemetry settings. Curl the exact
-local target from the Alloy host:
+you restarted the daemon after changing telemetry settings.
+`gr doctor --alloy --alloy-signals metrics` checks the loopback scrape target
+when the configured bind address can be checked locally. You can also curl the
+exact local target from the Alloy host:
 
 ```bash
 curl http://127.0.0.1:4824/metrics
