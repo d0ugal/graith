@@ -219,6 +219,9 @@ type ToolsConfig struct {
 	// GCX is the Grafana Cloud CLI executable used by gcx trigger sources
 	// (default "gcx").
 	GCX string `toml:"gcx"`
+	// Alloy is the Grafana Alloy executable used by `gr observability run alloy`
+	// (default "alloy").
+	Alloy string `toml:"alloy"`
 	// Shell runs notification and trigger commands as `<shell> -c <cmd>`
 	// (default "sh").
 	Shell string `toml:"shell"`
@@ -239,6 +242,7 @@ func (t ToolsConfig) Resolved(baseDir string) tools.Config {
 		Git:   resolveToolPath(baseDir, t.Git),
 		GH:    resolveToolPath(baseDir, t.GH),
 		GCX:   resolveToolPath(baseDir, t.GCX),
+		Alloy: resolveToolPath(baseDir, t.Alloy),
 		Shell: resolveToolPath(baseDir, t.Shell),
 		PS:    resolveToolPath(baseDir, t.PS),
 		Lsof:  resolveToolPath(baseDir, t.Lsof),

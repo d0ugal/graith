@@ -399,6 +399,7 @@ func registerCommands() {
 		registerMsgCmd()
 		registerNewCmd()
 		registerNotifyCmd()
+		registerObservabilityCmd()
 		registerPathCmd()
 		registerReportStatusCmd()
 		registerRestartCmd()

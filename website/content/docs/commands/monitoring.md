@@ -333,6 +333,47 @@ user-facing notification rate limit because they are explicit child-to-parent
 follow events. Raw GitHub comments still use the existing trust and quarantine
 paths instead of event forwarding.
 
+### `gr observability run alloy [config-path]`
+
+Run an already-installed Grafana Alloy binary in the foreground with generated
+config, or with a supplied Alloy config file or directory. This is a testing and
+development helper, not a service manager: it does not install Alloy, register
+LaunchAgent/systemd units, restart Alloy, or keep it running after the CLI exits.
+
+```bash
+gr observability run alloy
+gr observability run alloy ./config.alloy
+```
+
+Alloy must already be installed separately and resolvable as `alloy` on `PATH`,
+or configured with [`tools.alloy`]({{< relref "/docs/configuration/sessions.md#external-tool-executables" >}}).
+Graith starts Alloy as:
+
+```text
+alloy run --disable-reporting --storage.path=<storage> <config-path>
+```
+
+`<storage>` defaults to `<data_dir>/tmp/observability/alloy`, using the resolved
+Graith data directory, and is created with owner-only permissions. Pass
+`--storage-path <path>` to choose another Alloy storage directory. Alloy stdout
+and stderr are forwarded directly to your terminal. Press `ctrl+c` to ask Alloy
+to shut down and return to the shell.
+
+| Flag | Description |
+|------|-------------|
+| `--signals <list>` | Signals to include when generating config: `daemon-logs`, `metrics`, `traces`, or `all` (default: `daemon-logs,metrics,traces`) |
+| `--storage-path <path>` | Alloy storage directory (default: `<data_dir>/tmp/observability/alloy`) |
+
+With no config path, Graith writes generated config to
+`<data_dir>/tmp/observability/alloy.generated.alloy` using the same renderer as
+`gr config alloy`. Generated configs may reference the backend environment
+variables listed in [Collect with Grafana Alloy]({{< relref "/docs/configuration/observability.md#collect-with-grafana-alloy" >}}).
+When traces are included, the generated config creates a local OTLP receiver for
+Graith spans. Alloy also starts its own local HTTP server according to Alloy's
+defaults; occupied listener ports surface as Alloy startup errors. `--signals`
+applies only to this generated path and is rejected with an explicit config
+file or directory, because supplied configs run unchanged.
+
 ### `gr logs <name-or-id>` (alias: `l`)
 
 Show session output without attaching.

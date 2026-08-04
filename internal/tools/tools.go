@@ -1,7 +1,7 @@
 // Package tools resolves the external executables graith shells out to: git,
-// gh, gcx, the notification shell, ps, and lsof. Historically these names and
-// paths were hard-coded, which broke Nix/custom-PATH installs, wrapper binaries,
-// and alternate shells (issue #1238).
+// gh, gcx, Alloy, the notification shell, ps, and lsof. Historically these
+// names and paths were hard-coded, which broke Nix/custom-PATH installs, wrapper
+// binaries, and alternate shells (issue #1238).
 //
 // A single process-wide resolver holds the effective set. The daemon and the
 // stateless CLI configure it once at startup from the [tools] config block;
@@ -31,6 +31,7 @@ type Config struct {
 	Git   string
 	GH    string
 	GCX   string
+	Alloy string
 	Shell string
 	PS    string
 	Lsof  string
@@ -42,6 +43,7 @@ func Defaults() Config {
 		Git:   "git",
 		GH:    "gh",
 		GCX:   "gcx",
+		Alloy: "alloy",
 		Shell: "sh",
 		PS:    "/bin/ps",
 		Lsof:  "/usr/sbin/lsof",
@@ -63,6 +65,10 @@ func merge(c Config) Config {
 
 	if c.GCX == "" {
 		c.GCX = d.GCX
+	}
+
+	if c.Alloy == "" {
+		c.Alloy = d.Alloy
 	}
 
 	if c.Shell == "" {
@@ -117,6 +123,9 @@ func GH() string { return get().GH }
 // GCX returns the configured Grafana Cloud CLI executable.
 func GCX() string { return get().GCX }
 
+// Alloy returns the configured Grafana Alloy executable.
+func Alloy() string { return get().Alloy }
+
 // Shell returns the configured shell used to run notification and trigger
 // commands (invoked as `<shell> -c <command>`).
 func Shell() string { return get().Shell }
@@ -141,6 +150,7 @@ func Validate(c Config) error {
 		{"git", c.Git},
 		{"gh", c.GH},
 		{"gcx", c.GCX},
+		{"alloy", c.Alloy},
 		{"shell", c.Shell},
 		{"ps", c.PS},
 		{"lsof", c.Lsof},

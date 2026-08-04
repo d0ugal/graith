@@ -103,6 +103,7 @@ func resolveRenderedDefaults(cfg *Config) *Config {
 	fillToolDefault(&c.Tools.Git, toolDefaults.Git)
 	fillToolDefault(&c.Tools.GH, toolDefaults.GH)
 	fillToolDefault(&c.Tools.GCX, toolDefaults.GCX)
+	fillToolDefault(&c.Tools.Alloy, toolDefaults.Alloy)
 	fillToolDefault(&c.Tools.Shell, toolDefaults.Shell)
 	fillToolDefault(&c.Tools.PS, toolDefaults.PS)
 	fillToolDefault(&c.Tools.Lsof, toolDefaults.Lsof)

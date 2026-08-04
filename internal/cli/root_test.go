@@ -418,7 +418,7 @@ func TestRegisterCommandsIdempotent(t *testing.T) {
 	registerCommands()
 	registerCommands()
 
-	want := []string{"agent", "new", "list", "update", "events", "help-tree", "msg", "scenario", "sandbox", "store", "daemon", "config"}
+	want := []string{"agent", "new", "list", "update", "events", "help-tree", "msg", "scenario", "sandbox", "store", "daemon", "config", "observability"}
 	for _, name := range want {
 		found := false
 

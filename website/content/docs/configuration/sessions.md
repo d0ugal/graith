@@ -219,6 +219,7 @@ graith shells out to a handful of external binaries, each resolved by its conven
 git       = "git"             # git executable
 gh        = "gh"              # GitHub CLI executable
 gcx       = "gcx"             # Grafana Cloud CLI executable (gcx trigger source)
+alloy     = "alloy"           # Grafana Alloy executable (`gr observability run alloy`)
 shell     = "sh"              # shell for notification/trigger commands (run as `<shell> -c ...`)
 ps        = "/bin/ps"         # process-listing binary
 lsof      = "/usr/sbin/lsof"  # open-files listing binary (macOS FD sampling)

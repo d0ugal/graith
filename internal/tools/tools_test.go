@@ -23,10 +23,11 @@ func TestDefaults(t *testing.T) {
 	d := Defaults()
 
 	cases := map[string]string{
-		"git": d.Git,
-		"gh":  d.GH,
-		"gcx": d.GCX,
-		"sh":  d.Shell,
+		"git":   d.Git,
+		"gh":    d.GH,
+		"gcx":   d.GCX,
+		"alloy": d.Alloy,
+		"sh":    d.Shell,
 	}
 	for want, got := range cases {
 		if got != want {
@@ -61,6 +62,10 @@ func TestConfigureFillsEmptyFieldsWithDefaults(t *testing.T) {
 		t.Errorf("GCX() = %q, want default gcx", got)
 	}
 
+	if got := Alloy(); got != "alloy" {
+		t.Errorf("Alloy() = %q, want default alloy", got)
+	}
+
 	if got := Shell(); got != "sh" {
 		t.Errorf("Shell() = %q, want default sh", got)
 	}
@@ -71,7 +76,7 @@ func TestConfigureFillsEmptyFieldsWithDefaults(t *testing.T) {
 }
 
 func TestResetRestoresDefaults(t *testing.T) {
-	Configure(Config{Git: "custom-git", GH: "custom-gh", GCX: "custom-gcx"})
+	Configure(Config{Git: "custom-git", GH: "custom-gh", GCX: "custom-gcx", Alloy: "custom-alloy"})
 	Reset()
 
 	if got := Git(); got != "git" {
@@ -84,6 +89,10 @@ func TestResetRestoresDefaults(t *testing.T) {
 
 	if got := GCX(); got != "gcx" {
 		t.Errorf("after Reset, GCX() = %q, want gcx", got)
+	}
+
+	if got := Alloy(); got != "alloy" {
+		t.Errorf("after Reset, Alloy() = %q, want alloy", got)
 	}
 }
 

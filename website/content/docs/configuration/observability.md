@@ -401,9 +401,26 @@ enable that telemetry setting and restart the daemon before running Alloy. Use
 a current Grafana Alloy release; the generated config uses current `sys.env`,
 `loki.source.file.file_match`, and `otelcol.auth.basic.client_auth` syntax.
 
-Graith does not start Alloy, read these environment variables, or send any
-telemetry to the generated backend endpoints. Only Alloy uses them when you run
-Alloy with the generated file.
+Graith does not start Alloy automatically, read these environment variables, or
+send any telemetry to the generated backend endpoints. Only Alloy uses them when
+you run Alloy with the generated file.
+
+For local testing, you can run an already-installed Alloy binary in the
+foreground with the explicit CLI helper:
+
+```bash
+gr observability run alloy
+gr observability run alloy ./config.alloy
+```
+
+With no path, the helper writes generated config to
+`<data_dir>/tmp/observability/alloy.generated.alloy` using the same renderer as
+`gr config alloy`. Pass a file or directory path to run supplied config instead.
+The helper passes `--disable-reporting`, uses Graith-owned Alloy storage under
+`<data_dir>/tmp/observability/alloy` unless you pass `--storage-path`, forwards
+Alloy stdout and stderr to your terminal, and shuts down on `ctrl+c`. It is for
+testing and development only; it does not install Alloy, register a service, or
+keep Alloy running after the CLI exits.
 
 ## Troubleshooting collection
 
