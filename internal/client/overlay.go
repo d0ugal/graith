@@ -2,12 +2,15 @@ package client
 
 import (
 	"fmt"
+	"hash/fnv"
 	"image/color"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -56,8 +59,12 @@ const (
 	wideDetailDefaultMaxPanelWidth     = 54
 	wideDetailGap                      = 2
 	compactSessionLabelLimit           = 2
-	compactSessionLabelMaxWidth        = 12
-	compactSessionLabelColumnMaxWidth  = 12
+	compactSessionLabelMaxWidth        = 8
+	compactSessionLabelColumnMaxWidth  = 13
+	selectedDetailLabelMaxWidth        = 18
+	selectedDetailLabelMaxLines        = 3
+	labelChipHorizontalPadding         = 1
+	labelChipGap                       = 0
 )
 
 var defaultSelectedDetailFields = []string{
@@ -228,6 +235,24 @@ var (
 	colorSelectDim  = lipgloss.Color("#cbd5e1")
 	colorSelectRed  = lipgloss.Color("#fecaca")
 	colorSelectBlue = lipgloss.Color("#bfdbfe")
+
+	colorLabelChipLightText = lipgloss.Color("#f8fafc")
+	colorLabelChipDarkText  = lipgloss.Color("#111827")
+	colorLabelChipOverflow  = lipgloss.Color("#3f3f46")
+	labelChipPalette        = []color.Color{
+		lipgloss.Color("#2563eb"),
+		lipgloss.Color("#0891b2"),
+		lipgloss.Color("#059669"),
+		lipgloss.Color("#7c3aed"),
+		lipgloss.Color("#a21caf"),
+		lipgloss.Color("#be123c"),
+		lipgloss.Color("#c2410c"),
+		lipgloss.Color("#a16207"),
+		lipgloss.Color("#0f766e"),
+		lipgloss.Color("#4338ca"),
+		lipgloss.Color("#0e7490"),
+		lipgloss.Color("#7f1d1d"),
+	}
 )
 
 type sessionItem struct {
@@ -271,9 +296,15 @@ func (s sessionItem) displayName() string {
 	return s.info.Name
 }
 
-func compactSessionLabelText(labels []string) string {
+type labelChip struct {
+	label    string
+	text     string
+	overflow bool
+}
+
+func cleanSessionLabels(labels []string) []string {
 	if len(labels) == 0 {
-		return ""
+		return nil
 	}
 
 	clean := make([]string, 0, len(labels))
@@ -285,77 +316,248 @@ func compactSessionLabelText(labels []string) string {
 	}
 
 	if len(clean) == 0 {
-		return ""
+		return nil
+	}
+
+	return clean
+}
+
+func compactSessionLabelText(labels []string) string {
+	return labelChipPlainText(compactSessionLabelChips(labels))
+}
+
+func compactSessionLabelChips(labels []string) []labelChip {
+	clean := cleanSessionLabels(labels)
+	if len(clean) == 0 {
+		return nil
+	}
+
+	if len(clean) == 1 {
+		return []labelChip{newLabelChip(clean[0], compactSessionLabelColumnMaxWidth-(2*labelChipHorizontalPadding))}
 	}
 
 	limit := min(compactSessionLabelLimit, len(clean))
-	parts := make([]string, 0, limit+1)
+	chips := make([]labelChip, 0, limit+1)
 
 	for _, label := range clean[:limit] {
-		parts = append(parts, compactSessionLabelChip(label, compactSessionLabelMaxWidth))
+		chips = append(chips, newLabelChip(label, compactSessionLabelMaxWidth))
 	}
 
 	if overflow := len(clean) - limit; overflow > 0 {
-		parts = append(parts, fmt.Sprintf("+%d", overflow))
+		chips = append(chips, overflowLabelChip(overflow))
 	}
 
-	text := strings.Join(parts, " ")
-	if ansi.StringWidth(text) <= compactSessionLabelColumnMaxWidth {
-		return text
+	if labelChipSequenceWidth(chips) <= compactSessionLabelColumnMaxWidth {
+		return chips
 	}
 
 	if len(clean) > 1 {
-		suffix := fmt.Sprintf(" +%d", len(clean)-1)
+		overflowChip := overflowLabelChip(len(clean) - 1)
 
-		labelWidth := compactSessionLabelColumnMaxWidth - ansi.StringWidth(suffix) - 2
+		labelWidth := compactSessionLabelColumnMaxWidth - labelChipGap - labelChipVisibleWidth(overflowChip.text) - (2 * labelChipHorizontalPadding)
 		if labelWidth > 0 {
-			return compactSessionLabelChip(clean[0], labelWidth) + suffix
+			return []labelChip{
+				newLabelChip(clean[0], labelWidth),
+				overflowChip,
+			}
 		}
 	}
 
-	return compactSessionLabelChip(clean[0], compactSessionLabelColumnMaxWidth-2)
+	return []labelChip{newLabelChip(clean[0], compactSessionLabelColumnMaxWidth-(2*labelChipHorizontalPadding))}
 }
 
-func compactSessionLabelChip(label string, width int) string {
+func newLabelChip(label string, width int) labelChip {
+	label = strings.TrimSpace(label)
+	text := label
+
 	if width < 1 {
+		width = 1
+	}
+
+	if ansi.StringWidth(text) > width {
+		text = ansi.Truncate(text, width, "…")
+	}
+
+	return labelChip{
+		label: label,
+		text:  text,
+	}
+}
+
+func overflowLabelChip(count int) labelChip {
+	return labelChip{
+		text:     fmt.Sprintf("+%d", count),
+		overflow: true,
+	}
+}
+
+func labelChipPlainText(chips []labelChip) string {
+	if len(chips) == 0 {
 		return ""
 	}
 
-	if ansi.StringWidth(label) > width {
-		label = ansi.Truncate(label, width, "…")
+	parts := make([]string, 0, len(chips))
+	for _, chip := range chips {
+		parts = append(parts, chip.text)
 	}
 
-	return "[" + label + "]"
+	return strings.Join(parts, " ")
 }
 
-func compactSessionLabelTextForItem(item sessionItem) string {
+func labelChipVisibleWidth(text string) int {
+	return ansi.StringWidth(text) + (2 * labelChipHorizontalPadding)
+}
+
+func labelChipSequenceWidth(chips []labelChip) int {
+	width := 0
+
+	for i, chip := range chips {
+		if i > 0 {
+			width += labelChipGap
+		}
+
+		width += labelChipVisibleWidth(chip.text)
+	}
+
+	return width
+}
+
+func compactSessionLabelChipsForItem(item sessionItem) []labelChip {
 	// labelGroup is set only in the explicit Labels view, whose group headers
 	// already provide the label context. Other views get the compact column.
 	if item.labelGroup != "" {
-		return ""
+		return nil
 	}
 
-	return compactSessionLabelText(item.info.Labels)
+	return compactSessionLabelChips(item.info.Labels)
 }
 
-func renderCompactSessionLabels(text string, selected bool, width int) string {
+func renderCompactSessionLabels(chips []labelChip, width int) string {
 	if width <= 0 {
 		return ""
 	}
 
-	text = fitStyledLine(text, width)
-
-	cell := pad(text, width)
-	if text == "" {
-		return cell
+	if len(chips) == 0 {
+		return strings.Repeat(" ", width)
 	}
 
-	style := lipgloss.NewStyle().Foreground(colorDim)
-	if selected {
-		style = lipgloss.NewStyle().Foreground(colorSelectDim)
+	line := renderLabelChipSequence(chips)
+
+	return pad(line, width)
+}
+
+func renderLabelChipSequence(chips []labelChip) string {
+	var b strings.Builder
+
+	for i, chip := range chips {
+		if i > 0 {
+			b.WriteString(strings.Repeat(" ", labelChipGap))
+		}
+
+		b.WriteString(renderLabelChip(chip))
 	}
 
-	return style.Render(cell)
+	return b.String()
+}
+
+func renderLabelChip(chip labelChip) string {
+	return labelChipStyle(chip).Render(chip.text)
+}
+
+func labelChipStyle(chip labelChip) lipgloss.Style {
+	foreground, background := labelChipColors(chip.label)
+	if chip.overflow {
+		foreground = colorLabelChipLightText
+		background = colorLabelChipOverflow
+	}
+
+	return lipgloss.NewStyle().
+		Foreground(foreground).
+		Background(background).
+		Padding(0, labelChipHorizontalPadding)
+}
+
+func labelChipColors(label string) (color.Color, color.Color) {
+	background := labelChipBackground(label)
+
+	return labelChipForeground(background), background
+}
+
+func labelChipForeground(background color.Color) color.Color {
+	lightContrast := colorContrastRatio(colorLabelChipLightText, background)
+	darkContrast := colorContrastRatio(colorLabelChipDarkText, background)
+
+	if darkContrast > lightContrast {
+		return colorLabelChipDarkText
+	}
+
+	return colorLabelChipLightText
+}
+
+func labelChipBackground(label string) color.Color {
+	normalized := labelChipColorKey(label)
+	if normalized == "" || len(labelChipPalette) == 0 {
+		return colorLabelChipOverflow
+	}
+
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(normalized))
+
+	return labelChipPalette[int(h.Sum32())%len(labelChipPalette)]
+}
+
+func labelChipColorKey(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(label))
+
+	for _, r := range label {
+		b.WriteRune(canonicalSimpleFoldRune(r))
+	}
+
+	return b.String()
+}
+
+func canonicalSimpleFoldRune(r rune) rune {
+	canonical := r
+
+	for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+		if next < canonical {
+			canonical = next
+		}
+	}
+
+	return canonical
+}
+
+func colorContrastRatio(a, b color.Color) float64 {
+	aLum := colorRelativeLuminance(a)
+	bLum := colorRelativeLuminance(b)
+	light := max(aLum, bLum)
+	dark := min(aLum, bLum)
+
+	return (light + 0.05) / (dark + 0.05)
+}
+
+func colorRelativeLuminance(c color.Color) float64 {
+	r, g, b, _ := c.RGBA()
+
+	return 0.2126*linearizedColorChannel(r) +
+		0.7152*linearizedColorChannel(g) +
+		0.0722*linearizedColorChannel(b)
+}
+
+func linearizedColorChannel(v uint32) float64 {
+	channel := float64(v) / 65535.0
+	if channel <= 0.04045 {
+		return channel / 12.92
+	}
+
+	return math.Pow((channel+0.055)/1.055, 2.4)
 }
 
 func sessionRepositoryLabel(s protocol.SessionInfo) string {
@@ -1495,7 +1697,7 @@ func appendSelectedDetailField(b *strings.Builder, item sessionItem, field strin
 	case "review":
 		appendDetailLine(b, "Review", cliReview(s), width, lipgloss.NewStyle().Foreground(reviewColor(s)), false)
 	case "labels":
-		appendDetailLine(b, "Labels", strings.Join(s.Labels, ", "), width, lipgloss.NewStyle(), false)
+		appendDetailLabelChips(b, s.Labels, width)
 	case "created":
 		appendDetailLine(b, "Created", detailTimestamp(s.CreatedAt), width, lipgloss.NewStyle(), false)
 	case "attached":
@@ -1513,6 +1715,164 @@ func appendSelectedDetailField(b *strings.Builder, item sessionItem, field strin
 	case "id":
 		appendDetailLine(b, "ID", s.ID, width, lipgloss.NewStyle().Foreground(colorDim), false)
 	}
+}
+
+func appendDetailLabelChips(b *strings.Builder, labels []string, width int) {
+	clean := cleanSessionLabels(labels)
+	if len(clean) == 0 {
+		return
+	}
+
+	prefix := detailLabelPrefix("Labels")
+
+	valueWidth := width - lipgloss.Width(prefix)
+	if valueWidth <= 0 {
+		valueWidth = width
+	}
+
+	lines := wrapLabelChips(detailLabelChips(clean, valueWidth), valueWidth, selectedDetailLabelMaxLines)
+	if len(lines) == 0 {
+		return
+	}
+
+	dim := lipgloss.NewStyle().Foreground(colorDim)
+	continuation := strings.Repeat(" ", lipgloss.Width(prefix))
+
+	for i, line := range lines {
+		b.WriteString("\n")
+
+		if i == 0 {
+			line = dim.Render(prefix) + line
+		} else {
+			line = dim.Render(continuation) + line
+		}
+
+		b.WriteString(fitStyledLine(line, width))
+	}
+}
+
+func detailLabelChips(labels []string, valueWidth int) []labelChip {
+	maxTextWidth := selectedDetailLabelMaxWidth
+	if valueWidth > 0 {
+		maxTextWidth = min(maxTextWidth, max(1, valueWidth-(2*labelChipHorizontalPadding)))
+	}
+
+	chips := make([]labelChip, 0, len(labels))
+	for _, label := range labels {
+		chips = append(chips, newLabelChip(label, maxTextWidth))
+	}
+
+	return chips
+}
+
+func wrapLabelChips(chips []labelChip, width int, maxLines int) []string {
+	if len(chips) == 0 {
+		return nil
+	}
+
+	chipLines := wrapLabelChipLines(chips, width)
+	chipLines = clampLabelChipLines(chipLines, len(chips), width, maxLines)
+
+	lines := make([]string, 0, len(chipLines))
+	for _, line := range chipLines {
+		lines = append(lines, renderLabelChipSequence(line))
+	}
+
+	return lines
+}
+
+func wrapLabelChipLines(chips []labelChip, width int) [][]labelChip {
+	if width <= 0 {
+		return [][]labelChip{chips}
+	}
+
+	var (
+		chipLines    [][]labelChip
+		current      []labelChip
+		currentWidth int
+	)
+
+	for _, chip := range chips {
+		chip = fitLabelChipToWidth(chip, width)
+		chipWidth := labelChipVisibleWidth(chip.text)
+
+		gapWidth := 0
+		if currentWidth > 0 {
+			gapWidth = labelChipGap
+		}
+
+		if currentWidth > 0 && currentWidth+gapWidth+chipWidth > width {
+			chipLines = append(chipLines, current)
+
+			current = nil
+			currentWidth = 0
+			gapWidth = 0
+		}
+
+		current = append(current, chip)
+		currentWidth += gapWidth + chipWidth
+	}
+
+	if currentWidth > 0 {
+		chipLines = append(chipLines, current)
+	}
+
+	return chipLines
+}
+
+func clampLabelChipLines(lines [][]labelChip, totalChips, width, maxLines int) [][]labelChip {
+	if maxLines <= 0 || len(lines) <= maxLines {
+		return lines
+	}
+
+	clamped := make([][]labelChip, maxLines)
+	visibleChips := 0
+
+	for i := range clamped {
+		clamped[i] = append([]labelChip(nil), lines[i]...)
+		visibleChips += len(clamped[i])
+	}
+
+	overflow := totalChips - visibleChips
+	last := len(clamped) - 1
+	overflowChip := overflowLabelChip(overflow)
+
+	for {
+		line := clamped[last]
+		lineWidth := labelChipSequenceWidth(line)
+
+		gapWidth := 0
+		if len(line) > 0 {
+			gapWidth = labelChipGap
+		}
+
+		if width <= 0 || lineWidth+gapWidth+labelChipVisibleWidth(overflowChip.text) <= width {
+			clamped[last] = append(line, overflowChip)
+
+			return clamped
+		}
+
+		if len(line) == 0 {
+			clamped[last] = []labelChip{fitLabelChipToWidth(overflowChip, width)}
+
+			return clamped
+		}
+
+		clamped[last] = line[:len(line)-1]
+		overflow++
+		overflowChip = overflowLabelChip(overflow)
+	}
+}
+
+func fitLabelChipToWidth(chip labelChip, width int) labelChip {
+	if width <= 0 || labelChipVisibleWidth(chip.text) <= width {
+		return chip
+	}
+
+	maxTextWidth := max(1, width-(2*labelChipHorizontalPadding))
+	chip.text = ansi.Truncate(chip.text, maxTextWidth, "…")
+
+	return chip
 }
 
 func appendDetailLine(b *strings.Builder, label, value string, width int, valueStyle lipgloss.Style, preserveTail bool) {
@@ -1791,7 +2151,7 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	if d.cols.labels > 0 {
 		b.WriteString(sep)
-		b.WriteString(renderCompactSessionLabels(compactSessionLabelTextForItem(si), selected, d.cols.labels))
+		b.WriteString(renderCompactSessionLabels(compactSessionLabelChipsForItem(si), d.cols.labels))
 	}
 
 	line := b.String()
@@ -2531,7 +2891,7 @@ func maxCompactSessionLabelWidthFromItems(items []list.Item) int {
 			continue
 		}
 
-		if width := lipgloss.Width(compactSessionLabelTextForItem(si)); width > maxWidth {
+		if width := labelChipSequenceWidth(compactSessionLabelChipsForItem(si)); width > maxWidth {
 			maxWidth = width
 		}
 	}
