@@ -365,8 +365,8 @@ func TestTUIColumnCellsGolden(t *testing.T) {
 	}
 
 	// status="active"(6) summary="fixing bothy"(12) git="M ↑2"(4) pr="#42 ✓"(5)
-	// review="—"(1) — no review decision on this PR, so the placeholder glyph.
-	want := "  active  fixing bothy  M ↑2  #42 ✓  —"
+	// review="—"(1), padded to the full "Review" header width.
+	want := "  active  fixing bothy  M ↑2  #42 ✓  —     "
 	if got := deterministic.String(); got != want {
 		t.Errorf("TUI column cells mismatch:\n got %q\nwant %q", got, want)
 	}

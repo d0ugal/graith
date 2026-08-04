@@ -50,6 +50,7 @@ Current classifier consumers and rollback boundaries:
 | `libghostty-native.yml` | native runtime matrix and dependency-unit race/fuzz gates | `native`, `dependency-unit` | migrated | file-list, classifier, or detector job failure requires native and dependency-unit validation |
 | `dev-release.yml` | dev release-shaped package validation | `release` | migrated | file-list or classifier failure runs dev release |
 | `docs-preview.yml` | workflow trigger and Hugo build gate; page selection stays local to the workflow | `trigger`, `global`, `build` | migrated | file-list or classifier failure runs the Hugo build; local detector failure expands page selection globally |
+| `session-navigator-preview.yml` | deterministic Session Navigator screenshot preview | `trigger` | migrated | file-list or classifier failure renders the synthetic Navigator screenshots |
 | `goreleaser.yml` | stable release-shaped package validation | `release` | parity only | existing inline classifier remains; file-list failure runs stable release |
 
 Stable release must not be migrated until the parity fixtures in
@@ -58,10 +59,13 @@ match the current inline stable-release classifier for representative release
 paths. Keep that migration in a separate rollback boundary from non-release
 gates.
 
-CI workflow source changes conservatively select every migrated non-release
-gate. Changes to `cmd/ciclassify` or `internal/ciworkflow` also select the
-dev-release and docs-preview gates, because both workflows now rely on the
-shared classifier.
+CI workflow source changes conservatively select every migrated non-release gate,
+including the native runtime matrix. The `dependency-unit` output is narrower:
+only native dependency inputs such as `libghostty-native.lock.json` select the
+extra source dependency validation path. Changes to `cmd/ciclassify` or
+`internal/ciworkflow` also select the dev-release, docs-preview, and Session
+Navigator preview gates, because those workflows now rely on the shared
+classifier.
 
 ## Retained Workflow Tests
 
@@ -71,7 +75,8 @@ the security properties that matter for current workflows:
 - changed-path parity for migrated gates and stable-release fixtures;
 - fail-safe behavior when file listing or classification fails;
 - workflow trigger, timeout, concurrency, shell, and pinned-tool policies;
-- docs-preview, renovate retry, libghostty native, and release workflow checks;
+- docs-preview, Session Navigator preview, renovate retry, libghostty native,
+  and release workflow checks;
 - credential boundary checks for synthetic token class, trust tier, scope, and
   filesystem target roots.
 

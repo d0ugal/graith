@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -33,6 +34,8 @@ const (
 	defaultGutter  = 12
 	defaultGap     = 20
 )
+
+var defaultViewports = []string{"desktop", "mobile"}
 
 var errNoDiff = errors.New("no visual diff")
 
@@ -55,9 +58,10 @@ type hunk struct {
 }
 
 type page struct {
-	Name    string `json:"name"`
-	HasBase bool   `json:"hasBase"`
-	Deleted bool   `json:"deleted"`
+	Name      string   `json:"name"`
+	HasBase   bool     `json:"hasBase"`
+	Deleted   bool     `json:"deleted"`
+	Viewports []string `json:"viewports,omitempty"`
 }
 
 type manifestPage struct {
@@ -154,8 +158,18 @@ func runBatch(pagesPath, baseDir, headDir, outDir string, stdout io.Writer) erro
 
 	manifest := make([]manifestPage, 0, len(pages))
 	for _, page := range pages {
+		if !isSafeArtifactName(page.Name) {
+			return fmt.Errorf("unsafe page name %q", page.Name)
+		}
+
 		manifestPage := manifestPage{name: page.Name}
-		for _, viewport := range []string{"desktop", "mobile"} {
+
+		viewports, err := page.viewportLabels()
+		if err != nil {
+			return err
+		}
+
+		for _, viewport := range viewports {
 			file := page.Name + "-" + viewport + ".png"
 			basePath := filepath.Join(baseDir, file)
 			headPath := filepath.Join(headDir, file)
@@ -225,6 +239,47 @@ func runBatch(pagesPath, baseDir, headDir, outDir string, stdout io.Writer) erro
 	_, _ = fmt.Fprintf(stdout, "docs-diff: %s\n", counts.marshalJSON())
 
 	return nil
+}
+
+func (p page) viewportLabels() ([]string, error) {
+	if len(p.Viewports) == 0 {
+		return defaultViewports, nil
+	}
+
+	labels := make([]string, 0, len(p.Viewports))
+	for _, viewport := range p.Viewports {
+		viewport = strings.TrimSpace(viewport)
+		if viewport == "" {
+			return nil, fmt.Errorf("page %q has an empty viewport label", p.Name)
+		}
+
+		if !isSafeArtifactName(viewport) {
+			return nil, fmt.Errorf("page %q has an unsafe viewport label %q", p.Name, viewport)
+		}
+
+		labels = append(labels, viewport)
+	}
+
+	return labels, nil
+}
+
+func isSafeArtifactName(name string) bool {
+	if name == "" || strings.Contains(name, "..") {
+		return false
+	}
+
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 func (p *manifestPage) add(viewport, kind, file string, counts *orderedCounts) {

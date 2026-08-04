@@ -3,11 +3,13 @@
 package docspreview
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,9 +19,10 @@ import (
 )
 
 const (
-	ScreenshotsBranch = "screenshots"
-	StickyMarker      = "<!-- docs-preview -->"
-	DefaultMaxAge     = 30 * 24 * time.Hour
+	ScreenshotsBranch            = "screenshots"
+	StickyMarker                 = "<!-- docs-preview -->"
+	SessionNavigatorStickyMarker = "<!-- session-navigator-preview -->"
+	DefaultMaxAge                = 30 * 24 * time.Hour
 
 	// EmptyTreeSHA is git's well-known empty tree. The GitHub API rejects
 	// createTree with an empty tree slice, so destructive rewrites that keep no
@@ -28,6 +31,84 @@ const (
 )
 
 const defaultMaxAttempts = 5
+
+const (
+	maxPreviewAssetBytes     = 15 * 1024 * 1024
+	maxPreviewAssetDimension = 50_000
+	maxPreviewAssetPixels    = 100_000_000
+)
+
+type PreviewViewport struct {
+	Key        string
+	Label      string
+	ImageWidth int
+}
+
+type PreviewSuite struct {
+	Name         string
+	Marker       string
+	Title        string
+	CommitPrefix string
+	Viewports    []PreviewViewport
+}
+
+func DocsPreviewSuite() PreviewSuite {
+	return PreviewSuite{
+		Name:         "docs",
+		Marker:       StickyMarker,
+		Title:        "Docs preview",
+		CommitPrefix: "docs preview",
+		Viewports: []PreviewViewport{
+			{Key: "desktop", Label: "Desktop", ImageWidth: 620},
+			{Key: "mobile", Label: "Mobile", ImageWidth: 300},
+		},
+	}
+}
+
+func SessionNavigatorPreviewSuite() PreviewSuite {
+	return PreviewSuite{
+		Name:         "session-navigator",
+		Marker:       SessionNavigatorStickyMarker,
+		Title:        "Session Navigator preview",
+		CommitPrefix: "session navigator preview",
+		Viewports: []PreviewViewport{
+			{Key: "small", Label: "Small", ImageWidth: 360},
+			{Key: "normal", Label: "Normal", ImageWidth: 540},
+			{Key: "wide", Label: "Wide", ImageWidth: 720},
+		},
+	}
+}
+
+func PreviewSuiteByName(name string) (PreviewSuite, error) {
+	switch strings.TrimSpace(name) {
+	case "", "docs":
+		return DocsPreviewSuite(), nil
+	case "session-navigator", "session-navigator-preview":
+		return SessionNavigatorPreviewSuite(), nil
+	default:
+		return PreviewSuite{}, fmt.Errorf("unknown preview suite %q", name)
+	}
+}
+
+func previewSuiteOrDefault(suite PreviewSuite) PreviewSuite {
+	if suite.Marker == "" {
+		return DocsPreviewSuite()
+	}
+
+	if suite.Title == "" {
+		suite.Title = suite.Name
+	}
+
+	if suite.CommitPrefix == "" {
+		suite.CommitPrefix = "preview"
+	}
+
+	if len(suite.Viewports) == 0 {
+		suite.Viewports = DocsPreviewSuite().Viewports
+	}
+
+	return suite
+}
 
 type Logger interface {
 	Info(message string)
@@ -407,6 +488,7 @@ type CleanupOptions struct {
 	Logger Logger
 	Repo   Repository
 	Event  Event
+	Suite  PreviewSuite
 }
 
 func Cleanup(ctx context.Context, options CleanupOptions) error {
@@ -414,6 +496,8 @@ func Cleanup(ctx context.Context, options CleanupOptions) error {
 	if logger == nil {
 		logger = noopLogger{}
 	}
+
+	suite := previewSuiteOrDefault(options.Suite)
 
 	if !IsSameRepoPR(options.Event, options.Repo) {
 		logger.Info("Fork PR: no screenshots were published, nothing to clean up.")
@@ -458,7 +542,7 @@ func Cleanup(ctx context.Context, options CleanupOptions) error {
 				options.Repo,
 				kept,
 				tip.CommitSHA,
-				fmt.Sprintf("docs preview: clean up PR #%d", pr),
+				fmt.Sprintf("%s: clean up PR #%d", suite.CommitPrefix, pr),
 			)
 		},
 	})
@@ -469,11 +553,8 @@ func Cleanup(ctx context.Context, options CleanupOptions) error {
 	switch result.Outcome {
 	case "absent":
 		logger.Info(fmt.Sprintf("No %s branch: nothing to clean up.", ScreenshotsBranch))
-		return nil
 	case "updated":
 		logger.Info(fmt.Sprintf("Removed %d screenshot(s) for PR #%d.", removed, pr))
-	default:
-		return nil
 	}
 
 	comments, err := options.Client.ListComments(ctx, options.Repo.Owner, options.Repo.Name, pr)
@@ -482,8 +563,8 @@ func Cleanup(ctx context.Context, options CleanupOptions) error {
 	}
 
 	for _, comment := range comments {
-		if strings.Contains(comment.Body, StickyMarker) {
-			body := StickyMarker + "\n### \U0001F4F8 Docs preview\n\n_Preview screenshots for this PR were cleaned up after it was closed._"
+		if strings.Contains(comment.Body, suite.Marker) {
+			body := suite.Marker + "\n### \U0001F4F8 " + suite.Title + "\n\n_Preview screenshots for this PR were cleaned up after it was closed._"
 			return options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, comment.ID, body)
 		}
 	}
@@ -582,6 +663,7 @@ type PublishOptions struct {
 	RunID        string
 	RunAttempt   string
 	Now          time.Time
+	Suite        PreviewSuite
 }
 
 func Publish(ctx context.Context, options PublishOptions) error {
@@ -589,6 +671,8 @@ func Publish(ctx context.Context, options PublishOptions) error {
 	if logger == nil {
 		logger = noopLogger{}
 	}
+
+	suite := previewSuiteOrDefault(options.Suite)
 
 	if !IsSameRepoPR(options.Event, options.Repo) {
 		logger.Info("Fork PR: screenshots are published only for same-repo PRs; skipping publish.")
@@ -662,6 +746,10 @@ func Publish(ctx context.Context, options PublishOptions) error {
 				return err
 			}
 
+			if err := validatePreviewAsset(file, data); err != nil {
+				return err
+			}
+
 			blobSHA, err := options.Client.CreateBlob(
 				ctx,
 				options.Repo.Owner,
@@ -707,7 +795,7 @@ func Publish(ctx context.Context, options PublishOptions) error {
 					ctx,
 					options.Repo.Owner,
 					options.Repo.Name,
-					fmt.Sprintf("docs preview: PR #%d @ %s", options.Event.PullRequest.Number, shortSHA),
+					fmt.Sprintf("%s: PR #%d @ %s", suite.CommitPrefix, options.Event.PullRequest.Number, shortSHA),
 					treeSHA,
 					parents,
 				)
@@ -718,17 +806,34 @@ func Publish(ctx context.Context, options PublishOptions) error {
 		}
 	}
 
-	body := buildPreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest, len(files) > 0)
-
 	comments, err := options.Client.ListComments(ctx, options.Repo.Owner, options.Repo.Name, options.Event.PullRequest.Number)
 	if err != nil {
 		return err
 	}
 
+	existingCommentID := int64(0)
+
 	for _, comment := range comments {
-		if strings.Contains(comment.Body, StickyMarker) {
-			return options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, comment.ID, body)
+		if strings.Contains(comment.Body, suite.Marker) {
+			existingCommentID = comment.ID
+			break
 		}
+	}
+
+	if existingCommentID == 0 && !manifestHasVisualChange(manifest) {
+		logger.Info("No visual changes and no existing sticky comment; skipping preview comment.")
+		return nil
+	}
+
+	var body string
+	if suite.Marker == StickyMarker {
+		body = buildPreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest, len(files) > 0)
+	} else {
+		body = buildSuitePreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest, len(files) > 0, suite)
+	}
+
+	if existingCommentID != 0 {
+		return options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, existingCommentID, body)
 	}
 
 	return options.Client.CreateComment(ctx, options.Repo.Owner, options.Repo.Name, options.Event.PullRequest.Number, body)
@@ -745,7 +850,117 @@ func readManifest(path string) (PreviewManifest, error) {
 		return nil, err
 	}
 
+	if err := validatePreviewManifest(manifest); err != nil {
+		return nil, err
+	}
+
 	return manifest, nil
+}
+
+func validatePreviewManifest(manifest PreviewManifest) error {
+	seenFiles := map[string]bool{}
+
+	for name, viewports := range manifest {
+		if !isSafePreviewLabel(name) {
+			return fmt.Errorf("manifest has unsafe page name %q", name)
+		}
+
+		for viewport, entry := range viewports {
+			if !isSafePreviewLabel(viewport) {
+				return fmt.Errorf("manifest page %q has unsafe viewport label %q", name, viewport)
+			}
+
+			switch entry.Kind {
+			case "same":
+				if entry.File != "" {
+					return fmt.Errorf("manifest page %q viewport %q has unexpected asset filename for same screenshot", name, viewport)
+				}
+
+				continue
+			case "new", "diff", "deleted":
+				if entry.File == "" {
+					return fmt.Errorf("manifest page %q viewport %q is missing asset filename for %s screenshot", name, viewport, entry.Kind)
+				}
+			default:
+				return fmt.Errorf("manifest page %q viewport %q has unknown screenshot kind %q", name, viewport, entry.Kind)
+			}
+
+			if !isSafePreviewAssetName(entry.File) {
+				return fmt.Errorf("manifest page %q viewport %q has unsafe asset filename %q", name, viewport, entry.File)
+			}
+
+			if seenFiles[entry.File] {
+				return fmt.Errorf("manifest asset filename %q is duplicated", entry.File)
+			}
+
+			seenFiles[entry.File] = true
+		}
+	}
+
+	return nil
+}
+
+func validatePreviewAsset(name string, data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("preview asset %q is empty", name)
+	}
+
+	if len(data) > maxPreviewAssetBytes {
+		return fmt.Errorf("preview asset %q is too large: %d bytes", name, len(data))
+	}
+
+	config, err := png.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("preview asset %q is not a valid PNG: %w", name, err)
+	}
+
+	if config.Width <= 0 || config.Height <= 0 {
+		return fmt.Errorf("preview asset %q has invalid PNG dimensions %dx%d", name, config.Width, config.Height)
+	}
+
+	if config.Width > maxPreviewAssetDimension || config.Height > maxPreviewAssetDimension {
+		return fmt.Errorf("preview asset %q has implausible PNG dimensions %dx%d", name, config.Width, config.Height)
+	}
+
+	if int64(config.Width)*int64(config.Height) > maxPreviewAssetPixels {
+		return fmt.Errorf("preview asset %q has too many pixels: %dx%d", name, config.Width, config.Height)
+	}
+
+	return nil
+}
+
+func isSafePreviewLabel(name string) bool {
+	if name == "" || strings.Contains(name, "..") || filepath.Base(name) != name {
+		return false
+	}
+
+	return hasSafePreviewNameChars(name)
+}
+
+func isSafePreviewAssetName(name string) bool {
+	if name == "" ||
+		strings.Contains(name, "..") ||
+		filepath.Base(name) != name ||
+		filepath.Ext(name) != ".png" {
+		return false
+	}
+
+	return hasSafePreviewNameChars(name)
+}
+
+func hasSafePreviewNameChars(name string) bool {
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 func manifestFiles(manifest PreviewManifest) []string {
@@ -767,6 +982,18 @@ func manifestFiles(manifest PreviewManifest) []string {
 	sort.Strings(files)
 
 	return files
+}
+
+func manifestHasVisualChange(manifest PreviewManifest) bool {
+	for _, viewports := range manifest {
+		for _, entry := range viewports {
+			if entry.Kind != "same" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func buildPreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir string, manifest PreviewManifest, storedImages bool) string {
@@ -802,7 +1029,9 @@ func buildPreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir s
 			return "_no visual change_"
 		}
 
-		return fmt.Sprintf(`<img src="%s" width="%d">`, raw(entry.File), width)
+		imageURL := raw(entry.File)
+
+		return fmt.Sprintf(`<a href="%s"><img src="%s" width="%d"></a>`, imageURL, imageURL, width)
 	}
 
 	var body strings.Builder
@@ -857,4 +1086,181 @@ func buildPreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir s
 	}
 
 	return body.String()
+}
+
+func buildSuitePreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir string, manifest PreviewManifest, storedImages bool, suite PreviewSuite) string {
+	suite = previewSuiteOrDefault(suite)
+
+	names := make([]string, 0, len(manifest))
+	allKinds := make(map[string]bool)
+
+	for name, viewports := range manifest {
+		names = append(names, name)
+
+		for _, entry := range viewports {
+			allKinds[entry.Kind] = true
+		}
+	}
+
+	sort.Strings(names)
+
+	raw := func(file string) string {
+		return fmt.Sprintf(
+			"https://raw.githubusercontent.com/%s/%s/%s/%s/%s",
+			repo.Owner,
+			repo.Name,
+			ScreenshotsBranch,
+			runDir,
+			file,
+		)
+	}
+	cell := func(entry PreviewEntry, ok bool, width int) string {
+		if !ok {
+			return "\u2014"
+		}
+
+		if entry.Kind == "same" {
+			return "_no visual change_"
+		}
+
+		imageURL := raw(entry.File)
+
+		return fmt.Sprintf(`<a href="%s"><img src="%s" width="%d"></a>`, imageURL, imageURL, width)
+	}
+
+	var body strings.Builder
+	body.WriteString(suite.Marker)
+	body.WriteString("\n### \U0001F4F8 ")
+	body.WriteString(suite.Title)
+	body.WriteString("\n\n")
+	fmt.Fprintf(&body, "Rendered %d Session Navigator scene(s) against `%s` at commit `%s`. ",
+		len(names),
+		pr.Base.Ref,
+		shortSHA)
+	body.WriteString("Each screenshot uses deterministic fake data at a fixed terminal size. Changed screenshots show **base \u2502 head**, cropped with context.\n\n")
+
+	if allKinds["new"] {
+		body.WriteString("_Snapshots new in this PR (no baseline) are shown in full._\n\n")
+	}
+
+	if allKinds["deleted"] {
+		fmt.Fprintf(&body, "_Snapshots removed in this PR are shown as their last render on `%s`._\n\n", pr.Base.Ref)
+	}
+
+	for _, name := range names {
+		viewports := manifest[name]
+		removed := false
+
+		for _, entry := range viewports {
+			if entry.Kind == "deleted" {
+				removed = true
+				break
+			}
+		}
+
+		columns := suiteViewports(suite, viewports)
+
+		body.WriteString("<details><summary><b>")
+		body.WriteString(name)
+		body.WriteString("</b>")
+
+		if removed {
+			body.WriteString(" \u2014 removed")
+		}
+
+		body.WriteString("</summary>\n\n")
+		writeMarkdownRow(&body, viewportHeaders(columns))
+		writeMarkdownRow(&body, markdownSeparators(len(columns)))
+
+		cells := make([]string, 0, len(columns))
+		for _, column := range columns {
+			entry, ok := viewports[column.Key]
+			cells = append(cells, cell(entry, ok, column.ImageWidth))
+		}
+
+		writeMarkdownRow(&body, cells)
+		body.WriteString("\n</details>\n\n")
+	}
+
+	if storedImages {
+		fmt.Fprintf(&body, "_Screenshots stored on the [`%s`](https://github.com/%s/%s/tree/%s/%s) branch._",
+			ScreenshotsBranch,
+			repo.Owner,
+			repo.Name,
+			ScreenshotsBranch,
+			runDir)
+	} else {
+		body.WriteString("_No visual changes to preview._")
+	}
+
+	return body.String()
+}
+
+func suiteViewports(suite PreviewSuite, entries map[string]PreviewEntry) []PreviewViewport {
+	seen := make(map[string]bool, len(suite.Viewports))
+	columns := make([]PreviewViewport, 0, len(suite.Viewports)+len(entries))
+
+	for _, viewport := range suite.Viewports {
+		columns = append(columns, viewport)
+		seen[viewport.Key] = true
+	}
+
+	var extra []string
+
+	for key := range entries {
+		if !seen[key] {
+			extra = append(extra, key)
+		}
+	}
+
+	sort.Strings(extra)
+
+	for _, key := range extra {
+		columns = append(columns, PreviewViewport{Key: key, Label: viewportLabel(key), ImageWidth: 620})
+	}
+
+	return columns
+}
+
+func viewportHeaders(columns []PreviewViewport) []string {
+	headers := make([]string, 0, len(columns))
+	for _, column := range columns {
+		headers = append(headers, column.Label)
+	}
+
+	return headers
+}
+
+func markdownSeparators(n int) []string {
+	separators := make([]string, n)
+	for i := range separators {
+		separators[i] = "---"
+	}
+
+	return separators
+}
+
+func writeMarkdownRow(body *strings.Builder, cells []string) {
+	body.WriteString("| ")
+	body.WriteString(strings.Join(cells, " | "))
+	body.WriteString(" |\n")
+}
+
+func viewportLabel(key string) string {
+	parts := strings.FieldsFunc(key, func(r rune) bool {
+		return r == '-' || r == '_'
+	})
+	if len(parts) == 0 {
+		return key
+	}
+
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+
+	return strings.Join(parts, " ")
 }

@@ -62,19 +62,22 @@ func TestWorkflowClassifierTreatsPolicyChangesAsMigratedGatingConsumers(t *testi
 	t.Parallel()
 
 	tests := map[string]struct {
-		path        string
-		docsPreview bool
+		path             string
+		docsPreview      bool
+		sessionNavigator bool
 	}{
 		"ci policy workflow": {
 			path: ".github/workflows/coverage.yml",
 		},
 		"shared classifier": {
-			path:        "cmd/ciclassify/main.go",
-			docsPreview: true,
+			path:             "cmd/ciclassify/main.go",
+			docsPreview:      true,
+			sessionNavigator: true,
 		},
 		"shared workflow package": {
-			path:        "internal/ciworkflow/workflow_classifier.go",
-			docsPreview: true,
+			path:             "internal/ciworkflow/workflow_classifier.go",
+			docsPreview:      true,
+			sessionNavigator: true,
 		},
 	}
 
@@ -90,13 +93,20 @@ func TestWorkflowClassifierTreatsPolicyChangesAsMigratedGatingConsumers(t *testi
 			if !got.CIMacOS ||
 				!got.CoverageGUI ||
 				!got.SandboxMacOS ||
-				!got.LibghosttyNative ||
-				!got.LibghosttyDependencyUnit {
-				t.Fatalf("policy classifier change = %#v, want every migrated gating output true", got)
+				!got.LibghosttyNative {
+				t.Fatalf("policy classifier change = %#v, want every migrated non-dependency gate true", got)
+			}
+
+			if got.LibghosttyDependencyUnit {
+				t.Fatalf("policy classifier change = %#v, want dependency-unit false for non-native-dependency paths", got)
 			}
 
 			if got.DocsPreviewTrigger != test.docsPreview || got.DocsPreviewBuild != test.docsPreview || got.DocsPreviewGlobal {
 				t.Fatalf("policy classifier change = %#v, want docs-preview trigger/build %t and global false", got, test.docsPreview)
+			}
+
+			if got.SessionNavigatorPreview != test.sessionNavigator {
+				t.Fatalf("policy classifier change = %#v, want session-navigator-preview %t", got, test.sessionNavigator)
 			}
 		})
 	}
@@ -276,6 +286,12 @@ func TestMigratedDetectorScriptsFailSafe(t *testing.T) {
 			mode:     "docs-preview",
 			outputs:  []string{"build", "trigger"},
 		},
+		"session-navigator-preview detector": {
+			workflow: ".github/workflows/session-navigator-preview.yml",
+			jobID:    "changes",
+			mode:     "session-navigator-preview",
+			outputs:  []string{"trigger"},
+		},
 		"sandbox macos detector": {
 			workflow: ".github/workflows/sandbox.yml",
 			jobID:    "changes",
@@ -348,16 +364,18 @@ func TestWorkflowModeOutputs(t *testing.T) {
 		DocsPreviewTrigger:       true,
 		DocsPreviewGlobal:        true,
 		DocsPreviewBuild:         true,
+		SessionNavigatorPreview:  true,
 	}
 
 	tests := map[WorkflowClassifierMode][]string{
-		WorkflowClassifierModeCI:          {"macos"},
-		WorkflowClassifierModeCoverage:    {"gui"},
-		WorkflowClassifierModeSandbox:     {"macos"},
-		WorkflowClassifierModeLibghostty:  {"dependency-unit", "native"},
-		WorkflowClassifierModeDevRelease:  {"release"},
-		WorkflowClassifierModeStable:      {"release"},
-		WorkflowClassifierModeDocsPreview: {"build", "global", "trigger"},
+		WorkflowClassifierModeCI:                      {"macos"},
+		WorkflowClassifierModeCoverage:                {"gui"},
+		WorkflowClassifierModeSandbox:                 {"macos"},
+		WorkflowClassifierModeLibghostty:              {"dependency-unit", "native"},
+		WorkflowClassifierModeDevRelease:              {"release"},
+		WorkflowClassifierModeStable:                  {"release"},
+		WorkflowClassifierModeDocsPreview:             {"build", "global", "trigger"},
+		WorkflowClassifierModeSessionNavigatorPreview: {"trigger"},
 	}
 
 	for mode, wantKeys := range tests {
@@ -499,7 +517,7 @@ func legacyWorkflowClassification(files []string, matchers workflowLegacyMatcher
 			result.SandboxMacOS = true
 		}
 
-		if sharedWorkflow || path == "libghostty-native.lock.json" {
+		if path == "libghostty-native.lock.json" {
 			result.LibghosttyDependencyUnit = true
 		}
 
@@ -524,6 +542,10 @@ func legacyWorkflowClassification(files []string, matchers workflowLegacyMatcher
 			result.DocsPreviewGlobal = true
 			result.DocsPreviewBuild = true
 		}
+
+		if legacySessionNavigatorPreviewMatcher.MatchString(path) {
+			result.SessionNavigatorPreview = true
+		}
 	}
 
 	return result
@@ -545,4 +567,6 @@ var (
 	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/install-(dart-sass|hugo)\.sh$`)
 
 	legacyDocsPreviewGlobalMatcher = regexp.MustCompile(`^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)`)
+
+	legacySessionNavigatorPreviewMatcher = regexp.MustCompile(`^cmd/(ciclassify|docsdiff|docspreview|sessionnavshots)/|^internal/(ciworkflow|client|config|docspreview|sessionlabel)/|^Makefile$|^go\.(mod|sum)$|^internal/protocol/messages\.go$|^\.github/workflows/session-navigator-preview\.yml$|^scripts/session-navigator-terminal-screenshot\.sh$`)
 )

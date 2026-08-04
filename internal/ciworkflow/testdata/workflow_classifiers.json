@@ -5,7 +5,9 @@
       "name": "go only",
       "event": "pull_request",
       "files": ["internal/client/passthrough.go"],
-      "want": {}
+      "want": {
+        "session_navigator_preview": true
+      }
     },
     {
       "name": "gui app change",
@@ -62,7 +64,8 @@
         "sandbox_macos": true,
         "libghostty_native": true,
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {
@@ -85,7 +88,6 @@
         "coverage_gui": true,
         "sandbox_macos": true,
         "libghostty_native": true,
-        "libghostty_dependency_unit": true,
         "dev_release": true
       }
     },
@@ -180,10 +182,10 @@
         "coverage_gui": true,
         "sandbox_macos": true,
         "libghostty_native": true,
-        "libghostty_dependency_unit": true,
         "dev_release": true,
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {
@@ -195,10 +197,10 @@
         "coverage_gui": true,
         "sandbox_macos": true,
         "libghostty_native": true,
-        "libghostty_dependency_unit": true,
         "dev_release": true,
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {
@@ -217,6 +219,59 @@
       "want": {
         "libghostty_native": true,
         "stable_release": true
+      }
+    },
+    {
+      "name": "session navigator screenshot command",
+      "event": "pull_request",
+      "files": ["cmd/sessionnavshots/main.go"],
+      "want": {
+        "session_navigator_preview": true
+      }
+    },
+    {
+      "name": "session navigator config",
+      "event": "pull_request",
+      "files": ["internal/config/session_navigator_test.go"],
+      "want": {
+        "session_navigator_preview": true
+      }
+    },
+    {
+      "name": "session navigator labels",
+      "event": "pull_request",
+      "files": ["internal/sessionlabel/label.go"],
+      "want": {
+        "session_navigator_preview": true
+      }
+    },
+    {
+      "name": "session navigator protocol projection",
+      "event": "pull_request",
+      "files": ["internal/protocol/messages.go"],
+      "want": {
+        "ci_macos": true,
+        "session_navigator_preview": true
+      }
+    },
+    {
+      "name": "session navigator preview workflow",
+      "event": "pull_request",
+      "files": [".github/workflows/session-navigator-preview.yml"],
+      "want": {
+        "ci_macos": true,
+        "coverage_gui": true,
+        "sandbox_macos": true,
+        "libghostty_native": true,
+        "session_navigator_preview": true
+      }
+    },
+    {
+      "name": "session navigator terminal screenshot script",
+      "event": "pull_request",
+      "files": ["scripts/session-navigator-terminal-screenshot.sh"],
+      "want": {
+        "session_navigator_preview": true
       }
     },
     {
@@ -283,7 +338,8 @@
       "files": ["cmd/docsdiff/main.go"],
       "want": {
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {
@@ -292,7 +348,8 @@
       "files": ["cmd/docspreview/main.go"],
       "want": {
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {
@@ -301,7 +358,8 @@
       "files": ["internal/docspreview/docspreview.go"],
       "want": {
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {
@@ -313,7 +371,6 @@
         "coverage_gui": true,
         "sandbox_macos": true,
         "libghostty_native": true,
-        "libghostty_dependency_unit": true,
         "docs_preview_trigger": true,
         "docs_preview_build": true
       }
@@ -327,7 +384,6 @@
         "coverage_gui": true,
         "sandbox_macos": true,
         "libghostty_native": true,
-        "libghostty_dependency_unit": true,
         "docs_preview_trigger": true,
         "docs_preview_build": true
       }
@@ -379,7 +435,8 @@
       "want": {
         "ci_macos": true,
         "docs_preview_trigger": true,
-        "docs_preview_build": true
+        "docs_preview_build": true,
+        "session_navigator_preview": true
       }
     },
     {

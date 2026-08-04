@@ -6,18 +6,19 @@ import (
 	"strings"
 )
 
-const WorkflowClassifierVersion = "ci-path-classifier-v1"
+const WorkflowClassifierVersion = "ci-path-classifier-v2"
 
 type WorkflowClassifierMode string
 
 const (
-	WorkflowClassifierModeCI          WorkflowClassifierMode = "ci"
-	WorkflowClassifierModeCoverage    WorkflowClassifierMode = "coverage"
-	WorkflowClassifierModeSandbox     WorkflowClassifierMode = "sandbox"
-	WorkflowClassifierModeLibghostty  WorkflowClassifierMode = "libghostty"
-	WorkflowClassifierModeDevRelease  WorkflowClassifierMode = "dev-release"
-	WorkflowClassifierModeStable      WorkflowClassifierMode = "stable-release"
-	WorkflowClassifierModeDocsPreview WorkflowClassifierMode = "docs-preview"
+	WorkflowClassifierModeCI                      WorkflowClassifierMode = "ci"
+	WorkflowClassifierModeCoverage                WorkflowClassifierMode = "coverage"
+	WorkflowClassifierModeSandbox                 WorkflowClassifierMode = "sandbox"
+	WorkflowClassifierModeLibghostty              WorkflowClassifierMode = "libghostty"
+	WorkflowClassifierModeDevRelease              WorkflowClassifierMode = "dev-release"
+	WorkflowClassifierModeStable                  WorkflowClassifierMode = "stable-release"
+	WorkflowClassifierModeDocsPreview             WorkflowClassifierMode = "docs-preview"
+	WorkflowClassifierModeSessionNavigatorPreview WorkflowClassifierMode = "session-navigator-preview"
 )
 
 type WorkflowClassifications struct {
@@ -31,6 +32,7 @@ type WorkflowClassifications struct {
 	DocsPreviewTrigger       bool `json:"docs_preview_trigger"`
 	DocsPreviewGlobal        bool `json:"docs_preview_global"`
 	DocsPreviewBuild         bool `json:"docs_preview_build"`
+	SessionNavigatorPreview  bool `json:"session_navigator_preview"`
 }
 
 type workflowPathRule struct {
@@ -201,6 +203,28 @@ var (
 			"website/themes/",
 		},
 	}
+
+	sessionNavigatorPreviewRules = workflowPathRule{
+		Paths: []string{
+			".github/workflows/session-navigator-preview.yml",
+			"Makefile",
+			"go.mod",
+			"go.sum",
+			"internal/protocol/messages.go",
+			"scripts/session-navigator-terminal-screenshot.sh",
+		},
+		Prefixes: []string{
+			"cmd/ciclassify/",
+			"cmd/docsdiff/",
+			"cmd/docspreview/",
+			"cmd/sessionnavshots/",
+			"internal/ciworkflow/",
+			"internal/client/",
+			"internal/config/",
+			"internal/docspreview/",
+			"internal/sessionlabel/",
+		},
+	}
 )
 
 func ClassifyWorkflowPaths(changedFiles []string) (WorkflowClassifications, error) {
@@ -230,7 +254,7 @@ func ClassifyWorkflowPaths(changedFiles []string) (WorkflowClassifications, erro
 			result.LibghosttyNative = true
 		}
 
-		if sharedWorkflow || workflowRuleMatches(libghosttyDependencyUnitRules, path) {
+		if workflowRuleMatches(libghosttyDependencyUnitRules, path) {
 			result.LibghosttyDependencyUnit = true
 		}
 
@@ -250,6 +274,10 @@ func ClassifyWorkflowPaths(changedFiles []string) (WorkflowClassifications, erro
 		if workflowRuleMatches(docsPreviewGlobalRules, path) {
 			result.DocsPreviewGlobal = true
 			result.DocsPreviewBuild = true
+		}
+
+		if workflowRuleMatches(sessionNavigatorPreviewRules, path) {
+			result.SessionNavigatorPreview = true
 		}
 	}
 
@@ -279,6 +307,8 @@ func WorkflowModeOutputs(mode WorkflowClassifierMode, result WorkflowClassificat
 			"global":  result.DocsPreviewGlobal,
 			"trigger": result.DocsPreviewTrigger,
 		}, nil
+	case WorkflowClassifierModeSessionNavigatorPreview:
+		return map[string]bool{"trigger": result.SessionNavigatorPreview}, nil
 	default:
 		return nil, fmt.Errorf("unknown workflow classifier mode %q", mode)
 	}

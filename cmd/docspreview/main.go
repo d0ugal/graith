@@ -46,6 +46,7 @@ func runPublish(args []string, getenv func(string) string, now func() time.Time,
 	assetsDir := flags.String("assets", "shots/out", "directory containing diff assets")
 	sha := flags.String("sha", getenv("GITHUB_SHA"), "commit SHA used in the preview comment and storage path")
 	runID := flags.String("run-id", getenv("GITHUB_RUN_ID"), "GitHub Actions run id")
+	suiteName := flags.String("suite", "docs", "preview suite: docs or session-navigator")
 
 	runAttempt := flags.String("run-attempt", getenv("GITHUB_RUN_ATTEMPT"), "GitHub Actions run attempt")
 	if err := flags.Parse(args); err != nil {
@@ -54,6 +55,11 @@ func runPublish(args []string, getenv func(string) string, now func() time.Time,
 
 	if flags.NArg() != 0 {
 		return errors.New("publish does not accept positional arguments")
+	}
+
+	suite, err := docspreview.PreviewSuiteByName(*suiteName)
+	if err != nil {
+		return err
 	}
 
 	event, err := readEvent(*common.eventPath)
@@ -77,6 +83,7 @@ func runPublish(args []string, getenv func(string) string, now func() time.Time,
 		RunID:        *runID,
 		RunAttempt:   *runAttempt,
 		Now:          now(),
+		Suite:        suite,
 	})
 }
 
@@ -84,12 +91,19 @@ func runCleanup(args []string, getenv func(string) string, logOutput io.Writer) 
 	flags := flag.NewFlagSet("docspreview cleanup", flag.ContinueOnError)
 
 	common := addCommonFlags(flags, getenv)
+
+	suiteName := flags.String("suite", "docs", "preview suite: docs or session-navigator")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 
 	if flags.NArg() != 0 {
 		return errors.New("cleanup does not accept positional arguments")
+	}
+
+	suite, err := docspreview.PreviewSuiteByName(*suiteName)
+	if err != nil {
+		return err
 	}
 
 	event, err := readEvent(*common.eventPath)
@@ -107,6 +121,7 @@ func runCleanup(args []string, getenv func(string) string, logOutput io.Writer) 
 		Logger: streamLogger{output: logOutput},
 		Repo:   repo,
 		Event:  event,
+		Suite:  suite,
 	})
 }
 
