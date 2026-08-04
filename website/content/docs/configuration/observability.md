@@ -260,7 +260,9 @@ buffering, enrichment, sampling, redaction, log collection, or metric scraping.
 
 The opt-in boundary is unchanged. Graith still ships no telemetry until you set
 `enabled = true` under `[telemetry.tracing]` with a valid endpoint and restart
-the daemon (`gr daemon restart`).
+the daemon (`gr daemon restart`). Run `gr doctor --tracing` after editing the
+config to check the endpoint shape and credential sources before restarting or
+when traces are missing.
 
 For a self-hosted Tempo OTLP gRPC receiver:
 
@@ -496,15 +498,17 @@ samples, inspect the Alloy `prometheus.scrape` and `prometheus.remote_write`
 components, the `metrics_path`, and the remote-write URL and credentials.
 
 If traces are missing, confirm `[telemetry.tracing].enabled = true`, restart
-the daemon, and match Graith's protocol and endpoint to Alloy's receiver:
-`protocol = "grpc"` uses `127.0.0.1:4317` with `insecure = true` for the
-plaintext local example, while `protocol = "http/protobuf"` uses a full URL
-such as `http://127.0.0.1:4318/v1/traces`. `gr config alloy --signals traces`
-refuses remote tracing endpoints and HTTP/protobuf URLs without an explicit
-port because Alloy receivers listen locally on `host:port`. Graith does not
-read `OTEL_*` environment variables for tracing exporter settings. The gRPC
-exporter dials lazily, so the receiver may not see a connection until a span is
-exported.
+the daemon, and run `gr doctor --tracing`. Doctor validates direct OTLP trace
+export configuration and credential sources without printing header values or
+calling the remote backend. For collector-based traces, also match Graith's
+protocol and endpoint to Alloy's receiver: `protocol = "grpc"` uses
+`127.0.0.1:4317` with `insecure = true` for the plaintext local example, while
+`protocol = "http/protobuf"` uses a full URL such as
+`http://127.0.0.1:4318/v1/traces`. `gr config alloy --signals traces` refuses
+remote tracing endpoints and HTTP/protobuf URLs without an explicit port because
+Alloy receivers listen locally on `host:port`. Graith does not read `OTEL_*`
+environment variables for tracing exporter settings. The gRPC exporter dials
+lazily, so the receiver may not see a connection until a span is exported.
 
 If tracing uses `headers_env` or `headers_file`, a missing variable, missing
 file, unsafe token-file mode, empty source, or invalid multi-line value prevents

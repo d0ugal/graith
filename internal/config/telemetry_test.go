@@ -223,6 +223,52 @@ func TestTelemetryConfigValidateRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestTelemetryTracingEndpointValidationRedactsCredentialMaterial(t *testing.T) {
+	tests := map[string]struct {
+		endpoint string
+		protocol string
+		wantErr  string
+	}{
+		"grpc url with userinfo": {
+			endpoint: "https://dreich-secret@example.grafana.net:4317?token=thrawn-secret#frag",
+			protocol: TelemetryTracingProtocolGRPC,
+			wantErr:  "grpc endpoints must be host:port without a URL scheme",
+		},
+		"http url with userinfo": {
+			endpoint: "https://dreich-secret@example.grafana.net/otlp/v1/traces?token=thrawn-secret#frag",
+			protocol: TelemetryTracingProtocolHTTPProtobuf,
+			wantErr:  "credentials belong",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Telemetry.Tracing = TelemetryTracingConfig{
+				Enabled:  true,
+				Endpoint: test.endpoint,
+				Protocol: test.protocol,
+			}
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() = nil, want endpoint validation error")
+			}
+
+			got := err.Error()
+			if !strings.Contains(got, test.wantErr) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.wantErr)
+			}
+
+			for _, leaked := range []string{"dreich-secret", "thrawn-secret", "token=", "#frag"} {
+				if strings.Contains(got, leaked) {
+					t.Fatalf("Validate() error leaked %q: %v", leaked, err)
+				}
+			}
+		})
+	}
+}
+
 func TestTelemetryTracingResolvedHeaders(t *testing.T) {
 	sourceDir := t.TempDir()
 
