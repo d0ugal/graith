@@ -207,9 +207,12 @@ func requireSelectedSessionID(t *testing.T, m *overlayModel, want string) {
 // renderItem builds a compactDelegate for the given sessions and renders the
 // item at index into a string, using the standard 120x10 list dimensions.
 func renderItem(sessions []protocol.SessionInfo, current string, index int) string {
-	cols := computeColumnWidths(sessions, current)
-	d := compactDelegate{cols: cols, currentSessionID: current}
 	items := buildGroupedItems(sessions, nil)
+	cols := computeColumnWidths(sessions, current)
+	cols.name = maxSessionNameWidthFromItems(items, cols.name)
+	cols.treeIndent = maxTreeIndentFromItems(items)
+	cols.labels = maxCompactSessionLabelWidthFromItems(items)
+	d := compactDelegate{cols: cols, currentSessionID: current}
 	l := list.New(items, d, 120, 10)
 
 	var buf strings.Builder
@@ -1121,6 +1124,66 @@ func TestSessionItemFilterValue(t *testing.T) {
 	got := si.FilterValue()
 	if got != "braw croft" {
 		t.Errorf("FilterValue() = %q, want %q", got, "braw croft")
+	}
+}
+
+func TestCompactSessionLabelTextLimitsAndTruncates(t *testing.T) {
+	tests := map[string]struct {
+		labels       []string
+		wantContains []string
+		wantAbsent   []string
+	}{
+		"limits labels and reports overflow": {
+			labels:       []string{"strath", "bothy", "canny", "dreich"},
+			wantContains: []string{"[strath]", "+3"},
+			wantAbsent:   []string{"[canny]", "[dreich]"},
+		},
+		"truncates long labels": {
+			labels:       []string{"strath-label-for-dreich-weather", "bothy", "canny"},
+			wantContains: []string{"…", "+2"},
+			wantAbsent:   []string{"weather", "[canny]"},
+		},
+		"ignores blank defensive labels": {
+			labels:       []string{" ", "braw"},
+			wantContains: []string{"[braw]"},
+			wantAbsent:   []string{"[]", "+1"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := compactSessionLabelText(test.labels)
+			if width := ansi.StringWidth(got); width > compactSessionLabelColumnMaxWidth {
+				t.Fatalf("compact label text width = %d, want <= %d: %q", width, compactSessionLabelColumnMaxWidth, got)
+			}
+
+			for _, want := range test.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("compact label text %q missing %q", got, want)
+				}
+			}
+
+			for _, absent := range test.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("compact label text %q unexpectedly contains %q", got, absent)
+				}
+			}
+		})
+	}
+}
+
+func TestCompactSessionLabelTextTruncatesWideLabels(t *testing.T) {
+	got := compactSessionLabelText([]string{"日本語のラベルはとても長い"})
+	if got == "" {
+		t.Fatal("compact label text should not be empty")
+	}
+
+	if width := ansi.StringWidth(got); width > compactSessionLabelColumnMaxWidth {
+		t.Fatalf("wide compact label width = %d, want <= %d: %q", width, compactSessionLabelColumnMaxWidth, got)
+	}
+
+	if !strings.Contains(got, "…") {
+		t.Fatalf("wide compact label should be elided, got %q", got)
 	}
 }
 
@@ -5102,6 +5165,158 @@ func TestCompactDelegate_RenderSessionItem(t *testing.T) {
 	}
 }
 
+func TestCompactDelegate_RenderCompactLabelsOutsideLabelView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:        "braw",
+			Name:      "braw",
+			RepoName:  "croft",
+			Status:    "running",
+			Labels:    []string{"strath", "bothy", "canny", "dreich"},
+			CreatedAt: time.Now().Format(time.RFC3339),
+		},
+	}
+
+	line := ansi.Strip(renderItem(sessions, "", 1))
+	for _, want := range []string{"braw", "[strath]", "+3"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("rendered row missing %q:\n%s", want, line)
+		}
+	}
+
+	for _, absent := range []string{"[bothy]", "[canny]", "[dreich]"} {
+		if strings.Contains(line, absent) {
+			t.Errorf("rendered row should not include overflow label %q:\n%s", absent, line)
+		}
+	}
+}
+
+func TestCompactDelegate_RenderCompactLabelsInAllView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:        "braw",
+			Name:      "braw",
+			RepoName:  "croft",
+			Status:    "running",
+			Labels:    []string{"cli", "ui"},
+			CreatedAt: time.Now().Format(time.RFC3339),
+		},
+	}
+
+	items := buildViewItems(viewAll, sessions, nil)
+	cols := computeColumnWidths(sessions, "")
+	cols.name = maxSessionNameWidthFromItems(items, cols.name)
+	cols.treeIndent = maxTreeIndentFromItems(items)
+	cols.labels = maxCompactSessionLabelWidthFromItems(items)
+	d := compactDelegate{cols: cols}
+	l := list.New(items, d, 120, 10)
+	l.Select(0)
+
+	var buf strings.Builder
+	d.Render(&buf, l, 0, items[0])
+	line := ansi.Strip(buf.String())
+
+	for _, want := range []string{"croft/braw", "[cli]", "[ui]"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("all view row missing %q:\n%s", want, line)
+		}
+	}
+}
+
+func TestCompactDelegate_SuppressesCompactLabelsInLabelView(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:        "braw",
+			Name:      "braw",
+			RepoName:  "croft",
+			Status:    "running",
+			Labels:    []string{"strath", "bothy"},
+			CreatedAt: time.Now().Format(time.RFC3339),
+		},
+	}
+
+	items := buildLabelGroupedItems(sessions, nil)
+	cols := computeColumnWidths(sessions, "")
+	cols.name = maxSessionNameWidthFromItems(items, cols.name)
+	cols.treeIndent = maxTreeIndentFromItems(items)
+	cols.labels = maxCompactSessionLabelWidthFromItems(items)
+	d := compactDelegate{cols: cols}
+	l := list.New(items, d, 120, 10)
+	l.Select(1)
+
+	var buf strings.Builder
+	d.Render(&buf, l, 1, items[1])
+	line := ansi.Strip(buf.String())
+
+	if !strings.Contains(line, "croft/braw") {
+		t.Fatalf("label view row should keep repo-qualified session name:\n%s", line)
+	}
+
+	if strings.Contains(line, "[strath]") || strings.Contains(line, "[bothy]") {
+		t.Fatalf("label view row should not duplicate compact label chips:\n%s", line)
+	}
+}
+
+func TestCompactDelegate_CompactLabelsRespectListWidth(t *testing.T) {
+	sessions := []protocol.SessionInfo{
+		{
+			ID:     "braw",
+			Name:   "braw",
+			Status: "running",
+			Labels: []string{
+				"strath-label-for-dreich-weather",
+				"bothy-label-for-canny-roof",
+				"thrawn",
+				"bairn",
+				"blether",
+			},
+			CreatedAt: time.Now().Format(time.RFC3339),
+		},
+	}
+
+	items := buildGroupedItems(sessions, nil)
+	cols := computeColumnWidths(sessions, "")
+	cols.name = maxSessionNameWidthFromItems(items, cols.name)
+	cols.treeIndent = maxTreeIndentFromItems(items)
+	cols.labels = maxCompactSessionLabelWidthFromItems(items)
+	d := compactDelegate{cols: cols}
+	l := list.New(items, d, 36, 10)
+
+	var buf strings.Builder
+	d.Render(&buf, l, 1, items[1])
+	line := buf.String()
+
+	if strings.Contains(line, "\n") {
+		t.Fatalf("compact labels should keep the row single-line, got:\n%q", line)
+	}
+
+	if width := lipgloss.Width(line); width > l.Width() {
+		t.Fatalf("compact label row width = %d, want <= %d:\n%s", width, l.Width(), ansi.Strip(line))
+	}
+
+	stripped := ansi.Strip(line)
+	for _, want := range []string{"braw", "running"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("compact labels should preserve %q in a narrow row:\n%s", want, stripped)
+		}
+	}
+}
+
+func TestRenderCompactSessionLabelsStylesSelectedAndUnselected(t *testing.T) {
+	text := "[strath]"
+	width := lipgloss.Width(text)
+
+	selected := renderCompactSessionLabels(text, true, width)
+	if !strings.Contains(selected, lipgloss.NewStyle().Foreground(colorSelectDim).Render(text)) {
+		t.Fatalf("selected compact labels should use selected dim colour, got %q", selected)
+	}
+
+	unselected := renderCompactSessionLabels(text, false, width)
+	if !strings.Contains(unselected, lipgloss.NewStyle().Foreground(colorDim).Render(text)) {
+		t.Fatalf("unselected compact labels should use regular dim colour, got %q", unselected)
+	}
+}
+
 func TestCompactDelegate_RenderConfigStaleMarkerOnlyWhenActionable(t *testing.T) {
 	tests := map[string]struct {
 		status string
@@ -5536,6 +5751,17 @@ func TestColumnWidths_TotalWidth(t *testing.T) {
 	// 9 + 10 + 4 + (2+8) + (2+15) + (2+5) + (2+6) + (2+6) + (2+4) = 79
 	if got != 79 {
 		t.Errorf("totalWidth() = %d, want 79", got)
+	}
+}
+
+func TestColumnWidths_TotalWidthIncludesCompactLabels(t *testing.T) {
+	cw := columnWidths{name: 10, labels: 12, trailing: map[string]int{
+		"status": 8, "summary": 15, "git": 5, "pr": 6, "review": 6, "output": 4,
+	}}
+
+	got := cw.totalWidth()
+	if got != 93 {
+		t.Errorf("totalWidth() with compact labels = %d, want 93", got)
 	}
 }
 
