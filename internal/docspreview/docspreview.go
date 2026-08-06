@@ -45,11 +45,12 @@ type PreviewViewport struct {
 }
 
 type PreviewSuite struct {
-	Name         string
-	Marker       string
-	Title        string
-	CommitPrefix string
-	Viewports    []PreviewViewport
+	Name                     string
+	Marker                   string
+	Title                    string
+	CommitPrefix             string
+	CommentOnNoVisualChanges bool
+	Viewports                []PreviewViewport
 }
 
 func DocsPreviewSuite() PreviewSuite {
@@ -67,10 +68,11 @@ func DocsPreviewSuite() PreviewSuite {
 
 func SessionNavigatorPreviewSuite() PreviewSuite {
 	return PreviewSuite{
-		Name:         "session-navigator",
-		Marker:       SessionNavigatorStickyMarker,
-		Title:        "Session Navigator preview",
-		CommitPrefix: "session navigator preview",
+		Name:                     "session-navigator",
+		Marker:                   SessionNavigatorStickyMarker,
+		Title:                    "Session Navigator preview",
+		CommitPrefix:             "session navigator preview",
+		CommentOnNoVisualChanges: true,
 		Viewports: []PreviewViewport{
 			{Key: "small", Label: "Small", ImageWidth: 360},
 			{Key: "normal", Label: "Normal", ImageWidth: 540},
@@ -820,7 +822,7 @@ func Publish(ctx context.Context, options PublishOptions) error {
 		}
 	}
 
-	if existingCommentID == 0 && !manifestHasVisualChange(manifest) {
+	if existingCommentID == 0 && !manifestHasVisualChange(manifest) && !suite.CommentOnNoVisualChanges {
 		logger.Info("No visual changes and no existing sticky comment; skipping preview comment.")
 		return nil
 	}

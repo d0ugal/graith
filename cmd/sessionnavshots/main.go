@@ -35,15 +35,25 @@ type fixture struct {
 	Collapsed        map[string]bool        `json:"collapsed"`
 	Sessions         []protocol.SessionInfo `json:"sessions"`
 	DeletedSessions  []protocol.SessionInfo `json:"deleted_sessions"`
+	StatusBar        *statusBarFixture      `json:"status_bar"`
 	Scenes           []snapshotScene        `json:"scenes"`
 }
 
 type snapshotScene struct {
-	Name         string `json:"name"`
-	View         string `json:"view"`
-	SessionID    string `json:"session_id"`
-	LabelGroup   string `json:"label_group"`
-	HelpExpanded bool   `json:"help_expanded"`
+	Name         string            `json:"name"`
+	View         string            `json:"view"`
+	SessionID    string            `json:"session_id"`
+	LabelGroup   string            `json:"label_group"`
+	HelpExpanded bool              `json:"help_expanded"`
+	StatusBar    *statusBarFixture `json:"status_bar"`
+}
+
+type statusBarFixture struct {
+	SessionID   string          `json:"session_id"`
+	Fleet       json.RawMessage `json:"fleet"`
+	UnreadCount int             `json:"unread_count"`
+	ReadOnly    bool            `json:"read_only"`
+	Position    string          `json:"position"`
 }
 
 type terminalSize struct {
@@ -150,8 +160,13 @@ func renderSnapshots(fixturePath, outDir, pagesPath, viewportsPath, sizesValue s
 		help := client.DefaultSessionNavigatorHelp()
 		help.ExpandedByDefault = scene.HelpExpanded
 
+		statusBar := scene.StatusBar
+		if statusBar == nil {
+			statusBar = fx.StatusBar
+		}
+
 		for _, size := range sizes {
-			rendered, err := client.RenderSessionNavigatorSnapshot(client.SessionNavigatorSnapshotOptions{
+			navigatorOptions := client.SessionNavigatorSnapshotOptions{
 				Sessions:         fx.Sessions,
 				DeletedSessions:  fx.DeletedSessions,
 				CurrentSessionID: fx.CurrentSessionID,
@@ -165,7 +180,9 @@ func renderSnapshots(fixturePath, outDir, pagesPath, viewportsPath, sizesValue s
 				HomeDir:          fx.HomeDir,
 				Width:            size.Width,
 				Height:           size.Height,
-			})
+			}
+
+			rendered, err := renderSceneSnapshot(fx, navigatorOptions, statusBar)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s/%s: %w", scene.Name, size.Label, err)
 			}
@@ -191,6 +208,65 @@ func renderSnapshots(fixturePath, outDir, pagesPath, viewportsPath, sizesValue s
 	}
 
 	return pages, sizes, nil
+}
+
+func renderSceneSnapshot(fx fixture, navigatorOptions client.SessionNavigatorSnapshotOptions, statusBar *statusBarFixture) (string, error) {
+	if statusBar == nil {
+		return client.RenderSessionNavigatorSnapshot(navigatorOptions)
+	}
+
+	statusBarOptions, err := fx.statusBarOptions(*statusBar)
+	if err != nil {
+		return "", err
+	}
+
+	return client.RenderSessionNavigatorTerminalSnapshot(client.SessionNavigatorTerminalSnapshotOptions{
+		Navigator: navigatorOptions,
+		StatusBar: statusBarOptions,
+	})
+}
+
+func (fx fixture) statusBarOptions(statusBar statusBarFixture) (client.SessionNavigatorStatusBarSnapshotOptions, error) {
+	sessionID := statusBar.SessionID
+	if sessionID == "" {
+		sessionID = fx.CurrentSessionID
+	}
+
+	session, ok := fx.sessionByID(sessionID)
+	if !ok {
+		return client.SessionNavigatorStatusBarSnapshotOptions{}, fmt.Errorf("status bar session %q not found in fixture sessions", sessionID)
+	}
+
+	fleet := protocol.FleetSummary{}
+	if len(statusBar.Fleet) > 0 {
+		if err := json.Unmarshal(statusBar.Fleet, &fleet); err != nil {
+			return client.SessionNavigatorStatusBarSnapshotOptions{}, fmt.Errorf("decode status bar fleet: %w", err)
+		}
+	}
+
+	return client.SessionNavigatorStatusBarSnapshotOptions{
+		Session:     session,
+		Fleet:       fleet,
+		UnreadCount: statusBar.UnreadCount,
+		ReadOnly:    statusBar.ReadOnly,
+		Position:    statusBar.Position,
+	}, nil
+}
+
+func (fx fixture) sessionByID(id string) (protocol.SessionInfo, bool) {
+	for _, session := range fx.Sessions {
+		if session.ID == id {
+			return session, true
+		}
+	}
+
+	for _, session := range fx.DeletedSessions {
+		if session.ID == id {
+			return session, true
+		}
+	}
+
+	return protocol.SessionInfo{}, false
 }
 
 func loadFixture(path string) (fixture, error) {

@@ -56,6 +56,8 @@ Add a small exported snapshot helper in `internal/client` that constructs the ex
 
 The workflow starts `xterm` under `Xvfb`, displays each ANSI snapshot in a real terminal window with stable geometry and font settings, then captures PNGs with ImageMagick. `cmd/docsdiff` and `cmd/docspreview` handle image diffs, branch storage, cleanup, pruning, and the sticky PR comment.
 
+Snapshots render the full terminal frame, not just the Navigator child view. The command reserves one row for the same attached-session status bar/chrome renderer used by the CLI and renders the Navigator into the remaining rows. This makes status-bar-adjacent UI changes visible in the Session Navigator preview instead of producing a silent all-same manifest. The rendered composite is a deliberate CI preview surface: the live Navigator normally owns the full overlay after attach chrome has been torn down, so the Navigator content in these screenshots is one row shorter than the live full-screen overlay. That trade-off is accepted so one preview suite covers the Session Navigator footer, surrounding terminal chrome, and status-bar signals that influence whether a PR should show visual output.
+
 This avoids maintaining a second browser/HTML renderer for terminal behavior. The terminal screenshot script only displays ANSI files; it does not know about Session Navigator rows, columns, labels, borders, or colors.
 
 ### Proposal 2: Render ANSI HTML From The Go Model
@@ -79,7 +81,7 @@ Text snapshots are easy to diff and review in tests, but GitHub PR comments woul
 
 ### Implementation Notes
 
-The fake fixture should cover long names and labels, parent/child sessions, PR and CI state, stale config, dirty and unpushed git state, stopped/running/error sessions, deleted sessions, scenario/system rows, mirror sessions, read-only sessions, and in-place sessions. The default scenes render the all, repo, labels, and deleted views so reviewers see the most common repository-grouped workflow alongside edge-case views.
+The fake fixture should cover long names and labels, parent/child sessions, PR and CI state, stale config, dirty and unpushed git state, stopped/running/error sessions, deleted sessions, scenario/system rows, mirror sessions, read-only sessions, in-place sessions, and the attached-session status bar. The status-bar fixture stores fleet state as raw JSON before decoding it into the checked-out branch's `protocol.FleetSummary`, so fixture fields for newer fleet signals are ignored by older base commits but become visible when a PR adds support for those fields. A scene can replace the default status-bar fixture when it needs a different attached-session shape; the default scene set uses that to keep both compact fleet signals and long branch/PR/ahead status-bar sections covered. The default scenes render the all, repo, labels, and deleted views so reviewers see the most common repository-grouped workflow alongside edge-case views.
 
 The first matrix is:
 
@@ -91,7 +93,7 @@ The first matrix is:
 
 The matrix is owned by `cmd/sessionnavshots` rather than copied into the workflow. Workflow policy tests assert the Action uses the command defaults so geometry tests and CI screenshots cannot drift to different sizes.
 
-`docspreview` remains the publisher name because it already owns the `screenshots` branch. It gains suite metadata so docs and Session Navigator previews use separate sticky markers and comment titles while sharing storage, cleanup, and pruning behavior.
+`docspreview` remains the publisher name because it already owns the `screenshots` branch. It gains suite metadata so docs and Session Navigator previews use separate sticky markers and comment titles while sharing storage, cleanup, and pruning behavior. Session Navigator previews publish their sticky comment even when a rendered, non-empty manifest has no visual diffs, so reviewers can distinguish "preview ran and found no changes" from "preview did not run".
 
 The live interactive navigator and the snapshot helper both construct the model through `newSessionNavigatorModel`. Regression tests compare `RenderSessionNavigatorSnapshot` against the configured live model's `View().Content` byte for byte at the same terminal size, populate every snapshot option in that equality test, verify custom keybindings show up in the rendered footer, and fail when `RunSessionNavigatorOpts` gains a render-affecting field without a matching snapshot option. This forces future model-construction changes to keep the screenshot path in sync with the real CLI view or make a deliberate non-rendering classification in test code.
 

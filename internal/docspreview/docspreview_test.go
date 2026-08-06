@@ -961,6 +961,90 @@ func TestPublish(t *testing.T) {
 		}
 	})
 
+	t.Run("same-only session navigator manifest creates sticky comment without branch write", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"session-navigator-all": {
+				"small":  {Kind: "same"},
+				"normal": {Kind: "same"},
+				"wide":   {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+			Suite:        SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.createBlob != 0 || github.calls.createTree != 0 || github.calls.createRef != 0 {
+			t.Fatalf("branch writes = %+v, want none for same-only session navigator manifest", github.calls)
+		}
+
+		if len(github.comments[42]) != 1 {
+			t.Fatalf("comments = %+v, want one session navigator sticky comment", github.comments[42])
+		}
+
+		body := github.comments[42][0].Body
+		for _, want := range []string{
+			SessionNavigatorStickyMarker,
+			"Session Navigator preview",
+			"session-navigator-all",
+			"| Small | Normal | Wide |",
+			"_no visual change_",
+			"_No visual changes to preview._",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("comment body missing %q:\n%s", want, body)
+			}
+		}
+
+		if strings.Contains(body, StickyMarker) {
+			t.Fatalf("session navigator no-change comment should not use docs marker:\n%s", body)
+		}
+	})
+
+	t.Run("empty session navigator manifest noops without existing sticky comment", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+			Suite:        SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.createBlob != 0 || github.calls.createTree != 0 || github.calls.createRef != 0 || github.calls.createComment != 0 {
+			t.Fatalf("writes = %+v, want none for empty session navigator manifest", github.calls)
+		}
+
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want no new sticky comment for empty session navigator manifest", github.comments[42])
+		}
+	})
+
 	t.Run("same-only manifest updates existing sticky comment without branch write", func(t *testing.T) {
 		t.Parallel()
 
@@ -993,6 +1077,55 @@ func TestPublish(t *testing.T) {
 
 		if body := github.comments[42][0].Body; !strings.Contains(body, "_No visual changes to preview._") {
 			t.Fatalf("comment body = %q, want no visual changes note", body)
+		}
+	})
+
+	t.Run("same-only session navigator manifest updates existing sticky comment without branch write", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{{ID: 44, Body: SessionNavigatorStickyMarker + "\nold navigator body"}}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"session-navigator-repo": {
+				"small":  {Kind: "same"},
+				"normal": {Kind: "same"},
+				"wide":   {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+			Suite:        SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.createBlob != 0 || github.calls.createTree != 0 || github.calls.createRef != 0 || github.calls.createComment != 0 {
+			t.Fatalf("branch/create writes = %+v, want only existing comment update", github.calls)
+		}
+
+		if github.calls.updateComment != 1 {
+			t.Fatalf("updateComment calls = %d, want 1", github.calls.updateComment)
+		}
+
+		body := github.comments[42][0].Body
+		for _, want := range []string{
+			SessionNavigatorStickyMarker,
+			"Session Navigator preview",
+			"session-navigator-repo",
+			"_No visual changes to preview._",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("comment body missing %q:\n%s", want, body)
+			}
 		}
 	})
 
