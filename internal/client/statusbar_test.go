@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -217,6 +218,102 @@ func TestFormatStatusLineFleetHiddenWhenSolo(t *testing.T) {
 	line := formatStatusLine(info, 120)
 	if strings.Contains(line, "active") && strings.Contains(line, "1 active") {
 		t.Errorf("fleet summary should be hidden when only 1 session, got %q", line)
+	}
+}
+
+func TestFormatStatusLineAttentionSignals(t *testing.T) {
+	info := statusBarInfo{
+		name:        "braw-session",
+		agent:       "claude",
+		status:      "running",
+		agentStatus: "active",
+		fleet: protocol.FleetSummary{
+			Total:                 3,
+			Active:                2,
+			OrchestratorAttention: "Need a release decision",
+			JailedComments:        2,
+			JailedNewestAuthor:    "scunner",
+			JailedNewestPR:        42,
+		},
+	}
+
+	line := ansi.Strip(formatStatusLine(info, 140))
+	for _, want := range []string{"‼ orch Need a release decision", "⚠ jail 2 @scunner #42"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("status line missing %q: %q", want, line)
+		}
+	}
+}
+
+func TestFormatStatusLineAttentionSignalsSanitizeControls(t *testing.T) {
+	info := statusBarInfo{
+		name:        "braw-session",
+		agent:       "claude",
+		status:      "running",
+		agentStatus: "active",
+		fleet: protocol.FleetSummary{
+			Total:                 3,
+			Active:                2,
+			OrchestratorAttention: "Need \x1b]0;bad\x07user\x07",
+			JailedComments:        2,
+			JailedNewestAuthor:    "\x1b[31mscunner\x1b[0m\x07",
+			JailedNewestPR:        42,
+		},
+	}
+
+	line := formatStatusLine(info, 140)
+	if strings.Contains(line, "\x07") {
+		t.Fatalf("status line contains BEL control: %q", line)
+	}
+
+	plain := ansi.Strip(line)
+	for _, want := range []string{"‼ orch Need user", "⚠ jail 2 @scunner #42"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("sanitized status line missing %q: %q", want, plain)
+		}
+	}
+
+	if got := compactStatusToken("\x1b[31mscunner\x1b[0m\x07", 14); got != "scunner" {
+		t.Fatalf("compactStatusToken sanitized = %q, want scunner", got)
+	}
+}
+
+func TestFormatStatusLineAttentionCompactionPrioritizesOrchestrator(t *testing.T) {
+	info := statusBarInfo{
+		name:   "braw",
+		agent:  "claude",
+		status: "running",
+		fleet: protocol.FleetSummary{
+			Total:                 10,
+			Errored:               3,
+			OrchestratorAttention: "Need a release decision with a long message",
+			JailedComments:        8,
+			JailedNewestAuthor:    "scunner",
+			JailedNewestPR:        42,
+		},
+	}
+
+	line := ansi.Strip(formatStatusLine(info, 36))
+	if !strings.Contains(line, "‼ orch") {
+		t.Fatalf("compact status line should keep orchestrator attention: %q", line)
+	}
+
+	if strings.Contains(line, "jail") || strings.Contains(line, "error") {
+		t.Fatalf("critical compaction should drop lower-priority right tokens: %q", line)
+	}
+
+	if w := lipgloss.Width(line); w > 36 {
+		t.Fatalf("width = %d, want <= 36", w)
+	}
+}
+
+func TestJailedAttentionColor(t *testing.T) {
+	if got := jailedAttentionColor(1); got != colorYellow {
+		t.Errorf("single jailed comment color = %v, want yellow", got)
+	}
+
+	if got := jailedAttentionColor(5); got != colorRed {
+		t.Errorf("five jailed comments color = %v, want red", got)
 	}
 }
 

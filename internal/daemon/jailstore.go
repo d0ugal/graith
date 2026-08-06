@@ -36,6 +36,15 @@ type JailedComment struct {
 // Released reports whether this jailed comment has already been released.
 func (j JailedComment) Released() bool { return j.ReleasedAt != "" }
 
+// JailedCommentSummary is the metadata-only aggregate used by fleet/status-bar
+// surfaces. It deliberately excludes comment bodies.
+type JailedCommentSummary struct {
+	Count        int
+	NewestAuthor string
+	NewestRepo   string
+	NewestPR     int
+}
+
 func generateJailID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
@@ -147,6 +156,33 @@ func (s *MsgStore) ListJailed(includeReleased bool) ([]JailedComment, error) {
 	}
 
 	return out, rows.Err()
+}
+
+// JailedSummary returns a compact metadata-only summary of unreleased jailed
+// comments. It is used by frequent status refreshes, so it avoids materializing
+// the bounded jail listing or exposing raw bodies.
+func (s *MsgStore) JailedSummary() (JailedCommentSummary, error) {
+	var summary JailedCommentSummary
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jailed_comments WHERE released_at = ''`).Scan(&summary.Count); err != nil {
+		return JailedCommentSummary{}, fmt.Errorf("count jailed: %w", err)
+	}
+
+	if summary.Count == 0 {
+		return summary, nil
+	}
+
+	err := s.db.QueryRow(`
+		SELECT author, repo_slug, pr_number
+		FROM jailed_comments
+		WHERE released_at = ''
+		ORDER BY jailed_at DESC, id DESC
+		LIMIT 1`).Scan(&summary.NewestAuthor, &summary.NewestRepo, &summary.NewestPR)
+	if err != nil {
+		return JailedCommentSummary{}, fmt.Errorf("newest jailed: %w", err)
+	}
+
+	return summary, nil
 }
 
 // GetJailed returns a single quarantined comment by jail ID. Reads don't take

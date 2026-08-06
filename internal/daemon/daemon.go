@@ -42,6 +42,8 @@ var newPTYSession = grpty.NewSession
 
 type attachedClient struct {
 	conn        net.Conn
+	userAttach  bool
+	readOnly    bool
 	kick        func()
 	sendControl func(msgType string, payload any)
 }
@@ -667,8 +669,16 @@ func (sm *SessionManager) KickAttachedClient(sessionID string) {
 }
 
 func (sm *SessionManager) SetAttachedClient(sessionID string, conn net.Conn, kick func(), sendCtrl func(string, any)) {
+	sm.setAttachedClient(sessionID, conn, false, false, kick, sendCtrl)
+}
+
+func (sm *SessionManager) SetAttachedClientWithMode(sessionID string, conn net.Conn, userAttach, readOnly bool, kick func(), sendCtrl func(string, any)) {
+	sm.setAttachedClient(sessionID, conn, userAttach, readOnly, kick, sendCtrl)
+}
+
+func (sm *SessionManager) setAttachedClient(sessionID string, conn net.Conn, userAttach, readOnly bool, kick func(), sendCtrl func(string, any)) {
 	sm.mu.Lock()
-	sm.attachedClients[sessionID] = &attachedClient{conn: conn, kick: kick, sendControl: sendCtrl}
+	sm.attachedClients[sessionID] = &attachedClient{conn: conn, userAttach: userAttach, readOnly: readOnly, kick: kick, sendControl: sendCtrl}
 	sm.mu.Unlock()
 }
 

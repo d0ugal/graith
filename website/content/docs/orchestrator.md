@@ -98,10 +98,33 @@ gr msg pub --topic <topic> "text" # broadcast to a topic
 gr msg inbox --all --ack              # read inbox messages
 gr store put --shared <key> <body> # persist documents (use --shared)
 gr status "message"               # set status visible in the Session Navigator
+gr attention "Need user input"     # show an outstanding request in the status bar
 gr type <session> "text"          # type into another session
 ```
 
 For reproducible, multi-repo session fleets, use [scenarios](scenarios.md) — they define sessions declaratively in a TOML file and create them atomically, rolling back on failure.
+
+## Status-bar attention
+
+The orchestrator can request the user's attention without sending a desktop
+notification:
+
+```bash
+gr attention "Need release decision" --context "Use gr msg jail list"
+```
+
+Every attached session's status bar shows a red orchestrator attention marker.
+The marker clears automatically when the user attaches or switches to the
+orchestrator. If the request is at least a few minutes old when the user arrives,
+the daemon sends the orchestrator one system inbox notice saying the user has
+arrived, including the stored context. Fresh requests clear silently to avoid
+repeating the active conversation.
+
+Clear an outstanding request explicitly:
+
+```bash
+gr attention --clear
+```
 
 ## Important constraints
 

@@ -11,6 +11,18 @@ draft: false
 
 See [Inter-Agent Messaging]({{< relref "/docs/messaging.md" >}}) for details.
 
+### `gr attention [text]`
+
+Request a persistent status-bar indicator asking the user to return to the
+orchestrator session. The request clears when the user attaches to the
+orchestrator; stale requests generate one system inbox notice to the
+orchestrator when the user arrives.
+
+| Flag | Description |
+|------|-------------|
+| `--context <text>` | Longer context returned to the orchestrator if the user arrives after the request is stale |
+| `--clear` | Clear the outstanding request |
+
 ### `gr msg pub <body>`
 
 Publish to a stream.

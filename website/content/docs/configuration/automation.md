@@ -154,6 +154,10 @@ An untrusted comment is **held (jailed)**, not discarded: quarantined in a store
 
 ### Comment jail
 
+When there are unreleased jailed comments, attached sessions show a yellow
+status-bar warning with the count and newest author/PR. The warning turns red
+for larger backlogs. Use the jail commands to inspect and release the comments.
+
 Inspect and release jailed comments with `gr msg jail`:
 
 ```bash

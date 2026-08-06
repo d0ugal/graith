@@ -572,7 +572,7 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 					attachedReadOnly = a.ReadOnly
 
 					sm.KickAttachedClient(a.SessionID)
-					sm.SetAttachedClient(a.SessionID, conn,
+					sm.SetAttachedClientWithMode(a.SessionID, conn, auth.isHuman(), a.ReadOnly,
 						func() {
 							data, _ := protocol.EncodeControl("detached", protocol.DetachedMsg{Reason: "replaced"})
 							_ = writer.WriteFrameWithDeadline(protocol.ChannelControl, data, defaultAttachOutputWriteTimeout)
@@ -593,6 +593,10 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 						log.Error("failed to save state after attach", "session", a.SessionID, "err", err)
 					}
 					sm.mu.Unlock()
+
+					if auth.isHuman() && !a.ReadOnly {
+						sm.noteOrchestratorAttach(context.WithoutCancel(ctx), a.SessionID, now)
+					}
 				}
 
 				if interactive, ok := interactiveCapability(ptySess); ok {
@@ -974,6 +978,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 			case "notify":
 				handleNotify(sm, auth, sendControl, msg)
 
+			case "orchestrator_attention":
+				handleOrchestratorAttention(sm, auth, sendControl, msg)
+
 			case "scenario_resume":
 				//nolint:contextcheck // session-lifecycle work is intentionally detached from the client connection: it uses its own bounded background timeouts so it survives client disconnect, not the request ctx.
 				handleScenarioResume(sm, auth, sendControl, msg, clientRows, clientCols)
@@ -1237,6 +1244,20 @@ func (ac authContext) authorizeTriggerOp(sm *SessionManager, send func(string, a
 func (ac authContext) authorizeNotify(sm *SessionManager, send func(string, any)) bool {
 	sm.mu.RLock()
 	err := ac.checkNotifyOp(sm)
+	sm.mu.RUnlock()
+
+	if err != nil {
+		send("error", protocol.ErrorMsg{Message: err.Error()})
+
+		return false
+	}
+
+	return true
+}
+
+func (ac authContext) authorizeOrchestratorAttention(sm *SessionManager, clearRequest bool, send func(string, any)) bool {
+	sm.mu.RLock()
+	err := ac.checkOrchestratorAttentionOp(sm, clearRequest)
 	sm.mu.RUnlock()
 
 	if err != nil {

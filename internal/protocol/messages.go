@@ -623,6 +623,23 @@ type NotifyResponse struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// OrchestratorAttentionMsg lets the orchestrator request a persistent,
+// status-bar-visible user attention signal. Clear removes the outstanding
+// request; otherwise Text is the compact status-bar label and Context is stored
+// for the stale-arrival prompt sent back to the orchestrator.
+type OrchestratorAttentionMsg struct {
+	Text    string `json:"text,omitempty"`
+	Context string `json:"context,omitempty"`
+	Clear   bool   `json:"clear,omitempty"`
+}
+
+// OrchestratorAttentionResponse is the daemon's acknowledgement for
+// OrchestratorAttentionMsg.
+type OrchestratorAttentionResponse struct {
+	Active bool   `json:"active"`
+	Text   string `json:"text,omitempty"`
+}
+
 // StatusReportMsg is sent by the client to the daemon to report hook events.
 type StatusReportMsg struct {
 	SessionID string `json:"session_id"`
@@ -1147,6 +1164,13 @@ type FleetSummary struct {
 	Ready   int `json:"ready"`
 	Errored int `json:"errored"`
 	Stopped int `json:"stopped"`
+
+	JailedComments     int    `json:"jailed_comments,omitempty"`
+	JailedNewestAuthor string `json:"jailed_newest_author,omitempty"`
+	JailedNewestRepo   string `json:"jailed_newest_repo,omitempty"`
+	JailedNewestPR     int    `json:"jailed_newest_pr,omitempty"`
+
+	OrchestratorAttention string `json:"orchestrator_attention,omitempty"`
 }
 
 type StatusResponseMsg struct {

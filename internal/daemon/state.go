@@ -593,6 +593,10 @@ type State struct {
 	Version   int                       `json:"version"`
 	Sessions  map[string]*SessionState  `json:"sessions"`
 	Scenarios map[string]*ScenarioState `json:"scenarios,omitempty"`
+	// OrchestratorAttention is the currently visible status-bar request for the
+	// user to return to the orchestrator. It is cleared when the user attaches to
+	// that orchestrator, so one request cannot spam repeated arrival prompts.
+	OrchestratorAttention *OrchestratorAttentionRequestState `json:"orchestrator_attention,omitempty"`
 	// GraithBuild records the last daemon build observed at startup. It lets a
 	// newer daemon detect version transitions without notifying on every restart.
 	GraithBuild *GraithBuildState `json:"graith_build,omitempty"`
@@ -652,6 +656,14 @@ type GraithUpdateNotificationState struct {
 	Previous   GraithBuildState `json:"previous"`
 	Current    GraithBuildState `json:"current"`
 	DetectedAt time.Time        `json:"detected_at"`
+}
+
+type OrchestratorAttentionRequestState struct {
+	ID             string    `json:"id"`
+	OrchestratorID string    `json:"orchestrator_id"`
+	Text           string    `json:"text"`
+	Context        string    `json:"context,omitempty"`
+	RequestedAt    time.Time `json:"requested_at"`
 }
 
 type UpgradeCleanupState struct {

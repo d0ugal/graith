@@ -380,6 +380,7 @@ func registerCommands() {
 		rootCmd.PersistentFlags().BoolVar(&agentMode, "agent-mode", false, "force agent mode (auto-enables JSON output)")
 
 		registerAgentCmd()
+		registerAttentionCmd()
 		registerAttachCmd()
 		registerCheckInboxCmd()
 		registerCompletionCmd()

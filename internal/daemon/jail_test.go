@@ -106,6 +106,47 @@ func TestJail_MarkReleased(t *testing.T) {
 	}
 }
 
+func TestJail_SummaryMetadataOnly(t *testing.T) {
+	s := testStore(t)
+
+	if _, _, err := s.Jail(JailedComment{
+		CommentID: 1, Surface: "conversation", PRNumber: 5, RepoSlug: "d0ugal/graith",
+		Author: "scunner", Body: "INJECT", TargetSession: "dreich", JailedAt: "2026-08-06T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("Jail first: %v", err)
+	}
+
+	newest, _, err := s.Jail(JailedComment{
+		CommentID: 2, Surface: "inline review", PRNumber: 6, RepoSlug: "d0ugal/graith",
+		Author: "fash", Body: "do not summarize this body", TargetSession: "dreich", JailedAt: "2026-08-06T11:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("Jail second: %v", err)
+	}
+
+	summary, err := s.JailedSummary()
+	if err != nil {
+		t.Fatalf("JailedSummary: %v", err)
+	}
+
+	if summary.Count != 2 || summary.NewestAuthor != "fash" || summary.NewestPR != 6 || summary.NewestRepo != "d0ugal/graith" {
+		t.Fatalf("summary = %+v", summary)
+	}
+
+	if _, ok, err := s.MarkReleased(newest); err != nil || !ok {
+		t.Fatalf("MarkReleased newest ok=%v err=%v", ok, err)
+	}
+
+	summary, err = s.JailedSummary()
+	if err != nil {
+		t.Fatalf("JailedSummary after release: %v", err)
+	}
+
+	if summary.Count != 1 || summary.NewestAuthor != "scunner" || summary.NewestPR != 5 {
+		t.Fatalf("summary after release = %+v", summary)
+	}
+}
+
 func TestJail_RetentionByAge(t *testing.T) {
 	s := testStore(t)
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -100,8 +101,6 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	dirtyStyle := lipgloss.NewStyle().Foreground(colorGold).Background(fill)
 	aheadStyle := lipgloss.NewStyle().Foreground(colorBlue).Background(fill)
 	fillSep := lipgloss.NewStyle().Foreground(colorFaint).Background(fill)
-	accentSep := lipgloss.NewStyle().Foreground(colorDim).Background(accent)
-	unreadStyle := lipgloss.NewStyle().Foreground(colorGold).Background(accent)
 
 	transAccentToFill := lipgloss.NewStyle().Foreground(accent).Background(fill).Render(plRight)
 	transFillToAccent := lipgloss.NewStyle().Foreground(accent).Background(fill).Render(plLeft)
@@ -140,18 +139,6 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		mid += sep + pr
 	}
 
-	appendUnread := func(body string) string {
-		if info.unread <= 0 {
-			return body
-		}
-
-		if body != "" {
-			body += accentSep.Render(" │ ")
-		}
-
-		return body + unreadStyle.Render(fmt.Sprintf("✉ %d", info.unread))
-	}
-
 	wrapRight := func(body string) (string, string, int) {
 		if body == "" {
 			return "", "", 0
@@ -162,7 +149,7 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 		return transFillToAccent, section, lipgloss.Width(transFillToAccent) + lipgloss.Width(section)
 	}
 
-	rightSep, rightSection, rightW := wrapRight(appendUnread(formatFleetSection(info.fleet, accent)))
+	rightSep, rightSection, rightW := wrapRight(formatRightSection(info, accent, statusRightFull))
 
 	left := leftAccent + transAccentToFill + leftContent
 	leftW := lipgloss.Width(left)
@@ -174,7 +161,11 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	}
 
 	if leftW+rightW > cols {
-		rightSep, rightSection, rightW = wrapRight(appendUnread(formatFleetMinimal(info.fleet, accent)))
+		rightSep, rightSection, rightW = wrapRight(formatRightSection(info, accent, statusRightCompact))
+	}
+
+	if leftW+rightW > cols {
+		rightSep, rightSection, rightW = wrapRight(formatRightSection(info, accent, statusRightCritical))
 	}
 
 	if leftW+rightW > cols {
@@ -192,6 +183,129 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 	}
 
 	return line
+}
+
+type statusRightMode int
+
+const (
+	statusRightFull statusRightMode = iota
+	statusRightCompact
+	statusRightCritical
+)
+
+func formatRightSection(info statusBarInfo, bg color.Color, mode statusRightMode) string {
+	sep := lipgloss.NewStyle().Foreground(colorDim).Background(bg).Render(" │ ")
+	parts := formatAttentionSignals(info.fleet, bg, mode)
+
+	switch mode {
+	case statusRightFull:
+		if fleet := formatFleetSection(info.fleet, bg); fleet != "" {
+			parts = append(parts, fleet)
+		}
+	case statusRightCompact:
+		if fleet := formatFleetMinimal(info.fleet, bg); fleet != "" {
+			parts = append(parts, fleet)
+		}
+	case statusRightCritical:
+		if len(parts) == 0 {
+			if fleet := formatFleetMinimal(info.fleet, bg); fleet != "" {
+				parts = append(parts, fleet)
+			}
+		}
+	}
+
+	if info.unread > 0 && mode != statusRightCritical {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorGold).Background(bg).Render(fmt.Sprintf("✉ %d", info.unread)))
+	}
+
+	if len(parts) == 0 && info.unread > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorGold).Background(bg).Render(fmt.Sprintf("✉ %d", info.unread)))
+	}
+
+	return strings.Join(parts, sep)
+}
+
+func formatAttentionSignals(fleet protocol.FleetSummary, bg color.Color, mode statusRightMode) []string {
+	var parts []string
+
+	if text := strings.TrimSpace(fleet.OrchestratorAttention); text != "" {
+		parts = append(parts, formatOrchestratorAttention(text, bg, mode))
+	}
+
+	if fleet.JailedComments > 0 && (mode != statusRightCritical || len(parts) == 0) {
+		parts = append(parts, formatJailedAttention(fleet, bg, mode))
+	}
+
+	return parts
+}
+
+func formatOrchestratorAttention(text string, bg color.Color, mode statusRightMode) string {
+	style := lipgloss.NewStyle().Foreground(colorRed).Background(bg).Bold(true)
+	if mode != statusRightFull {
+		return style.Render("‼ orch")
+	}
+
+	return style.Render("‼ orch " + compactStatusToken(text, 28))
+}
+
+func formatJailedAttention(fleet protocol.FleetSummary, bg color.Color, mode statusRightMode) string {
+	style := lipgloss.NewStyle().Foreground(jailedAttentionColor(fleet.JailedComments)).Background(bg).Bold(true)
+
+	label := fmt.Sprintf("⚠ jail %d", fleet.JailedComments)
+	if mode != statusRightFull {
+		return style.Render(label)
+	}
+
+	if author := compactStatusToken(strings.TrimPrefix(fleet.JailedNewestAuthor, "@"), 14); author != "" {
+		label += " @" + author
+	}
+
+	if fleet.JailedNewestPR > 0 {
+		label += fmt.Sprintf(" #%d", fleet.JailedNewestPR)
+	} else if repo := compactStatusToken(fleet.JailedNewestRepo, 18); repo != "" {
+		label += " " + repo
+	}
+
+	return style.Render(label)
+}
+
+func jailedAttentionColor(count int) color.Color {
+	if count >= 5 {
+		return colorRed
+	}
+
+	return colorYellow
+}
+
+func compactStatusToken(s string, width int) string {
+	s = sanitizeStatusText(s)
+	s = strings.Join(strings.Fields(s), " ")
+
+	if s == "" || width <= 0 {
+		return ""
+	}
+
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+
+	if width <= 1 {
+		return ansi.Truncate(s, width, "")
+	}
+
+	return ansi.Truncate(s, width-1, "") + "…"
+}
+
+func sanitizeStatusText(s string) string {
+	s = ansi.Strip(s)
+
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+
+		return r
+	}, s)
 }
 
 // formatReadOnlyLine renders the persistent read-only indicator shown during a

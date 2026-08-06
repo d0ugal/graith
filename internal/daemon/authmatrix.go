@@ -62,17 +62,18 @@ var remoteMessagePolicy = map[string]remotePolicy{
 	"scenario_result_publish": remoteSessionOnly,
 
 	// Mutating / operator actions (paired user + sessions; not guests).
-	"msg_conversation": remoteHumanRW,  // reads private DMs — user, not guest
-	"msg_jail_list":    remoteReadOnly, // inspect quarantined comments — agents may see, not release
-	"msg_jail_show":    remoteReadOnly,
-	"msg_jail_release": remoteHumanRW, // releasing untrusted content: user/orchestrator only (handler re-checks)
-	"scenario_status":  remoteHumanRW, // design denies scenario_* to guests
-	"scenario_list":    remoteHumanRW,
-	"trigger_list":     remoteHumanRW, // triggers gated to users + sessions, not guests
-	"trigger_status":   remoteHumanRW,
-	"trigger_run":      remoteHumanRW,
-	"trigger_pause":    remoteHumanRW,
-	"notify":           remoteHumanRW, // orchestrator/user only; the handler re-checks
+	"msg_conversation":       remoteHumanRW,  // reads private DMs — user, not guest
+	"msg_jail_list":          remoteReadOnly, // inspect quarantined comments — agents may see, not release
+	"msg_jail_show":          remoteReadOnly,
+	"msg_jail_release":       remoteHumanRW, // releasing untrusted content: user/orchestrator only (handler re-checks)
+	"scenario_status":        remoteHumanRW, // design denies scenario_* to guests
+	"scenario_list":          remoteHumanRW,
+	"trigger_list":           remoteHumanRW, // triggers gated to users + sessions, not guests
+	"trigger_status":         remoteHumanRW,
+	"trigger_run":            remoteHumanRW,
+	"trigger_pause":          remoteHumanRW,
+	"notify":                 remoteHumanRW, // orchestrator/user only; the handler re-checks
+	"orchestrator_attention": remoteHumanRW, // orchestrator set, user/orchestrator clear; handler re-checks
 
 	// Read-only host introspection for the paired user/sessions only (not a
 	// read-only guest). diagnostics carries only host-shaped detail (PIDs,
