@@ -174,6 +174,7 @@ var (
 			"Makefile",
 			"scripts/install-dart-sass.sh",
 			"scripts/install-hugo.sh",
+			"scripts/render-session-navigator-doc-screenshots.sh",
 		},
 		Prefixes: []string{
 			"cmd/ciclassify/",

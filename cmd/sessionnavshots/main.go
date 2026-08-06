@@ -1,5 +1,5 @@
 // Command sessionnavshots renders deterministic Session Navigator snapshots for
-// PR screenshot previews.
+// PR screenshot previews and documentation.
 package main
 
 import (
@@ -21,8 +21,15 @@ import (
 )
 
 const (
-	defaultFixturePath = "internal/client/testdata/session_navigator_screenshot_fixture.json"
-	defaultSizes       = "small:80x24,normal:120x30,wide:240x40"
+	defaultSuite = "preview"
+
+	defaultPreviewFixturePath = "internal/client/testdata/session_navigator_screenshot_fixture.json"
+	defaultPreviewOutDir      = "shots/session-navigator/ansi"
+	defaultPreviewSizes       = "small:80x24,normal:120x30,wide:240x40"
+
+	defaultDocsFixturePath = "cmd/sessionnavshots/testdata/session_navigator_docs_fixture.json"
+	defaultDocsOutDir      = "shots/session-navigator/docs/ansi"
+	defaultDocsSizes       = "docs:120x30"
 )
 
 type fixture struct {
@@ -69,6 +76,12 @@ type pageMetadata struct {
 	Viewports []string `json:"viewports,omitempty"`
 }
 
+type suiteDefaults struct {
+	FixturePath string
+	OutDir      string
+	Sizes       string
+}
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -77,11 +90,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("sessionnavshots", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
-	fixturePath := flags.String("fixture", defaultFixturePath, "JSON fixture with fake Session Navigator data")
-	outDir := flags.String("out", "shots/session-navigator/ansi", "directory for generated ANSI and text snapshots")
+	suiteName := flags.String("suite", defaultSuite, "snapshot suite to render: preview or docs")
+	fixturePath := flags.String("fixture", "", "JSON fixture with fake Session Navigator data (defaults by suite)")
+	outDir := flags.String("out", "", "directory for generated ANSI and text snapshots (defaults by suite)")
 	pagesPath := flags.String("pages", "", "path for generated pages metadata JSON")
 	viewportsPath := flags.String("viewports", "", "path for generated viewport metadata JSON")
-	sizesValue := flags.String("sizes", defaultSizes, "comma-delimited terminal sizes as label:COLSxROWS")
+	sizesValue := flags.String("sizes", "", "comma-delimited terminal sizes as label:COLSxROWS (defaults by suite)")
 
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -90,6 +104,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if flags.NArg() != 0 {
 		_, _ = fmt.Fprintf(stderr, "sessionnavshots: unexpected argument %q\n", flags.Arg(0))
 		return 2
+	}
+
+	defaults, err := defaultsForSuite(*suiteName)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "sessionnavshots: %v\n", err)
+		return 2
+	}
+
+	if *fixturePath == "" {
+		*fixturePath = defaults.FixturePath
+	}
+
+	if *outDir == "" {
+		*outDir = defaults.OutDir
+	}
+
+	if *sizesValue == "" {
+		*sizesValue = defaults.Sizes
 	}
 
 	if *pagesPath == "" {
@@ -109,6 +141,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 	_, _ = fmt.Fprintf(stdout, "sessionnavshots: rendered %d page(s) across %d terminal size(s)\n", len(pages), len(viewports))
 
 	return 0
+}
+
+func defaultsForSuite(name string) (suiteDefaults, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "preview", "pr-preview", "session-navigator-preview":
+		return suiteDefaults{
+			FixturePath: defaultPreviewFixturePath,
+			OutDir:      defaultPreviewOutDir,
+			Sizes:       defaultPreviewSizes,
+		}, nil
+	case "docs", "documentation":
+		return suiteDefaults{
+			FixturePath: defaultDocsFixturePath,
+			OutDir:      defaultDocsOutDir,
+			Sizes:       defaultDocsSizes,
+		}, nil
+	default:
+		return suiteDefaults{}, fmt.Errorf("unknown suite %q", name)
+	}
 }
 
 func renderSnapshots(fixturePath, outDir, pagesPath, viewportsPath, sizesValue string) ([]pageMetadata, []terminalSize, error) {

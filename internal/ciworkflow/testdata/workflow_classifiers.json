@@ -398,6 +398,15 @@
       }
     },
     {
+      "name": "docs session navigator screenshot script",
+      "event": "pull_request",
+      "files": ["scripts/render-session-navigator-doc-screenshots.sh"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
       "name": "docs global input",
       "event": "pull_request",
       "files": ["website/data/package_dependencies.json"],

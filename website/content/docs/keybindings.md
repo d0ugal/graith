@@ -70,6 +70,8 @@ inside the Navigator. If `?` is configured for another Navigator action, use
 F1 for expanded help. The visible footer actions and expanded help list are
 configurable with `[session_navigator.help]`.
 
+{{< session-nav-screenshot name="session-navigator-list-docs" alt="Session Navigator list view with the Graith status bar at the bottom" >}}
+
 ### Navigation
 
 | Key | Action |
@@ -97,6 +99,10 @@ Cycle with `h`/`l` or arrows:
 | Labels | Sessions grouped by label across all repositories, with a parent/child tree inside each label; a multi-labelled session appears in each matching group |
 | Scenarios | Every session grouped by scenario, with a parent/child tree inside each scenario and unassigned sessions in a separate group |
 | Deleted | Recently deleted sessions; press `enter` to restore the highlighted session |
+
+{{< session-nav-screenshot name="session-navigator-labels-docs" alt="Session Navigator Labels view with several session labels visible" >}}
+
+{{< session-nav-screenshot name="session-navigator-repo-docs" alt="Session Navigator repository-grouped view with the status bar visible" >}}
 
 ### Actions
 
@@ -149,6 +155,15 @@ Each session row shows:
 | PR | Pull request number plus CI or merge-conflict state |
 | Review | Pull request review decision (`a`, `c`, or `r`) |
 | Output | Age of most recent output |
+
+### Attention States
+
+The status bar remains visible around Navigator screenshots, so user-attention
+signals are reviewed with the surrounding TUI rather than as isolated text.
+
+{{< session-nav-screenshot name="session-navigator-jailed-warning-docs" alt="Session Navigator with jailed-comment status-bar warning scene" >}}
+
+{{< session-nav-screenshot name="session-navigator-orchestrator-attention-docs" alt="Session Navigator with orchestrator-attention status-bar warning scene" >}}
 
 ## Message viewer and scroll pager
 
