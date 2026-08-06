@@ -242,7 +242,6 @@ func (sm *SessionManager) List() []SessionState {
 
 func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 	sm.mu.RLock()
-	defer sm.mu.RUnlock()
 
 	var f protocol.FleetSummary
 
@@ -269,6 +268,25 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 			f.Stopped++
 		case StatusErrored:
 			f.Errored++
+		}
+	}
+
+	f.OrchestratorAttention = sm.visibleOrchestratorAttentionLocked()
+
+	messages := sm.messages
+	sm.mu.RUnlock()
+
+	if messages != nil {
+		summary, err := messages.JailedSummary()
+		if err != nil {
+			if sm.log != nil {
+				sm.log.Debug("failed to summarize jailed comments for status bar", "err", err)
+			}
+		} else {
+			f.JailedComments = summary.Count
+			f.JailedNewestAuthor = summary.NewestAuthor
+			f.JailedNewestRepo = summary.NewestRepo
+			f.JailedNewestPR = summary.NewestPR
 		}
 	}
 

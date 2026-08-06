@@ -110,6 +110,7 @@ func (sm *SessionManager) Delete(id string) (returnErr error) {
 		delete(sm.state.Sessions, id)
 		delete(sm.state.EventFollowRules, id)
 		delete(sm.hookReports, id)
+		sm.clearOrchestratorAttentionForSessionLocked(id)
 
 		saveErr := sm.saveState()
 		sm.mu.Unlock()
@@ -367,12 +368,16 @@ func (sm *SessionManager) Delete(id string) (returnErr error) {
 	delete(sm.state.EventFollowRules, id)
 	delete(sm.hookReports, id)
 	delete(sm.silentWarned, id)
+	previousAttention := sm.clearOrchestratorAttentionForSessionLocked(id)
 
 	if sessToken != "" {
 		delete(sm.tokenIndex, sessToken)
 	}
 
 	err := sm.saveState()
+	if err != nil && previousAttention != nil {
+		sm.state.OrchestratorAttention = previousAttention
+	}
 	sm.mu.Unlock()
 
 	if err == nil {
@@ -870,6 +875,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 			delete(sm.state.Sessions, did)
 			delete(sm.state.EventFollowRules, did)
 			delete(sm.hookReports, did)
+			sm.clearOrchestratorAttentionForSessionLocked(did)
 
 			if ac, ok := sm.attachedClients[did]; ok {
 				delete(sm.attachedClients, did)
@@ -1040,6 +1046,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 				delete(sm.state.Sessions, sid)
 				delete(sm.state.EventFollowRules, sid)
 				delete(sm.hookReports, sid)
+				sm.clearOrchestratorAttentionForSessionLocked(sid)
 
 				if ac, ok := sm.attachedClients[sid]; ok {
 					delete(sm.attachedClients, sid)
@@ -1211,6 +1218,7 @@ func (sm *SessionManager) deleteWithChildren(id string, excludeRoot, allowSystem
 			delete(sm.state.Sessions, s.id)
 			delete(sm.state.EventFollowRules, s.id)
 			delete(sm.hookReports, s.id)
+			sm.clearOrchestratorAttentionForSessionLocked(s.id)
 			deletedIDs = append(deletedIDs, s.id)
 			removedSet[s.id] = true
 		} else if !tombstoned[s.id] || killFailed[s.id] || liveFailed[s.id] {

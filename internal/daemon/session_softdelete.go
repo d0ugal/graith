@@ -158,12 +158,18 @@ func (sm *SessionManager) softDelete(id string, rejectChildren bool) (result Ses
 	applyLifecycleSummaryLocked(sessState, softDeleteSummary(expiresAt))
 
 	lifecycleEvent := pendingSessionStatusChangeEvent(id, sessState, prevStatus)
+	previousAttention := sm.clearOrchestratorAttentionForSessionLocked(id)
+
 	if err := sm.saveState(); err != nil {
 		// Roll back: the session stays live and fully consistent (nothing has
 		// been removed from the runtime maps or killed yet).
 		sessState.DeletedAt = nil
 		sessState.ExpiresAt = nil
 		sessState.Status = prevStatus
+
+		if previousAttention != nil {
+			sm.state.OrchestratorAttention = previousAttention
+		}
 		sm.mu.Unlock()
 
 		return SessionState{}, fmt.Errorf("soft delete aborted: could not persist marker: %w", err)

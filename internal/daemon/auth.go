@@ -360,6 +360,26 @@ func (ac authContext) checkNotifyOp(sm *SessionManager) error {
 	return errors.New("not authorized: only the orchestrator or the user may send notifications")
 }
 
+// checkOrchestratorAttentionOp authorizes the persistent status-bar attention
+// request. Creating the request is orchestrator-only so ordinary sessions cannot
+// claim fleet-wide user attention; a user may clear a stale request manually.
+// Must be called with sm.mu at least RLocked.
+func (ac authContext) checkOrchestratorAttentionOp(sm *SessionManager, clearRequest bool) error {
+	if clearRequest && ac.isHuman() {
+		return nil
+	}
+
+	if ac.isOrchestrator(sm) {
+		return nil
+	}
+
+	if clearRequest {
+		return errors.New("not authorized: only the orchestrator or the user may clear orchestrator attention")
+	}
+
+	return errors.New("not authorized: only the orchestrator may request user attention")
+}
+
 // checkJailRelease authorizes releasing a jailed PR comment (issue #1082).
 // Releasing delivers quarantined, untrusted content to a working agent, so it
 // must be restricted to a user or the system orchestrator — a plain

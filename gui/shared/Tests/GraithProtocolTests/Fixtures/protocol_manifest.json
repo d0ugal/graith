@@ -1591,6 +1591,41 @@
             "kind": "int"
           },
           "optional": false
+        },
+        {
+          "name": "jailed_comments",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "jailed_newest_author",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "jailed_newest_repo",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "jailed_newest_pr",
+          "type": {
+            "kind": "int"
+          },
+          "optional": true
+        },
+        {
+          "name": "orchestrator_attention",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
         }
       ]
     },
@@ -2569,6 +2604,53 @@
         },
         {
           "name": "reason",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "OrchestratorAttentionMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "text",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "context",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "clear",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "OrchestratorAttentionResponse",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "active",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": false
+        },
+        {
+          "name": "text",
           "type": {
             "kind": "string"
           },

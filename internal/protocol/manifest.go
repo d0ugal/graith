@@ -167,6 +167,8 @@ var registeredTypes = []any{
 	MsgJailReleaseResponse{},
 	NotifyMsg{},
 	NotifyResponse{},
+	OrchestratorAttentionMsg{},
+	OrchestratorAttentionResponse{},
 	StatusReportMsg{},
 	HandshakeOkMsg{},
 	HandshakeErrMsg{},
@@ -407,48 +409,50 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	// --- Planned: client-relevant, not modelled in Swift yet (known gaps). ---
 	// Headless convert-on-attach (#1137) is a CLI-driven flow today; a remote GUI
 	// can't attach to a headless session yet, so these stay planned.
-	"AttachConvertMsg":          {SwiftPlanned, ""},
-	"ConvertRequiredMsg":        {SwiftPlanned, ""},
-	"DeleteResultMsg":           {SwiftPlanned, ""},
-	"RestoreResultMsg":          {SwiftPlanned, ""},
-	"StatusSetMsg":              {SwiftPlanned, ""},
-	"WaitMsg":                   {SwiftNA, ""},
-	"WaitMatchedMsg":            {SwiftNA, ""},
-	"MsgPubMsg":                 {SwiftRequired, "MsgPubMsg"},
-	"MsgSubMsg":                 {SwiftNA, ""},
-	"MsgInboxMsg":               {SwiftNA, ""},
-	"EventsSubMsg":              {SwiftNA, ""}, // CLI-only supervisory event stream
-	"EventFollowMsg":            {SwiftNA, ""}, // CLI-only session event forwarding
-	"EventUnfollowMsg":          {SwiftNA, ""}, // CLI-only session event forwarding
-	"EventFollowingMsg":         {SwiftNA, ""}, // CLI-only session event forwarding
-	"EventFollowRuleInfo":       {SwiftNA, ""}, // CLI-only session event forwarding
-	"EventFollowingResponseMsg": {SwiftNA, ""}, // CLI-only session event forwarding
-	"EventMsg":                  {SwiftNA, ""}, // CLI-only supervisory event stream
-	"MsgAckMsg":                 {SwiftRequired, "MsgAckMsg"},
-	"MsgTopicsMsg":              {SwiftNA, ""},
-	"MsgConversationMsg":        {SwiftRequired, "MsgConversationMsg"},
-	"ConversationMessage":       {SwiftRequired, "ConversationMessage"},
-	"MsgConversationListMsg":    {SwiftRequired, "MsgConversationListMsg"},
-	"JailedCommentInfo":         {SwiftNA, ""},
-	"MsgJailListMsg":            {SwiftNA, ""},
-	"MsgJailListResponse":       {SwiftNA, ""},
-	"MsgJailShowMsg":            {SwiftNA, ""},
-	"MsgJailShowResponse":       {SwiftNA, ""},
-	"MsgJailReleaseMsg":         {SwiftNA, ""},
-	"MsgJailReleaseResponse":    {SwiftNA, ""},
-	"NotifyMsg":                 {SwiftNA, ""},
-	"NotifyResponse":            {SwiftNA, ""},
-	"TokenInfo":                 {SwiftPlanned, ""},
-	"FleetSummary":              {SwiftRequired, "FleetSummary"},            // GUI diagnostics panel (#904)
-	"ConfigResponseMsg":         {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
-	"AgentCatalogEntry":         {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
-	"AgentCatalogResponseMsg":   {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)
-	"AgentInfoCacheMetadata":    {SwiftNA, ""},                              // CLI provider introspection
-	"AgentInfoMsg":              {SwiftNA, ""},                              // CLI provider introspection
-	"AgentInfoModel":            {SwiftNA, ""},                              // CLI provider introspection
-	"AgentInfoResult":           {SwiftNA, ""},                              // CLI provider introspection
-	"AgentInfoResponseMsg":      {SwiftNA, ""},                              // CLI provider introspection
-	"StatusResponseMsg":         {SwiftPlanned, ""},
+	"AttachConvertMsg":              {SwiftPlanned, ""},
+	"ConvertRequiredMsg":            {SwiftPlanned, ""},
+	"DeleteResultMsg":               {SwiftPlanned, ""},
+	"RestoreResultMsg":              {SwiftPlanned, ""},
+	"StatusSetMsg":                  {SwiftPlanned, ""},
+	"WaitMsg":                       {SwiftNA, ""},
+	"WaitMatchedMsg":                {SwiftNA, ""},
+	"MsgPubMsg":                     {SwiftRequired, "MsgPubMsg"},
+	"MsgSubMsg":                     {SwiftNA, ""},
+	"MsgInboxMsg":                   {SwiftNA, ""},
+	"EventsSubMsg":                  {SwiftNA, ""}, // CLI-only supervisory event stream
+	"EventFollowMsg":                {SwiftNA, ""}, // CLI-only session event forwarding
+	"EventUnfollowMsg":              {SwiftNA, ""}, // CLI-only session event forwarding
+	"EventFollowingMsg":             {SwiftNA, ""}, // CLI-only session event forwarding
+	"EventFollowRuleInfo":           {SwiftNA, ""}, // CLI-only session event forwarding
+	"EventFollowingResponseMsg":     {SwiftNA, ""}, // CLI-only session event forwarding
+	"EventMsg":                      {SwiftNA, ""}, // CLI-only supervisory event stream
+	"MsgAckMsg":                     {SwiftRequired, "MsgAckMsg"},
+	"MsgTopicsMsg":                  {SwiftNA, ""},
+	"MsgConversationMsg":            {SwiftRequired, "MsgConversationMsg"},
+	"ConversationMessage":           {SwiftRequired, "ConversationMessage"},
+	"MsgConversationListMsg":        {SwiftRequired, "MsgConversationListMsg"},
+	"JailedCommentInfo":             {SwiftNA, ""},
+	"MsgJailListMsg":                {SwiftNA, ""},
+	"MsgJailListResponse":           {SwiftNA, ""},
+	"MsgJailShowMsg":                {SwiftNA, ""},
+	"MsgJailShowResponse":           {SwiftNA, ""},
+	"MsgJailReleaseMsg":             {SwiftNA, ""},
+	"MsgJailReleaseResponse":        {SwiftNA, ""},
+	"NotifyMsg":                     {SwiftNA, ""},
+	"NotifyResponse":                {SwiftNA, ""},
+	"OrchestratorAttentionMsg":      {SwiftNA, ""},
+	"OrchestratorAttentionResponse": {SwiftNA, ""},
+	"TokenInfo":                     {SwiftPlanned, ""},
+	"FleetSummary":                  {SwiftRequired, "FleetSummary"},            // GUI diagnostics panel (#904)
+	"ConfigResponseMsg":             {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
+	"AgentCatalogEntry":             {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
+	"AgentCatalogResponseMsg":       {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)
+	"AgentInfoCacheMetadata":        {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoMsg":                  {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoModel":                {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoResult":               {SwiftNA, ""},                              // CLI provider introspection
+	"AgentInfoResponseMsg":          {SwiftNA, ""},                              // CLI provider introspection
+	"StatusResponseMsg":             {SwiftPlanned, ""},
 	// Read-only task-list types remain planned for the GUIs. Mutation types are
 	// intentionally not applicable to the native apps.
 	"TodoItemInfo":          {SwiftPlanned, ""},

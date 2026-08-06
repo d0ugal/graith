@@ -933,14 +933,40 @@ public struct FleetSummary: Codable, Hashable, Sendable {
     public var ready: Int
     public var errored: Int
     public var stopped: Int
+    public var jailedComments: Int?
+    public var jailedNewestAuthor: String?
+    public var jailedNewestRepo: String?
+    public var jailedNewestPR: Int?
+    public var orchestratorAttention: String?
 
     public init(total: Int = 0, active: Int = 0, ready: Int = 0,
-                errored: Int = 0, stopped: Int = 0) {
+                errored: Int = 0, stopped: Int = 0,
+                jailedComments: Int? = nil, jailedNewestAuthor: String? = nil,
+                jailedNewestRepo: String? = nil, jailedNewestPR: Int? = nil,
+                orchestratorAttention: String? = nil) {
         self.total = total
         self.active = active
         self.ready = ready
         self.errored = errored
         self.stopped = stopped
+        self.jailedComments = jailedComments
+        self.jailedNewestAuthor = jailedNewestAuthor
+        self.jailedNewestRepo = jailedNewestRepo
+        self.jailedNewestPR = jailedNewestPR
+        self.orchestratorAttention = orchestratorAttention
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case active
+        case ready
+        case errored
+        case stopped
+        case jailedComments = "jailed_comments"
+        case jailedNewestAuthor = "jailed_newest_author"
+        case jailedNewestRepo = "jailed_newest_repo"
+        case jailedNewestPR = "jailed_newest_pr"
+        case orchestratorAttention = "orchestrator_attention"
     }
 }
 
