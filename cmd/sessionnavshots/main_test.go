@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/d0ugal/graith/internal/protocol"
 )
 
 func TestRunRendersSnapshotArtifacts(t *testing.T) {
@@ -102,6 +104,167 @@ func TestRunRendersSnapshotArtifacts(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "rendered 1 page(s) across 2 terminal size(s)") {
 		t.Fatalf("unexpected stdout:\n%s", stdout.String())
+	}
+}
+
+func TestRunUsesDocsSuiteDefaults(t *testing.T) {
+	dir := t.TempDir()
+	outDir := filepath.Join(dir, "out")
+
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{
+		"-suite", "docs",
+		"-fixture", filepath.Join("testdata", "session_navigator_docs_fixture.json"),
+		"-out", outDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	if !strings.Contains(stdout.String(), "rendered 5 page(s) across 1 terminal size(s)") {
+		t.Fatalf("unexpected stdout:\n%s", stdout.String())
+	}
+
+	pages, viewports := readGeneratedMetadata(t, outDir)
+
+	pageNames := make(map[string]bool, len(pages))
+	for _, page := range pages {
+		pageNames[page.Name] = true
+		if len(page.Viewports) != 1 || page.Viewports[0] != "docs" {
+			t.Fatalf("page %s viewports = %v, want [docs]", page.Name, page.Viewports)
+		}
+	}
+
+	for _, want := range []string{
+		"session-navigator-list",
+		"session-navigator-labels",
+		"session-navigator-repo",
+		"session-navigator-jailed-warning",
+		"session-navigator-orchestrator-attention",
+	} {
+		if !pageNames[want] {
+			t.Fatalf("docs pages missing %q: %+v", want, pages)
+		}
+	}
+
+	if len(viewports) != 1 || viewports[0].Label != "docs" || viewports[0].Width != 120 || viewports[0].Height != 30 {
+		t.Fatalf("docs viewports = %+v, want one docs 120x30 viewport", viewports)
+	}
+
+	textData, err := os.ReadFile(filepath.Join(outDir, "session-navigator-list-docs.txt"))
+	if err != nil {
+		t.Fatalf("read docs text: %v", err)
+	}
+
+	text := string(textData)
+	for _, want := range []string{"Session Navigator", "session-navigator-doc-screenshots", "orchestrator", "✉ 2"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("docs text missing %q:\n%s", want, text)
+		}
+	}
+
+	if got := len(strings.Split(text, "\n")); got != 30 {
+		t.Fatalf("docs text line count = %d, want 30:\n%s", got, text)
+	}
+}
+
+func TestSuiteDefaults(t *testing.T) {
+	tests := map[string]suiteDefaults{
+		"preview": {
+			FixturePath: "internal/client/testdata/session_navigator_screenshot_fixture.json",
+			OutDir:      "shots/session-navigator/ansi",
+			Sizes:       "small:80x24,normal:120x30,wide:240x40",
+		},
+		"docs": {
+			FixturePath: "cmd/sessionnavshots/testdata/session_navigator_docs_fixture.json",
+			OutDir:      "shots/session-navigator/docs/ansi",
+			Sizes:       "docs:120x30",
+		},
+	}
+
+	for name, want := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := defaultsForSuite(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if got != want {
+				t.Fatalf("defaultsForSuite(%q) = %+v, want %+v", name, got, want)
+			}
+		})
+	}
+}
+
+func TestDocsFixtureDefinesAttentionScenes(t *testing.T) {
+	fx, err := loadFixture(filepath.Join("testdata", "session_navigator_docs_fixture.json"))
+	if err != nil {
+		t.Fatalf("load docs fixture: %v", err)
+	}
+
+	scenes := make(map[string]snapshotScene, len(fx.Scenes))
+	for _, scene := range fx.Scenes {
+		scenes[scene.Name] = scene
+	}
+
+	tests := map[string]func(protocol.FleetSummary) bool{
+		"session-navigator-jailed-warning": func(fleet protocol.FleetSummary) bool {
+			return fleet.JailedComments == 2 && fleet.JailedNewestAuthor == "scunner" && fleet.JailedNewestPR == 43
+		},
+		"session-navigator-orchestrator-attention": func(fleet protocol.FleetSummary) bool {
+			return fleet.OrchestratorAttention == "Review release checklist"
+		},
+	}
+
+	for sceneName, validate := range tests {
+		scene, ok := scenes[sceneName]
+		if !ok {
+			t.Fatalf("docs fixture missing %s scene", sceneName)
+		}
+
+		if scene.StatusBar == nil {
+			t.Fatalf("%s scene has no status bar override", sceneName)
+		}
+
+		statusBar, err := fx.statusBarOptions(*scene.StatusBar)
+		if err != nil {
+			t.Fatalf("%s status bar options: %v", sceneName, err)
+		}
+
+		if !validate(statusBar.Fleet) {
+			t.Fatalf("%s status bar fleet missing attention signal: %+v", sceneName, statusBar.Fleet)
+		}
+	}
+}
+
+func TestDocsWarningScenesRenderStatusBarWarnings(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	fixturePath := filepath.Join("testdata", "session_navigator_docs_fixture.json")
+
+	if _, _, err := renderSnapshots(fixturePath, outDir, filepath.Join(outDir, "pages.json"), filepath.Join(outDir, "viewports.json"), defaultDocsSizes); err != nil {
+		t.Fatalf("render docs fixture: %v", err)
+	}
+
+	tests := map[string][]string{
+		"session-navigator-jailed-warning-docs.txt":         {"⚠ jail 2", "@scunner #43"},
+		"session-navigator-orchestrator-attention-docs.txt": {"‼ orch", "Review release checklist"},
+	}
+
+	for filename, wants := range tests {
+		t.Run(filename, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(outDir, filename))
+			if err != nil {
+				t.Fatalf("read warning scene: %v", err)
+			}
+
+			status := lastLine(string(data))
+			for _, want := range wants {
+				if !strings.Contains(status, want) {
+					t.Fatalf("%s status bar missing %q:\n%s", filename, want, status)
+				}
+			}
+		})
 	}
 }
 
@@ -209,9 +372,9 @@ func TestRenderDefaultFixtureIsStableAcrossProcessHome(t *testing.T) {
 		}
 
 		outDir := filepath.Join(t.TempDir(), "out")
-		fixturePath := filepath.Join("..", "..", defaultFixturePath)
+		fixturePath := filepath.Join("..", "..", defaultPreviewFixturePath)
 
-		pages, viewports, err := renderSnapshots(fixturePath, outDir, filepath.Join(outDir, "pages.json"), filepath.Join(outDir, "viewports.json"), defaultSizes)
+		pages, viewports, err := renderSnapshots(fixturePath, outDir, filepath.Join(outDir, "pages.json"), filepath.Join(outDir, "viewports.json"), defaultPreviewSizes)
 		if err != nil {
 			t.Fatalf("render default fixture with HOME=%s: %v", home, err)
 		}
@@ -340,9 +503,9 @@ func lastLine(text string) string {
 
 func TestDefaultFixtureSnapshotsFitTerminalGeometry(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
-	fixturePath := filepath.Join("..", "..", defaultFixturePath)
+	fixturePath := filepath.Join("..", "..", defaultPreviewFixturePath)
 
-	pages, viewports, err := renderSnapshots(fixturePath, outDir, filepath.Join(outDir, "pages.json"), filepath.Join(outDir, "viewports.json"), defaultSizes)
+	pages, viewports, err := renderSnapshots(fixturePath, outDir, filepath.Join(outDir, "pages.json"), filepath.Join(outDir, "viewports.json"), defaultPreviewSizes)
 	if err != nil {
 		t.Fatalf("render default fixture: %v", err)
 	}
@@ -391,6 +554,32 @@ func TestDefaultFixtureSnapshotsFitTerminalGeometry(t *testing.T) {
 			}
 		}
 	}
+}
+
+func readGeneratedMetadata(t *testing.T, outDir string) ([]pageMetadata, []terminalSize) {
+	t.Helper()
+
+	pagesData, err := os.ReadFile(filepath.Join(outDir, "pages.json"))
+	if err != nil {
+		t.Fatalf("read pages metadata: %v", err)
+	}
+
+	var pages []pageMetadata
+	if err := json.Unmarshal(pagesData, &pages); err != nil {
+		t.Fatalf("decode pages metadata: %v", err)
+	}
+
+	viewportsData, err := os.ReadFile(filepath.Join(outDir, "viewports.json"))
+	if err != nil {
+		t.Fatalf("read viewport metadata: %v", err)
+	}
+
+	var viewports []terminalSize
+	if err := json.Unmarshal(viewportsData, &viewports); err != nil {
+		t.Fatalf("decode viewport metadata: %v", err)
+	}
+
+	return pages, viewports
 }
 
 func TestRunRejectsInvalidTerminalSize(t *testing.T) {

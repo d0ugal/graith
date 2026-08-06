@@ -1,0 +1,283 @@
+{
+  "now": "2026-08-06T12:00:00Z",
+  "home_dir": "/Users/dougalmatthews",
+  "profile": "docs",
+  "current_session_id": "orchestrator-docs",
+  "shortcut_keys": "123456789",
+  "preview": "$ gr status \"Reviewing docs screenshots\"\nstatus updated\n\n$ gr todo list --scenario docs-polish\nID        STATUS       TITLE\nnav-1     done         Capture the normal Session Navigator\nnav-2     in-progress  Refresh documentation images\nnav-3     todo         Review visual drift\n\nWaiting for CI...",
+  "collapsed": {
+    "automation-audit": true
+  },
+  "sessions": [
+    {
+      "id": "orchestrator-docs",
+      "name": "orchestrator",
+      "labels": ["scenario", "docs"],
+      "status": "running",
+      "agent_status": "active",
+      "agent": "graith",
+      "tool_name": "graith",
+      "system_kind": "orchestrator",
+      "scenario_id": "scenario-docs-polish",
+      "scenario_name": "docs screenshot refresh",
+      "created_at": "2026-08-06T09:30:00Z",
+      "last_attached_at": "2026-08-06T11:45:00Z",
+      "status_changed_at": "2026-08-06T09:30:00Z",
+      "last_output_at": "2026-08-06T11:58:00Z",
+      "summary_text": "Coordinating documentation screenshot refresh and review.",
+      "todo_done": 2,
+      "todo_total": 5
+    },
+    {
+      "id": "docs-session",
+      "parent_id": "orchestrator-docs",
+      "name": "session-navigator-doc-screenshots",
+      "labels": ["docs", "visual-regression", "status-bar", "user-guide"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/session-navigator-docs",
+      "cwd": "/Users/dougalmatthews/src/graith",
+      "branch": "docs/session-navigator-screenshots",
+      "base_branch": "main",
+      "agent": "codex",
+      "agent_session_id": "codex-docs-001",
+      "status": "running",
+      "agent_status": "thinking",
+      "created_at": "2026-08-06T10:10:00Z",
+      "last_attached_at": "2026-08-06T11:35:00Z",
+      "status_changed_at": "2026-08-06T11:50:00Z",
+      "last_output_at": "2026-08-06T11:59:20Z",
+      "dirty": true,
+      "unpushed_count": 1,
+      "sandboxed": true,
+      "model": "gpt-5",
+      "config_stale": true,
+      "starred": true,
+      "summary_text": "Implement deterministic documentation screenshots for the Session Navigator.",
+      "pull_request": {
+        "number": 42,
+        "state": "open",
+        "url": "https://github.com/d0ugal/graith/pull/42",
+        "review_decision": "review_required"
+      },
+      "ci": {
+        "state": "pending",
+        "passed": 18,
+        "total": 24
+      },
+      "tokens": {
+        "input": 182000,
+        "output": 41000,
+        "cache_creation": 6000,
+        "cache_read": 230000,
+        "total": 459000
+      },
+      "context_pressure": true,
+      "sub_agent_count": 1,
+      "todo_done": 2,
+      "todo_total": 5
+    },
+    {
+      "id": "status-attention",
+      "parent_id": "orchestrator-docs",
+      "name": "untrusted-review-comment",
+      "labels": ["status-bar", "jailed-comments", "orchestrator-attention", "review-needed"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/untrusted-review-comment",
+      "branch": "d0ugal/graith/pr-comment-moderation",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "running",
+      "agent_status": "active",
+      "created_at": "2026-08-06T10:40:00Z",
+      "last_attached_at": "2026-08-06T11:20:00Z",
+      "status_changed_at": "2026-08-06T11:40:00Z",
+      "last_output_at": "2026-08-06T11:57:00Z",
+      "dirty": false,
+      "unpushed_count": 0,
+      "model": "gpt-5",
+      "summary_text": "Review quarantined comments and user-attention status-bar warnings.",
+      "pull_request": {
+        "number": 43,
+        "state": "open",
+        "url": "https://github.com/d0ugal/graith/pull/43",
+        "review_decision": "approved"
+      },
+      "ci": {
+        "state": "passing",
+        "passed": 24,
+        "total": 24
+      }
+    },
+    {
+      "id": "review-child",
+      "parent_id": "docs-session",
+      "name": "docs-review-follow-up",
+      "labels": ["docs", "review-needed"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/docs-review",
+      "branch": "d0ugal/graith/docs-review",
+      "base_branch": "main",
+      "agent": "claude",
+      "status": "running",
+      "agent_status": "blocked",
+      "created_at": "2026-08-06T10:55:00Z",
+      "last_attached_at": "2026-08-06T11:10:00Z",
+      "status_changed_at": "2026-08-06T11:25:00Z",
+      "last_output_at": "2026-08-06T11:42:00Z",
+      "summary_text": "Reviewing documentation image placement and asset strategy."
+    },
+    {
+      "id": "automation-audit",
+      "parent_id": "orchestrator-docs",
+      "name": "automation-audit",
+      "labels": ["automation", "audit"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith",
+      "branch": "main",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "running",
+      "agent_status": "reading",
+      "created_at": "2026-08-06T08:20:00Z",
+      "last_attached_at": "2026-08-06T10:15:00Z",
+      "status_changed_at": "2026-08-06T10:20:00Z",
+      "last_output_at": "2026-08-06T11:30:00Z",
+      "read_only_branch": true,
+      "read_only_revision": "33a4c228",
+      "model": "gpt-5",
+      "summary_text": "Collapsed read-only audit parent with hidden descendants."
+    },
+    {
+      "id": "automation-audit-child",
+      "parent_id": "automation-audit",
+      "name": "hidden-audit-child",
+      "labels": ["automation"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "branch": "main",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "running",
+      "agent_status": "active",
+      "created_at": "2026-08-06T08:45:00Z",
+      "last_output_at": "2026-08-06T09:20:00Z",
+      "summary_text": "Hidden by the collapsed audit parent."
+    },
+    {
+      "id": "in-place-debug",
+      "name": "in-place-debug",
+      "labels": ["debug", "local"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith",
+      "agent": "codex",
+      "status": "error",
+      "agent_status": "errored",
+      "exit_code": 1,
+      "created_at": "2026-08-06T07:15:00Z",
+      "last_attached_at": "2026-08-06T07:30:00Z",
+      "status_changed_at": "2026-08-06T07:35:00Z",
+      "last_output_at": "2026-08-06T07:35:00Z",
+      "in_place": true,
+      "summary_text": "Errored in-place debugging session with no PR."
+    }
+  ],
+  "deleted_sessions": [
+    {
+      "id": "deleted-docs-draft",
+      "name": "deleted-docs-draft",
+      "labels": ["cleanup", "deleted"],
+      "repo_path": "/Users/dougalmatthews/src/graith",
+      "repo_name": "graith",
+      "worktree_path": "/Users/dougalmatthews/src/graith/.graith/worktrees/deleted-docs-draft",
+      "branch": "d0ugal/graith/deleted-docs-draft",
+      "base_branch": "main",
+      "agent": "codex",
+      "status": "stopped",
+      "agent_status": "done",
+      "created_at": "2026-08-03T12:00:00Z",
+      "last_attached_at": "2026-08-04T12:00:00Z",
+      "status_changed_at": "2026-08-04T12:05:00Z",
+      "last_output_at": "2026-08-04T12:05:00Z",
+      "deleted_at": "2026-08-06T11:30:00Z",
+      "delete_expires_at": "2026-08-13T11:30:00Z",
+      "summary_text": "Soft-deleted documentation draft retained for recovery."
+    }
+  ],
+  "status_bar": {
+    "session_id": "orchestrator-docs",
+    "unread_count": 2,
+    "position": "bottom",
+    "fleet": {
+      "total": 7,
+      "active": 4,
+      "ready": 1,
+      "errored": 1,
+      "stopped": 1
+    }
+  },
+  "scenes": [
+    {
+      "name": "session-navigator-list",
+      "view": "all",
+      "session_id": "docs-session"
+    },
+    {
+      "name": "session-navigator-labels",
+      "view": "labels",
+      "session_id": "status-attention",
+      "label_group": "status-bar"
+    },
+    {
+      "name": "session-navigator-repo",
+      "view": "repo",
+      "session_id": "docs-session",
+      "status_bar": {
+        "session_id": "docs-session",
+        "position": "bottom"
+      }
+    },
+    {
+      "name": "session-navigator-jailed-warning",
+      "view": "all",
+      "session_id": "status-attention",
+      "status_bar": {
+        "session_id": "orchestrator-docs",
+        "unread_count": 1,
+        "position": "bottom",
+        "fleet": {
+          "total": 7,
+          "active": 4,
+          "ready": 1,
+          "errored": 1,
+          "stopped": 1,
+          "jailed_comments": 2,
+          "jailed_newest_author": "scunner",
+          "jailed_newest_pr": 43
+        }
+      }
+    },
+    {
+      "name": "session-navigator-orchestrator-attention",
+      "view": "all",
+      "session_id": "orchestrator-docs",
+      "status_bar": {
+        "session_id": "orchestrator-docs",
+        "unread_count": 1,
+        "position": "bottom",
+        "fleet": {
+          "total": 7,
+          "active": 4,
+          "ready": 1,
+          "errored": 1,
+          "stopped": 1,
+          "orchestrator_attention": "Review release checklist"
+        }
+      }
+    }
+  ]
+}

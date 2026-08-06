@@ -72,6 +72,27 @@ swift test --package-path gui/shared --enable-code-coverage
 jq '.data[0].totals.lines.percent' "$(swift test --package-path gui/shared --show-codecov-path)"
 ```
 
+### Documentation Screenshots
+
+Session Navigator documentation screenshots are checked-in PNG files under
+`website/static/images/docs/session-navigator/`. They use deterministic fake
+session data from `cmd/sessionnavshots/testdata/` and the same full-terminal
+renderer used by the Session Navigator PR preview, including the status bar row.
+
+Refresh them from the repository root with:
+
+```bash
+make docs-session-nav-screenshots
+```
+
+The command renders one canonical documentation terminal size (`120x30`), writes
+temporary ANSI files under `shots/`, and captures PNGs into the public docs
+asset directory. On Linux it uses local `xterm`/`Xvfb`/ImageMagick tools; on
+other hosts it falls back to Docker. Commit the changed PNGs with the fixture or
+renderer change that caused them. Visual drift is reviewed in the normal PR
+diff, while PR-preview screenshots continue to use the separate `screenshots`
+branch and sticky comment.
+
 ## Lint
 
 CI runs `golangci-lint` via Docker:

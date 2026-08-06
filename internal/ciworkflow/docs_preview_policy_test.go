@@ -28,6 +28,7 @@ func TestDocsPreviewWorkflowRoutesPreMergeHugoBuildInputs(t *testing.T) {
 		".github/workflows/docs-preview.yml",
 		"scripts/install-dart-sass.sh",
 		"scripts/install-hugo.sh",
+		"scripts/render-session-navigator-doc-screenshots.sh",
 	})
 
 	workflow, err := ReadP11WorkflowSummary(workflowPath)
@@ -93,6 +94,7 @@ github.event.action != 'closed' &&
 		"go.sum",
 		"scripts/install-dart-sass.sh",
 		"scripts/install-hugo.sh",
+		"scripts/render-session-navigator-doc-screenshots.sh",
 		"detector_failed=1",
 		`classifier_build="${CLASSIFIER_BUILD:-true}"`,
 		`classifier_global="${CLASSIFIER_GLOBAL:-false}"`,
@@ -100,7 +102,7 @@ github.event.action != 'closed' &&
 		`grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"`,
 		`grep -qx '.github/ci-tool-versions.env' <<<"$changed"`,
 		`[ "$classifier_build" != "false" ]`,
-		`grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/install-(dart-sass|hugo)\.sh$' <<<"$changed"`,
+		`grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/(install-(dart-sass|hugo)|render-session-navigator-doc-screenshots)\.sh$' <<<"$changed"`,
 		`emit "website/content/docs/_index.md" false`,
 		`echo "build=$build"`,
 		"find website/content/docs -name '*.md'",

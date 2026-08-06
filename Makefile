@@ -17,7 +17,7 @@ GOLANGCI_LINT_DOCKER := $(GOLANGCI_LINT_DOCKER_BASE) $(GOLANGCI_LINT_IMAGE)
 GOLANGCI_LINT_LIBGHOSTTY_GOARCH ?=
 GOLANGCI_LINT_LIBGHOSTTY_PACKAGES := ./internal/pty ./internal/daemon ./cmd/graith
 
-.PHONY: build test architecture-check lint lint-only lint-darwin lint-libghostty lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve demo demo-clean demo-test
+.PHONY: build test architecture-check lint lint-only lint-darwin lint-libghostty lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve docs-session-nav-screenshots demo demo-clean demo-test
 
 build:
 	GRAITH_LIBGHOSTTY_LDFLAGS="-s -w" scripts/libghostty-native.sh build-local
@@ -126,6 +126,9 @@ docs:
 
 docs-serve:
 	cd website && hugo server
+
+docs-session-nav-screenshots:
+	scripts/render-session-navigator-doc-screenshots.sh
 
 # Record the demo GIF (demo/graith.gif) with VHS. Runs unsandboxed on your own
 # machine: it stands up an isolated `demo` profile with a mix of running/stopped

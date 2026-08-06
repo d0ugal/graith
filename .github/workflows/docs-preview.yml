@@ -18,6 +18,7 @@ on:
       - '.github/workflows/docs-preview.yml'
       - 'scripts/install-dart-sass.sh'
       - 'scripts/install-hugo.sh'
+      - 'scripts/render-session-navigator-doc-screenshots.sh'
   # Safety-net prune of stale screenshot dirs (in case an on-close cleanup
   # was ever missed — dropped event, deleted PR, etc.).
   schedule:
@@ -155,7 +156,8 @@ jobs:
             .github/workflows/docs.yml \
             .github/workflows/docs-preview.yml \
             scripts/install-dart-sass.sh \
-            scripts/install-hugo.sh)"; then
+            scripts/install-hugo.sh \
+            scripts/render-session-navigator-doc-screenshots.sh)"; then
             detector_failed=0
           else
             detector_failed=1
@@ -180,7 +182,7 @@ jobs:
 
           # Website tooling and workflow changes still need the production Hugo
           # validation path, even when they do not map to a specific screenshot.
-          if [ "$classifier_build" != "false" ] || [ "$global" = 1 ] || grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/install-(dart-sass|hugo)\.sh$' <<<"$changed"; then
+          if [ "$classifier_build" != "false" ] || [ "$global" = 1 ] || grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/(install-(dart-sass|hugo)|render-session-navigator-doc-screenshots)\.sh$' <<<"$changed"; then
             build=1
           fi
 
