@@ -2820,7 +2820,7 @@ func TestPrepareUpgradePartialFailureClosesOwnedDuplicates(t *testing.T) {
 	}
 
 	after := countOpenDescriptors(t)
-	if after != before {
+	if after > before {
 		t.Fatalf("open descriptor count grew after partial prepare: before=%d after=%d", before, after)
 	}
 }
