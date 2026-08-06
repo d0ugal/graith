@@ -35,6 +35,24 @@ type SessionNavigatorSnapshotOptions struct {
 	Height           int
 }
 
+// SessionNavigatorStatusBarSnapshotOptions configures the Graith-owned
+// terminal chrome rendered around a Session Navigator snapshot.
+type SessionNavigatorStatusBarSnapshotOptions struct {
+	Session     protocol.SessionInfo
+	Fleet       protocol.FleetSummary
+	UnreadCount int
+	ReadOnly    bool
+	Position    string
+}
+
+// SessionNavigatorTerminalSnapshotOptions configures a full terminal render:
+// the Session Navigator child frame plus the status bar/chrome row shown while
+// attached.
+type SessionNavigatorTerminalSnapshotOptions struct {
+	Navigator SessionNavigatorSnapshotOptions
+	StatusBar SessionNavigatorStatusBarSnapshotOptions
+}
+
 // RenderSessionNavigatorSnapshot renders the same Bubble Tea/Lip Gloss view as
 // the live Session Navigator without starting an interactive terminal program.
 func RenderSessionNavigatorSnapshot(opts SessionNavigatorSnapshotOptions) (string, error) {
@@ -89,6 +107,44 @@ func RenderSessionNavigatorSnapshot(opts SessionNavigatorSnapshotOptions) (strin
 	}
 
 	return rendered.View().Content, nil
+}
+
+// RenderSessionNavigatorTerminalSnapshot renders the Session Navigator inside
+// the Graith-owned terminal chrome used for attached sessions.
+func RenderSessionNavigatorTerminalSnapshot(opts SessionNavigatorTerminalSnapshotOptions) (string, error) {
+	position := opts.StatusBar.Position
+	if position == "" {
+		position = "bottom"
+	}
+
+	if position != "top" && position != "bottom" {
+		return "", fmt.Errorf("status bar position must be top or bottom, got %q", position)
+	}
+
+	if opts.Navigator.Height <= 1 {
+		return "", errors.New("terminal snapshot height must leave room for status bar")
+	}
+
+	navigator := opts.Navigator
+	navigator.Height--
+
+	rendered, err := RenderSessionNavigatorSnapshot(navigator)
+	if err != nil {
+		return "", err
+	}
+
+	info := newStatusBarInfo(opts.StatusBar.Session, opts.StatusBar.UnreadCount, opts.StatusBar.Fleet)
+	statusLine := formatStatusLine(info, opts.Navigator.Width)
+
+	if opts.StatusBar.ReadOnly {
+		statusLine = formatReadOnlyLine(info, opts.Navigator.Width)
+	}
+
+	if position == "top" {
+		return statusLine + "\n" + rendered, nil
+	}
+
+	return rendered + "\n" + statusLine, nil
 }
 
 func installSnapshotClock(now time.Time) func() {

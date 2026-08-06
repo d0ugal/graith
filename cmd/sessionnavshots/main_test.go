@@ -105,6 +105,91 @@ func TestRunRendersSnapshotArtifacts(t *testing.T) {
 	}
 }
 
+func TestRunRendersStatusBarChrome(t *testing.T) {
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "fixture.json")
+	outDir := filepath.Join(dir, "out")
+
+	fixture := `{
+  "now": "2026-08-04T12:00:00Z",
+  "profile": "preview",
+  "current_session_id": "braw",
+  "shortcut_keys": "123",
+  "sessions": [
+    {
+      "id": "braw",
+      "name": "braw",
+      "repo_name": "graith",
+      "status": "running",
+      "agent_status": "active",
+      "agent": "codex",
+      "branch": "d0ugal/graith/status-bar-shots",
+      "created_at": "2026-08-04T11:00:00Z",
+      "last_output_at": "2026-08-04T11:59:00Z",
+      "summary_text": "Render canny deterministic previews"
+    }
+  ],
+  "status_bar": {
+    "session_id": "braw",
+    "unread_count": 2,
+    "position": "bottom",
+    "fleet": {
+      "total": 3,
+      "active": 2,
+      "ready": 1,
+      "jailed_comments": 1,
+      "jailed_newest_author": "scunner",
+      "jailed_newest_pr": 2086,
+      "orchestrator_attention": "Need release decision"
+    }
+  },
+  "scenes": [
+    {
+      "name": "canny",
+      "view": "all",
+      "session_id": "braw"
+    }
+  ]
+}`
+	if err := os.WriteFile(fixturePath, []byte(fixture), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+
+	code := run([]string{
+		"-fixture", fixturePath,
+		"-out", outDir,
+		"-sizes", "normal:100x24",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "canny-normal.txt"))
+	if err != nil {
+		t.Fatalf("read text: %v", err)
+	}
+
+	text := string(data)
+	for _, want := range []string{"Session Navigator", "braw", "codex", "status-bar-shots", "active", "✉ 2"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("status bar snapshot missing %q:\n%s", want, text)
+		}
+	}
+
+	lines := strings.Split(text, "\n")
+	if len(lines) != 24 {
+		t.Fatalf("text line count = %d, want 24:\n%s", len(lines), text)
+	}
+
+	for i, line := range lines {
+		if width := ansi.StringWidth(line); width > 100 {
+			t.Fatalf("line %d width = %d, want <= 100:\n%s", i+1, width, line)
+		}
+	}
+}
+
 func TestRenderDefaultFixtureIsStableAcrossProcessHome(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 
@@ -170,6 +255,11 @@ func TestRenderDefaultFixtureIsStableAcrossProcessHome(t *testing.T) {
 			t.Fatalf("read repo text: %v", err)
 		}
 
+		repoWideData, err := os.ReadFile(filepath.Join(outDir, "session-navigator-repo-wide.txt"))
+		if err != nil {
+			t.Fatalf("read repo wide text: %v", err)
+		}
+
 		labelsData, err := os.ReadFile(filepath.Join(outDir, "session-navigator-labels-normal.txt"))
 		if err != nil {
 			t.Fatalf("read labels text: %v", err)
@@ -185,10 +275,32 @@ func TestRenderDefaultFixtureIsStableAcrossProcessHome(t *testing.T) {
 			t.Fatalf("normal text missing shortened home path:\n%s", normalText)
 		}
 
+		normalStatus := lastLine(normalText)
+		for _, want := range []string{"orchestrator", "graith", "✉ 3"} {
+			if !strings.Contains(normalStatus, want) {
+				t.Fatalf("normal status bar missing %q:\n%s", want, normalStatus)
+			}
+		}
+
 		wideText := string(wideData)
+
+		wideStatus := lastLine(wideText)
+		for _, want := range []string{"3 active", "1 ready", "1 error", "2 stopped"} {
+			if !strings.Contains(wideStatus, want) {
+				t.Fatalf("wide status bar missing %q:\n%s", want, wideStatus)
+			}
+		}
+
 		for _, want := range []string{"#1870", "review-needed"} {
 			if !strings.Contains(wideText, want) {
 				t.Fatalf("wide text missing %q:\n%s", want, wideText)
+			}
+		}
+
+		repoWideStatus := lastLine(string(repoWideData))
+		for _, want := range []string{"session-navigator-preview", "PR#1870", "↑2"} {
+			if !strings.Contains(repoWideStatus, want) {
+				t.Fatalf("repo wide status bar missing %q:\n%s", want, repoWideStatus)
 			}
 		}
 
@@ -219,6 +331,11 @@ func TestRenderDefaultFixtureIsStableAcrossProcessHome(t *testing.T) {
 	if outputs[0] != outputs[1] {
 		t.Fatal("default fixture render changed with process HOME")
 	}
+}
+
+func lastLine(text string) string {
+	lines := strings.Split(text, "\n")
+	return lines[len(lines)-1]
 }
 
 func TestDefaultFixtureSnapshotsFitTerminalGeometry(t *testing.T) {

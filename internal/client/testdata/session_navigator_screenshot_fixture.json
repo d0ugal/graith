@@ -244,6 +244,23 @@
       "summary_text": "Soft-deleted stopped session retained for recovery."
     }
   ],
+  "status_bar": {
+    "session_id": "orchestrator-root",
+    "unread_count": 3,
+    "position": "bottom",
+    "fleet": {
+      "total": 7,
+      "active": 3,
+      "ready": 1,
+      "errored": 1,
+      "stopped": 2,
+      "jailed_comments": 2,
+      "jailed_newest_author": "scunner",
+      "jailed_newest_repo": "d0ugal/graith",
+      "jailed_newest_pr": 2086,
+      "orchestrator_attention": "Need release decision"
+    }
+  },
   "scenes": [
     {
       "name": "session-navigator-all",
@@ -253,7 +270,11 @@
     {
       "name": "session-navigator-repo",
       "view": "repo",
-      "session_id": "feature-navigator-shots"
+      "session_id": "feature-navigator-shots",
+      "status_bar": {
+        "session_id": "feature-navigator-shots",
+        "position": "bottom"
+      }
     },
     {
       "name": "session-navigator-labels",

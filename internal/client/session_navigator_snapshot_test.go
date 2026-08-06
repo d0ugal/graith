@@ -113,6 +113,74 @@ func TestRenderSessionNavigatorSnapshot(t *testing.T) {
 	}
 }
 
+func TestRenderSessionNavigatorTerminalSnapshotIncludesStatusBar(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+
+	out, err := RenderSessionNavigatorTerminalSnapshot(SessionNavigatorTerminalSnapshotOptions{
+		Navigator: SessionNavigatorSnapshotOptions{
+			Sessions: []protocol.SessionInfo{{
+				ID:           "braw",
+				Name:         "braw",
+				RepoName:     "graith",
+				Agent:        "codex",
+				Status:       "running",
+				AgentStatus:  "active",
+				Branch:       "d0ugal/graith/session-nav-terminal-shots",
+				CreatedAt:    now.Add(-1 * time.Hour).Format(time.RFC3339),
+				LastOutputAt: now.Add(-1 * time.Minute).Format(time.RFC3339),
+			}},
+			CurrentSessionID: "braw",
+			State:            SessionNavigatorState{View: SessionNavigatorViewAll, SessionID: "braw"},
+			ShortcutKeys:     "123",
+			Help:             DefaultSessionNavigatorHelp(),
+			Now:              now,
+			Width:            100,
+			Height:           24,
+		},
+		StatusBar: SessionNavigatorStatusBarSnapshotOptions{
+			Session: protocol.SessionInfo{
+				ID:          "braw",
+				Name:        "braw",
+				Agent:       "codex",
+				Status:      "running",
+				AgentStatus: "active",
+				Branch:      "d0ugal/graith/session-nav-terminal-shots",
+			},
+			Fleet:       protocol.FleetSummary{Total: 4, Active: 2, Ready: 1, Errored: 1},
+			UnreadCount: 3,
+			Position:    "bottom",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderSessionNavigatorTerminalSnapshot returned error: %v", err)
+	}
+
+	lines := strings.Split(out, "\n")
+	if len(lines) != 24 {
+		t.Fatalf("terminal snapshot line count = %d, want 24", len(lines))
+	}
+
+	plain := ansi.Strip(out)
+	for _, want := range []string{"Session Navigator", "braw", "codex", "session-nav-terminal-shots", "error", "active", "✉ 3"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("terminal snapshot missing %q:\n%s", want, plain)
+		}
+	}
+
+	statusLine := lines[len(lines)-1]
+	if width := ansi.StringWidth(statusLine); width != 100 {
+		t.Fatalf("status line width = %d, want 100:\n%s", width, statusLine)
+	}
+
+	for i, line := range lines {
+		if width := ansi.StringWidth(line); width > 100 {
+			t.Fatalf("line %d width = %d, want <= 100:\n%s", i+1, width, line)
+		}
+	}
+}
+
 func TestRenderSessionNavigatorSnapshotRejectsInvalidSize(t *testing.T) {
 	tests := map[string]SessionNavigatorSnapshotOptions{
 		"missing width":  {Height: 24},
