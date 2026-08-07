@@ -7,7 +7,7 @@
     ]
   },
   "dataLicense": "CC0-1.0",
-  "documentNamespace": "https://github.com/d0ugal/graith/sbom/libghostty-native/2dd79f3bc6af649e68422b08e21ad0300fd8b391/ef0f8ce3daa7fff71dbd7ea550a1de81c194d3b8",
+  "documentNamespace": "https://github.com/d0ugal/graith/sbom/libghostty-native/7e50356642afead216a35c8968f4c33cb38d7f04/774494360861671f94f1c0f084c961fb6ff3a301",
   "name": "graith-libghostty-native-dependencies",
   "packages": [
     {
@@ -17,17 +17,17 @@
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:golang/go.mitchellh.com/libghostty@v0.0.0-20260727203050-ef0f8ce3daa7",
+          "referenceLocator": "pkg:golang/go.mitchellh.com/libghostty@v0.0.0-20260803215605-774494360861",
           "referenceType": "purl"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "Exact revision ef0f8ce3daa7fff71dbd7ea550a1de81c194d3b8; module sum h1:FjTViNdmzrhZ0/cprJIf9OVLRFrv9mi3XgcyHv9/ZK0=; wrapper build tests pin Ghostty 2dd79f3bc6af649e68422b08e21ad0300fd8b391; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
+      "licenseComments": "Exact revision 774494360861671f94f1c0f084c961fb6ff3a301; module sum h1:KKW3iix28TNux+cEB8n+k51HUhbRcsbTkpOrQuTVm7w=; wrapper build tests pin Ghostty 7e50356642afead216a35c8968f4c33cb38d7f04; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "go-libghostty",
       "supplier": "Person: Mitchell Hashimoto",
-      "versionInfo": "v0.0.0-20260727203050-ef0f8ce3daa7"
+      "versionInfo": "v0.0.0-20260803215605-774494360861"
     },
     {
       "SPDXID": "SPDXRef-Package-Ghostty",
@@ -36,18 +36,18 @@
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:github/ghostty-org/ghostty@2dd79f3bc6af649e68422b08e21ad0300fd8b391",
+          "referenceLocator": "pkg:github/ghostty-org/ghostty@7e50356642afead216a35c8968f4c33cb38d7f04",
           "referenceType": "purl"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The committed header tree SHA-256 is bf954e4d646f4e9e2ab23844b2b025085b1eeb9733a99d0e9fda288b75531df9. The Apple archive SHA-256 is 5e420e5245f4997e6812ee06966a594be3e3f335e9011dcf94e31ab102669f79.",
+      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The committed header tree SHA-256 is 5755a63fc45e195b995370d9debb1d71b39ccabb6711520b12fc9354c57b4e6d. The Apple archive SHA-256 is 1f933c8220214b49dacfcf573f2ad50d46d5d57dbc68d0d8e9fe692e911a982d.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "Ghostty libghostty-vt",
-      "sourceInfo": "Built from exact commit 2dd79f3bc6af649e68422b08e21ad0300fd8b391 with Zig 0.16.0 and -Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast. No explicit SIMD override is passed by the pinned Apple build.",
+      "sourceInfo": "Built from exact commit 7e50356642afead216a35c8968f4c33cb38d7f04 with Zig 0.16.0 and -Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast. No explicit SIMD override is passed by the pinned Apple build.",
       "supplier": "Organization: Ghostty contributors",
-      "versionInfo": "1.3.2-dev+2dd79f3bc6af649e68422b08e21ad0300fd8b391"
+      "versionInfo": "1.3.2-dev+7e50356642afead216a35c8968f4c33cb38d7f04"
     },
     {
       "SPDXID": "SPDXRef-Package-Uucode",
@@ -104,7 +104,7 @@
     {
       "SPDXID": "SPDXRef-Package-Simdutf",
       "copyrightText": "Copyright 2021 The simdutf authors; Facebook, Inc.; Idiap Research Institute; Deepmind Technologies; NEC Laboratories America; NYU; Google Fuchsia contributors",
-      "downloadLocation": "https://github.com/ghostty-org/ghostty/tree/2dd79f3bc6af649e68422b08e21ad0300fd8b391/pkg/simdutf/vendor",
+      "downloadLocation": "https://github.com/ghostty-org/ghostty/tree/7e50356642afead216a35c8968f4c33cb38d7f04/pkg/simdutf/vendor",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",

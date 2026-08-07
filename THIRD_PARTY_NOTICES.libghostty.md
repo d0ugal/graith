@@ -14,8 +14,8 @@ dependency unit.
 
 | Component | Exact compiled pin | Distributed license conclusion |
 |-----------|--------------------|--------------------------------|
-| go-libghostty | `v0.0.0-20260727203050-ef0f8ce3daa7` / `ef0f8ce3daa7fff71dbd7ea550a1de81c194d3b8` | MIT |
-| Ghostty libghostty-vt | `1.3.2-dev` / `2dd79f3bc6af649e68422b08e21ad0300fd8b391` | MIT |
+| go-libghostty | `v0.0.0-20260803215605-774494360861` / `774494360861671f94f1c0f084c961fb6ff3a301` | MIT |
+| Ghostty libghostty-vt | `1.3.2-dev` / `7e50356642afead216a35c8968f4c33cb38d7f04` | MIT |
 | uucode | `0.2.0`, Zig hash `uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA` | MIT AND Unicode-3.0 |
 | Highway | `1.2.0`, upstream `66486a10623fa0d72fe91260f96c892e41aceb06`, Zig hash `N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE` | BSD-3-Clause, elected from Apache-2.0 OR BSD-3-Clause |
 | simdutf amalgamation | compiled version `9.0.0`, corresponding upstream `ca7acbcea967b5dcbab490066e99e3a6e6925539` | MIT AND BSD-3-Clause AND Apache-2.0 |
@@ -31,20 +31,20 @@ build-only tool.
 The exact verified inputs are:
 
 - go-libghostty module sum
-  `h1:FjTViNdmzrhZ0/cprJIf9OVLRFrv9mi3XgcyHv9/ZK0=`, wrapper-tested Ghostty commit
-  `2dd79f3bc6af649e68422b08e21ad0300fd8b391`, and LICENSE SHA-256
+  `h1:KKW3iix28TNux+cEB8n+k51HUhbRcsbTkpOrQuTVm7w=`, wrapper-tested Ghostty commit
+  `7e50356642afead216a35c8968f4c33cb38d7f04`, and LICENSE SHA-256
   `fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9`;
 - Ghostty LICENSE SHA-256
   `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1` and committed-header tree SHA-256
-  `bf954e4d646f4e9e2ab23844b2b025085b1eeb9733a99d0e9fda288b75531df9`;
+  `5755a63fc45e195b995370d9debb1d71b39ccabb6711520b12fc9354c57b4e6d`;
 - Linux source-build configuration `-Demit-lib-vt=true`,
   `-Demit-xcframework=false`, `-Doptimize=ReleaseFast`, and the
   target-specific `-Dtarget=x86_64-linux-gnu` or
   `-Dtarget=aarch64-linux-gnu`; no Apple archive is used for Linux;
 - Apple testing archive used by the macOS native candidate
-  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-2dd79f3-go-ef0f8ce-zig-0.16.0/libghostty-vt.xcframework.zip`
+  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-7e50356-go-7744943-zig-0.16.0/libghostty-vt.xcframework.zip`
   SHA-256
-  `5e420e5245f4997e6812ee06966a594be3e3f335e9011dcf94e31ab102669f79`;
+  `1f933c8220214b49dacfcf573f2ad50d46d5d57dbc68d0d8e9fe692e911a982d`;
 - Zig source URL `https://ziglang.org/download/0.16.0/zig-0.16.0.tar.xz`,
   source SHA-256
   `43186959edc87d5c7a1be7b7d2a25efffd22ce5807c7af99067f86f99641bfdf`,
