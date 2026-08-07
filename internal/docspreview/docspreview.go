@@ -45,12 +45,11 @@ type PreviewViewport struct {
 }
 
 type PreviewSuite struct {
-	Name                     string
-	Marker                   string
-	Title                    string
-	CommitPrefix             string
-	CommentOnNoVisualChanges bool
-	Viewports                []PreviewViewport
+	Name         string
+	Marker       string
+	Title        string
+	CommitPrefix string
+	Viewports    []PreviewViewport
 }
 
 func DocsPreviewSuite() PreviewSuite {
@@ -68,11 +67,10 @@ func DocsPreviewSuite() PreviewSuite {
 
 func SessionNavigatorPreviewSuite() PreviewSuite {
 	return PreviewSuite{
-		Name:                     "session-navigator",
-		Marker:                   SessionNavigatorStickyMarker,
-		Title:                    "Session Navigator preview",
-		CommitPrefix:             "session navigator preview",
-		CommentOnNoVisualChanges: true,
+		Name:         "session-navigator",
+		Marker:       SessionNavigatorStickyMarker,
+		Title:        "TUI preview",
+		CommitPrefix: "tui preview",
 		Viewports: []PreviewViewport{
 			{Key: "small", Label: "Small", ImageWidth: 360},
 			{Key: "normal", Label: "Normal", ImageWidth: 540},
@@ -248,6 +246,7 @@ type CommentClient interface {
 	ListComments(ctx context.Context, owner, repo string, issueNumber int) ([]Comment, error)
 	UpdateComment(ctx context.Context, owner, repo string, commentID int64, body string) error
 	CreateComment(ctx context.Context, owner, repo string, issueNumber int, body string) error
+	DeleteComment(ctx context.Context, owner, repo string, commentID int64) error
 }
 
 type CleanupClient interface {
@@ -564,14 +563,17 @@ func Cleanup(ctx context.Context, options CleanupOptions) error {
 		return err
 	}
 
-	for _, comment := range comments {
-		if strings.Contains(comment.Body, suite.Marker) {
-			body := suite.Marker + "\n### \U0001F4F8 " + suite.Title + "\n\n_Preview screenshots for this PR were cleaned up after it was closed._"
-			return options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, comment.ID, body)
-		}
+	existingCommentIDs := stickyCommentIDs(comments, suite.Marker)
+	if len(existingCommentIDs) == 0 {
+		return nil
 	}
 
-	return nil
+	body := suite.Marker + "\n### \U0001F4F8 " + suite.Title + "\n\n_Preview screenshots for this PR were cleaned up after it was closed._"
+	if err := options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, existingCommentIDs[0], body); err != nil {
+		return err
+	}
+
+	return deleteDuplicateStickyPreviewComments(ctx, options.Client, logger, options.Repo, existingCommentIDs[1:])
 }
 
 type PruneOptions struct {
@@ -697,7 +699,13 @@ func Publish(ctx context.Context, options PublishOptions) error {
 
 	if len(manifest) == 0 {
 		logger.Info("No changed pages.")
-		return nil
+
+		comments, err := options.Client.ListComments(ctx, options.Repo.Owner, options.Repo.Name, options.Event.PullRequest.Number)
+		if err != nil {
+			return err
+		}
+
+		return deleteStickyPreviewComments(ctx, options.Client, logger, options.Repo, stickyCommentIDs(comments, suite.Marker))
 	}
 
 	if options.SHA == "" {
@@ -813,32 +821,83 @@ func Publish(ctx context.Context, options PublishOptions) error {
 		return err
 	}
 
-	existingCommentID := int64(0)
+	existingCommentIDs := stickyCommentIDs(comments, suite.Marker)
 
-	for _, comment := range comments {
-		if strings.Contains(comment.Body, suite.Marker) {
-			existingCommentID = comment.ID
-			break
-		}
-	}
-
-	if existingCommentID == 0 && !manifestHasVisualChange(manifest) && !suite.CommentOnNoVisualChanges {
-		logger.Info("No visual changes and no existing sticky comment; skipping preview comment.")
-		return nil
+	if !manifestHasVisualChange(manifest) {
+		return deleteStickyPreviewComments(ctx, options.Client, logger, options.Repo, existingCommentIDs)
 	}
 
 	var body string
 	if suite.Marker == StickyMarker {
-		body = buildPreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest, len(files) > 0)
+		body = buildPreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest)
 	} else {
-		body = buildSuitePreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest, len(files) > 0, suite)
+		body = buildSuitePreviewCommentBody(options.Repo, *options.Event.PullRequest, shortSHA, runDir, manifest, suite)
 	}
 
-	if existingCommentID != 0 {
-		return options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, existingCommentID, body)
+	if len(existingCommentIDs) > 0 {
+		if err := options.Client.UpdateComment(ctx, options.Repo.Owner, options.Repo.Name, existingCommentIDs[0], body); err != nil {
+			return err
+		}
+
+		return deleteDuplicateStickyPreviewComments(ctx, options.Client, logger, options.Repo, existingCommentIDs[1:])
 	}
 
 	return options.Client.CreateComment(ctx, options.Repo.Owner, options.Repo.Name, options.Event.PullRequest.Number, body)
+}
+
+func stickyCommentIDs(comments []Comment, marker string) []int64 {
+	var ids []int64
+
+	for _, comment := range comments {
+		if strings.HasPrefix(comment.Body, marker) {
+			ids = append(ids, comment.ID)
+		}
+	}
+
+	return ids
+}
+
+func deleteStickyPreviewComments(ctx context.Context, client CommentClient, logger Logger, repo Repository, commentIDs []int64) error {
+	if len(commentIDs) == 0 {
+		logger.Info("No visual changes and no existing sticky comment; skipping preview comment.")
+		return nil
+	}
+
+	logger.Info("No visual changes; deleting existing sticky preview comment.")
+
+	for _, commentID := range commentIDs {
+		if err := client.DeleteComment(ctx, repo.Owner, repo.Name, commentID); err != nil {
+			if statusCode(err) == 404 {
+				logger.Info("Existing sticky preview comment was already deleted.")
+				continue
+			}
+
+			return err
+		}
+	}
+
+	return nil
+}
+
+func deleteDuplicateStickyPreviewComments(ctx context.Context, client CommentClient, logger Logger, repo Repository, commentIDs []int64) error {
+	if len(commentIDs) == 0 {
+		return nil
+	}
+
+	logger.Info("Deleting duplicate sticky preview comment.")
+
+	for _, commentID := range commentIDs {
+		if err := client.DeleteComment(ctx, repo.Owner, repo.Name, commentID); err != nil {
+			if statusCode(err) == 404 {
+				logger.Info("Duplicate sticky preview comment was already deleted.")
+				continue
+			}
+
+			return err
+		}
+	}
+
+	return nil
 }
 
 func readManifest(path string) (PreviewManifest, error) {
@@ -998,7 +1057,7 @@ func manifestHasVisualChange(manifest PreviewManifest) bool {
 	return false
 }
 
-func buildPreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir string, manifest PreviewManifest, storedImages bool) string {
+func buildPreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir string, manifest PreviewManifest) string {
 	names := make([]string, 0, len(manifest))
 	allKinds := make(map[string]bool)
 
@@ -1076,21 +1135,17 @@ func buildPreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir s
 		body.WriteString(" |\n\n</details>\n\n")
 	}
 
-	if storedImages {
-		fmt.Fprintf(&body, "_Screenshots stored on the [`%s`](https://github.com/%s/%s/tree/%s/%s) branch._",
-			ScreenshotsBranch,
-			repo.Owner,
-			repo.Name,
-			ScreenshotsBranch,
-			runDir)
-	} else {
-		body.WriteString("_No visual changes to preview._")
-	}
+	fmt.Fprintf(&body, "_Screenshots stored on the [`%s`](https://github.com/%s/%s/tree/%s/%s) branch._",
+		ScreenshotsBranch,
+		repo.Owner,
+		repo.Name,
+		ScreenshotsBranch,
+		runDir)
 
 	return body.String()
 }
 
-func buildSuitePreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir string, manifest PreviewManifest, storedImages bool, suite PreviewSuite) string {
+func buildSuitePreviewCommentBody(repo Repository, pr PullRequest, shortSHA, runDir string, manifest PreviewManifest, suite PreviewSuite) string {
 	suite = previewSuiteOrDefault(suite)
 
 	names := make([]string, 0, len(manifest))
@@ -1135,7 +1190,7 @@ func buildSuitePreviewCommentBody(repo Repository, pr PullRequest, shortSHA, run
 	body.WriteString("\n### \U0001F4F8 ")
 	body.WriteString(suite.Title)
 	body.WriteString("\n\n")
-	fmt.Fprintf(&body, "Rendered %d Session Navigator scene(s) against `%s` at commit `%s`. ",
+	fmt.Fprintf(&body, "Rendered %d TUI scene(s) against `%s` at commit `%s`. ",
 		len(names),
 		pr.Base.Ref,
 		shortSHA)
@@ -1184,16 +1239,12 @@ func buildSuitePreviewCommentBody(repo Repository, pr PullRequest, shortSHA, run
 		body.WriteString("\n</details>\n\n")
 	}
 
-	if storedImages {
-		fmt.Fprintf(&body, "_Screenshots stored on the [`%s`](https://github.com/%s/%s/tree/%s/%s) branch._",
-			ScreenshotsBranch,
-			repo.Owner,
-			repo.Name,
-			ScreenshotsBranch,
-			runDir)
-	} else {
-		body.WriteString("_No visual changes to preview._")
-	}
+	fmt.Fprintf(&body, "_Screenshots stored on the [`%s`](https://github.com/%s/%s/tree/%s/%s) branch._",
+		ScreenshotsBranch,
+		repo.Owner,
+		repo.Name,
+		ScreenshotsBranch,
+		runDir)
 
 	return body.String()
 }

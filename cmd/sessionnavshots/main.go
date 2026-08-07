@@ -1,5 +1,5 @@
-// Command sessionnavshots renders deterministic Session Navigator snapshots for
-// PR screenshot previews and documentation.
+// Command sessionnavshots renders deterministic Graith TUI snapshots for PR
+// screenshot previews and documentation.
 package main
 
 import (
@@ -91,7 +91,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 
 	suiteName := flags.String("suite", defaultSuite, "snapshot suite to render: preview or docs")
-	fixturePath := flags.String("fixture", "", "JSON fixture with fake Session Navigator data (defaults by suite)")
+	fixturePath := flags.String("fixture", "", "JSON fixture with fake TUI data (defaults by suite)")
 	outDir := flags.String("out", "", "directory for generated ANSI and text snapshots (defaults by suite)")
 	pagesPath := flags.String("pages", "", "path for generated pages metadata JSON")
 	viewportsPath := flags.String("viewports", "", "path for generated viewport metadata JSON")

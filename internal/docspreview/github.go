@@ -255,6 +255,17 @@ func (client *GitHubHTTPClient) CreateComment(ctx context.Context, owner, repo s
 	)
 }
 
+func (client *GitHubHTTPClient) DeleteComment(ctx context.Context, owner, repo string, commentID int64) error {
+	return client.do(
+		ctx,
+		http.MethodDelete,
+		fmt.Sprintf("/repos/%s/%s/issues/comments/%d", escape(owner), escape(repo), commentID),
+		nil,
+		nil,
+		nil,
+	)
+}
+
 func (client *GitHubHTTPClient) do(ctx context.Context, method, endpoint string, query url.Values, payload, output any) error {
 	_, err := client.doWithURL(ctx, method, endpoint, "", query, payload, output)
 	return err

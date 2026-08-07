@@ -34,7 +34,7 @@ func TestRenderSessionNavigatorSnapshot(t *testing.T) {
 				Labels:          []string{"ci", "review-needed", "very-long-snapshot-label"},
 				RepoName:        "graith",
 				WorktreePath:    "/Users/dougalmatthews/src/graith/.worktrees/dreich-session",
-				Branch:          "d0ugal/graith/session-navigator-preview",
+				Branch:          "d0ugal/graith/tui-preview",
 				BaseBranch:      "main",
 				Agent:           "codex",
 				Model:           "gpt-5",
@@ -48,7 +48,7 @@ func TestRenderSessionNavigatorSnapshot(t *testing.T) {
 				UnpushedCount:   2,
 				ConfigStale:     true,
 				Starred:         true,
-				SummaryText:     "Implement deterministic Session Navigator screenshots with fake sessions and PR review state.",
+				SummaryText:     "Implement deterministic TUI screenshots with fake sessions and PR review state.",
 				PullRequest: &protocol.PRInfo{
 					Number:         1870,
 					State:          "open",

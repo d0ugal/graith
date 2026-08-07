@@ -1,4 +1,4 @@
-name: Session Navigator Preview
+name: TUI Preview
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ on:
       - '.github/workflows/session-navigator-preview.yml'
   # Safety-net prune of stale screenshot dirs. The docs-preview workflow also
   # prunes this shared branch; keeping this workflow self-contained makes the
-  # Session Navigator preview independent of docs-only workflow changes.
+  # TUI preview independent of docs-only workflow changes.
   schedule:
     - cron: '47 4 * * *'
 
@@ -42,7 +42,7 @@ defaults:
 
 jobs:
   changes:
-    name: Detect Session Navigator preview changes
+    name: Detect TUI preview changes
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -68,23 +68,23 @@ jobs:
           set -euo pipefail
           if ! files="$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')"; then
             echo "trigger=true" >> "$GITHUB_OUTPUT"
-            echo "Could not list PR files; running Session Navigator preview to be safe."
+            echo "Could not list PR files; running TUI preview to be safe."
             exit 0
           fi
           if ! classification="$(go run ./cmd/ciclassify -mode session-navigator-preview <<<"$files")"; then
             echo "trigger=true" >> "$GITHUB_OUTPUT"
-            echo "Shared classifier failed; running Session Navigator preview to be safe."
+            echo "Shared classifier failed; running TUI preview to be safe."
             exit 0
           fi
           echo "$classification" >> "$GITHUB_OUTPUT"
           if grep -qx 'trigger=true' <<<"$classification"; then
-            echo "Session-Navigator-preview-relevant files changed: rendering screenshots."
+            echo "TUI-preview-relevant files changed: rendering screenshots."
           else
-            echo "No Session-Navigator-preview-relevant files changed: skipping screenshots."
+            echo "No TUI-preview-relevant files changed: skipping screenshots."
           fi
 
   preview:
-    name: Screenshot Session Navigator
+    name: Screenshot TUI
     needs: changes
     if: >-
       !cancelled() &&
@@ -143,12 +143,12 @@ jobs:
                   -out "$base_out" \
                   -pages "$base_pages" \
                   -viewports "$base_viewports"
-              ) && has_base=1 || echo "Base Session Navigator snapshot render failed; treating screenshots as new."
+              ) && has_base=1 || echo "Base TUI snapshot render failed; treating screenshots as new."
             else
-              echo "Base Session Navigator worktree setup failed; treating screenshots as new."
+              echo "Base TUI worktree setup failed; treating screenshots as new."
             fi
           else
-            echo "Base commit does not have Session Navigator snapshot tooling; treating screenshots as new."
+            echo "Base commit does not have TUI snapshot tooling; treating screenshots as new."
           fi
 
           if [ "$has_base" = "1" ]; then
@@ -191,7 +191,7 @@ jobs:
           retention-days: 3
 
   publish:
-    name: Publish Session Navigator screenshots
+    name: Publish TUI screenshots
     needs: preview
     if: >-
       !cancelled() &&
@@ -224,7 +224,7 @@ jobs:
             echo "supported=true" >> "$GITHUB_OUTPUT"
           else
             echo "supported=false" >> "$GITHUB_OUTPUT"
-            echo "Trusted base checkout does not yet support Session Navigator preview; skipping publish."
+            echo "Trusted base checkout does not yet support TUI preview; skipping publish."
           fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: steps.trusted-publisher.outputs.supported == 'true'
@@ -278,7 +278,7 @@ jobs:
           if grep -Rqs 'session-navigator' cmd/docspreview internal/docspreview; then
             go run ./cmd/docspreview cleanup -suite session-navigator
           else
-            echo "Trusted base checkout does not yet support Session Navigator preview; skipping cleanup."
+            echo "Trusted base checkout does not yet support TUI preview; skipping cleanup."
           fi
 
   prune:

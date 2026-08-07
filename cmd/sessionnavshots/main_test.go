@@ -461,21 +461,21 @@ func TestRenderDefaultFixtureIsStableAcrossProcessHome(t *testing.T) {
 		}
 
 		repoWideStatus := lastLine(string(repoWideData))
-		for _, want := range []string{"session-navigator-preview", "PR#1870", "↑2"} {
+		for _, want := range []string{"tui-preview", "PR#1870", "↑2"} {
 			if !strings.Contains(repoWideStatus, want) {
 				t.Fatalf("repo wide status bar missing %q:\n%s", want, repoWideStatus)
 			}
 		}
 
 		repoText := string(repoData)
-		for _, want := range []string{"Repo", "graith (", "session-navigator-screenshots"} {
+		for _, want := range []string{"Repo", "graith (", "tui-screenshots"} {
 			if !strings.Contains(repoText, want) {
 				t.Fatalf("repo text missing %q:\n%s", want, repoText)
 			}
 		}
 
 		labelsText := string(labelsData)
-		for _, want := range []string{"Labels", "visual-regression", "session-navigator-screenshots"} {
+		for _, want := range []string{"Labels", "visual-regression", "tui-screenshots"} {
 			if !strings.Contains(labelsText, want) {
 				t.Fatalf("labels text missing %q:\n%s", want, labelsText)
 			}

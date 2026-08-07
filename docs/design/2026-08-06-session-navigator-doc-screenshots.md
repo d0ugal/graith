@@ -17,8 +17,8 @@ preview screenshots, then checks the generated PNGs into the Hugo site.
 
 ## Background
 
-PR-preview screenshots already render deterministic fake Session Navigator
-states through the Go model and capture the ANSI output in `xterm`. Those images
+PR-preview screenshots already render deterministic fake TUI states through the
+Go model and capture the ANSI output in `xterm`. Those images
 are published to the `screenshots` branch for short-lived review. Public docs
 need the same visual fidelity but need stable asset paths, source-controlled
 ownership, and a contributor workflow for refreshing images.
@@ -53,7 +53,7 @@ repository grouping, jailed-comment attention, and orchestrator-attention states
 |---------|----------|-----------|
 | CLI | Targeted | The screenshots document the CLI/TUI Session Navigator. |
 | iOS | Excluded | The native iOS app does not render the Bubble Tea terminal UI. |
-| macOS | Excluded | The macOS app may show sessions, but these assets document the terminal Navigator. |
+| macOS | Excluded | The macOS app may show sessions, but these assets document the terminal TUI. |
 
 ## Proposals
 

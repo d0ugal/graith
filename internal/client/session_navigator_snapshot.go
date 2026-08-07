@@ -36,7 +36,7 @@ type SessionNavigatorSnapshotOptions struct {
 }
 
 // SessionNavigatorStatusBarSnapshotOptions configures the Graith-owned
-// terminal chrome rendered around a Session Navigator snapshot.
+// terminal chrome rendered around a TUI snapshot.
 type SessionNavigatorStatusBarSnapshotOptions struct {
 	Session     protocol.SessionInfo
 	Fleet       protocol.FleetSummary
