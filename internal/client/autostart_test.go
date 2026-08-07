@@ -1033,44 +1033,118 @@ func TestEnsureDaemonConfiguredContextBoundsInitialSocketProbe(t *testing.T) {
 	origDial := dialLocalDaemon
 	origStart := startDaemonFn
 
-	clientConn, serverConn := net.Pipe()
+	probeConn := &deadlineFailConn{}
 
 	t.Cleanup(func() {
-		_ = clientConn.Close()
-		_ = serverConn.Close()
 		dialLocalDaemon = origDial
 		startDaemonFn = origStart
 	})
 
-	dialLocalDaemon = func(_, _ string, _ time.Duration) (net.Conn, error) {
-		return clientConn, nil
+	var (
+		probeDialTimeout time.Duration
+		startErr         error
+		launchErr        = errors.New("dreich: launch stopped")
+	)
+
+	dialLocalDaemon = func(_, _ string, timeout time.Duration) (net.Conn, error) {
+		probeDialTimeout = timeout
+
+		return probeConn, nil
 	}
-	startCalled := false
+
 	startDaemonFn = func(ctx context.Context, _ *config.Config, _ config.Paths, _ string) error {
-		startCalled = true
+		startErr = ctx.Err()
 
-		<-ctx.Done()
-
-		return ctx.Err()
+		return launchErr
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	started := time.Now()
+	callerDeadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("caller context has no deadline")
+	}
 
 	_, err := EnsureDaemonConfiguredContext(ctx, config.Default(), config.Paths{SocketPath: "/bothy/stuck.sock"}, "")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("EnsureDaemonConfiguredContext() = %v, want caller deadline", err)
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("EnsureDaemonConfiguredContext() = %v, want launch error", err)
 	}
 
-	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
-		t.Fatalf("initial socket probe took %v, want caller-bounded startup", elapsed)
+	if !probeConn.writeCalled {
+		t.Fatal("initial socket probe did not attempt a handshake")
 	}
 
-	if !startCalled {
+	if probeConn.deadline.IsZero() {
+		t.Fatal("initial socket probe did not set a deadline")
+	}
+
+	if !probeConn.deadline.Before(callerDeadline) {
 		t.Fatal("initial socket probe consumed the entire startup budget")
 	}
+
+	if probeDialTimeout <= 0 {
+		t.Fatalf("initial socket probe dial timeout = %v, want positive timeout", probeDialTimeout)
+	}
+
+	if startErr != nil {
+		t.Fatalf("launcher context was expired before start: %v", startErr)
+	}
+}
+
+type deadlineFailConn struct {
+	deadline    time.Time
+	writeCalled bool
+}
+
+func (c *deadlineFailConn) Read([]byte) (int, error) {
+	return 0, errors.New("dreich: no frame")
+}
+
+func (c *deadlineFailConn) Write([]byte) (int, error) {
+	c.writeCalled = true
+
+	if c.deadline.IsZero() {
+		return 0, errors.New("dreich: write before deadline")
+	}
+
+	return 0, os.ErrDeadlineExceeded
+}
+
+func (c *deadlineFailConn) Close() error {
+	return nil
+}
+
+func (c *deadlineFailConn) LocalAddr() net.Addr {
+	return staticTestAddr("local")
+}
+
+func (c *deadlineFailConn) RemoteAddr() net.Addr {
+	return staticTestAddr("remote")
+}
+
+func (c *deadlineFailConn) SetDeadline(t time.Time) error {
+	c.deadline = t
+
+	return nil
+}
+
+func (c *deadlineFailConn) SetReadDeadline(t time.Time) error {
+	return c.SetDeadline(t)
+}
+
+func (c *deadlineFailConn) SetWriteDeadline(t time.Time) error {
+	return c.SetDeadline(t)
+}
+
+type staticTestAddr string
+
+func (a staticTestAddr) Network() string {
+	return string(a)
+}
+
+func (a staticTestAddr) String() string {
+	return string(a)
 }
 
 func TestPrepareDaemonCleanRestartRejectsManagedAgentBeforeResolution(t *testing.T) {
