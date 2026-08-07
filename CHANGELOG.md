@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.10](https://github.com/d0ugal/graith/compare/v0.73.9...v0.73.10) (2026-08-07)
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.14.8 ([#2118](https://github.com/d0ugal/graith/issues/2118)) ([80221ef](https://github.com/d0ugal/graith/commit/80221ef18e307628c73ad5e1eb8622631bf3478c))
+
 ## [0.73.9](https://github.com/d0ugal/graith/compare/v0.73.8...v0.73.9) (2026-08-07)
 
 
