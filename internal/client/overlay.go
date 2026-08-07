@@ -219,41 +219,45 @@ func filterStarred(sessions []protocol.SessionInfo) []protocol.SessionInfo {
 }
 
 var (
-	colorGreen   = lipgloss.Color("#00ff87")
-	colorRed     = lipgloss.Color("#ff5f5f")
-	colorBlue    = lipgloss.Color("#87afff")
-	colorGold    = lipgloss.Color("#FFD700")
-	colorPurple  = lipgloss.Color("#7B61FF")
-	colorDim     = lipgloss.Color("#626262")
-	colorFaint   = lipgloss.Color("#444444")
-	colorYellow  = lipgloss.Color("#FFD75F")
-	colorPreview = lipgloss.Color("#555555")
-	colorPanel   = lipgloss.Color("#1a1a1a")
+	// The default UI palette uses a dark, stepped surface with soft
+	// Catppuccin/Kanagawa-inspired accents. Keep these as semantic roles so the
+	// Session Navigator, message browser, status bar, and CLI snapshots stay in
+	// the same visual family.
+	colorGreen   = lipgloss.Color("#a6e3a1")
+	colorRed     = lipgloss.Color("#f38ba8")
+	colorBlue    = lipgloss.Color("#89b4fa")
+	colorGold    = lipgloss.Color("#f9e2af")
+	colorPurple  = lipgloss.Color("#cba6f7")
+	colorDim     = lipgloss.Color("#9399b2")
+	colorFaint   = lipgloss.Color("#6c7086")
+	colorYellow  = lipgloss.Color("#e6c384")
+	colorPreview = lipgloss.Color("#7f849c")
+	colorPanel   = lipgloss.Color("#1e1e2e")
 	// Selected-row colours are intentionally stronger than the panel background:
 	// the active Navigator row must be visible at a glance on common dark
 	// terminals without waiting for the "> " cursor to catch the eye.
-	colorSelectBg   = lipgloss.Color("#155e75")
-	colorSelectFg   = lipgloss.Color("#f8fafc")
-	colorSelectDim  = lipgloss.Color("#cbd5e1")
-	colorSelectRed  = lipgloss.Color("#fecaca")
-	colorSelectBlue = lipgloss.Color("#bfdbfe")
+	colorSelectBg   = lipgloss.Color("#22576d")
+	colorSelectFg   = lipgloss.Color("#f5e0dc")
+	colorSelectDim  = lipgloss.Color("#cdd6f4")
+	colorSelectRed  = lipgloss.Color("#f2cdcd")
+	colorSelectBlue = lipgloss.Color("#c6d0f5")
 
-	colorLabelChipLightText = lipgloss.Color("#f8fafc")
-	colorLabelChipDarkText  = lipgloss.Color("#111827")
-	colorLabelChipOverflow  = lipgloss.Color("#3f3f46")
+	colorLabelChipLightText = lipgloss.Color("#f5e0dc")
+	colorLabelChipDarkText  = lipgloss.Color("#11111b")
+	colorLabelChipOverflow  = lipgloss.Color("#45475a")
 	labelChipPalette        = []color.Color{
-		lipgloss.Color("#2563eb"),
-		lipgloss.Color("#0891b2"),
-		lipgloss.Color("#059669"),
-		lipgloss.Color("#7c3aed"),
-		lipgloss.Color("#a21caf"),
-		lipgloss.Color("#be123c"),
-		lipgloss.Color("#c2410c"),
-		lipgloss.Color("#a16207"),
-		lipgloss.Color("#0f766e"),
-		lipgloss.Color("#4338ca"),
-		lipgloss.Color("#0e7490"),
-		lipgloss.Color("#7f1d1d"),
+		lipgloss.Color("#89b4fa"),
+		lipgloss.Color("#94e2d5"),
+		lipgloss.Color("#a6e3a1"),
+		lipgloss.Color("#cba6f7"),
+		lipgloss.Color("#f5c2e7"),
+		lipgloss.Color("#f38ba8"),
+		lipgloss.Color("#fab387"),
+		lipgloss.Color("#f9e2af"),
+		lipgloss.Color("#7e9cd8"),
+		lipgloss.Color("#98bb6c"),
+		lipgloss.Color("#e6c384"),
+		lipgloss.Color("#d27e99"),
 	}
 )
 
