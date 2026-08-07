@@ -154,6 +154,114 @@ func TestEnsureDaemonRecoversAfterReadinessTimeout(t *testing.T) {
 	}
 }
 
+func TestEnsureDaemonDoesNotLaunchDuringPendingUpgradeAdoption(t *testing.T) {
+	shortenStartTimeout(t, 40*time.Millisecond)
+	shortenStartPollInterval(t, time.Millisecond)
+
+	runtimeDir := t.TempDir()
+	writePendingUpgradeAdoptionJournal(t, runtimeDir)
+
+	pidFile := filepath.Join(t.TempDir(), "braw.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{
+		PIDFile:    pidFile,
+		RuntimeDir: runtimeDir,
+		SocketPath: filepath.Join(t.TempDir(), "braw.sock"),
+	}
+
+	origIsDaemon, origStartTime, origStop, origStart := recoveryIsDaemon, recoveryStartTime, recoveryStopIdentity, startDaemonFn
+
+	t.Cleanup(func() {
+		recoveryIsDaemon, recoveryStartTime = origIsDaemon, origStartTime
+		recoveryStopIdentity, startDaemonFn = origStop, origStart
+	})
+
+	recoveryIsDaemon = func(pid int) bool { return pid == 4242 }
+	recoveryStartTime = func(int) (int64, error) { return 17, nil }
+	recoveryStopIdentity = func(int, int64) error {
+		t.Fatal("pending upgrade adoption daemon was stopped")
+
+		return nil
+	}
+	startDaemonFn = func(context.Context, *config.Config, config.Paths, string) error {
+		t.Fatal("pending upgrade adoption launched a competing daemon")
+
+		return nil
+	}
+
+	stubDialLocalDaemon(t, func() (net.Conn, error) {
+		return nil, errors.New("adoption not serving yet")
+	})
+
+	_, err := EnsureDaemonConfigured(config.Default(), paths, "")
+	if !errors.Is(err, errUpgradeAdoptionInProgress) {
+		t.Fatalf("EnsureDaemonConfigured() error = %v, want pending upgrade adoption", err)
+	}
+}
+
+func TestEnsureDaemonDoesNotRecoverWhenUpgradeJournalAppearsAfterLaunch(t *testing.T) {
+	shortenStartTimeout(t, 40*time.Millisecond)
+	shortenStartPollInterval(t, time.Millisecond)
+
+	runtimeDir := t.TempDir()
+
+	pidFile := filepath.Join(t.TempDir(), "braw.pid")
+	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := config.Paths{
+		PIDFile:    pidFile,
+		RuntimeDir: runtimeDir,
+		SocketPath: filepath.Join(t.TempDir(), "braw.sock"),
+	}
+
+	origIsDaemon, origStartTime, origStop, origSocketGone, origStart := recoveryIsDaemon, recoveryStartTime, recoveryStopIdentity, recoverySocketGone, startDaemonFn
+
+	t.Cleanup(func() {
+		recoveryIsDaemon, recoveryStartTime = origIsDaemon, origStartTime
+		recoveryStopIdentity, recoverySocketGone, startDaemonFn = origStop, origSocketGone, origStart
+	})
+
+	recoveryIsDaemon = func(pid int) bool { return pid == 4242 }
+	recoveryStartTime = func(int) (int64, error) { return 17, nil }
+	recoveryStopIdentity = func(int, int64) error {
+		t.Fatal("pending upgrade adoption daemon was recovered destructively")
+
+		return nil
+	}
+	recoverySocketGone = func(string) bool {
+		t.Fatal("pending upgrade adoption recovery waited for socket removal")
+
+		return false
+	}
+
+	launches := 0
+	startDaemonFn = func(context.Context, *config.Config, config.Paths, string) error {
+		launches++
+
+		writePendingUpgradeAdoptionJournal(t, runtimeDir)
+
+		return nil
+	}
+
+	stubDialLocalDaemon(t, func() (net.Conn, error) {
+		return nil, errors.New("adoption not serving yet")
+	})
+
+	_, err := EnsureDaemonConfigured(config.Default(), paths, "")
+	if !errors.Is(err, errUpgradeAdoptionInProgress) {
+		t.Fatalf("EnsureDaemonConfigured() error = %v, want pending upgrade adoption", err)
+	}
+
+	if launches != 1 {
+		t.Fatalf("launch attempts = %d, want initial launch only", launches)
+	}
+}
+
 func TestReconcileUnresponsiveDaemonDoesNotKillNewGeneration(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "braw.pid")
 	if err := os.WriteFile(pidFile, []byte("4242\n"), 0o600); err != nil {
@@ -706,6 +814,56 @@ func shortenStartTimeout(t *testing.T, d time.Duration) {
 		daemonStartTimeout = orig
 		upgradeReadinessFloor = origUpgrade
 	})
+}
+
+func writePendingUpgradeAdoptionJournal(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.WriteFile(filepath.Join(dir, "upgrade-adoption-"+strings.Repeat("a", 32)+".pending"), []byte("braw"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIsPendingUpgradeAdoptionJournalName(t *testing.T) {
+	tests := map[string]struct {
+		name string
+		want bool
+	}{
+		"pending": {
+			name: "upgrade-adoption-" + strings.Repeat("a", 32) + ".pending",
+			want: true,
+		},
+		"committed marker": {
+			name: "upgrade-adoption-" + strings.Repeat("a", 32) + ".pending.committed",
+			want: false,
+		},
+		"rolled back marker": {
+			name: "upgrade-adoption-" + strings.Repeat("a", 32) + ".pending.rolledback",
+			want: false,
+		},
+		"quarantine": {
+			name: "upgrade-adoption-" + strings.Repeat("a", 32) + ".quarantine",
+			want: false,
+		},
+		"short id": {
+			name: "upgrade-adoption-" + strings.Repeat("a", 31) + ".pending",
+			want: false,
+		},
+		"uppercase id": {
+			name: "upgrade-adoption-" + strings.Repeat("A", 32) + ".pending",
+			want: false,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isPendingUpgradeAdoptionJournalName(test.name); got != test.want {
+				t.Fatalf("isPendingUpgradeAdoptionJournalName(%q) = %v, want %v", test.name, got, test.want)
+			}
+		})
+	}
 }
 
 func TestEnsureDaemonStartsFreshWhenSocketStale(t *testing.T) {

@@ -1559,6 +1559,56 @@ func TestConnectManagedAutoUpgradeFailureGivesRecoveryCommands(t *testing.T) {
 	}
 }
 
+func TestConnectUnmanagedAutoUpgradeDoesNotStopDuringPendingAdoption(t *testing.T) {
+	shortenStartTimeout(t, 10*time.Millisecond)
+	shortenStartPollInterval(t, time.Millisecond)
+
+	originalVersion := version.Version
+	originalDial := dialLocalDaemon
+	originalRequest := requestUpgradeForClient
+	originalProbe := probeDaemonIdentityForUpgrade
+
+	t.Cleanup(func() {
+		version.Version = originalVersion
+		dialLocalDaemon = originalDial
+		requestUpgradeForClient = originalRequest
+		probeDaemonIdentityForUpgrade = originalProbe
+	})
+
+	version.Version = "2.0.0"
+
+	runtimeDir := t.TempDir()
+	writePendingUpgradeAdoptionJournal(t, runtimeDir)
+
+	paths := config.Paths{SocketPath: "/croft/graith.sock", RuntimeDir: runtimeDir}
+	remainingDials := installScriptedDaemonDial(t, paths,
+		scriptedHandshakeIdentity{"1.0.0", "auld-gen"},
+		scriptedHandshakeIdentity{"1.0.0", "auld-gen"},
+	)
+
+	requestUpgradeForClient = func(context.Context, *Client) (bool, bool, error) {
+		return true, false, nil
+	}
+
+	probeDaemonIdentityForUpgrade = func(string, config.Paths, time.Time) (string, string) {
+		return "1.0.0", "auld-gen"
+	}
+
+	c, err := connect(context.Background(), config.Default(), paths, "", true)
+	if err == nil {
+		c.Close()
+		t.Fatal("connect should report pending adoption instead of clean fallback")
+	}
+
+	if !errors.Is(err, errUpgradeAdoptionInProgress) {
+		t.Fatalf("connect error = %v, want pending upgrade adoption", err)
+	}
+
+	if remaining := remainingDials(); remaining != 0 {
+		t.Fatalf("remaining scripted dials = %d, want no clean-restart fallback dials", remaining)
+	}
+}
+
 func TestProbeNewDaemonGenerationUsesBoundedRealProbe(t *testing.T) {
 	originalDial := dialLocalDaemon
 	originalProbe := probeDaemonIdentityForUpgrade
