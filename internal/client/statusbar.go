@@ -60,8 +60,8 @@ const (
 )
 
 var (
-	barBg    = lipgloss.Color("#1a1a1a")
-	accentBg = lipgloss.Color("#44475a")
+	barBg    = lipgloss.Color("#11111b")
+	accentBg = lipgloss.Color("#313244")
 )
 
 func styledStatus(status string, bg color.Color) lipgloss.Style {
@@ -95,7 +95,7 @@ func formatStatusLine(info statusBarInfo, cols int) string {
 
 	accentPad := lipgloss.NewStyle().Background(accent)
 	fillPad := lipgloss.NewStyle().Background(fill)
-	nameStyle := lipgloss.NewStyle().Bold(true).Background(accent)
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(colorSelectFg).Background(accent)
 	agentStyle := lipgloss.NewStyle().Foreground(colorDim).Background(fill)
 	branchStyle := lipgloss.NewStyle().Foreground(colorDim).Background(fill)
 	dirtyStyle := lipgloss.NewStyle().Foreground(colorGold).Background(fill)
@@ -312,7 +312,7 @@ func sanitizeStatusText(s string) string {
 // read-only attach (issue #31): a bold badge followed by the session name and
 // agent/status, padded to the full terminal width so it reads as a bar.
 func formatReadOnlyLine(info statusBarInfo, cols int) string {
-	badgeBg := lipgloss.Color("#8b0000")
+	badgeBg := lipgloss.Color("#43242b")
 
 	badgeStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGold).Background(badgeBg)
 	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGold).Background(barBg)
