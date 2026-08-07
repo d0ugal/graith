@@ -17,11 +17,15 @@ import (
 	"time"
 )
 
-// AllowedMembers is the exact Linux libghostty artifact member order.
-var AllowedMembers = []string{
+const includeRoot = "include/ghostty"
+
+var fixedLeadingMembers = []string{
 	"libghostty-vt.a",
 	"pkgconfig/libghostty-vt-static.pc",
 	"include/module.modulemap",
+}
+
+var baselineIncludeMembers = []string{
 	"include/ghostty/vt.h",
 	"include/ghostty/vt/allocator.h",
 	"include/ghostty/vt/build_info.h",
@@ -54,10 +58,18 @@ var AllowedMembers = []string{
 	"include/ghostty/vt/types.h",
 	"include/ghostty/vt/unicode.h",
 	"include/ghostty/vt/wasm.h",
+}
+
+var fixedTrailingMembers = []string{
 	"manifest.json",
 	"libghostty-native.spdx.json",
 	"THIRD_PARTY_NOTICES.libghostty.md",
 }
+
+// AllowedMembers is the historical Linux libghostty artifact member order used
+// by regression fixtures. Production packing computes the generated
+// include/ghostty tree dynamically so new Ghostty headers cannot be omitted.
+var AllowedMembers = archiveMembers(baselineIncludeMembers)
 
 const tarTypeRegA byte = 0
 
@@ -90,7 +102,7 @@ func Inspect(archive string) error {
 	for _, member := range members {
 		names = append(names, member.Name)
 	}
-	if !sameStrings(names, AllowedMembers) {
+	if err := validateArchiveMemberNames(names); err != nil {
 		//nolint:staticcheck // Preserve the retired Python helper's caller-visible diagnostic.
 		return fmt.Errorf("Linux artifact has unexpected or incomplete archive members: %s", jsonList(names))
 	}
@@ -113,7 +125,7 @@ func Inspect(archive string) error {
 	return nil
 }
 
-// Pack writes archive from source using the exact allowed member order and
+// Pack writes archive from source using the source-derived member order and
 // deterministic tar metadata.
 //
 //nolint:wsl_v5 // The writer lifecycle is kept linear so close/inspection ordering is obvious.
@@ -123,7 +135,12 @@ func Pack(source, archive string) error {
 		return fmt.Errorf("artifact source is not a directory: %s", source)
 	}
 
-	for _, name := range AllowedMembers {
+	members, err := sourceMembers(source)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range members {
 		if err := requireRegularSourceMember(source, name); err != nil {
 			return err
 		}
@@ -153,7 +170,7 @@ func Pack(source, archive string) error {
 	compressed.ModTime = time.Unix(0, 0)
 	compressed.OS = 255
 
-	if err := writeUSTAR(compressed, source); err != nil {
+	if err := writeUSTAR(compressed, source, members); err != nil {
 		_ = compressed.Close()
 		return err
 	}
@@ -210,7 +227,11 @@ func Regression() error {
 	for _, member := range members {
 		names = append(names, member.Name)
 	}
-	if !sameStrings(names, AllowedMembers) {
+	want, err := sourceMembers(source)
+	if err != nil {
+		return err
+	}
+	if !sameStrings(names, want) {
 		return fmt.Errorf("corrected archive member order changed: %s", jsonList(names))
 	}
 
@@ -266,6 +287,111 @@ func Members(archive string) ([]Member, error) {
 	return members, nil
 }
 
+func sourceMembers(source string) ([]string, error) {
+	headers, err := sourceIncludeMembers(source)
+	if err != nil {
+		return nil, err
+	}
+
+	return archiveMembers(headers), nil
+}
+
+//nolint:wsl_v5 // Header tree validation and collection stay together for one filesystem walk.
+func sourceIncludeMembers(source string) ([]string, error) {
+	root := filepath.Join(source, filepath.FromSlash(includeRoot))
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("artifact source include tree is not a directory: %s", includeRoot)
+	}
+
+	var members []string
+	err = filepath.WalkDir(root, func(memberPath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if memberPath == root {
+			return nil
+		}
+
+		relative, err := filepath.Rel(root, memberPath)
+		if err != nil {
+			return err
+		}
+		name := includeRoot + "/" + filepath.ToSlash(relative)
+
+		switch {
+		case entry.Type()&os.ModeSymlink != 0:
+			return fmt.Errorf("artifact source include member is a symlink: %s", name)
+		case entry.IsDir():
+			return nil
+		case !strings.HasSuffix(name, ".h"):
+			return fmt.Errorf("artifact source include member is not a header: %s", name)
+		case entry.Type().IsRegular():
+			members = append(members, name)
+			return nil
+		default:
+			return fmt.Errorf("artifact source include member is not a regular file: %s", name)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return nil, fmt.Errorf("artifact source include tree is empty: %s", includeRoot)
+	}
+
+	sort.Strings(members)
+
+	return members, nil
+}
+
+func archiveMembers(headers []string) []string {
+	members := make([]string, 0, len(fixedLeadingMembers)+len(headers)+len(fixedTrailingMembers))
+	members = append(members, fixedLeadingMembers...)
+	members = append(members, headers...)
+	members = append(members, fixedTrailingMembers...)
+
+	return members
+}
+
+//nolint:wsl_v5 // Member-table validation is intentionally grouped by archive contract section.
+func validateArchiveMemberNames(names []string) error {
+	minimum := len(fixedLeadingMembers) + len(fixedTrailingMembers) + 1
+	if len(names) < minimum {
+		return errors.New("missing required members")
+	}
+
+	leadingEnd := len(fixedLeadingMembers)
+	trailingStart := len(names) - len(fixedTrailingMembers)
+	if trailingStart <= leadingEnd ||
+		!sameStrings(names[:leadingEnd], fixedLeadingMembers) ||
+		!sameStrings(names[trailingStart:], fixedTrailingMembers) {
+		return errors.New("required member order changed")
+	}
+
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("duplicate member %s", name)
+		}
+		seen[name] = struct{}{}
+	}
+
+	headers := names[leadingEnd:trailingStart]
+	if !sort.StringsAreSorted(headers) {
+		return errors.New("include members are not sorted")
+	}
+	for _, name := range headers {
+		if path.Clean(name) != name ||
+			!strings.HasPrefix(name, includeRoot+"/") ||
+			!strings.HasSuffix(name, ".h") {
+			return fmt.Errorf("unexpected include member %s", name)
+		}
+	}
+
+	return nil
+}
+
 //nolint:wsl_v5 // Path derivation and validation stay adjacent for this guard.
 func requireRegularSourceMember(source, name string) error {
 	path := filepath.Join(source, filepath.FromSlash(name))
@@ -278,9 +404,9 @@ func requireRegularSourceMember(source, name string) error {
 }
 
 //nolint:wsl_v5 // Byte-for-byte tar construction keeps write accounting adjacent.
-func writeUSTAR(writer io.Writer, source string) error {
+func writeUSTAR(writer io.Writer, source string, members []string) error {
 	var written int64
-	for _, name := range AllowedMembers {
+	for _, name := range members {
 		data, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(name)))
 		if err != nil {
 			return err

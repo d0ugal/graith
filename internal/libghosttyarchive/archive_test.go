@@ -54,6 +54,41 @@ func TestPackCreatesDeterministicContractArchive(t *testing.T) {
 	}
 }
 
+//nolint:wsl_v5 // Fixture setup and archive assertions are kept in one regression.
+func TestPackIncludesDynamicGhosttyHeaders(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "canny-source")
+	mustWriteFixtureSource(t, source)
+	for _, name := range []string{
+		"include/ghostty/vt/io.h",
+		"include/ghostty/vt/snapshot.h",
+	} {
+		path := filepath.Join(source, filepath.FromSlash(name))
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	archive := filepath.Join(root, "canny.tar.gz")
+	if err := Pack(source, archive); err != nil {
+		t.Fatal(err)
+	}
+
+	members, err := Members(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := sourceMembers(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContractMembersForNames(t, members, want)
+	assertMemberData(t, members, "include/ghostty/vt/io.h")
+	assertMemberData(t, members, "include/ghostty/vt/snapshot.h")
+}
+
 //nolint:wsl_v5 // The parity assertions are intentionally grouped around one fixture archive.
 func TestPackMatchesPythonParityFixture(t *testing.T) {
 	t.Parallel()
@@ -132,6 +167,28 @@ func TestInspectRejectsMalformedArchives(t *testing.T) {
 			},
 			wantErr: "Linux artifact has unexpected or incomplete archive members:",
 		},
+		"unsorted_dynamic_header": {
+			write: func(t *testing.T, archive string) {
+				t.Helper()
+				members := fixtureArchiveMembers()
+				members = append(members[:4], append([]testArchiveMember{
+					{name: "include/ghostty/vt/zzz.h", data: "include/ghostty/vt/zzz.h", typeflag: tar.TypeReg},
+				}, members[4:]...)...)
+				writeArchive(t, archive, members)
+			},
+			wantErr: "Linux artifact has unexpected or incomplete archive members:",
+		},
+		"unexpected_dynamic_path": {
+			write: func(t *testing.T, archive string) {
+				t.Helper()
+				members := fixtureArchiveMembers()
+				members = append(members[:4], append([]testArchiveMember{
+					{name: "include/ghostty/vt/generated.txt", data: "include/ghostty/vt/generated.txt", typeflag: tar.TypeReg},
+				}, members[4:]...)...)
+				writeArchive(t, archive, members)
+			},
+			wantErr: "Linux artifact has unexpected or incomplete archive members:",
+		},
 	}
 
 	for name, test := range tests {
@@ -190,6 +247,19 @@ func TestPackRejectsInvalidSourceMembers(t *testing.T) {
 			},
 			wantErr: "artifact source member is not a regular file: libghostty-vt.a",
 		},
+		"non_header_include_member": {
+			arrange: func(t *testing.T, root string) string {
+				t.Helper()
+				source := filepath.Join(root, "dreich-source")
+				mustWriteFixtureSource(t, source)
+				path := filepath.Join(source, "include", "ghostty", "vt", "generated.txt")
+				if err := os.WriteFile(path, []byte("dreich"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return source
+			},
+			wantErr: "artifact source include member is not a header: include/ghostty/vt/generated.txt",
+		},
 	}
 
 	for name, test := range tests {
@@ -221,16 +291,22 @@ const (
 	pythonParityTarSize   = 40960
 )
 
-//nolint:wsl_v5 // Contract-field assertions are intentionally grouped per member.
 func assertContractMembers(t *testing.T, members []Member) {
 	t.Helper()
 
-	if len(members) != len(AllowedMembers) {
-		t.Fatalf("member count = %d, want %d", len(members), len(AllowedMembers))
+	assertContractMembersForNames(t, members, AllowedMembers)
+}
+
+//nolint:wsl_v5 // Contract-field assertions are intentionally grouped per member.
+func assertContractMembersForNames(t *testing.T, members []Member, want []string) {
+	t.Helper()
+
+	if len(members) != len(want) {
+		t.Fatalf("member count = %d, want %d", len(members), len(want))
 	}
 	for index, member := range members {
-		if member.Name != AllowedMembers[index] {
-			t.Fatalf("member[%d] = %q, want %q", index, member.Name, AllowedMembers[index])
+		if member.Name != want[index] {
+			t.Fatalf("member[%d] = %q, want %q", index, member.Name, want[index])
 		}
 		if !regularTypeflag(member.Typeflag) {
 			t.Fatalf("%s typeflag = %q, want regular", member.Name, member.Typeflag)
@@ -251,6 +327,22 @@ func assertContractMembers(t *testing.T, members []Member) {
 			t.Fatalf("%s size = %d, data length = %d", member.Name, member.Size, len(member.Data))
 		}
 	}
+}
+
+func assertMemberData(t *testing.T, members []Member, name string) {
+	t.Helper()
+
+	for _, member := range members {
+		if member.Name == name {
+			if string(member.Data) != name {
+				t.Fatalf("%s data = %q, want fixture name", member.Name, string(member.Data))
+			}
+
+			return
+		}
+	}
+
+	t.Fatalf("archive member %s was not packed", name)
 }
 
 func mustWriteFixtureSource(t *testing.T, source string) {
