@@ -16,6 +16,17 @@ import (
 // configPRWatch is a short local alias for the config struct.
 type configPRWatch = config.PRWatchConfig
 
+type prWatchCommentBodyFunc func(*configPRWatch, prWatchTarget, prData, []ghComment) string
+
+type prWatchCommentSurface struct {
+	enabled  bool
+	comments []ghComment
+	cursor   int64
+	surface  string
+	kind     string
+	body     prWatchCommentBodyFunc
+}
+
 // prwatch.go implements the PR & CI awareness loop. It resolves each eligible
 // session's GitHub PR via gh (ghpr.go), polls CI checks and review comments,
 // diffs against a per-session cursor, and on a meaningful transition publishes a
@@ -628,7 +639,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 					cur.ciAwaitingFinal = false
 					cur.failing = map[string]bool{}
 
-					return []string{ciCompleteBody(t, slug, d)}
+					return []string{sm.prWatchNotificationBody(notificationKindGithubCIComplete, t, slug, d, nil, ciCompleteBody(t, slug, d))}
 				}
 			} else {
 				// CI recovered while still unprimed with nothing armed: clear the
@@ -648,7 +659,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 
 				cur.ciAwaitingFinal = d.CIPending > 0
 
-				return []string{ciFailureBody(t, slug, d)}
+				return []string{sm.prWatchNotificationBody(notificationKindGithubCIFailure, t, slug, d, nil, ciFailureBody(t, slug, d))}
 			}
 		}
 
@@ -663,14 +674,14 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		if cfg.NotifyCIFailures && cur.ciAwaitingFinal && d.CIState == "failing" && d.CIPending == 0 {
 			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				cur.ciAwaitingFinal = false
-				return []string{ciCompleteBody(t, slug, d)}
+				return []string{sm.prWatchNotificationBody(notificationKindGithubCIComplete, t, slug, d, nil, ciCompleteBody(t, slug, d))}
 			}
 		}
 
 		if d.Mergeable == "CONFLICTING" && cfg.NotifyMergeConflicts && cur.mergeable != "CONFLICTING" {
 			if _, ok := sm.gate(cfg, t.id, cur, true); ok {
 				cur.mergeable = "CONFLICTING" // advance only on delivery
-				return []string{conflictBody(t, d)}
+				return []string{sm.prWatchNotificationBody(notificationKindGithubPRMergeConflict, t, slug, d, nil, conflictBody(t, d))}
 			}
 		}
 
@@ -699,7 +710,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 					cur.failing[name] = true
 				}
 
-				out = append(out, ciFailureBody(t, slug, d))
+				out = append(out, sm.prWatchNotificationBody(notificationKindGithubCIFailure, t, slug, d, nil, ciFailureBody(t, slug, d)))
 
 				// If checks are still running, arm a completion notice for when
 				// they finish. If none are pending, this failure notice already
@@ -720,7 +731,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if cfg.NotifyCIFailures && cur.ciAwaitingFinal && d.CIPending == 0 &&
 		(d.CIState == "failing" || d.CIState == "passing") {
 		if _, ok := sm.gate(cfg, t.id, cur, true); ok {
-			out = append(out, ciCompleteBody(t, slug, d))
+			out = append(out, sm.prWatchNotificationBody(notificationKindGithubCIComplete, t, slug, d, nil, ciCompleteBody(t, slug, d)))
 			cur.ciAwaitingFinal = false
 
 			if d.CIState == "passing" {
@@ -744,7 +755,8 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 			// keep cur.failing so recovery re-fires on a later poll (the
 			// cursor-advance-only-on-delivery invariant).
 			if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-				out = append(out, fmt.Sprintf("CI is green again on PR #%d (%s).", d.Number, t.branch))
+				body := fmt.Sprintf("CI is green again on PR #%d (%s).", d.Number, t.branch)
+				out = append(out, sm.prWatchNotificationBody(notificationKindGithubCIRecovery, t, slug, d, nil, body))
 				cur.failing = map[string]bool{}
 			}
 		} else {
@@ -764,7 +776,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 		case "CONFLICTING":
 			if cfg.NotifyMergeConflicts && cur.mergeable != "CONFLICTING" {
 				if _, ok := sm.gate(cfg, t.id, cur, true); ok {
-					out = append(out, conflictBody(t, d))
+					out = append(out, sm.prWatchNotificationBody(notificationKindGithubPRMergeConflict, t, slug, d, nil, conflictBody(t, d)))
 					cur.mergeable = "CONFLICTING"
 				}
 			} else if !cfg.NotifyMergeConflicts {
@@ -779,8 +791,9 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if cfg.NotifyPRLifecycle && d.State != cur.state &&
 		(d.State == "merged" || d.State == "closed") {
 		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-			out = append(out, fmt.Sprintf("PR #%d (%s) was %s. %s", d.Number, t.branch, d.State,
-				"No further action needed unless you were mid-change."))
+			body := fmt.Sprintf("PR #%d (%s) was %s. %s", d.Number, t.branch, d.State,
+				"No further action needed unless you were mid-change.")
+			out = append(out, sm.prWatchNotificationBody(notificationKindGithubPRLifecycle, t, slug, d, nil, body))
 			cur.state = d.State
 		}
 	} else if d.State != cur.state {
@@ -791,7 +804,7 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	if cfg.NotifyReviewDecisions && d.ReviewDecision != cur.reviewDecision &&
 		(d.ReviewDecision == "changes_requested" || d.ReviewDecision == "approved") {
 		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-			out = append(out, reviewDecisionBody(t, d))
+			out = append(out, sm.prWatchNotificationBody(notificationKindGithubPRReviewDecision, t, slug, d, nil, reviewDecisionBody(t, d)))
 			cur.reviewDecision = d.ReviewDecision
 		}
 	} else if d.ReviewDecision != cur.reviewDecision {
@@ -812,49 +825,24 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	// untrusted backlog.
 	var untrusted []ghComment
 
-	if cfg.NotifyReviewComments {
-		newReview := commentsAfter(d.ReviewComments, cur.lastReviewCommentID)
-		if len(newReview) > 0 {
-			trusted, dropped := partitionCommentsByTrust(cfg, newReview)
-			untrusted = append(untrusted, dropped...)
-			sm.logDroppedComments(t, d, "inline review", dropped)
-
-			// Only advance the cursor once the dropped comments are durably
-			// jailed. If jailing failed (transient store error), hold the cursor
-			// and retry the whole batch next poll — advancing now would lose the
-			// untrusted body (neither jailed nor delivered). Jailing is idempotent,
-			// so re-processing the batch is safe.
-			if sm.jailDroppedComments(t, slug, d, "inline review", dropped) {
-				cur.lastReviewCommentID = sm.deliverTrustedComments(
-					cfg, t, cur, &out, reviewCommentBody, d, trusted, dropped,
-					cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
-			}
-		}
-	} else if d.CommentsOK {
-		// Keep the cursor current so flipping the gate on later doesn't dump history.
-		cur.lastReviewCommentID = maxInt64(cur.lastReviewCommentID, maxCommentID(d.ReviewComments))
-	}
+	cur.lastReviewCommentID, untrusted = sm.processPRCommentSurface(cfg, t, slug, d, cur, &out, untrusted, prWatchCommentSurface{
+		enabled:  cfg.NotifyReviewComments,
+		comments: d.ReviewComments,
+		cursor:   cur.lastReviewCommentID,
+		surface:  "inline review",
+		kind:     notificationKindGithubPRReview,
+		body:     reviewCommentBody,
+	})
 
 	// --- PR conversation comments (issue-style thread — human intent, awareness) ---
-	if cfg.NotifyPRComments {
-		newIssue := commentsAfter(d.IssueComments, cur.lastIssueCommentID)
-		if len(newIssue) > 0 {
-			trusted, dropped := partitionCommentsByTrust(cfg, newIssue)
-			untrusted = append(untrusted, dropped...)
-			sm.logDroppedComments(t, d, "conversation", dropped)
-
-			// See the inline-review surface above: hold the cursor if jailing the
-			// dropped comments failed, so a transient store error can't lose them.
-			if sm.jailDroppedComments(t, slug, d, "conversation", dropped) {
-				cur.lastIssueCommentID = sm.deliverTrustedComments(
-					cfg, t, cur, &out, prCommentBody, d, trusted, dropped,
-					cur.lastIssueCommentID, maxCommentID(d.IssueComments))
-			}
-		}
-	} else if d.CommentsOK {
-		// Keep the cursor current so flipping the gate on later doesn't dump history.
-		cur.lastIssueCommentID = maxInt64(cur.lastIssueCommentID, maxCommentID(d.IssueComments))
-	}
+	cur.lastIssueCommentID, untrusted = sm.processPRCommentSurface(cfg, t, slug, d, cur, &out, untrusted, prWatchCommentSurface{
+		enabled:  cfg.NotifyPRComments,
+		comments: d.IssueComments,
+		cursor:   cur.lastIssueCommentID,
+		surface:  "conversation",
+		kind:     notificationKindGithubPRComment,
+		body:     prCommentBody,
+	})
 
 	// Surface any newly-seen untrusted authors to the orchestrator (metadata only,
 	// batched across both surfaces, once ever per author). Held under prWatch.mu.
@@ -863,6 +851,46 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 	}
 
 	return out
+}
+
+func (sm *SessionManager) processPRCommentSurface(
+	cfg *configPRWatch,
+	t prWatchTarget,
+	slug string,
+	d prData,
+	cur *prWatchCursor,
+	out *[]string,
+	untrusted []ghComment,
+	spec prWatchCommentSurface,
+) (int64, []ghComment) {
+	if spec.enabled {
+		newComments := commentsAfter(spec.comments, spec.cursor)
+		if len(newComments) == 0 {
+			return spec.cursor, untrusted
+		}
+
+		trusted, dropped := partitionCommentsByTrust(cfg, newComments)
+		untrusted = append(untrusted, dropped...)
+		sm.logDroppedComments(t, d, spec.surface, dropped)
+
+		// Only advance the cursor once dropped comments are durably jailed. If
+		// jailing failed, retry the whole batch next poll so untrusted text is
+		// neither lost nor delivered outside the jail path.
+		if sm.jailDroppedComments(t, slug, d, spec.surface, dropped) {
+			spec.cursor = sm.deliverTrustedComments(
+				cfg, t, slug, spec.kind, cur, out, spec.body, d, trusted, dropped,
+				spec.cursor, maxCommentID(spec.comments))
+		}
+
+		return spec.cursor, untrusted
+	}
+
+	if d.CommentsOK {
+		// Keep the cursor current so flipping the gate on later doesn't dump history.
+		return maxInt64(spec.cursor, maxCommentID(spec.comments)), untrusted
+	}
+
+	return spec.cursor, untrusted
 }
 
 // deliverTrustedComments applies the notification gate to the trusted subset of
@@ -877,13 +905,13 @@ func (sm *SessionManager) diffAndBuild(cfg *configPRWatch, t prWatchTarget, slug
 //   - only untrusted (nothing to deliver) → advance past them so the drop is not
 //     re-evaluated every poll.
 func (sm *SessionManager) deliverTrustedComments(
-	cfg *configPRWatch, t prWatchTarget, cur *prWatchCursor, out *[]string,
+	cfg *configPRWatch, t prWatchTarget, slug string, kind string, cur *prWatchCursor, out *[]string,
 	body func(*configPRWatch, prWatchTarget, prData, []ghComment) string,
 	d prData, trusted, dropped []ghComment, cursor, maxNew int64,
 ) int64 {
 	if len(trusted) > 0 {
 		if _, ok := sm.gate(cfg, t.id, cur, false); ok {
-			*out = append(*out, body(cfg, t, d, trusted))
+			*out = append(*out, sm.prWatchNotificationBody(kind, t, slug, d, prWatchCommentAuthors(trusted), body(cfg, t, d, trusted)))
 			return maxInt64(cursor, maxNew)
 		}
 
