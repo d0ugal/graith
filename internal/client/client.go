@@ -269,6 +269,10 @@ func connect(ctx context.Context, cfg *config.Config, paths config.Paths, config
 					return nil, errors.New(managedUpgradeNoGenerationMessage)
 				}
 
+				if pendingUpgradeAdoption(paths.RuntimeDir) {
+					return nil, upgradeAdoptionInProgressError(errors.New("daemon exec upgrade did not produce a new generation"))
+				}
+
 				fmt.Fprintf(os.Stderr, "Exec upgrade did not produce a new daemon generation, falling back to clean restart...\n")
 			} else {
 				c.Close()

@@ -39,6 +39,10 @@ var (
 	recoverySocketGone   = waitForSocketGone
 )
 
+var pendingUpgradeAdoption = hasPendingUpgradeAdoptionJournal
+
+var errUpgradeAdoptionInProgress = errors.New("daemon upgrade adoption is in progress")
+
 var (
 	detectDaemonServiceModeForCleanRestart = daemonservice.DetectMode
 	cleanRestartSecurityBoundaryDetected   = func() bool { return agent.SecurityBoundaryDetectedEnviron(os.Environ()) }
@@ -104,6 +108,14 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 		return nil, err
 	}
 
+	if priorDaemon != nil && pendingUpgradeAdoption(paths.RuntimeDir) {
+		if conn, ready := waitForDaemonReadyConnection(sockPath, token, paths.Profile, startupDeadline); ready {
+			return conn, nil
+		}
+
+		return nil, upgradeAdoptionInProgressError(errors.New("daemon did not start in time"))
+	}
+
 	// An interrupted preserve upgrade can leave its old process alive after
 	// the inherited listener was closed. Reconcile after any failed launch;
 	// the reconciliation itself proves the socket is unresponsive, the PID
@@ -111,6 +123,10 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	// avoids relying on a child-process error that fire-and-forget launchers
 	// cannot report to the client.
 	recoverAndRestart := func(startErr error) (context.CancelFunc, error) {
+		if expectedDaemon != nil && pendingUpgradeAdoption(paths.RuntimeDir) {
+			return nil, upgradeAdoptionInProgressError(startErr)
+		}
+
 		recovered, recoveryErr := reconcileUnresponsiveDaemonGeneration(paths, expectedDaemon)
 		if !recovered {
 			return nil, fmt.Errorf("start daemon: %w", startErr)
@@ -153,10 +169,28 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 	// start policy. Each probe's dial and handshake is capped at the remaining
 	// aggregate budget so a socket that accepts but never handshakes can't overrun
 	// start_timeout on the first probe (issue #1319).
+	readyConn, ready := waitForDaemonReadyConnection(sockPath, token, paths.Profile, startupDeadline)
+	if !ready {
+		retryCancel, recoveryErr := recoverAndRestart(errors.New("daemon did not start in time"))
+		if recoveryErr != nil {
+			return nil, recoveryErr
+		}
+		defer retryCancel()
+
+		readyConn, ready = waitForDaemonReadyConnection(sockPath, token, paths.Profile, startupDeadline)
+		if !ready {
+			return nil, errors.New("daemon did not start in time")
+		}
+	}
+
+	return readyConn, nil
+}
+
+func waitForDaemonReadyConnection(sockPath, token, profile string, startupDeadline time.Time) (net.Conn, bool) {
 	var readyConn net.Conn
 
 	ready := pollDaemonReadyBefore(startupDeadline, func(deadline time.Time) bool {
-		if !daemonRespondsUntil(sockPath, token, paths.Profile, deadline) {
+		if !daemonRespondsUntil(sockPath, token, profile, deadline) {
 			return false
 		}
 
@@ -169,35 +203,66 @@ func EnsureDaemonConfiguredContext(parent context.Context, cfg *config.Config, p
 
 		return true
 	})
-	if !ready {
-		retryCancel, recoveryErr := recoverAndRestart(errors.New("daemon did not start in time"))
-		if recoveryErr != nil {
-			return nil, recoveryErr
+
+	return readyConn, ready
+}
+
+func upgradeAdoptionInProgressError(cause error) error {
+	if cause == nil {
+		return fmt.Errorf("%w; retry after the preserved restart finishes", errUpgradeAdoptionInProgress)
+	}
+
+	return fmt.Errorf("%w; retry after the preserved restart finishes: %w", errUpgradeAdoptionInProgress, cause)
+}
+
+func hasPendingUpgradeAdoptionJournal(runtimeDir string) bool {
+	if runtimeDir == "" {
+		return false
+	}
+
+	entries, err := os.ReadDir(runtimeDir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
 		}
-		defer retryCancel()
 
-		readyConn = nil
-
-		ready = pollDaemonReadyBefore(startupDeadline, func(deadline time.Time) bool {
-			if !daemonRespondsUntil(sockPath, token, paths.Profile, deadline) {
-				return false
-			}
-
-			conn, err := dialLocalDaemonBefore("unix", sockPath, daemonDialTimeout, deadline)
-			if err != nil {
-				return false
-			}
-
-			readyConn = conn
-
+		if isPendingUpgradeAdoptionJournalName(entry.Name()) {
 			return true
-		})
-		if !ready {
-			return nil, errors.New("daemon did not start in time")
 		}
 	}
 
-	return readyConn, nil
+	return false
+}
+
+func isPendingUpgradeAdoptionJournalName(name string) bool {
+	const (
+		prefix = "upgrade-adoption-"
+		suffix = ".pending"
+		idLen  = 32
+	)
+
+	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+		return false
+	}
+
+	id := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
+	if len(id) != idLen {
+		return false
+	}
+
+	for _, ch := range id {
+		if ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f' {
+			continue
+		}
+
+		return false
+	}
+
+	return true
 }
 
 func daemonIdentityFromPIDFile(paths config.Paths) *DaemonIdentity {

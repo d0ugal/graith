@@ -92,6 +92,11 @@ stale PID file isn't enough — then checks that result for the requested versio
 and a fresh daemon generation. Otherwise it leaves the possible in-progress
 replacement alone: retry once startup finishes, or use `--force` to kill the
 sessions intentionally.
+Ordinary commands follow the same rule during the handoff window. If an
+upgrade-adoption journal is pending for the live daemon PID, auto-start recovery
+does not stop or kickstart over that PID; it waits for the daemon to answer and,
+if the startup budget expires, reports that adoption is still in progress so the
+command can be retried.
 
 If a preserve restart cannot drain accepted daemon mutations before its
 deadline, the error and daemon log identify every active holder by an opaque
