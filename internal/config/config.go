@@ -22,17 +22,20 @@ import (
 var defaultConfigTOML []byte
 
 type Config struct {
-	DefaultAgent     string                 `toml:"default_agent"`
-	GitHubUsername   string                 `toml:"github_username"`
-	BranchPrefix     string                 `toml:"branch_prefix"`
-	DataDir          string                 `toml:"data_dir"`
-	FetchOnCreate    bool                   `toml:"fetch_on_create"`
-	AgentPrompt      string                 `toml:"agent_prompt"`
-	AllowedRepoPaths []string               `toml:"allowed_repo_paths"`
-	Repos            []RepoConfig           `toml:"repos"`
-	StatusBar        StatusBar              `toml:"status_bar"`
-	Keybindings      Keybindings            `toml:"keybindings"`
-	Notifications    Notifications          `toml:"notifications"`
+	DefaultAgent     string        `toml:"default_agent"`
+	GitHubUsername   string        `toml:"github_username"`
+	BranchPrefix     string        `toml:"branch_prefix"`
+	DataDir          string        `toml:"data_dir"`
+	FetchOnCreate    bool          `toml:"fetch_on_create"`
+	AgentPrompt      string        `toml:"agent_prompt"`
+	AllowedRepoPaths []string      `toml:"allowed_repo_paths"`
+	Repos            []RepoConfig  `toml:"repos"`
+	StatusBar        StatusBar     `toml:"status_bar"`
+	Keybindings      Keybindings   `toml:"keybindings"`
+	Notifications    Notifications `toml:"notifications"`
+
+	NotificationRules []NotificationInstructionRule `toml:"notification_instruction"`
+
 	Messages         Messages               `toml:"messages"`
 	Delete           Delete                 `toml:"delete"`
 	GC               GCConfig               `toml:"gc"`
@@ -4827,6 +4830,8 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
+	errs = append(errs, validateNotificationInstructionRules(c.NotificationRules)...)
+
 	if err := c.DaemonService.Validate(); err != nil {
 		errs = append(errs, err)
 	}
@@ -5419,7 +5424,7 @@ func LoadBytes(path string, data []byte) (*Config, error) {
 	// Compose every removed security/process namespace from the same raw
 	// snapshot so a mixed legacy configuration reports all required migration
 	// work without ever rendering its values.
-	if err := errors.Join(rejectRemovedToolServerConfig(data), checkRemovedConfigKeys(data)); err != nil {
+	if err := errors.Join(rejectRemovedToolServerConfig(data), checkRemovedConfigKeys(data), rejectUnknownNotificationInstructionKeys(data)); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
 

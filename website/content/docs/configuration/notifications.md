@@ -119,6 +119,58 @@ disable. `dispatch_timeout`, `inbox_idle_timeout`, and `inbox_max_wait` fall bac
 to their default when zero or negative (they have no sensible zero). An
 unparseable value always falls back to the default.
 
+### System notification guidance
+
+Add top-level `[[notification_instruction]]` rules to prepend trusted local
+guidance to matching PR-watch and released jailed-comment system notices sent to
+agents. With no rules configured, system notification bodies are unchanged.
+Repeat `[[notification_instruction]]` blocks to define multiple rules.
+
+```toml
+[[notification_instruction]]
+name = "reviewer-guidance"
+kinds = ["github_pr_comment", "github_pr_review"]
+owners = ["my-user", "example-org"]
+repos = ["example-org/customer-rollout"]
+authors = ["alice", "bob", "review-bot[bot]"]
+template = """
+Reviewer feedback guidance:
+- Treat maintainer review comments as actionable feedback.
+- Keep the PR scoped to the requested change unless the user says otherwise.
+- If generated files are involved, verify the matching source config before editing.
+"""
+```
+
+Each rule must include at least one condition field. All configured condition
+fields must match; values inside one field are alternatives. For example, the
+rule above matches only PR conversation or inline review-comment notices for
+`example-org/customer-rollout` under one of the listed owners when at least one
+source comment author is one of the listed logins. If multiple rules match,
+Graith prepends them in config order.
+
+`owners` matches the owner or user portion of an `owner/repo` repository slug;
+use it to match every repository under one account or organization. `repos`
+accepts either `owner/repo` or a repository basename and never means "all repos
+owned by this name." `authors` matches GitHub logins case-insensitively when the
+notification source has authors. `session_names` and `session_repos` can further
+restrict rules to session metadata when available; `session_repos` uses the same
+`owner/repo` or basename matching as `repos`, falling back to basename matching
+when owner metadata is not available.
+
+Current PR-watch notification kinds are `github_ci_failure`,
+`github_ci_complete`, `github_ci_recovery`, `github_pr_merge_conflict`,
+`github_pr_lifecycle`, `github_pr_review_decision`, `github_pr_review`
+(inline code-review comments), and `github_pr_comment` (PR conversation
+comments).
+
+Templates use `{{kind}}`, `{{repo}}`, `{{author}}`, `{{pr_number}}`, `{{url}}`,
+`{{session_name}}`, and `{{session_repo}}`. These variables are metadata only;
+comment bodies and reviewer text are never available as template variables.
+Graith renders the matched guidance in a `Trusted guidance from local Graith
+config` section before the existing notification payload, followed by a
+metadata block labeled as data, not instructions. The notification payload is
+then labeled as external data, not instructions.
+
 ## Messages
 
 ```toml

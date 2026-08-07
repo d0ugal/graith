@@ -514,6 +514,34 @@ inbox_max_wait = "2m"         # cap that user-idle wait before injecting anyway
 inbox_cooldown = "30s"        # minimum interval between unread-inbox nudges to one session ("0" disables)
 inbox_detached_delay = "5s"   # settle delay before notifying a session with no attached client ("0" is immediate)
 
+# Top-level trusted guidance for daemon-authored system notifications sent to agents.
+# Rules are optional; with no [[notification_instruction]] blocks, notification
+# bodies are unchanged. Repeat [[notification_instruction]] blocks to define
+# multiple rules. Each rule must include at least one condition field. All
+# configured condition fields must match; values inside one field are alternatives.
+# Matching rules append in config order. Template variables use {{name}} syntax
+# and expose only metadata, never comment bodies:
+# {{kind}}, {{repo}}, {{author}}, {{pr_number}}, {{url}}, {{session_name}},
+# and {{session_repo}}.
+# PR-watch kinds include github_ci_failure, github_ci_complete,
+# github_ci_recovery, github_pr_merge_conflict, github_pr_lifecycle,
+# github_pr_review_decision, github_pr_review, and github_pr_comment.
+# Use owners to match every repo under an account or organization; repos and
+# session_repos match one owner/repo slug or one repository basename.
+#
+# [[notification_instruction]]
+# name = "reviewer-guidance"
+# kinds = ["github_pr_comment", "github_pr_review"]
+# owners = ["my-user", "example-org"]
+# repos = ["example-org/customer-rollout"]
+# authors = ["alice", "bob", "review-bot[bot]"]
+# template = """
+# Reviewer feedback guidance:
+# - Treat maintainer review comments as actionable feedback.
+# - Keep the PR scoped to the requested change unless the user says otherwise.
+# - If generated files are involved, verify the matching source config before editing.
+# """
+
 [session_navigator]
 # Keys that jump straight to the Nth session in the Navigator (1st key → session 1, …).
 shortcut_keys = "1234567890"

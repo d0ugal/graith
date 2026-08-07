@@ -298,7 +298,17 @@ func (sm *SessionManager) deliverReleased(j JailedComment) error {
 		pw = cfg.PRWatch
 	}
 
-	if err := sm.notifyFromDaemon(j.TargetSession, releasedCommentBody(j, pw.CommentBodyMaxBytes())); err != nil {
+	body := releasedCommentBody(j, pw.CommentBodyMaxBytes())
+	body = sm.appendNotificationInstructions(j.TargetSession, body, config.NotificationInstructionContext{
+		Kind:        releasedCommentNotificationKind(j),
+		Repo:        j.RepoSlug,
+		Authors:     []string{j.Author},
+		PRNumber:    j.PRNumber,
+		URL:         jailedCommentURL(j),
+		SessionName: j.TargetName,
+	})
+
+	if err := sm.notifyFromDaemon(j.TargetSession, body); err != nil {
 		if sm.log != nil {
 			sm.log.Error("jail: failed to deliver released comment",
 				"id", j.ID, "session", j.TargetSession, "err", err)
@@ -308,6 +318,15 @@ func (sm *SessionManager) deliverReleased(j JailedComment) error {
 	}
 
 	return nil
+}
+
+func jailedCommentURL(j JailedComment) string {
+	repo := strings.Trim(j.RepoSlug, "/")
+	if repo == "" || j.PRNumber <= 0 || strings.Contains(repo, " ") || strings.Contains(repo, "//") {
+		return ""
+	}
+
+	return fmt.Sprintf("https://github.com/%s/pull/%d", repo, j.PRNumber)
 }
 
 // releasedCommentBody frames a released, previously-quarantined comment for the

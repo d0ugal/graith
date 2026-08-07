@@ -128,6 +128,12 @@ The poll runs on a timer, catching a pushed PR only on the next tick. For near-i
 
 On first associating a PR, graith surfaces any **currently-broken mechanical state** — a failing CI build or merge conflict — so a stopped session (or restarted daemon) isn't stranded on a red PR. It does **not** replay review comments, PR comments, or review decisions from before it noticed the PR — those are baselined silently, so re-discovering a PR doesn't dump a backlog. Near-instant detection keeps that pre-association window to about a second.
 
+For local reviewer-policy guidance, add `[[notification_instruction]]` rules
+matching `github_pr_comment` or `github_pr_review`. Matching guidance is
+prepended to live PR-watch notices and released jailed-comment notices before
+the PR/comment payload, while comment bodies remain unavailable to templates. See
+[Notifications & messages]({{< relref "/docs/configuration/notifications.md#system-notification-guidance" >}}).
+
 ### Comment author-trust gate
 
 PR comments are free text from anyone, reaching the agent verbatim and able to auto-resume a stopped session — an untrusted comment is a **prompt-injection vector**. graith gates comment notifications on author trust: it notifies only if the author is trusted.
