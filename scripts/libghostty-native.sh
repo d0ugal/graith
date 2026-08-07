@@ -398,22 +398,30 @@ linux_artifact() {
     mkdir -m 700 "$staging"
     tar -xzf "$archive" -C "$staging" --no-same-owner --no-same-permissions
     for path in libghostty-vt.a pkgconfig/libghostty-vt-static.pc include/module.modulemap \
-        include/ghostty/vt.h include/ghostty/vt/allocator.h include/ghostty/vt/build_info.h \
-        include/ghostty/vt/color.h include/ghostty/vt/color_scheme.h include/ghostty/vt/device.h \
-        include/ghostty/vt/focus.h include/ghostty/vt/formatter.h include/ghostty/vt/grid_ref.h \
-        include/ghostty/vt/grid_ref_tracked.h include/ghostty/vt/key.h include/ghostty/vt/key/encoder.h \
-        include/ghostty/vt/key/event.h include/ghostty/vt/kitty_graphics.h include/ghostty/vt/modes.h \
-        include/ghostty/vt/mouse.h include/ghostty/vt/mouse/encoder.h include/ghostty/vt/mouse/event.h \
-        include/ghostty/vt/osc.h include/ghostty/vt/paste.h include/ghostty/vt/point.h \
-        include/ghostty/vt/render.h include/ghostty/vt/screen.h include/ghostty/vt/selection.h \
-        include/ghostty/vt/sgr.h include/ghostty/vt/size_report.h include/ghostty/vt/style.h \
-        include/ghostty/vt/sys.h include/ghostty/vt/terminal.h include/ghostty/vt/types.h \
-        include/ghostty/vt/unicode.h include/ghostty/vt/wasm.h manifest.json \
-        libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md; do
+        manifest.json libghostty-native.spdx.json THIRD_PARTY_NOTICES.libghostty.md; do
         [[ -f "$staging/$path" && ! -L "$staging/$path" ]] || {
             die "Linux artifact member is not a regular file: $path"; return 1;
         }
     done
+    local expected_headers actual_headers
+    if ! expected_headers="$(
+        cd "$REPO_DIR/gui/shared/Sources/CGhosttyVT/include" &&
+            find ghostty -type f -print | LC_ALL=C sort
+    )"; then
+        die "could not enumerate committed Ghostty headers"
+        return 1
+    fi
+    if ! actual_headers="$(
+        cd "$staging/include" &&
+            find ghostty -type f -print | LC_ALL=C sort
+    )"; then
+        die "could not enumerate Linux artifact Ghostty headers"
+        return 1
+    fi
+    if [[ "$actual_headers" != "$expected_headers" ]]; then
+        die "Linux artifact header tree mismatch"
+        return 1
+    fi
     if ! jq -e --arg target "$target" --arg arch "$goarch" \
         --arg ghostty "$GHOSTTY_SHA" \
         '.schemaVersion == 1 and .target == $target and .architecture == $arch and .ghosttyCommit == $ghostty' \
