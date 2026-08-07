@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.73.9](https://github.com/d0ugal/graith/compare/v0.73.8...v0.73.9) (2026-08-07)
+
+
+### Features
+
+* add notification instruction rules ([4aba62d](https://github.com/d0ugal/graith/commit/4aba62d37fe0e38162f56978ad3c053aee1b0998))
+* refresh default terminal palette ([21af171](https://github.com/d0ugal/graith/commit/21af1719312738b3a52381104c81ca18a74b5510))
+
+
+### Bug Fixes
+
+* make autostart probe deadline test deterministic ([969d572](https://github.com/d0ugal/graith/commit/969d572b7e4dd1ccfce6e0869d0dff37a95e2838))
+* suppress no-diff screenshot comments ([99ff9bd](https://github.com/d0ugal/graith/commit/99ff9bdd0ec8a292aa1f039ebfb232bafadf9fa9))
+* update google.golang.org/genproto/googleapis/api digest to c8921c7 ([#2106](https://github.com/d0ugal/graith/issues/2106)) ([ff7b528](https://github.com/d0ugal/graith/commit/ff7b52875fb223bb19f31d58d9cd663fc2a9f693))
+* update google.golang.org/genproto/googleapis/rpc digest to c8921c7 ([#2107](https://github.com/d0ugal/graith/issues/2107)) ([e60a42c](https://github.com/d0ugal/graith/commit/e60a42cdd7328b4654d55d1c659273ab495837c9))
+
+
+### Documentation
+
+* expand orchestrator prompt powers ([3d61141](https://github.com/d0ugal/graith/commit/3d61141af4de685752cac212f8b50645b1472fe0))
+
+
+### Tests
+
+* add initial fuzz coverage ([56ef459](https://github.com/d0ugal/graith/commit/56ef45908a19a13ce0f947c7269cb72e44b387aa))
+
+
+### Dependencies
+
+* **deps:** update dependency nolabs-ai/nono to v0.72.0 ([#2101](https://github.com/d0ugal/graith/issues/2101)) ([8b3f8ca](https://github.com/d0ugal/graith/commit/8b3f8ca55b5a238e03f95dc2e5d02ef199cc6484))
+* **deps:** update renovate/renovate docker tag to v44.14.4 ([#2096](https://github.com/d0ugal/graith/issues/2096)) ([6c42fce](https://github.com/d0ugal/graith/commit/6c42fce17306480f9fcd53a727871d61bc917b5a))
+* **deps:** update renovate/renovate docker tag to v44.14.5 ([#2100](https://github.com/d0ugal/graith/issues/2100)) ([06e0a7b](https://github.com/d0ugal/graith/commit/06e0a7b133444d410f419bbdf0e06490ecee14cf))
+* **deps:** update renovate/renovate docker tag to v44.14.7 ([#2104](https://github.com/d0ugal/graith/issues/2104)) ([0330ffa](https://github.com/d0ugal/graith/commit/0330ffaba27e3142cd7902b6e459efaeae0e507b))
+
 ## [0.73.8](https://github.com/d0ugal/graith/compare/v0.73.7...v0.73.8) (2026-08-07)
 
 
