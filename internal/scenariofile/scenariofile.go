@@ -216,6 +216,14 @@ func Parse(data []byte) (*File, error) {
 
 	depInputs := make([]protocol.ScenarioSessionInput, len(sf.Sessions))
 	for i, s := range sf.Sessions {
+		if s.Name == "" {
+			return nil, fmt.Errorf("session[%d]: name is required", i)
+		}
+
+		if s.Repo == "" && !s.Shared && s.Mirror == "" {
+			return nil, fmt.Errorf("session %q: repo is required (unless shared or mirrored)", s.Name)
+		}
+
 		depInputs[i] = protocol.ScenarioSessionInput{
 			Name: s.Name, Prompt: s.Prompt, Task: s.Task, DependsOn: s.DependsOn, Shared: s.Shared,
 		}

@@ -514,6 +514,8 @@ func TestParse_Invalid(t *testing.T) {
 		{"bad version", "version = 2\n[scenario]\nname=\"x\"\n[[sessions]]\nname=\"a\"\nrepo=\"/r\"\n", "unsupported scenario version"},
 		{"no name", "version = 1\n[scenario]\n[[sessions]]\nname=\"a\"\nrepo=\"/r\"\n", "scenario.name is required"},
 		{"no sessions", "version = 1\n[scenario]\nname=\"x\"\n", "at least one"},
+		{"session missing name", "version = 1\n[scenario]\nname=\"x\"\n[[sessions]]\nrepo=\"/r\"\n", "session[0]: name is required"},
+		{"session missing repo", "version = 1\n[scenario]\nname=\"x\"\n[[sessions]]\nname=\"a\"\n", "repo is required"},
 		{"unknown field", "version = 1\nbogus = true\n[scenario]\nname=\"x\"\n[[sessions]]\nname=\"a\"\nrepo=\"/r\"\n", "parse scenario TOML"},
 	}
 	for _, tc := range cases {
