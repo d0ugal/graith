@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.73.8](https://github.com/d0ugal/graith/compare/v0.73.7...v0.73.8) (2026-08-07)
+
+
+### Features
+
+* surface status bar attention signals ([04e6c45](https://github.com/d0ugal/graith/commit/04e6c450d6be82b70143ed37a7a17b3745d255d0))
+
+
+### Bug Fixes
+
+* avoid autostart recovery during upgrade adoption ([4be0ee5](https://github.com/d0ugal/graith/commit/4be0ee5969df40fe8fbe52e3776825d11d823b27))
+* include status bar in session navigator previews ([9781392](https://github.com/d0ugal/graith/commit/9781392a238f70a8f80ff726cc2a3d67145e256a))
+* package dynamic libghostty headers ([d18d2db](https://github.com/d0ugal/graith/commit/d18d2db5ac5345d881c0e2727f7885926b9e17f4))
+* update libghostty native dependency unit ([0e8db69](https://github.com/d0ugal/graith/commit/0e8db6929c9bcbcbf8e32730137030873b4d209c))
+* update module github.com/adhocore/gronx to v1.20.1 ([#2080](https://github.com/d0ugal/graith/issues/2080)) ([3f14173](https://github.com/d0ugal/graith/commit/3f14173d71f57b17b39f76be243c7af2d6065624))
+* update module github.com/grpc-ecosystem/grpc-gateway/v2 to v2.30.0 ([#2078](https://github.com/d0ugal/graith/issues/2078)) ([8dcfd40](https://github.com/d0ugal/graith/commit/8dcfd408edd514e8a3aab1645ee148a1b81c1e2c))
+* update module github.com/klauspost/compress to v1.19.2 ([#2084](https://github.com/d0ugal/graith/issues/2084)) ([65bc9df](https://github.com/d0ugal/graith/commit/65bc9df8b9e323a06770c59fd5c42589ee74e999))
+* update module modernc.org/memory to v1.12.0 ([#2091](https://github.com/d0ugal/graith/issues/2091)) ([64d6bac](https://github.com/d0ugal/graith/commit/64d6bac46f295c274d52d8959fcf0d4d40bad931))
+* update module tailscale.com to v1.102.2 ([#2077](https://github.com/d0ugal/graith/issues/2077)) ([d169863](https://github.com/d0ugal/graith/commit/d1698635c742c069e01f0d08aa98b046fddbef88))
+
+
+### Documentation
+
+* add full-terminal Session Navigator screenshots ([0798ca6](https://github.com/d0ugal/graith/commit/0798ca67309808ccc36c26459f2626161eadd11c))
+
+
+### Tests
+
+* tolerate closed descriptors in upgrade leak check ([541c7b4](https://github.com/d0ugal/graith/commit/541c7b4ce872937cbb4ac294e143410c8f32d94a))
+
+
+### Dependencies
+
+* **deps:** update actions/attest action to v4.2.2 ([#2074](https://github.com/d0ugal/graith/issues/2074)) ([b370301](https://github.com/d0ugal/graith/commit/b370301bc29e631398a7416dcf75b62cd73bd5d3))
+* **deps:** update renovate/renovate docker tag to v44.11.6 ([#2075](https://github.com/d0ugal/graith/issues/2075)) ([5999f78](https://github.com/d0ugal/graith/commit/5999f7862dae444ec0e2ac83be59121cd5fd5b4a))
+* **deps:** update renovate/renovate docker tag to v44.11.8 ([#2079](https://github.com/d0ugal/graith/issues/2079)) ([c126e7b](https://github.com/d0ugal/graith/commit/c126e7b8da95e65773efca5d46e4c7b168451c18))
+* **deps:** update renovate/renovate docker tag to v44.12.0 ([#2081](https://github.com/d0ugal/graith/issues/2081)) ([0e93d8c](https://github.com/d0ugal/graith/commit/0e93d8ce75a072775b26c64d3d0974639d181a90))
+* **deps:** update renovate/renovate docker tag to v44.13.1 ([#2082](https://github.com/d0ugal/graith/issues/2082)) ([3e8ed98](https://github.com/d0ugal/graith/commit/3e8ed984365b3308b8f8826f700451d9494e15af))
+* **deps:** update renovate/renovate docker tag to v44.13.2 ([#2083](https://github.com/d0ugal/graith/issues/2083)) ([6e51096](https://github.com/d0ugal/graith/commit/6e51096fdc3a843163ea330e972566487186e4cd))
+* **deps:** update renovate/renovate docker tag to v44.14.3 ([#2090](https://github.com/d0ugal/graith/issues/2090)) ([3eba66f](https://github.com/d0ugal/graith/commit/3eba66f90b8db233c1475502d7312711165bcb2e))
+* **generated:** refresh generated dependency metadata ([631706a](https://github.com/d0ugal/graith/commit/631706a25ab099d129a0f8813220ae58096e9a9b))
+
 ## [0.73.7](https://github.com/d0ugal/graith/compare/v0.73.6...v0.73.7) (2026-08-04)
 
 
