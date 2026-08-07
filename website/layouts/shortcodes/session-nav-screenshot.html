@@ -2,10 +2,10 @@
 {{- if not $name -}}
     {{- errorf "session-nav-screenshot shortcode requires name" -}}
 {{- end -}}
-{{- $alt := .Get "alt" | default "Session Navigator screenshot" -}}
+{{- $alt := .Get "alt" | default "Graith TUI screenshot" -}}
 {{- $staticPath := printf "static/images/docs/session-navigator/%s.png" $name -}}
 {{- if not (fileExists $staticPath) -}}
-    {{- errorf "missing Session Navigator docs screenshot %q; run `make docs-session-nav-screenshots`" $staticPath -}}
+    {{- errorf "missing TUI docs screenshot %q; run `make docs-session-nav-screenshots`" $staticPath -}}
 {{- end -}}
 {{- $src := printf "images/docs/session-navigator/%s.png" $name | relURL -}}
 <figure class="session-nav-screenshot">

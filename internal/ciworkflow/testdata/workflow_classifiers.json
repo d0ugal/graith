@@ -222,7 +222,7 @@
       }
     },
     {
-      "name": "session navigator screenshot command",
+      "name": "tui screenshot command",
       "event": "pull_request",
       "files": ["cmd/sessionnavshots/main.go"],
       "want": {
@@ -255,7 +255,7 @@
       }
     },
     {
-      "name": "session navigator preview workflow",
+      "name": "tui preview workflow",
       "event": "pull_request",
       "files": [".github/workflows/session-navigator-preview.yml"],
       "want": {
@@ -398,7 +398,7 @@
       }
     },
     {
-      "name": "docs session navigator screenshot script",
+      "name": "docs tui screenshot script",
       "event": "pull_request",
       "files": ["scripts/render-session-navigator-doc-screenshots.sh"],
       "want": {

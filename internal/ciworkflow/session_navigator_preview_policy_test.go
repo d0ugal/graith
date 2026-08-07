@@ -63,8 +63,8 @@ func TestSessionNavigatorPreviewWorkflowPolicy(t *testing.T) {
 		`gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename'`,
 		`go run ./cmd/ciclassify -mode session-navigator-preview`,
 		`echo "trigger=true" >> "$GITHUB_OUTPUT"`,
-		"Could not list PR files; running Session Navigator preview to be safe.",
-		"Shared classifier failed; running Session Navigator preview to be safe.",
+		"Could not list PR files; running TUI preview to be safe.",
+		"Shared classifier failed; running TUI preview to be safe.",
 	} {
 		if !strings.Contains(detector, want) {
 			t.Fatalf("session navigator detector does not contain %q:\n%s", want, detector)
@@ -101,8 +101,8 @@ github.event.action != 'closed' &&
 		"go run ./cmd/sessionnavshots",
 		`git cat-file -e "$BASE_SHA:cmd/sessionnavshots/main.go"`,
 		"git worktree add --detach /tmp/base-tree",
-		"Base Session Navigator snapshot render failed; treating screenshots as new.",
-		"Base Session Navigator worktree setup failed; treating screenshots as new.",
+		"Base TUI snapshot render failed; treating screenshots as new.",
+		"Base TUI worktree setup failed; treating screenshots as new.",
 		`jq 'map(.hasBase = true)' nav/pages.json`,
 		`jq 'map(.hasBase = false)' nav/pages.json`,
 	} {

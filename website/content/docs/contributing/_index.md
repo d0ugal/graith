@@ -77,7 +77,7 @@ jq '.data[0].totals.lines.percent' "$(swift test --package-path gui/shared --sho
 Session Navigator documentation screenshots are checked-in PNG files under
 `website/static/images/docs/session-navigator/`. They use deterministic fake
 session data from `cmd/sessionnavshots/testdata/` and the same full-terminal
-renderer used by the Session Navigator PR preview, including the status bar row.
+renderer used by the TUI PR preview, including the status bar row.
 
 Refresh them from the repository root with:
 

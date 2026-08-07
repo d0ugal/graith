@@ -70,6 +70,8 @@ func TestGitHubHTTPClientRequests(t *testing.T) {
 		case request.Method == http.MethodPost && request.URL.Path == "/repos/clachan/croft/issues/42/comments":
 			writer.WriteHeader(http.StatusCreated)
 			_, _ = writer.Write([]byte(`{"id":100}`))
+		case request.Method == http.MethodDelete && request.URL.Path == "/repos/clachan/croft/issues/comments/99":
+			writer.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected request %s %s", request.Method, request.URL.String())
 			http.Error(writer, "unexpected request", http.StatusInternalServerError)
@@ -134,8 +136,12 @@ func TestGitHubHTTPClientRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(requests) != 10 {
-		t.Fatalf("requests = %+v, want 10", requests)
+	if err := client.DeleteComment(context.Background(), "clachan", "croft", 99); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(requests) != 11 {
+		t.Fatalf("requests = %+v, want 11", requests)
 	}
 
 	if got := requests[0].Path; got != "/repos/clachan/croft/git/ref/heads/screenshots" {
@@ -175,6 +181,10 @@ func TestGitHubHTTPClientRequests(t *testing.T) {
 
 	if requests[8].Body["body"] != "updated body" || requests[9].Body["body"] != "new body" {
 		t.Fatalf("comment bodies = %+v / %+v", requests[8].Body, requests[9].Body)
+	}
+
+	if requests[10].Method != http.MethodDelete || requests[10].Path != "/repos/clachan/croft/issues/comments/99" {
+		t.Fatalf("delete comment request = %+v", requests[10])
 	}
 }
 

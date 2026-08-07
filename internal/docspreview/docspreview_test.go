@@ -501,7 +501,70 @@ func TestCleanup(t *testing.T) {
 			t.Fatalf("tree paths = %v, want only pr-7", got)
 		}
 
-		if got := github.comments[42][0].Body; !strings.Contains(got, "Session Navigator preview") || !strings.Contains(got, "cleaned up after it was closed") {
+		if got := github.comments[42][0].Body; !strings.Contains(got, "TUI preview") || !strings.Contains(got, "cleaned up after it was closed") {
+			t.Fatalf("navigator sticky comment body = %q, want cleanup note", got)
+		}
+
+		if got := github.comments[42][1].Body; got != StickyMarker+"\nold docs body" {
+			t.Fatalf("docs sticky comment was changed: %q", got)
+		}
+	})
+
+	t.Run("cleanup ignores quoted sticky marker", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		humanBody := "quoted previous bot output\n" + SessionNavigatorStickyMarker + "\nold navigator body"
+		github.comments[42] = []Comment{{ID: 99, Body: humanBody}}
+
+		err := Cleanup(context.Background(), CleanupOptions{
+			Client: github,
+			Repo:   testRepo,
+			Event:  prEvent(42, "clachan/croft"),
+			Suite:  SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.updateComment != 0 || github.calls.deleteComment != 0 {
+			t.Fatalf("comment writes = %+v, want none for quoted marker", github.calls)
+		}
+
+		if len(github.comments[42]) != 1 || github.comments[42][0].Body != humanBody {
+			t.Fatalf("comments = %+v, want quoted marker comment left intact", github.comments[42])
+		}
+	})
+
+	t.Run("cleanup removes duplicate sticky comments", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{
+			{ID: 99, Body: SessionNavigatorStickyMarker + "\nold navigator body"},
+			{ID: 100, Body: SessionNavigatorStickyMarker + "\nduplicate navigator body"},
+			{ID: 101, Body: StickyMarker + "\nold docs body"},
+		}
+
+		err := Cleanup(context.Background(), CleanupOptions{
+			Client: github,
+			Repo:   testRepo,
+			Event:  prEvent(42, "clachan/croft"),
+			Suite:  SessionNavigatorPreviewSuite(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.updateComment != 1 || github.calls.deleteComment != 1 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want one update and one delete", github.calls)
+		}
+
+		if len(github.comments[42]) != 2 {
+			t.Fatalf("comments = %+v, want one cleanup comment plus docs sticky", github.comments[42])
+		}
+
+		if got := github.comments[42][0].Body; !strings.Contains(got, "TUI preview") || !strings.Contains(got, "cleaned up after it was closed") {
 			t.Fatalf("navigator sticky comment body = %q, want cleanup note", got)
 		}
 
@@ -531,7 +594,7 @@ func TestCleanup(t *testing.T) {
 			t.Fatalf("branch writes = %+v, want none", github.calls)
 		}
 
-		if got := github.comments[42][0].Body; !strings.Contains(got, "Session Navigator preview") || !strings.Contains(got, "cleaned up after it was closed") {
+		if got := github.comments[42][0].Body; !strings.Contains(got, "TUI preview") || !strings.Contains(got, "cleaned up after it was closed") {
 			t.Fatalf("navigator sticky comment body = %q, want cleanup note", got)
 		}
 	})
@@ -860,7 +923,8 @@ func TestPublish(t *testing.T) {
 		body := github.comments[42][0].Body
 		for _, want := range []string{
 			SessionNavigatorStickyMarker,
-			"Session Navigator preview",
+			"TUI preview",
+			"Rendered 1 TUI scene(s)",
 			"session-navigator-all",
 			"| Small | Normal | Wide |",
 			"_Snapshots new in this PR",
@@ -878,8 +942,8 @@ func TestPublish(t *testing.T) {
 		}
 
 		commit := github.commits[github.refs["heads/"+ScreenshotsBranch]]
-		if !strings.Contains(commit.Message, "session navigator preview: PR #42 @ abcdef1") {
-			t.Fatalf("commit message = %q, want session navigator prefix", commit.Message)
+		if !strings.Contains(commit.Message, "tui preview: PR #42 @ abcdef1") {
+			t.Fatalf("commit message = %q, want TUI prefix", commit.Message)
 		}
 	})
 
@@ -927,6 +991,48 @@ func TestPublish(t *testing.T) {
 		}
 	})
 
+	t.Run("diff manifest updates first sticky comment and deletes duplicates", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.seedScreenshotsBranch([]TreeEntry{blobEntry("pr-7/old/z.png")})
+		github.comments[42] = []Comment{
+			{ID: 44, Body: StickyMarker + "\nold"},
+			{ID: 45, Body: StickyMarker + "\nduplicate"},
+		}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"canny-page": {
+				"desktop": {Kind: "new", File: "canny-desktop.png"},
+			},
+		}, map[string]string{"canny-desktop.png": "image-bytes"})
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "1234567890",
+			RunID:        "82",
+			Now:          now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.updateComment != 1 || github.calls.deleteComment != 1 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want one update and one delete", github.calls)
+		}
+
+		if len(github.comments[42]) != 1 {
+			t.Fatalf("comments = %+v, want duplicate sticky comment deleted", github.comments[42])
+		}
+
+		if got := github.comments[42][0]; got.ID != 44 || !strings.Contains(got.Body, "canny-page") {
+			t.Fatalf("updated comment = %+v, want first sticky updated with new page", got)
+		}
+	})
+
 	t.Run("same-only manifest noops without existing sticky comment", func(t *testing.T) {
 		t.Parallel()
 
@@ -961,7 +1067,7 @@ func TestPublish(t *testing.T) {
 		}
 	})
 
-	t.Run("same-only session navigator manifest creates sticky comment without branch write", func(t *testing.T) {
+	t.Run("same-only session navigator manifest noops without existing sticky comment", func(t *testing.T) {
 		t.Parallel()
 
 		github := newFakeGitHub()
@@ -992,26 +1098,8 @@ func TestPublish(t *testing.T) {
 			t.Fatalf("branch writes = %+v, want none for same-only session navigator manifest", github.calls)
 		}
 
-		if len(github.comments[42]) != 1 {
-			t.Fatalf("comments = %+v, want one session navigator sticky comment", github.comments[42])
-		}
-
-		body := github.comments[42][0].Body
-		for _, want := range []string{
-			SessionNavigatorStickyMarker,
-			"Session Navigator preview",
-			"session-navigator-all",
-			"| Small | Normal | Wide |",
-			"_no visual change_",
-			"_No visual changes to preview._",
-		} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("comment body missing %q:\n%s", want, body)
-			}
-		}
-
-		if strings.Contains(body, StickyMarker) {
-			t.Fatalf("session navigator no-change comment should not use docs marker:\n%s", body)
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want no new sticky comment for same-only session navigator manifest", github.comments[42])
 		}
 	})
 
@@ -1045,7 +1133,41 @@ func TestPublish(t *testing.T) {
 		}
 	})
 
-	t.Run("same-only manifest updates existing sticky comment without branch write", func(t *testing.T) {
+	t.Run("empty manifest deletes existing sticky comment", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{{ID: 44, Body: StickyMarker + "\nold"}}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.createBlob != 0 || github.calls.createTree != 0 || github.calls.createRef != 0 {
+			t.Fatalf("branch writes = %+v, want none for empty manifest", github.calls)
+		}
+
+		if github.calls.deleteComment != 1 || github.calls.updateComment != 0 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want one delete only", github.calls)
+		}
+
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want existing sticky comment deleted", github.comments[42])
+		}
+	})
+
+	t.Run("same-only manifest deletes existing sticky comment without branch write", func(t *testing.T) {
 		t.Parallel()
 
 		github := newFakeGitHub()
@@ -1075,12 +1197,154 @@ func TestPublish(t *testing.T) {
 			t.Fatalf("branch writes = %+v, want none for same-only manifest", github.calls)
 		}
 
-		if body := github.comments[42][0].Body; !strings.Contains(body, "_No visual changes to preview._") {
-			t.Fatalf("comment body = %q, want no visual changes note", body)
+		if github.calls.deleteComment != 1 || github.calls.updateComment != 0 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want one delete only", github.calls)
+		}
+
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want existing sticky comment deleted", github.comments[42])
 		}
 	})
 
-	t.Run("same-only session navigator manifest updates existing sticky comment without branch write", func(t *testing.T) {
+	t.Run("same-only manifest deletes duplicate sticky comments", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{
+			{ID: 44, Body: StickyMarker + "\nold"},
+			{ID: 45, Body: StickyMarker + "\nolder"},
+		}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "same"},
+				"mobile":  {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.deleteComment != 2 || github.calls.updateComment != 0 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want two deletes only", github.calls)
+		}
+
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want duplicate sticky comments deleted", github.comments[42])
+		}
+	})
+
+	t.Run("same-only manifest does not delete quoted sticky marker", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		humanBody := "quoted previous bot output\n" + StickyMarker + "\nold"
+		github.comments[42] = []Comment{{ID: 44, Body: humanBody}}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "same"},
+				"mobile":  {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.deleteComment != 0 || github.calls.updateComment != 0 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want none for quoted marker", github.calls)
+		}
+
+		if len(github.comments[42]) != 1 || github.comments[42][0].Body != humanBody {
+			t.Fatalf("comments = %+v, want quoted marker comment left intact", github.comments[42])
+		}
+	})
+
+	t.Run("same-only manifest tolerates already deleted sticky comment", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{{ID: 44, Body: StickyMarker + "\nold"}}
+		github.deleteCommentErr = &StatusError{Status: 404, Message: "Not Found"}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "same"},
+				"mobile":  {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if github.calls.deleteComment != 1 || github.calls.updateComment != 0 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want one delete only", github.calls)
+		}
+	})
+
+	t.Run("same-only manifest propagates sticky comment delete failure", func(t *testing.T) {
+		t.Parallel()
+
+		github := newFakeGitHub()
+		github.comments[42] = []Comment{{ID: 44, Body: StickyMarker + "\nold"}}
+		github.deleteCommentErr = &StatusError{Status: 500, Message: "dreich"}
+		assetsDir, manifestPath := writePreviewAssets(t, PreviewManifest{
+			"dreich-page": {
+				"desktop": {Kind: "same"},
+				"mobile":  {Kind: "same"},
+			},
+		}, nil)
+
+		err := Publish(context.Background(), PublishOptions{
+			Client:       github,
+			Repo:         testRepo,
+			Event:        prEvent(42, "clachan/croft"),
+			ManifestPath: manifestPath,
+			AssetsDir:    assetsDir,
+			SHA:          "abcdef123456",
+			RunID:        "83",
+			Now:          now,
+		})
+		if err == nil || !strings.Contains(err.Error(), "dreich") {
+			t.Fatalf("Publish() error = %v, want delete failure", err)
+		}
+
+		if github.calls.deleteComment != 1 || github.calls.updateComment != 0 || github.calls.createComment != 0 {
+			t.Fatalf("comment writes = %+v, want one delete only", github.calls)
+		}
+	})
+
+	t.Run("same-only session navigator manifest deletes existing sticky comment without branch write", func(t *testing.T) {
 		t.Parallel()
 
 		github := newFakeGitHub()
@@ -1109,23 +1373,15 @@ func TestPublish(t *testing.T) {
 		}
 
 		if github.calls.createBlob != 0 || github.calls.createTree != 0 || github.calls.createRef != 0 || github.calls.createComment != 0 {
-			t.Fatalf("branch/create writes = %+v, want only existing comment update", github.calls)
+			t.Fatalf("branch/create writes = %+v, want only existing comment delete", github.calls)
 		}
 
-		if github.calls.updateComment != 1 {
-			t.Fatalf("updateComment calls = %d, want 1", github.calls.updateComment)
+		if github.calls.deleteComment != 1 || github.calls.updateComment != 0 {
+			t.Fatalf("comment writes = %+v, want one delete only", github.calls)
 		}
 
-		body := github.comments[42][0].Body
-		for _, want := range []string{
-			SessionNavigatorStickyMarker,
-			"Session Navigator preview",
-			"session-navigator-repo",
-			"_No visual changes to preview._",
-		} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("comment body missing %q:\n%s", want, body)
-			}
+		if len(github.comments[42]) != 0 {
+			t.Fatalf("comments = %+v, want existing session navigator sticky comment deleted", github.comments[42])
 		}
 	})
 
@@ -1466,6 +1722,7 @@ type fakeGitHub struct {
 	beforeCreateRef   func()
 	alwaysRaceUpdates bool
 	updateRefErr      error
+	deleteCommentErr  error
 	calls             fakeCalls
 }
 
@@ -1480,11 +1737,12 @@ type fakeCalls struct {
 	updateRef           int
 	updateComment       int
 	createComment       int
+	deleteComment       int
 }
 
 func (calls fakeCalls) totalWrites() int {
 	return calls.createBlob + calls.createTree + calls.createCommit + calls.createRef +
-		calls.updateRef + calls.updateComment + calls.createComment
+		calls.updateRef + calls.updateComment + calls.createComment + calls.deleteComment
 }
 
 func newFakeGitHub() *fakeGitHub {
@@ -1687,6 +1945,24 @@ func (github *fakeGitHub) CreateComment(_ context.Context, _, _ string, issueNum
 	github.comments[issueNumber] = append(github.comments[issueNumber], comment)
 
 	return nil
+}
+
+func (github *fakeGitHub) DeleteComment(_ context.Context, _, _ string, commentID int64) error {
+	github.calls.deleteComment++
+	if github.deleteCommentErr != nil {
+		return github.deleteCommentErr
+	}
+
+	for issueNumber, comments := range github.comments {
+		for i, comment := range comments {
+			if comment.ID == commentID {
+				github.comments[issueNumber] = append(comments[:i], comments[i+1:]...)
+				return nil
+			}
+		}
+	}
+
+	return &StatusError{Status: 404, Message: "Not Found"}
 }
 
 func (github *fakeGitHub) seedScreenshotsBranch(entries []TreeEntry) string {
