@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.73.10](https://github.com/d0ugal/graith/compare/v0.73.9...v0.73.10) (2026-08-08)
+
+
+### Bug Fixes
+
+* update module github.com/cenkalti/backoff/v5 to v7 ([#2122](https://github.com/d0ugal/graith/issues/2122)) ([8de6427](https://github.com/d0ugal/graith/commit/8de6427866a49039fdad7e5977b809a82dab8f5d))
+* update module github.com/go-git/gcfg to v2 ([#2123](https://github.com/d0ugal/graith/issues/2123)) ([34ae32e](https://github.com/d0ugal/graith/commit/34ae32ed11d0ebd7f0f38d90fd08aa89843a7389))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.14.10 ([#2128](https://github.com/d0ugal/graith/issues/2128)) ([57a94ea](https://github.com/d0ugal/graith/commit/57a94eaf9fa7070e8899372ceb73d1e8c602d505))
+* **deps:** update renovate/renovate docker tag to v44.14.12 ([#2129](https://github.com/d0ugal/graith/issues/2129)) ([17c07c1](https://github.com/d0ugal/graith/commit/17c07c1c70fb6132764b0a3e9f4399f481aaec88))
+* **deps:** update renovate/renovate docker tag to v44.14.8 ([#2118](https://github.com/d0ugal/graith/issues/2118)) ([80221ef](https://github.com/d0ugal/graith/commit/80221ef18e307628c73ad5e1eb8622631bf3478c))
+* **deps:** update renovate/renovate docker tag to v44.14.9 ([#2127](https://github.com/d0ugal/graith/issues/2127)) ([fec9690](https://github.com/d0ugal/graith/commit/fec96907c900e1d1533f5e4dc4e24fe6c211d460))
+
 ## [0.73.9](https://github.com/d0ugal/graith/compare/v0.73.8...v0.73.9) (2026-08-07)
 
 
