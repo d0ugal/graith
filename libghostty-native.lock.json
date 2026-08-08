@@ -14,7 +14,7 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "7e50356642afead216a35c8968f4c33cb38d7f04",
+    "commit": "136f436a3bbb14fd48d18e927a83fc6585d5a63c",
     "version": "1.3.2-dev",
     "headersSHA256": "5755a63fc45e195b995370d9debb1d71b39ccabb6711520b12fc9354c57b4e6d",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
