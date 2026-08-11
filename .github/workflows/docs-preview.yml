@@ -172,7 +172,7 @@ jobs:
 
           # A change to theme/config/layout/assets/data affects every page.
           global=0
-          if [ "$classifier_global" = "true" ] || [ "$detector_failed" = 1 ] || grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"; then
+          if [ "$classifier_global" = "true" ] || [ "$detector_failed" = 1 ] || grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|package(-lock)?\.json|i18n/|layouts/|static/|themes/)' <<<"$changed"; then
             global=1
           fi
           ci_tool_versions_changed=0
@@ -274,6 +274,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASECOUNT: ${{ steps.changed.outputs.basecount }}
         run: |
+          make docs-faro-smoke
           (cd website && go test ./... && node --test tests/*.test.mjs)
           make package-graph-check
           hugo --gc --minify --baseURL "${BASE_URL}/" \
@@ -287,6 +288,9 @@ jobs:
               mkdir -p /tmp/base-tree/website/data
               cp website/data/package_dependencies.json \
                 /tmp/base-tree/website/data/package_dependencies.json
+            fi
+            if [ -f /tmp/base-tree/website/package-lock.json ]; then
+              (cd /tmp/base-tree/website && npm ci)
             fi
             hugo --gc --minify --baseURL "${BASE_URL}/" \
               --source /tmp/base-tree/website --destination "$PWD/site-base"

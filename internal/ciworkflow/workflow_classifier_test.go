@@ -566,7 +566,7 @@ var (
 
 	legacyDocsPreviewTriggerMatcher = regexp.MustCompile(`^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/(install-(dart-sass|hugo)|render-session-navigator-doc-screenshots)\.sh$`)
 
-	legacyDocsPreviewGlobalMatcher = regexp.MustCompile(`^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)`)
+	legacyDocsPreviewGlobalMatcher = regexp.MustCompile(`^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|package(-lock)?\.json|i18n/|layouts/|static/|themes/)`)
 
 	legacySessionNavigatorPreviewMatcher = regexp.MustCompile(`^cmd/(ciclassify|docsdiff|docspreview|sessionnavshots)/|^internal/(ciworkflow|client|config|docspreview|sessionlabel)/|^Makefile$|^go\.(mod|sum)$|^internal/protocol/messages\.go$|^\.github/workflows/session-navigator-preview\.yml$|^scripts/session-navigator-terminal-screenshot\.sh$`)
 )

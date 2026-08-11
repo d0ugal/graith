@@ -36,8 +36,11 @@ make docs
 node --test website/tests/*.test.mjs
 ```
 
-The package-dependency data is committed. `make docs` consumes it without
-modifying the worktree; use `make package-graph` only when the graph inputs
-change. The Node test covers interactive documentation assets. Use
-`make docs-serve` for a local live preview. The extended Hugo version and Dart
-Sass used by CI are defined in `.github/workflows/docs.yml`.
+The package-dependency data is committed. `make docs` installs locked npm
+dependencies for frontend assets, then consumes the package graph without
+modifying it; use `make package-graph` only when the graph inputs change.
+`make docs-faro-smoke` builds with a dummy Faro collector endpoint so Hugo
+bundles the npm-managed Faro entry. The Node test covers interactive
+documentation assets. Use `make docs-serve` for a local live preview. The
+extended Hugo version and Dart Sass used by CI are defined in
+`.github/workflows/docs.yml`.

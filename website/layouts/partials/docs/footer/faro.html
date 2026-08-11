@@ -1,0 +1,13 @@
+{{- $collectorEndpoint := strings.TrimSpace (.Site.Params.faro.collectorendpoint | default "") -}}
+{{- if and (not hugo.IsServer) $collectorEndpoint -}}
+{{- $pathName := $.Scratch.Get "pathName" | default "docs" -}}
+{{- $targetPath := printf "%s/%s" $pathName "js/faro-init.js" -}}
+{{- $init := resources.Get "js/faro-init.js" | resources.ExecuteAsTemplate $targetPath (dict "Site" .Site) -}}
+{{- $sourceMap := cond hugo.IsProduction "" "inline" -}}
+{{- $initOpts := dict "sourceMap" $sourceMap "minify" hugo.IsProduction "target" "es2018" -}}
+{{- $init = $init | js.Build $initOpts -}}
+{{- if hugo.IsProduction -}}
+    {{- $init = $init | fingerprint "sha384" -}}
+{{- end -}}
+<script src="{{ $init.RelPermalink }}" {{ if hugo.IsProduction }}integrity="{{ $init.Data.Integrity }}" crossorigin="anonymous"{{ end }} defer></script>
+{{- end -}}
