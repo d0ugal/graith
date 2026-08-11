@@ -3,7 +3,7 @@
   "goLibghostty": {
     "repository": "https://tangled.org/mitchellh.com/go-libghostty",
     "renovateRef": "main",
-    "commit": "774494360861671f94f1c0f084c961fb6ff3a301",
+    "commit": "bea702a427236e605957dd6966508bf2dab75eda",
     "version": "v0.0.0-20260803215605-774494360861",
     "moduleSum": "h1:KKW3iix28TNux+cEB8n+k51HUhbRcsbTkpOrQuTVm7w=",
     "testedGhosttyCommit": "7e50356642afead216a35c8968f4c33cb38d7f04",
@@ -14,7 +14,7 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "7e50356642afead216a35c8968f4c33cb38d7f04",
+    "commit": "94d775fefc21f74d9cc85a46b34c4e1d85318fd0",
     "version": "1.3.2-dev",
     "headersSHA256": "5755a63fc45e195b995370d9debb1d71b39ccabb6711520b12fc9354c57b4e6d",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
