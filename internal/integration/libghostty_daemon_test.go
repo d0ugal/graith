@@ -647,6 +647,11 @@ func TestLibghosttyDaemonSoak(t *testing.T) {
 	defer h.cleanup()
 
 	client := h.connect()
+	// Warm daemon-lifetime native resources before taking the leak baseline.
+	// The soak is meant to catch per-cycle session/helper growth, not the first
+	// retained helper image or other process-global state created by native use.
+	warmNativeDaemonScreen(t, h, client)
+
 	fdBefore := daemonFDCount(t, h.identity)
 	rssBefore := daemonRSSBytes(t, h.identity)
 	helperBefore := len(h.helperProcesses())
@@ -787,6 +792,18 @@ func TestLibghosttyDaemonSoak(t *testing.T) {
 		sort.Strings(stages)
 		t.Fatalf("native daemon soak recorded %d failures in stages %s", failureCount, strings.Join(stages, ","))
 	}
+}
+
+func warmNativeDaemonScreen(t *testing.T, h *nativeDaemonHarness, client *nativeControlClient) {
+	t.Helper()
+
+	info := createNativeSession(t, client, "braw-warmup")
+	waitForPreview(t, client, info.ID, nativeReadyText)
+	helpers := waitForHelperCount(t, h, 1)
+
+	purgeNativeSession(t, client, info.ID)
+	waitForProcessExit(t, helpers[0])
+	waitForHelperCount(t, h, 0)
 }
 
 func startNativeDaemon(t *testing.T) *nativeDaemonHarness {
