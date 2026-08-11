@@ -99,7 +99,7 @@ github.event.action != 'closed' &&
 		`classifier_build="${CLASSIFIER_BUILD:-true}"`,
 		`classifier_global="${CLASSIFIER_GLOBAL:-false}"`,
 		`[ "$classifier_global" = "true" ]`,
-		`grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|i18n/|layouts/|static/|themes/)' <<<"$changed"`,
+		`grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|package(-lock)?\.json|i18n/|layouts/|static/|themes/)' <<<"$changed"`,
 		`grep -qx '.github/ci-tool-versions.env' <<<"$changed"`,
 		`[ "$classifier_build" != "false" ]`,
 		`grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/(install-(dart-sass|hugo)|render-session-navigator-doc-screenshots)\.sh$' <<<"$changed"`,
@@ -119,6 +119,32 @@ github.event.action != 'closed' &&
 
 	if !strings.Contains(build.Run, "make package-graph-check") {
 		t.Fatalf("Build head + base sites step does not run package-graph-check:\n%s", build.Run)
+	}
+
+	if !strings.Contains(build.Run, "make docs-faro-smoke") {
+		t.Fatalf("Build head + base sites step does not smoke-build Faro:\n%s", build.Run)
+	}
+}
+
+func TestDocsWorkflowSmokeBuildsFaroBundle(t *testing.T) {
+	workflowPath := filepath.Join(p11RepoRoot(), ".github", "workflows", "docs.yml")
+
+	workflow, err := ReadP11WorkflowSummary(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	build := p11WorkflowJob(t, workflow, "build")
+	smokeIndex := p11WorkflowStepIndex(t, build, "Smoke-build Faro bundle")
+
+	siteIndex := p11WorkflowStepIndex(t, build, "Build site")
+	if smokeIndex >= siteIndex {
+		t.Fatalf("Smoke-build Faro bundle step index = %d, want before Build site index %d", smokeIndex, siteIndex)
+	}
+
+	smoke := p11WorkflowStep(t, build, "Smoke-build Faro bundle")
+	if !strings.Contains(smoke.Run, "make docs-faro-smoke") {
+		t.Fatalf("Smoke-build Faro bundle step does not run make docs-faro-smoke:\n%s", smoke.Run)
 	}
 }
 

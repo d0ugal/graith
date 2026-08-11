@@ -324,6 +324,26 @@
       }
     },
     {
+      "name": "docs npm dependency manifest",
+      "event": "pull_request",
+      "files": ["website/package.json"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "docs npm dependency lockfile",
+      "event": "pull_request",
+      "files": ["website/package-lock.json"],
+      "want": {
+        "docs_preview_trigger": true,
+        "docs_preview_global": true,
+        "docs_preview_build": true
+      }
+    },
+    {
       "name": "docs website go helper",
       "event": "pull_request",
       "files": ["website/cmd/packagegraph/main.go"],

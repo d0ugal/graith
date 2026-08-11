@@ -191,6 +191,8 @@ var (
 			"website/go.mod",
 			"website/go.sum",
 			"website/hugo.toml",
+			"website/package-lock.json",
+			"website/package.json",
 		},
 		Prefixes: []string{
 			"website/.ci/",

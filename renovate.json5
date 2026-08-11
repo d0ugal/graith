@@ -8,6 +8,16 @@
     { matchManagers: ['gomod'], postUpdateOptions: ['gomodTidy'] },
     { matchManagers: ['gomod'], commitMessagePrefix: 'fix:', commitMessageAction: 'update' },
     {
+      matchManagers: ['npm'],
+      matchPackageNames: [
+        '@grafana/faro-instrumentation-replay',
+        '@grafana/faro-web-sdk',
+        '@grafana/faro-web-tracing',
+      ],
+      groupName: 'Grafana Faro frontend observability packages',
+      groupSlug: 'grafana-faro-frontend-observability',
+    },
+    {
       // go-libghostty is only safe to update through the native lock manager
       // below. A gomod-only branch would omit the matching Ghostty archive,
       // headers, checksums, licenses, SPDX inventory, and native validation.

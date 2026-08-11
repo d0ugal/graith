@@ -17,7 +17,7 @@ GOLANGCI_LINT_DOCKER := $(GOLANGCI_LINT_DOCKER_BASE) $(GOLANGCI_LINT_IMAGE)
 GOLANGCI_LINT_LIBGHOSTTY_GOARCH ?=
 GOLANGCI_LINT_LIBGHOSTTY_PACKAGES := ./internal/pty ./internal/daemon ./cmd/graith
 
-.PHONY: build test architecture-check lint lint-only lint-darwin lint-libghostty lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs docs-serve docs-session-nav-screenshots demo demo-clean demo-test
+.PHONY: build test architecture-check lint lint-only lint-darwin lint-libghostty lint-profile lint-cache-clean shellcheck fmt clean notifier service-app package-graph package-graph-check docs-deps docs docs-faro-smoke docs-serve docs-session-nav-screenshots demo demo-clean demo-test
 
 build:
 	GRAITH_LIBGHOSTTY_LDFLAGS="-s -w" scripts/libghostty-native.sh build-local
@@ -121,8 +121,20 @@ package-graph-check:
 	cd website && GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/packagegraph -repo .. -check
 
 # Documentation builds consume the committed package graph without rewriting it.
-docs:
+website/node_modules/.package-lock-stamp: website/package.json website/package-lock.json
+	cd website && npm ci
+	touch $@
+
+docs-deps: website/node_modules/.package-lock-stamp
+
+docs: docs-deps
 	cd website && hugo --gc --minify
+
+docs-faro-smoke: docs-deps
+	@tmp="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	cd website && HUGO_PARAMS_FARO_COLLECTORENDPOINT=https://example.invalid/collect/ci-smoke HUGO_PARAMS_FARO_APPVERSION=ci-smoke hugo --gc --minify --destination "$$tmp" >/dev/null && \
+	ls "$$tmp/docs/js"/faro-init*.js >/dev/null
 
 docs-serve:
 	cd website && hugo server

@@ -5,3 +5,5 @@
 # Hugo module/resource cache
 /resources/_gen/
 .hugo_build.lock
+# npm dependencies are restored from package-lock.json.
+/node_modules/

@@ -73,6 +73,15 @@ title = "graith"
   [params.flexsearch]
     enabled = true
 
+  [params.faro]
+    # Inject the real collector URL at publish time from the
+    # GRAFANA_FARO_COLLECTOR_ENDPOINT GitHub Actions secret. Do not commit a
+    # collector key here.
+    collectorEndpoint = ""
+    appName = "graith-docs"
+    appVersion = "1.0.0"
+    environment = "production"
+
 [menu]
   [[menu.primary]]
     name = "Docs"

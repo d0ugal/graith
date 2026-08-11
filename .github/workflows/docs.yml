@@ -55,6 +55,8 @@ jobs:
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Smoke-build Faro bundle
+        run: make docs-faro-smoke
       - name: Test docs tooling
         working-directory: website
         run: |
@@ -64,6 +66,11 @@ jobs:
         run: make package-graph-check
       - name: Build site
         working-directory: website
+        env:
+          # Terraform manages this repository secret from the ha app output:
+          # terraform output -json frontend_o11y_apps | jq -r '.graith_docs.collector_endpoint'
+          HUGO_PARAMS_FARO_COLLECTORENDPOINT: ${{ secrets.GRAFANA_FARO_COLLECTOR_ENDPOINT }}
+          HUGO_PARAMS_FARO_APPVERSION: ${{ github.sha }}
         run: hugo --gc --minify --baseURL "${{ steps.pages.outputs.base_url }}/"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
