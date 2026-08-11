@@ -95,8 +95,8 @@ let package = Package(
         // reviewed artifact URL and checksum from the canonical lock.
         .binaryTarget(
             name: "GhosttyVt",
-            url: "https://github.com/d0ugal/graith/releases/download/libghostty-vt-7e50356-go-7744943-zig-0.16.0/libghostty-vt.xcframework.zip",
-            checksum: "1f933c8220214b49dacfcf573f2ad50d46d5d57dbc68d0d8e9fe692e911a982d"
+            url: "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0/libghostty-vt.xcframework.zip",
+            checksum: "50aa562e33a9aa8028ffd922e733c218c92c217db3a8ba23e0e28c8818e5e10a"
         ),
     ]
 )
