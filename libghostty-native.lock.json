@@ -4,9 +4,9 @@
     "repository": "https://tangled.org/mitchellh.com/go-libghostty",
     "renovateRef": "main",
     "commit": "bea702a427236e605957dd6966508bf2dab75eda",
-    "version": "v0.0.0-20260803215605-774494360861",
-    "moduleSum": "h1:KKW3iix28TNux+cEB8n+k51HUhbRcsbTkpOrQuTVm7w=",
-    "testedGhosttyCommit": "7e50356642afead216a35c8968f4c33cb38d7f04",
+    "version": "v0.0.0-20260810222103-bea702a42723",
+    "moduleSum": "h1:7YvkbTHIYizaanAiMKiw9k37VmWP0lV+ymk1VG7exWk=",
+    "testedGhosttyCommit": "d929e6a34a091dcfd69d45011b96cc70b5575dac",
     "licenseSHA256": "fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9",
     "licenseConclusion": "MIT",
     "licenseReview": "4eba7523ffff230d7a348f6aa21dffaaa0922bfccc3e3f902a5fe9a3c79bd244"
@@ -14,24 +14,24 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "94d775fefc21f74d9cc85a46b34c4e1d85318fd0",
+    "commit": "d929e6a34a091dcfd69d45011b96cc70b5575dac",
     "version": "1.3.2-dev",
-    "headersSHA256": "5755a63fc45e195b995370d9debb1d71b39ccabb6711520b12fc9354c57b4e6d",
+    "headersSHA256": "0485974bbdb0d4813174e2d56454ca75a4624a7ab577fa769451a7a55772d91b",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
     "licenseConclusion": "MIT",
     "licenseReview": "97036f38b4ac624f105099d931c8a9f8d09c5dc1153e1bf5cda801613733c2a5",
     "appleArtifact": {
-      "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-7e50356-go-7744943-zig-0.16.0/libghostty-vt.xcframework.zip",
-      "sha256": "1f933c8220214b49dacfcf573f2ad50d46d5d57dbc68d0d8e9fe692e911a982d"
+      "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0/libghostty-vt.xcframework.zip",
+      "sha256": "50aa562e33a9aa8028ffd922e733c218c92c217db3a8ba23e0e28c8818e5e10a"
     },
     "linuxArtifacts": {
       "amd64": {
-        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-7e50356-go-7744943-zig-0.16.0-linux/libghostty-vt-linux-amd64.tar.gz",
-        "sha256": "65a4366b85b3322f31ac90f03034d44f274cf4ec2ac0295ee92caaa75a873495"
+        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0-linux/libghostty-vt-linux-amd64.tar.gz",
+        "sha256": "11cfdf6a9eeef9eaa7197020bfa3695f35b3703d3a5e605f0e5f11e82e58000a"
       },
       "arm64": {
-        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-7e50356-go-7744943-zig-0.16.0-linux/libghostty-vt-linux-arm64.tar.gz",
-        "sha256": "3ae0e13c67c553de24cb8d175f91ba6ab105d6d1e6f18172cedd3754f9983e60"
+        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0-linux/libghostty-vt-linux-arm64.tar.gz",
+        "sha256": "e59165755c5b3bbf893b51c877dd45061bd74e67732f65511b6dceaba4e822e4"
       }
     }
   },
