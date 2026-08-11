@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.73.10](https://github.com/d0ugal/graith/compare/v0.73.9...v0.73.10) (2026-08-11)
+
+
+### Features
+
+* require explicit msg send reply mode ([d4f2196](https://github.com/d0ugal/graith/commit/d4f21960eabead99fe6e1c8ca519566158d65f38))
+
+
+### Bug Fixes
+
+* adapt libghostty native mode API ([d5f4731](https://github.com/d0ugal/graith/commit/d5f4731aca6807ad5ec21df23206d0b24824ad26))
+* update github.com/charmbracelet/ultraviolet digest to 402eeaa ([#2134](https://github.com/d0ugal/graith/issues/2134)) ([382c6ef](https://github.com/d0ugal/graith/commit/382c6efeb933ee4cb5735de7aa3c6fff129250a6))
+* update github.com/charmbracelet/ultraviolet digest to d38ea0f ([#2130](https://github.com/d0ugal/graith/issues/2130)) ([f897e81](https://github.com/d0ugal/graith/commit/f897e81fb878f7d96a4143f62b31ace10bdd7d58))
+* update golang.org/x/exp digest to a8b543c ([#2137](https://github.com/d0ugal/graith/issues/2137)) ([d0869cd](https://github.com/d0ugal/graith/commit/d0869cdc38d2d68388c06015a48b51e309fe7827))
+* update google.golang.org/genproto/googleapis/api digest to ec0a776 ([#2138](https://github.com/d0ugal/graith/issues/2138)) ([d251a19](https://github.com/d0ugal/graith/commit/d251a195c12dbc2ae27d9e41e71d6c7321325523))
+* update google.golang.org/genproto/googleapis/rpc digest to ec0a776 ([#2139](https://github.com/d0ugal/graith/issues/2139)) ([2c00836](https://github.com/d0ugal/graith/commit/2c00836a7d4d6631a5a118a22fd445e8a751d1e1))
+* update libghostty native dependency unit ([dab012f](https://github.com/d0ugal/graith/commit/dab012ff6b7a562a0554662e9a4208d7855bbd53))
+* update module github.com/cenkalti/backoff/v5 to v7 ([#2122](https://github.com/d0ugal/graith/issues/2122)) ([8de6427](https://github.com/d0ugal/graith/commit/8de6427866a49039fdad7e5977b809a82dab8f5d))
+* update module github.com/go-git/gcfg to v2 ([#2123](https://github.com/d0ugal/graith/issues/2123)) ([34ae32e](https://github.com/d0ugal/graith/commit/34ae32ed11d0ebd7f0f38d90fd08aa89843a7389))
+* update module github.com/xo/terminfo to v1 ([#2145](https://github.com/d0ugal/graith/issues/2145)) ([73c9dc4](https://github.com/d0ugal/graith/commit/73c9dc45fc400dfbfa55f9e82982752c3c4b117a))
+* update module google.golang.org/protobuf to v1.36.12 ([#2140](https://github.com/d0ugal/graith/issues/2140)) ([33bf455](https://github.com/d0ugal/graith/commit/33bf45521a6fbc0647d22f96f112f820b82170b9))
+* warm native soak fd baseline ([d230862](https://github.com/d0ugal/graith/commit/d2308624170f3021a73735bee543b0e3750f864e))
+
+
+### Documentation
+
+* add demo GIF to docs homepage ([b335e11](https://github.com/d0ugal/graith/commit/b335e11e93f1cfcd7786f29db30cf2513e78ab50))
+* add Faro frontend observability ([43eee2f](https://github.com/d0ugal/graith/commit/43eee2f07c5b338540b6db643e5b0b957293d708))
+* disable Faro replay masking ([019591b](https://github.com/d0ugal/graith/commit/019591b18710bf1d4061674cd09ea17c6ba2a96c))
+
+
+### Dependencies
+
+* **deps:** update dependency nolabs-ai/nono to v0.73.0 ([#2141](https://github.com/d0ugal/graith/issues/2141)) ([4e009f8](https://github.com/d0ugal/graith/commit/4e009f88bf10382d5918b1c2501e0dd9ebfd7e6b))
+* **deps:** update grafana/k6 docker tag to v2.2.0 ([#2143](https://github.com/d0ugal/graith/issues/2143)) ([cb908d1](https://github.com/d0ugal/graith/commit/cb908d1695f3d390a0b2f89ba55bae102f6bf1b9))
+* **deps:** update renovate/renovate docker tag to v44.14.10 ([#2128](https://github.com/d0ugal/graith/issues/2128)) ([57a94ea](https://github.com/d0ugal/graith/commit/57a94eaf9fa7070e8899372ceb73d1e8c602d505))
+* **deps:** update renovate/renovate docker tag to v44.14.12 ([#2129](https://github.com/d0ugal/graith/issues/2129)) ([17c07c1](https://github.com/d0ugal/graith/commit/17c07c1c70fb6132764b0a3e9f4399f481aaec88))
+* **deps:** update renovate/renovate docker tag to v44.14.8 ([#2118](https://github.com/d0ugal/graith/issues/2118)) ([80221ef](https://github.com/d0ugal/graith/commit/80221ef18e307628c73ad5e1eb8622631bf3478c))
+* **deps:** update renovate/renovate docker tag to v44.14.9 ([#2127](https://github.com/d0ugal/graith/issues/2127)) ([fec9690](https://github.com/d0ugal/graith/commit/fec96907c900e1d1533f5e4dc4e24fe6c211d460))
+* **deps:** update renovate/renovate docker tag to v44.16.1 ([#2131](https://github.com/d0ugal/graith/issues/2131)) ([5ec655e](https://github.com/d0ugal/graith/commit/5ec655e23821e8bc0053cd51048d4c692b20935b))
+* **deps:** update renovate/renovate docker tag to v44.17.0 ([#2132](https://github.com/d0ugal/graith/issues/2132)) ([a5936b6](https://github.com/d0ugal/graith/commit/a5936b69f712bf1965dcfbdc3f603472d4e01d60))
+* **deps:** update renovate/renovate docker tag to v44.17.3 ([#2135](https://github.com/d0ugal/graith/issues/2135)) ([db1f1e4](https://github.com/d0ugal/graith/commit/db1f1e45297b4c012fc235c8744738a250c4a983))
+* **deps:** update renovate/renovate docker tag to v44.18.0 ([#2136](https://github.com/d0ugal/graith/issues/2136)) ([6b401e0](https://github.com/d0ugal/graith/commit/6b401e0c53b213fd6751bb395dae9787f356314c))
+* **deps:** update renovate/renovate docker tag to v44.23.0 ([#2144](https://github.com/d0ugal/graith/issues/2144)) ([6b6079a](https://github.com/d0ugal/graith/commit/6b6079a821b60a60d62eb927da8a726588f6bd40))
+* **deps:** update renovate/renovate docker tag to v44.23.3 ([#2147](https://github.com/d0ugal/graith/issues/2147)) ([0ed79ba](https://github.com/d0ugal/graith/commit/0ed79bacd7577c0b4310451b16c01cdb04a29919))
+* **generated:** refresh generated dependency metadata ([339d496](https://github.com/d0ugal/graith/commit/339d49616fcb096c09d856225f9dacbb0d5b634f))
+
 ## [0.73.9](https://github.com/d0ugal/graith/compare/v0.73.8...v0.73.9) (2026-08-07)
 
 
