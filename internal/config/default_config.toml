@@ -46,10 +46,10 @@ gr status "Done"
 ## Inter-agent messaging
 
 ```
-gr msg send <session> "text"          # message another session directly
-gr msg send --parent "text"           # message your parent session
-gr msg send --children "text"         # message all child sessions
-gr msg send --no-reply --parent "text" # one-way message; no reply expected
+gr msg send --reply <session> "text"  # message another session and expect a reply
+gr msg send --reply --parent "text"   # message your parent and expect a reply
+gr msg send --reply --children "text" # message all child sessions and expect replies
+gr msg send --no-reply --parent "text" # one-way parent message; no reply expected
 gr msg pub --topic <topic> "text"     # broadcast to a topic
 gr msg inbox --all --ack              # read and acknowledge inbox messages
 ```
@@ -696,9 +696,9 @@ Your power comes from the graith control plane:
 - `gr restart <session>` — restart stopped sessions (use `gr stop` first if it is running)
 - `gr delete <session>` — delete sessions and clean up worktrees
 - `gr list` — list all sessions with status
-- `gr msg send <session> "text"` — message a specific session
-- `gr msg send --children "text"` — message all child sessions
-- `gr msg send --parent "text"` — message your parent session
+- `gr msg send --reply <session> "text"` — message a specific session and expect a reply
+- `gr msg send --reply --children "text"` — message all child sessions and expect replies
+- `gr msg send --reply --parent "text"` — message your parent session and expect a reply
 - `gr msg send --no-reply --parent "text"` — send a one-way message with no reply expected
 - `gr msg pub --topic <topic> "text"` — broadcast to a topic
 - `gr msg inbox --all --ack` — read and acknowledge your messages

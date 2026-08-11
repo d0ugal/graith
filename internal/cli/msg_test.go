@@ -1,14 +1,18 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func TestDescendantsOfDeepTree(t *testing.T) {
@@ -209,7 +213,13 @@ func TestMsgPubCovRequiresTopic(t *testing.T) {
 	}
 }
 
-func TestMsgCommandsExposeNoReplyFlag(t *testing.T) {
+func TestMsgCommandsExposeReplyExpectationFlags(t *testing.T) {
+	registerCommands()
+
+	if msgSendCmd.Flags().Lookup("reply") == nil {
+		t.Error("msg send is missing --reply")
+	}
+
 	if msgPubCmd.Flags().Lookup("no-reply") == nil {
 		t.Error("msg pub is missing --no-reply")
 	}
@@ -217,6 +227,376 @@ func TestMsgCommandsExposeNoReplyFlag(t *testing.T) {
 	if msgSendCmd.Flags().Lookup("no-reply") == nil {
 		t.Error("msg send is missing --no-reply")
 	}
+}
+
+func TestValidateMsgSendReplyExpectation(t *testing.T) {
+	tests := map[string]struct {
+		reply     bool
+		noReply   bool
+		wantErr   string
+		wantNoErr bool
+	}{
+		"missing": {
+			wantErr: "gr msg send now requires an explicit reply expectation",
+		},
+		"duplicate": {
+			reply:   true,
+			noReply: true,
+			wantErr: "--reply and --no-reply are mutually exclusive",
+		},
+		"reply": {
+			reply:     true,
+			wantNoErr: true,
+		},
+		"no reply": {
+			noReply:   true,
+			wantNoErr: true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateMsgSendReplyExpectation(test.reply, test.noReply)
+			if test.wantNoErr {
+				if err != nil {
+					t.Fatalf("validateMsgSendReplyExpectation: %v", err)
+				}
+
+				return
+			}
+
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestMsgSendRunRequiresExplicitReplyExpectationForAllTargets(t *testing.T) {
+	tests := map[string]struct {
+		children bool
+		parent   bool
+		args     []string
+	}{
+		"direct": {
+			args: []string{"canny", "haud on"},
+		},
+		"children": {
+			children: true,
+			args:     []string{"haud on"},
+		},
+		"parent": {
+			parent: true,
+			args:   []string{"haud on"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			withMsgSendTestState(t)
+
+			msgSendChildren = test.children
+			msgSendParent = test.parent
+			msgConnect = func() (closeableControlConn, error) {
+				t.Fatal("missing reply expectation should be rejected before connecting")
+				return nil, nil
+			}
+
+			err := msgSendCmd.RunE(msgSendCmd, test.args)
+			if err == nil || !strings.Contains(err.Error(), "gr msg send now requires an explicit reply expectation") {
+				t.Fatalf("error = %v, want missing reply expectation", err)
+			}
+		})
+	}
+}
+
+func TestMsgSendRunRejectsDuplicateReplyExpectation(t *testing.T) {
+	withMsgSendTestState(t)
+
+	msgSendReply = true
+	msgSendNoReply = true
+	msgConnect = func() (closeableControlConn, error) {
+		t.Fatal("duplicate reply expectation should be rejected before connecting")
+		return nil, nil
+	}
+
+	err := msgSendCmd.RunE(msgSendCmd, []string{"canny", "haud on"})
+	if err == nil || !strings.Contains(err.Error(), "--reply and --no-reply are mutually exclusive") {
+		t.Fatalf("error = %v, want duplicate reply expectation", err)
+	}
+}
+
+func TestMsgSendRunPublishesReplyExpectation(t *testing.T) {
+	tests := map[string]struct {
+		reply       bool
+		noReply     bool
+		parent      bool
+		children    bool
+		args        []string
+		responses   []scriptedResp
+		wantStreams []string
+		wantNoReply bool
+	}{
+		"reply mode sends replyable direct message": {
+			reply: true,
+			args:  []string{"canny", "are ye there"},
+			responses: []scriptedResp{
+				okResp(payloadEnv("list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+					{ID: "canny-id", Name: "canny"},
+				}})),
+				okResp(typeEnv("msg_published")),
+			},
+			wantStreams: []string{"inbox:canny-id"},
+		},
+		"no reply mode sends no-reply parent message": {
+			noReply: true,
+			parent:  true,
+			args:    []string{"closing oot"},
+			responses: []scriptedResp{
+				okResp(payloadEnv("list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+					{ID: "current-id", Name: "blether", ParentID: "parent-id"},
+				}})),
+				okResp(typeEnv("msg_published")),
+			},
+			wantStreams: []string{"inbox:parent-id"},
+			wantNoReply: true,
+		},
+		"no reply mode sends no-reply child messages": {
+			noReply:  true,
+			children: true,
+			args:     []string{"closing oot"},
+			responses: []scriptedResp{
+				okResp(payloadEnv("list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+					{ID: "current-id", Name: "blether"},
+					{ID: "bairn-id", Name: "bairn", ParentID: "current-id"},
+					{ID: "canny-id", Name: "canny", ParentID: "bairn-id"},
+				}})),
+				okResp(typeEnv("msg_published")),
+				okResp(typeEnv("msg_published")),
+			},
+			wantStreams: []string{"inbox:bairn-id", "inbox:canny-id"},
+			wantNoReply: true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			registerCommands()
+			resetMsgSendFlags(t)
+			withMsgSendTestState(t)
+			t.Setenv("GRAITH_SESSION_ID", "current-id")
+			t.Setenv("GRAITH_SESSION_NAME", "blether")
+
+			msgSendReply = test.reply
+			msgSendNoReply = test.noReply
+			msgSendParent = test.parent
+			msgSendChildren = test.children
+
+			conn := &scriptedConn{responses: test.responses}
+			msgConnect = func() (closeableControlConn, error) {
+				return conn, nil
+			}
+
+			var stdout bytes.Buffer
+
+			out = output.NewWithWriter(false, &stdout)
+
+			if err := msgSendCmd.RunE(msgSendCmd, test.args); err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+
+			if conn.closed != 1 {
+				t.Fatalf("connection closed %d times, want once", conn.closed)
+			}
+
+			if len(conn.sends) != len(test.wantStreams)+1 || conn.sends[0].Type != "list" {
+				t.Fatalf("sends = %+v, want list then %d msg_pub sends", conn.sends, len(test.wantStreams))
+			}
+
+			for i, wantStream := range test.wantStreams {
+				send := conn.sends[i+1]
+				if send.Type != "msg_pub" {
+					t.Fatalf("send %d type = %q, want msg_pub", i+1, send.Type)
+				}
+
+				msg, ok := send.Payload.(protocol.MsgPubMsg)
+				if !ok {
+					t.Fatalf("payload type = %T, want protocol.MsgPubMsg", send.Payload)
+				}
+
+				if msg.Stream != wantStream {
+					t.Errorf("stream = %q, want %q", msg.Stream, wantStream)
+				}
+
+				if msg.NoReply != test.wantNoReply {
+					t.Errorf("NoReply = %v, want %v", msg.NoReply, test.wantNoReply)
+				}
+			}
+		})
+	}
+}
+
+func TestMsgSendExecuteParsesReplyExpectationFlags(t *testing.T) {
+	tests := map[string]struct {
+		args        []string
+		responses   []scriptedResp
+		wantStreams []string
+		wantNoReply bool
+		wantErr     string
+	}{
+		"missing reply mode": {
+			args:    []string{"msg", "send", "canny", "haud on"},
+			wantErr: "gr msg send now requires an explicit reply expectation",
+		},
+		"duplicate reply mode": {
+			args:    []string{"msg", "send", "--reply", "--no-reply", "canny", "haud on"},
+			wantErr: "--reply and --no-reply are mutually exclusive",
+		},
+		"reply children mode": {
+			args: []string{"msg", "send", "--reply", "--children", "haud on"},
+			responses: []scriptedResp{
+				okResp(payloadEnv("list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+					{ID: "current-id", Name: "blether"},
+					{ID: "bairn-id", Name: "bairn", ParentID: "current-id"},
+				}})),
+				okResp(typeEnv("msg_published")),
+			},
+			wantStreams: []string{"inbox:bairn-id"},
+		},
+		"no reply parent mode": {
+			args: []string{"msg", "send", "--no-reply", "--parent", "closing oot"},
+			responses: []scriptedResp{
+				okResp(payloadEnv("list", protocol.SessionListMsg{Sessions: []protocol.SessionInfo{
+					{ID: "current-id", Name: "blether", ParentID: "parent-id"},
+				}})),
+				okResp(typeEnv("msg_published")),
+			},
+			wantStreams: []string{"inbox:parent-id"},
+			wantNoReply: true,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			withMsgSendTestState(t)
+			t.Setenv("GRAITH_SESSION_ID", "current-id")
+			t.Setenv("GRAITH_SESSION_NAME", "blether")
+
+			rootCmd.SetOut(io.Discard)
+			rootCmd.SetErr(io.Discard)
+			rootCmd.SetArgs(nil)
+			t.Cleanup(func() {
+				resetMsgSendFlags(t)
+				rootCmd.SetOut(nil)
+				rootCmd.SetErr(nil)
+				rootCmd.SetArgs(nil)
+			})
+
+			conn := &scriptedConn{responses: test.responses}
+			if test.wantErr == "" {
+				msgConnect = func() (closeableControlConn, error) {
+					return conn, nil
+				}
+			}
+
+			err := executeWithArgs(test.args)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("Execute() error = %v, want containing %q", err, test.wantErr)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Execute(): %v", err)
+			}
+
+			if conn.closed != 1 {
+				t.Fatalf("connection closed %d times, want once", conn.closed)
+			}
+
+			if len(conn.sends) != len(test.wantStreams)+1 || conn.sends[0].Type != "list" {
+				t.Fatalf("sends = %+v, want list then %d msg_pub sends", conn.sends, len(test.wantStreams))
+			}
+
+			for i, wantStream := range test.wantStreams {
+				send := conn.sends[i+1]
+				if send.Type != "msg_pub" {
+					t.Fatalf("send %d type = %q, want msg_pub", i+1, send.Type)
+				}
+
+				msg, ok := send.Payload.(protocol.MsgPubMsg)
+				if !ok {
+					t.Fatalf("payload type = %T, want protocol.MsgPubMsg", send.Payload)
+				}
+
+				if msg.Stream != wantStream {
+					t.Errorf("stream = %q, want %q", msg.Stream, wantStream)
+				}
+
+				if msg.NoReply != test.wantNoReply {
+					t.Errorf("NoReply = %v, want %v", msg.NoReply, test.wantNoReply)
+				}
+			}
+		})
+	}
+}
+
+func resetMsgSendFlags(t *testing.T) {
+	t.Helper()
+
+	msgSendCmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		flag.Changed = false
+		if err := flag.Value.Set(flag.DefValue); err != nil {
+			t.Fatalf("reset msg send flag %q: %v", flag.Name, err)
+		}
+	})
+}
+
+func withMsgSendTestState(t *testing.T) {
+	t.Helper()
+
+	prevFile := msgSendFile
+	prevThreadID := msgSendThreadID
+	prevReplyTo := msgSendReplyTo
+	prevReply := msgSendReply
+	prevNoReply := msgSendNoReply
+	prevQuiet := msgSendQuiet
+	prevChildren := msgSendChildren
+	prevParent := msgSendParent
+	prevConnect := msgConnect
+	prevOut := out
+	prevJSON := jsonOutput
+
+	msgSendFile = ""
+	msgSendThreadID = ""
+	msgSendReplyTo = ""
+	msgSendReply = false
+	msgSendNoReply = false
+	msgSendQuiet = false
+	msgSendChildren = false
+	msgSendParent = false
+	msgConnect = func() (closeableControlConn, error) {
+		t.Fatal("unexpected msg send daemon connection")
+		return nil, nil
+	}
+	out = output.NewWithWriter(false, io.Discard)
+	jsonOutput = false
+
+	t.Cleanup(func() {
+		msgSendFile = prevFile
+		msgSendThreadID = prevThreadID
+		msgSendReplyTo = prevReplyTo
+		msgSendReply = prevReply
+		msgSendNoReply = prevNoReply
+		msgSendQuiet = prevQuiet
+		msgSendChildren = prevChildren
+		msgSendParent = prevParent
+		msgConnect = prevConnect
+		out = prevOut
+		jsonOutput = prevJSON
+	})
 }
 
 func TestMsgSubCovRequiresTopic(t *testing.T) {

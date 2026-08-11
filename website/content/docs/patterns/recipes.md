@@ -45,10 +45,10 @@ The reviewer shares the worktree read-only, seeing changes live. Coordinate via 
 
 ```bash
 # From implement-feature:
-gr msg send review-feature "ready for review"
+gr msg send --reply review-feature "ready for review"
 
 # From review-feature:
-gr msg send implement-feature "found an issue in handler.go:45, missing error check"
+gr msg send --reply implement-feature "found an issue in handler.go:45, missing error check"
 ```
 
 ## Automated triggers
@@ -131,7 +131,7 @@ gr new docs --repo ~/Code/api --prompt "add godoc comments to all exported funct
 gr list
 
 # Coordinate
-gr msg send --children "rebase on main before pushing"
+gr msg send --reply --children "rebase on main before pushing"
 ```
 
 ## Declarative multi-repo scenario
@@ -191,7 +191,10 @@ gr scenario status integration-tests
 gr scenario stop integration-tests
 ```
 
-Each session gets a manifest with the full topology — siblings, roles, and how to message them — and coordinates via `gr msg send <sibling-name> "message"`.
+Each session gets a manifest with the full topology — siblings, roles, and how
+to message them — and coordinates via
+`gr msg send --reply <sibling-name> "message"` or
+`gr msg send --no-reply <sibling-name> "message"`.
 
 Scenarios are reproducible: the same TOML always creates the same fleet. See [Scenarios]({{< relref "scenarios" >}}) for the full reference.
 

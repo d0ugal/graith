@@ -2571,7 +2571,7 @@ func TestMsgPubInboxNotifiesTarget(t *testing.T) {
 		t.Errorf("notification should reference gr msg inbox command; got:\n%s", scrollback)
 	}
 
-	if !strings.Contains(scrollback, `Reply: gr msg send Ailsa "<reply>"`) {
+	if !strings.Contains(scrollback, `Reply: gr msg send --reply Ailsa "<reply>"`) {
 		t.Errorf("default session notification should offer a reply path; got:\n%s", scrollback)
 	}
 

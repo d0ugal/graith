@@ -93,15 +93,40 @@ var (
 	msgSendFile     string
 	msgSendThreadID string
 	msgSendReplyTo  string
+	msgSendReply    bool
 	msgSendNoReply  bool
 	msgSendQuiet    bool
 	msgSendChildren bool
 	msgSendParent   bool
 )
 
+const msgSendMissingReplyExpectationError = `gr msg send now requires an explicit reply expectation.
+
+Use --reply when the recipient should answer:
+  gr msg send --reply <session> "..."
+
+Use --no-reply for acknowledgements, status updates, or close-out messages:
+  gr msg send --no-reply <session> "..."`
+
+type closeableControlConn interface {
+	controlConn
+	Close()
+}
+
+var msgConnect = func() (closeableControlConn, error) {
+	return client.Connect(cfg, paths, cfgFile)
+}
+
 var msgSendCmd = &cobra.Command{
-	Use:   "send <session-name-or-id> <body>",
+	Use:   "send (--reply | --no-reply) [--parent | --children | <session-name-or-id>] [body]",
 	Short: "Send a message to a session's inbox",
+	Long: "Send a message to a session's inbox.\n\n" +
+		"Every send must declare whether a reply is expected. Use --reply for\n" +
+		"actionable messages and --no-reply for acknowledgements, status updates,\n" +
+		"or close-out messages.\n\n" +
+		"Direct sends take a session name or ID. With --parent or --children,\n" +
+		"omit the session operand. The message body may come from an argument,\n" +
+		"--file, or stdin.",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if msgSendChildren || msgSendParent {
 			return cobra.MaximumNArgs(1)(cmd, args)
@@ -117,6 +142,10 @@ var msgSendCmd = &cobra.Command{
 		return completeSessionNames(cmd, args, toComplete)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateMsgSendReplyExpectation(msgSendReply, msgSendNoReply); err != nil {
+			return err
+		}
+
 		if msgSendChildren {
 			return msgSendChildrenRun(args)
 		}
@@ -125,7 +154,7 @@ var msgSendCmd = &cobra.Command{
 			return msgSendParentRun(args)
 		}
 
-		c, err := client.Connect(cfg, paths, cfgFile)
+		c, err := msgConnect()
 		if err != nil {
 			return err
 		}
@@ -600,6 +629,7 @@ func registerMsgCmd() {
 	msgSendCmd.Flags().StringVarP(&msgSendFile, "file", "f", "", "read body from file")
 	msgSendCmd.Flags().StringVar(&msgSendThreadID, "thread", "", "thread ID to continue")
 	msgSendCmd.Flags().StringVar(&msgSendReplyTo, "reply-to", "", "stream for replies")
+	msgSendCmd.Flags().BoolVar(&msgSendReply, "reply", false, "declare that a reply is expected")
 	msgSendCmd.Flags().BoolVar(&msgSendNoReply, "no-reply", false, "declare that no reply is expected")
 	msgSendCmd.Flags().BoolVarP(&msgSendQuiet, "quiet", "q", false, "don't type a notification into the session")
 	msgSendCmd.Flags().BoolVar(&msgSendChildren, "children", false, "send to all descendant sessions")
@@ -698,7 +728,7 @@ func resolveSession(c controlConn, nameOrID string) (string, error) {
 	return "", fmt.Errorf("session %q not found", nameOrID)
 }
 
-func resolveCurrentSessionInfo(c *client.Client) (*protocol.SessionInfo, error) {
+func resolveCurrentSessionInfo(c controlConn) (*protocol.SessionInfo, error) {
 	currentID := os.Getenv("GRAITH_SESSION_ID")
 	if currentID == "" {
 		return nil, errors.New("GRAITH_SESSION_ID is not set; run this from inside a graith session")
@@ -725,6 +755,17 @@ func resolveCurrentSessionInfo(c *client.Client) (*protocol.SessionInfo, error) 
 	return nil, fmt.Errorf("current session %q not found in daemon", currentID)
 }
 
+func validateMsgSendReplyExpectation(reply, noReply bool) error {
+	switch {
+	case reply && noReply:
+		return errors.New("--reply and --no-reply are mutually exclusive")
+	case !reply && !noReply:
+		return errors.New(msgSendMissingReplyExpectationError)
+	default:
+		return nil
+	}
+}
+
 func msgSendChildrenRun(args []string) error {
 	body, err := resolveBody(args, msgSendFile)
 	if err != nil {
@@ -733,7 +774,7 @@ func msgSendChildrenRun(args []string) error {
 
 	senderID, senderName := detectSender()
 
-	c, err := client.Connect(cfg, paths, cfgFile)
+	c, err := msgConnect()
 	if err != nil {
 		return err
 	}
@@ -811,7 +852,7 @@ func msgSendParentRun(args []string) error {
 
 	senderID, senderName := detectSender()
 
-	c, err := client.Connect(cfg, paths, cfgFile)
+	c, err := msgConnect()
 	if err != nil {
 		return err
 	}

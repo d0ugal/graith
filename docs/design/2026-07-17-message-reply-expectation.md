@@ -19,10 +19,10 @@ notification suppression, and daemon-authored system identity.
 
 `gr msg send` and `gr msg pub` publish a `MsgPubMsg` through the daemon into the
 SQLite-backed message store. Direct inbox delivery normally injects a PTY hint
-which includes a `gr msg send` reply command when the sender is a session. A
-stopped recipient is resumed and receives unread inbox context through its
-startup hook. Messages already carry `reply_to` routing metadata and direct
-sends accept `--quiet` to suppress the immediate notification.
+which includes a `gr msg send --reply` reply command when the sender is a
+session. A stopped recipient is resumed and receives unread inbox context
+through its startup hook. Messages already carry `reply_to` routing metadata
+and direct sends accept `--quiet` to suppress the immediate notification.
 
 Daemon-authored notifications are identified separately as system messages.
 Their hints omit a reply command because the synthetic sender is not an
@@ -69,11 +69,14 @@ non-null integer with a false default; opening an older database adds it with
 that default. Required Swift types and MCP publish/read shapes model the same
 optional semantic.
 
-False and absent values retain existing behavior. A true value suppresses the
-reply command and adds `No reply expected` in direct PTY hints, resumed-session
-inbox context, and human-readable inbox/topic output. It does not suppress
-delivery, notification, or auto-resume. `reply_to` remains legal alongside the
-field because it supplies a route without asserting that a response is wanted.
+False and absent values retain the replyable wire/storage behavior. CLI direct
+sends now require the caller to choose `--reply` or `--no-reply`, so that
+replyable zero value is no longer selected silently by `gr msg send`. A true
+value suppresses the reply command and adds `No reply expected` in direct PTY
+hints, resumed-session inbox context, and human-readable inbox/topic output. It
+does not suppress delivery, notification, or auto-resume. `reply_to` remains
+legal alongside the field because it supplies a route without asserting that a
+response is wanted.
 
 System identity remains an independent reason not to offer a reply path. System
 messages therefore need not set `no_reply`; their existing identity-based
@@ -97,6 +100,7 @@ special decoding rules. `no_reply` makes the existing behavior the zero value.
 ### References
 
 - Issue [#1374](https://github.com/d0ugal/graith/issues/1374)
+- Follow-up issue [#2150](https://github.com/d0ugal/graith/issues/2150)
 - `internal/protocol/messages.go` — publish and conversation wire shapes
 - `internal/daemon/msgstore.go` — durable message schema and reads
 - `internal/daemon/notify.go` — running and resumed recipient hints

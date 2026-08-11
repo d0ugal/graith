@@ -246,8 +246,8 @@ gr list --flat                    # use flat repo/name ordering
 gr list --children my-session     # show descendants
 gr stop --children                # stop all children (from inside a session)
 gr delete --children              # delete all children
-gr msg send --children "rebase"   # message all descendants
-gr msg send --parent "done"       # message the parent
+gr msg send --reply --children "rebase" # message all descendants
+gr msg send --no-reply --parent "done"  # message the parent
 ```
 
 Without a positional argument inside a graith session, `--children` auto-detects the current session from `GRAITH_SESSION_ID` and excludes it.

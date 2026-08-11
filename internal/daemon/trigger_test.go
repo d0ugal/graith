@@ -1030,7 +1030,7 @@ func TestSessionDeliveryInstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, want := range []string{"orchestrator", "gr store put reports/2026-07-11.md", "deliver your result"} {
+	for _, want := range []string{"orchestrator", "gr msg send --no-reply orchestrator", "gr store put reports/2026-07-11.md", "deliver your result"} {
 		if !contains(got, want) {
 			t.Errorf("instruction missing %q:\n%s", want, got)
 		}

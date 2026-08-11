@@ -97,8 +97,8 @@ gr stop <session>                 # stop sessions
 gr delete <session>               # delete sessions
 gr restart <session>              # restart stopped sessions
 gr list                           # list all sessions with status
-gr msg send <session> "text"      # message a specific session
-gr msg send --children "text"     # message all child sessions
+gr msg send --reply <session> "text"  # message a specific session
+gr msg send --reply --children "text" # message all child sessions
 gr msg pub --topic <topic> "text" # broadcast to a topic
 gr msg inbox --all --ack              # read inbox messages
 gr msg jail list                  # inspect quarantined PR comments
@@ -172,8 +172,8 @@ Orchestrator monitors:
   gr msg inbox --all --ack
 
 Orchestrator coordinates:
-  gr msg send auth-tests "middleware is done, you can start integration tests now"
-  gr msg send auth-migration "hold off until tests pass"
+  gr msg send --reply auth-tests "middleware is done, you can start integration tests now"
+  gr msg send --reply auth-migration "hold off until tests pass"
 ```
 
 ## Access

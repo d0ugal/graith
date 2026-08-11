@@ -515,10 +515,10 @@ Sessions coordinate through the standard graith messaging primitives:
 
 ```bash
 # Message a sibling by name
-gr msg send frontend "API contract ready, see openapi.yaml"
+gr msg send --reply frontend "API contract ready, see openapi.yaml"
 
 # Message the orchestrator
-gr msg send --parent "backend work complete, ready for review"
+gr msg send --no-reply --parent "backend work complete, ready for review"
 
 # Read your inbox (where the manifest was delivered)
 gr msg inbox --all --ack

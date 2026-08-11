@@ -67,29 +67,35 @@ launching the agent; agents should not receive template-looking topic names.
 ## Direct messaging
 
 ```bash
-gr msg send fix-auth-bug "the tests are green now, rebase on main"
-gr msg send fix-auth-bug --file ./review-notes.md
-gr msg send fix-auth-bug --quiet "silent context update"
+gr msg send --reply fix-auth-bug "the tests are green now, rebase on main"
+gr msg send --reply fix-auth-bug --file ./review-notes.md
+gr msg send --no-reply fix-auth-bug --quiet "silent context update"
 gr msg send --no-reply --parent "Morning briefing complete"
 ```
 
+`send` requires exactly one reply expectation: `--reply` when the recipient
+should answer, or `--no-reply` when the message is informational.
+
 `send` writes to the target's inbox stream (`inbox:<session-id>`) and types a notification into its PTY. `--quiet` skips the notification; the message still reaches the inbox.
 
-`--no-reply` marks a one-way message. It's delivered and resumes a stopped
-recipient normally, but recipient hints say **No reply expected** and suggest no
-reply command. The choice is stored with the message, appears as
-`"no_reply": true` in JSON, and works with topic publishes too.
+`--reply` marks the message as actionable. `--no-reply` marks a one-way message:
+it's delivered and resumes a stopped recipient normally, but recipient hints say
+**No reply expected** and suggest no reply command. The no-reply choice is stored
+with the message, appears as `"no_reply": true` in JSON, and works with topic
+publishes too.
 
-`--no-reply`, `--reply-to`, and `--quiet` are independent: reply-expectation, a
-route if someone does respond, and PTY suppression respectively. Daemon-authored
-system notices have a separate automated identity and omit reply suggestions
-without relying on `no_reply`.
+`--reply` is only for `send`; `pub` keeps `--no-reply` as an optional marker.
+
+`--reply`, `--no-reply`, `--reply-to`, and `--quiet` are independent:
+reply-expectation, a route if someone does respond, and PTY suppression
+respectively. Daemon-authored system notices have a separate automated identity
+and omit reply suggestions without relying on `no_reply`.
 
 ### Tree messaging
 
 ```bash
-gr msg send --children "rebase on main and re-run tests"
-gr msg send --parent "tests are green, ready for review"
+gr msg send --reply --children "rebase on main and re-run tests"
+gr msg send --no-reply --parent "tests are green, ready for review"
 ```
 
 `--children` sends to all descendants, `--parent` to the parent. Both auto-detect the current session from `GRAITH_SESSION_ID`.
@@ -178,7 +184,7 @@ gr msg pub --topic design/api-cache/7f2a9/chat --thread msg_abc123 "I agree, but
 gr msg sub --topic design/api-cache/7f2a9/chat --thread msg_abc123
 
 # Set up a reply channel
-gr msg send worker-1 "Please review this change" --reply-to review/auth-middleware/7f2a9/response/worker-1
+gr msg send --reply worker-1 "Please review this change" --reply-to review/auth-middleware/7f2a9/response/worker-1
 # worker-1 can then publish results to the reply topic
 ```
 
@@ -201,7 +207,9 @@ In JSON output (`--json` or agent mode):
 }
 ```
 
-`no_reply` is omitted when false, preserving the default that an ordinary message is replyable.
+`no_reply` is omitted when false. The wire format stays replyable by default, but
+the CLI requires every `gr msg send` caller to choose `--reply` or `--no-reply`
+explicitly.
 
 ## From the GUI
 

@@ -642,7 +642,7 @@ func (sm *SessionManager) sessionDeliveryInstruction(d config.DeliverConfig, var
 			return "", err
 		}
 
-		fmt.Fprintf(&b, "\n- send it to the %q session's inbox with `gr msg send %s \"…\"`", target, target)
+		fmt.Fprintf(&b, "\n- send it to the %q session's inbox with `gr msg send --no-reply %s \"…\"`", target, target)
 	}
 
 	if d.Topic != "" {

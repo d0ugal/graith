@@ -24,7 +24,7 @@ gr new devil --mirror proposer --background \
 gr msg sub --topic advocate/cache-design/7f2a9/response --wait --ack
 
 # Proposer responds
-gr msg send devil "addressed issues 1-7, disagree on 8 because ..."
+gr msg send --reply devil "addressed issues 1-7, disagree on 8 because ..."
 
 # Devil reviews response
 gr msg inbox --wait --ack
@@ -84,7 +84,7 @@ gr new ralph --repo ~/Code/api \
   --prompt "implement the migration, use RALPH: after each attempt, read test results, analyze failures, plan fixes, iterate"
 
 # External feedback loop via messaging
-gr msg send ralph "tests fail on postgres 14 due to enum handling, try the cast approach"
+gr msg send --reply ralph "tests fail on postgres 14 due to enum handling, try the cast approach"
 
 # Agent stores progress per cycle
 gr store append progress/ralph.jsonl '{"cycle":1,"tests_passing":42,"tests_failing":3}'
@@ -105,12 +105,12 @@ gr new architect --repo ~/Code/api --background \
 # Phase 2: implementer builds from design
 gr new implementer --repo ~/Code/api --background \
   --prompt "wait for message, then implement the API from design/api.md"
-gr msg send implementer "design is ready at design/api.md, begin implementation"
+gr msg send --reply implementer "design is ready at design/api.md, begin implementation"
 
 # Phase 3: tester validates
 gr new tester --mirror implementer --background \
   --prompt "wait for message, then write tests for the new API"
-gr msg send tester "implementation complete, begin testing"
+gr msg send --reply tester "implementation complete, begin testing"
 ```
 
 ## Consensus building
@@ -179,11 +179,11 @@ gr new worker-2 --repo ~/Code/api --background --prompt "fix tests in cache_test
 gr status "managing 2 workers"
 
 # Workers report back
-gr msg send --parent "auth_test.go: all 12 tests passing"
+gr msg send --no-reply --parent "auth_test.go: all 12 tests passing"
 
 # Supervisor reads results
 gr msg inbox --all --ack
-gr msg send --children "rebase on main before pushing"
+gr msg send --reply --children "rebase on main before pushing"
 ```
 
 ## Continuous reviewer
@@ -198,7 +198,7 @@ gr new reviewer --mirror implementer --background \
   --prompt "continuously review changes as they appear, send feedback via messages"
 
 # Reviewer spots an issue and sends feedback
-gr msg send implementer "handler.go:45 -- missing error check on db.Query return"
+gr msg send --reply implementer "handler.go:45 -- missing error check on db.Query return"
 
 # Implementer reads feedback inline
 gr msg inbox --all --ack
