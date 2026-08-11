@@ -566,10 +566,9 @@ public final class GhosttyTerminalState {
 
     public func isBracketedPasteEnabled() -> Bool {
         guard let terminal else { return false }
-        var enabled: Bool = false
-        let bracketedPasteMode: GhosttyMode = ghostty_mode_new(2004, false)
-        let result = ghostty_terminal_mode_get(terminal, bracketedPasteMode, &enabled)
-        return result == GHOSTTY_SUCCESS && enabled
+        var config = GhosttyTerminalModeConfig(mode: ghostty_mode_new(2004, false), value: false)
+        let result = ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_MODE, &config)
+        return result == GHOSTTY_SUCCESS && config.value
     }
 
     // MARK: - Hyperlink Detection

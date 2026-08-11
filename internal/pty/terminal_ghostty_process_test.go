@@ -141,7 +141,7 @@ func TestGhosttyTerminalEnablesRecommendedGraphemeMode(t *testing.T) {
 
 	t.Cleanup(func() { _ = term.Close() })
 
-	enabled, err := term.terminal.ModeGet(libghostty.ModeGraphemeCluster)
+	enabled, err := term.terminal.Mode(libghostty.ModeGraphemeCluster)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,60 +267,10 @@ func TestGhosttyTerminalApplicationGraphemeModePolicy(t *testing.T) {
 	assertGhosttyGraphemeMode(t, term, true)
 }
 
-func TestGhosttyTerminalRISModeFailureReturnsConsumedPrefix(t *testing.T) {
-	injected := errors.New("injected mode failure")
-	payload := []byte("braw\x1bccanny")
-	consumedThroughRIS := len("braw\x1bc")
-
-	for _, test := range []struct {
-		name  string
-		mode  func(libghostty.Mode, bool) error
-		wantN int
-		want  error
-	}{
-		{
-			name: "error",
-			mode: func(libghostty.Mode, bool) error {
-				return injected
-			},
-			wantN: consumedThroughRIS,
-			want:  injected,
-		},
-		{
-			name: "panic",
-			mode: func(libghostty.Mode, bool) error {
-				panic("injected mode panic")
-			},
-			wantN: 0,
-			want:  errGhosttyBindingPanic,
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			term, err := newGhosttyTerminal(20, 2)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			t.Cleanup(func() { _ = term.Close() })
-
-			term.modeSet = test.mode
-
-			n, err := term.Write(payload)
-			if n != test.wantN || !errors.Is(err, test.want) {
-				t.Fatalf("Write after RIS mode failure = (%d,%v), want (%d,%v)", n, err, test.wantN, test.want)
-			}
-
-			if n >= len(payload) {
-				t.Fatalf("mode failure reported complete write: %d bytes", n)
-			}
-		})
-	}
-}
-
 func assertGhosttyGraphemeMode(t *testing.T, term *ghosttyTerminal, want bool) {
 	t.Helper()
 
-	got, err := term.terminal.ModeGet(libghostty.ModeGraphemeCluster)
+	got, err := term.terminal.Mode(libghostty.ModeGraphemeCluster)
 	if err != nil {
 		t.Fatal(err)
 	}

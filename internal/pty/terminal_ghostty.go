@@ -27,7 +27,6 @@ var (
 // process; the daemon never owns a native terminal handle.
 type ghosttyTerminal struct {
 	terminal    *libghostty.Terminal
-	modeSet     func(libghostty.Mode, bool) error
 	renderState *libghostty.RenderState
 	rowIterator *libghostty.RenderStateRowIterator
 	rowCells    *libghostty.RenderStateRowCells
@@ -37,15 +36,6 @@ type ghosttyTerminal struct {
 	historyRows int
 	cells       []Cell
 	dirty       bool
-
-	// Ghostty's public C options cannot set default_modes at the exact pin.
-	// Track ESC across Write boundaries so RIS can restore Graith's default
-	// grapheme mode before any later bytes reach the native parser. This relies
-	// on the exact pin's raw-adjacency invariant: ESC is an anywhere transition
-	// and a following bare c dispatches RIS. Revalidate that invariant whenever
-	// the pin changes; exposing default_modes in the C API is the desired
-	// upstream simplification.
-	previousByteWasESC bool
 
 	pendingPtyReplies []byte
 }
@@ -91,6 +81,7 @@ func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyT
 
 	options := []libghostty.TerminalOption{
 		libghostty.WithSize(cols16, rows16),
+		libghostty.WithModeDefault(libghostty.ModeGraphemeCluster, true),
 		libghostty.WithWritePty(func(_ *libghostty.Terminal, data []byte) {
 			gt.pendingPtyReplies = append(gt.pendingPtyReplies, data...)
 		}),
@@ -154,12 +145,7 @@ func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyT
 	}
 
 	gt.terminal = terminal
-	gt.modeSet = terminal.ModeSet
 	gt.historyRows = historyRows
-
-	if err = gt.modeSet(libghostty.ModeGraphemeCluster, true); err != nil {
-		return nil, fmt.Errorf("enable go-libghostty grapheme clustering: %w", err)
-	}
 
 	// Graith renders text cells only. Disable the image storage and all
 	// filesystem/shared-memory image media exposed by the upstream binding.
@@ -221,34 +207,8 @@ func (gt *ghosttyTerminal) Write(p []byte) (n int, err error) {
 		return 0, nil
 	}
 
-	start := 0
-	previousByteWasESC := gt.previousByteWasESC
-
-	for i, b := range p {
-		if previousByteWasESC && b == 'c' {
-			// ESC is an anywhere transition in Ghostty's parser, and a bare
-			// final c dispatches RIS. Feed through the reset, then restore
-			// Graith's default before parsing any bytes that follow it.
-			gt.terminal.VTWrite(p[start : i+1])
-			gt.dirty = true
-
-			gt.previousByteWasESC = false
-			if err := gt.modeSet(libghostty.ModeGraphemeCluster, true); err != nil {
-				return i + 1, fmt.Errorf("restore go-libghostty grapheme clustering after RIS: %w", err)
-			}
-
-			start = i + 1
-		}
-
-		previousByteWasESC = b == '\x1b'
-	}
-
-	if start < len(p) {
-		gt.terminal.VTWrite(p[start:])
-		gt.dirty = true
-	}
-
-	gt.previousByteWasESC = previousByteWasESC
+	gt.terminal.VTWrite(p)
+	gt.dirty = true
 
 	return len(p), nil
 }
@@ -365,7 +325,7 @@ func (gt *ghosttyTerminal) InputModes() (TerminalInputModes, error) {
 	}
 
 	mode := func(m libghostty.Mode) (bool, error) {
-		v, err := gt.terminal.ModeGet(m)
+		v, err := gt.terminal.Mode(m)
 		if err != nil {
 			return false, fmt.Errorf("read go-libghostty mode %d: %w", m.Value(), err)
 		}
