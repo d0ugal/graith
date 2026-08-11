@@ -362,7 +362,7 @@ Names must be lowercase alphanumeric with hyphens (no leading hyphen), at most 3
 
 ## Demo recording
 
-The demo GIF (`demo/graith.gif`, embedded in the README) is recorded with [VHS](https://github.com/charmbracelet/vhs), a dev-only dependency. Install once:
+The demo GIF (`demo/graith.gif`, embedded in the README and docs homepage) is recorded with [VHS](https://github.com/charmbracelet/vhs), a dev-only dependency. Install once:
 
 ```bash
 brew install vhs
@@ -381,7 +381,7 @@ make demo-clean   # tear down the demo env if a run is interrupted
 
 Setup and teardown require matching ownership proofs on the demo config, data, and runtime paths. They refuse changed or pre-existing state rather than adopting or deleting it; a deliberately edited demo config must be checked and removed manually. On Linux, `XDG_RUNTIME_DIR` must be set so the harness and CLI agree on the runtime target. macOS also requires it when `XDG_DATA_HOME` is customized. Removing only an owned runtime directory is safe: the next setup reconstructs it from the durable config and data proofs.
 
-Recording must run **locally and unsandboxed** (VHS needs a real TTY, the daemon binds a unix socket, sessions create git worktrees), so it's not a CI step.
+Recording must run **locally and unsandboxed** (VHS needs a real TTY, the daemon binds a unix socket, sessions create git worktrees), so it's not a CI step. Changes to `demo/graith.gif` rebuild and deploy the docs site and produce a docs-home preview screenshot.
 
 ## Project layout
 

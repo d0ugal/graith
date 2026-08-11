@@ -9,7 +9,7 @@ terminal recorder.
 | `demo.tape` | The VHS script — keystrokes, waits, and output settings. |
 | `setup.sh` | Stands up an **isolated** `demo` graith profile with real agent sessions. |
 | `teardown.sh` | Removes the demo profile, its sessions, worktrees, and daemon. |
-| `graith.gif` | The rendered output — produced by `make demo`, then committed and embedded in the repo README. |
+| `graith.gif` | The rendered output — produced by `make demo`, then committed and embedded in the repo README and docs homepage. |
 
 ## How it works
 
@@ -115,7 +115,7 @@ up such a deliberately modified profile manually after checking its paths.
 - **Other formats:** add another `Output` line to `demo.tape` (e.g.
   `Output demo/graith.mp4` or `.webm`) to emit video alongside the GIF.
 
-## Embedding in the README
+## Embedding in the README and docs
 
 Once `demo/graith.gif` exists (after `make demo`) and is committed, embed it near
 the top of the repo `README.md`:
@@ -125,3 +125,7 @@ the top of the repo `README.md`:
   <img src="demo/graith.gif" alt="graith demo — a fleet of AI agents in parallel" width="900">
 </p>
 ```
+
+The docs homepage uses the same committed file through a Hugo asset mount, so a
+change to `demo/graith.gif` also rebuilds and deploys the docs site and produces
+a docs-home preview screenshot on pull requests.

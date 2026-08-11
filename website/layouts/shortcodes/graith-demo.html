@@ -1,0 +1,7 @@
+{{- with resources.Get "demo/graith.gif" -}}
+<figure class="graith-demo my-4 text-center">
+  <img src="{{ .RelPermalink }}" alt="graith demo - attach to a running agent, view the fleet, and drive them from the Session Navigator" width="{{ .Width }}" height="{{ .Height }}" decoding="async" style="max-width: 100%; height: auto; border-radius: 6px;">
+</figure>
+{{- else -}}
+  {{- errorf "missing demo GIF demo/graith.gif; run `make demo` from the repository root" -}}
+{{- end -}}

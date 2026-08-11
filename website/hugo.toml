@@ -9,6 +9,14 @@ title = "graith"
   [module.hugoVersion]
     extended = true
     min = "0.140.0"
+  # Adding one assets mount replaces Hugo's default assets mount, so keep the
+  # project assets explicit and add the README demo GIF as a checked resource.
+  [[module.mounts]]
+    source = "assets"
+    target = "assets"
+  [[module.mounts]]
+    source = "../demo/graith.gif"
+    target = "assets/demo/graith.gif"
   [[module.imports]]
     path = "github.com/colinwilson/lotusdocs"
     disable = false

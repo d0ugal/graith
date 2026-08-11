@@ -40,6 +40,12 @@ async function shoot(page, url, name, vp) {
       check();
     });
   });
+  // Keep animated demo GIFs from diffing on arbitrary frame timing.
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('.graith-demo img')) {
+      el.style.visibility = 'hidden';
+    }
+  });
   await page.screenshot({ path: `/out/${name}-${vp.label}.png`, fullPage: true });
 }
 

@@ -304,6 +304,24 @@
       }
     },
     {
+      "name": "README demo media",
+      "event": "pull_request",
+      "files": ["demo/graith.gif"],
+      "want": {
+        "ci_macos": true,
+        "docs_preview_trigger": true,
+        "docs_preview_build": true
+      }
+    },
+    {
+      "name": "demo harness",
+      "event": "pull_request",
+      "files": ["demo/demo.tape"],
+      "want": {
+        "ci_macos": true
+      }
+    },
+    {
       "name": "docs hugo configuration",
       "event": "pull_request",
       "files": ["website/hugo.toml"],
