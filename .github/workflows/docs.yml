@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - 'demo/graith.gif'
       - 'cmd/**/*.go'
       - 'internal/**/*.go'
       - 'go.mod'

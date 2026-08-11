@@ -15,6 +15,7 @@ func TestDocsPreviewWorkflowRoutesPreMergeHugoBuildInputs(t *testing.T) {
 
 	assertStringsEqual(t, "pull_request paths", docsPreviewPullRequestPaths(t, workflowPath), []string{
 		"website/**",
+		"demo/graith.gif",
 		"cmd/ciclassify/**",
 		"cmd/docsdiff/**",
 		"cmd/docspreview/**",
@@ -84,6 +85,7 @@ github.event.action != 'closed' &&
 
 	for _, want := range []string{
 		`git diff --name-only "$BASE" "$HEAD" -- \`,
+		"website/ \\\n  demo/graith.gif \\",
 		"cmd/ciclassify/",
 		"cmd/docsdiff/",
 		"cmd/docspreview/",
@@ -102,7 +104,8 @@ github.event.action != 'closed' &&
 		`grep -qE '^website/(\.ci/|archetypes/|assets/|config/|data/|hugo\.toml|go\.(mod|sum)|package(-lock)?\.json|i18n/|layouts/|static/|themes/)' <<<"$changed"`,
 		`grep -qx '.github/ci-tool-versions.env' <<<"$changed"`,
 		`[ "$classifier_build" != "false" ]`,
-		`grep -qE '^website/|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/(install-(dart-sass|hugo)|render-session-navigator-doc-screenshots)\.sh$' <<<"$changed"`,
+		`grep -qE '^website/|^demo/graith\.gif$|^cmd/(ciclassify|docsdiff|docspreview)/|^internal/(ciworkflow|docspreview)/|^Makefile$|^go\.(mod|sum)$|^\.github/(ci-tool-versions\.env|workflows/(docs|docs-preview)\.yml)$|^scripts/(install-(dart-sass|hugo)|render-session-navigator-doc-screenshots)\.sh$' <<<"$changed"`,
+		`grep -qx 'demo/graith.gif' <<<"$changed"`,
 		`emit "website/content/docs/_index.md" false`,
 		`echo "build=$build"`,
 		"find website/content/docs -name '*.md'",
@@ -146,6 +149,25 @@ func TestDocsWorkflowSmokeBuildsFaroBundle(t *testing.T) {
 	if !strings.Contains(smoke.Run, "make docs-faro-smoke") {
 		t.Fatalf("Smoke-build Faro bundle step does not run make docs-faro-smoke:\n%s", smoke.Run)
 	}
+}
+
+func TestDocsWorkflowRoutesDeployInputs(t *testing.T) {
+	workflowPath := filepath.Join(p11RepoRoot(), ".github", "workflows", "docs.yml")
+
+	workflowYAML := readWorkflowYAML(t, workflowPath)
+	push := p11MappingValue(p11MappingValue(workflowYAML, "on"), "push")
+	assertStringsEqual(t, "docs push paths", p11StringList(p11MappingValue(push, "paths")), []string{
+		"website/**",
+		"demo/graith.gif",
+		"cmd/**/*.go",
+		"internal/**/*.go",
+		"go.mod",
+		"go.sum",
+		".github/ci-tool-versions.env",
+		".github/workflows/docs.yml",
+		"scripts/install-dart-sass.sh",
+		"scripts/install-hugo.sh",
+	})
 }
 
 func docsPreviewPullRequestPaths(t *testing.T, path string) []string {

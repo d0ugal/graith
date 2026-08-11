@@ -169,6 +169,7 @@ var (
 			".github/ci-tool-versions.env",
 			".github/workflows/docs-preview.yml",
 			".github/workflows/docs.yml",
+			"demo/graith.gif",
 			"go.mod",
 			"go.sum",
 			"Makefile",

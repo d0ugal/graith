@@ -13,6 +13,8 @@ draft: false
 
 graith is a terminal multiplexer for AI coding agents (Claude, Codex, OpenCode, Cursor, Agy). Spin up an agent per task and switch between them with a tmux-style prefix key. The binary's called `gr`.
 
+{{< graith-demo >}}
+
 **graith** (Scots) -- *noun:* equipment, tools, gear for a specific trade. *verb:* to make ready, prepare, equip.
 
 ## How it works
