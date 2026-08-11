@@ -31,6 +31,9 @@ import { ReplayInstrumentation } from "@grafana/faro-instrumentation-replay";
       new TracingInstrumentation(),
       new ReplayInstrumentation({
         samplingRate: 1,
+        maskAllInputs: false,
+        maskInputOptions: {},
+        maskTextSelector: undefined,
         recordAfter: "load",
         recordCrossOriginIframes: false,
       }),
