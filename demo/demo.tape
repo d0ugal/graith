@@ -92,7 +92,7 @@ Sleep 3.5s
 # 4. Agents — and you — message each other. (A non-mutating status ping: the
 # target is a real agent, so keep it a question, never an instruction to act.)
 # ============================================================================
-Type `gr msg send tracing-api "how's the ingest endpoint coming along?"`
+Type `gr msg send --reply tracing-api "how's the ingest endpoint coming along?"`
 Enter
 Sleep 3s
 

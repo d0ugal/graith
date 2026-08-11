@@ -35,15 +35,18 @@ Publish to a stream.
 | `--reply-to <stream>` | Stream for replies |
 | `--no-reply` | Declare that no reply is expected |
 
-### `gr msg send <session> [body]`
+### `gr msg send (--reply | --no-reply) [--parent | --children | <session>] [body]`
 
 Send a message to a session's inbox; also types a PTY notification by default.
+Exactly one of `--reply` or `--no-reply` is required. Direct sends take
+`<session>`; parent and children sends omit it.
 
 | Flag | Description |
 |------|-------------|
 | `-f, --file <path>` | Read body from file |
 | `--thread <id>` | Thread ID to continue |
 | `--reply-to <stream>` | Stream for replies |
+| `--reply` | Declare that a reply is expected |
 | `--no-reply` | Declare that no reply is expected |
 | `-q, --quiet` | Don't type a notification into the session |
 | `--children` | Send to all descendant sessions |

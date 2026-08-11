@@ -173,7 +173,7 @@ func inboxNotificationHint(senderID, senderName string, noReply bool) string {
 		return fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | No reply expected", sender)
 	}
 
-	return fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | Reply: gr msg send %s \"<reply>\"", sender, sender)
+	return fmt.Sprintf("New message from %s. Read: gr msg inbox --ack | Reply: gr msg send --reply %s \"<reply>\"", sender, sender)
 }
 
 func inboxResumeSummary(senderID, senderName string, noReply bool) string {

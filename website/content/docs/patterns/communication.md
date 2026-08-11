@@ -27,7 +27,7 @@ A request with a dedicated reply channel:
 
 ```bash
 # Requester
-gr msg send worker-1 "analyze auth.go for race conditions" --reply-to review/auth-races/7f2a9/response/worker-1
+gr msg send --reply worker-1 "analyze auth.go for race conditions" --reply-to review/auth-races/7f2a9/response/worker-1
 gr msg sub --topic review/auth-races/7f2a9/response/worker-1 --wait
 
 # Worker
@@ -44,11 +44,11 @@ Parent orchestrates children:
 # Parent creates workers and sends tasks
 gr new worker-1 --repo ~/Code/api --background
 gr new worker-2 --repo ~/Code/api --background
-gr msg send worker-1 "fix the auth tests"
-gr msg send worker-2 "fix the API tests"
+gr msg send --reply worker-1 "fix the auth tests"
+gr msg send --reply worker-2 "fix the API tests"
 
 # Workers report back
-gr msg send --parent "auth tests fixed, all passing"
+gr msg send --no-reply --parent "auth tests fixed, all passing"
 
 # Parent reads results
 gr msg inbox --all --ack
