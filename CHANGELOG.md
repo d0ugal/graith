@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.73.11](https://github.com/d0ugal/graith/compare/v0.73.10...v0.73.11) (2026-08-12)
+
+
+### Bug Fixes
+
+* update github.com/charmbracelet/ultraviolet digest to 006e29f ([#2156](https://github.com/d0ugal/graith/issues/2156)) ([ebd5a33](https://github.com/d0ugal/graith/commit/ebd5a331a4d58c8a0c31fa63097dd24df49497a3))
+* update golang.org/x/exp digest to ee035b5 ([#2157](https://github.com/d0ugal/graith/issues/2157)) ([13837a0](https://github.com/d0ugal/graith/commit/13837a0382e09a673f760af1797acc27c5ccd8f6))
+* update module charm.land/lipgloss/v2 to v2.0.6 ([#2160](https://github.com/d0ugal/graith/issues/2160)) ([9aeb3ba](https://github.com/d0ugal/graith/commit/9aeb3baf6679e717c4025ecefb91fe4399f32f83))
+* update module golang.org/x/crypto to v0.55.0 ([#2161](https://github.com/d0ugal/graith/issues/2161)) ([9923159](https://github.com/d0ugal/graith/commit/99231594043b543cff0ff247bbb80213ce1817c8))
+* update module golang.org/x/text to v0.41.0 ([#2162](https://github.com/d0ugal/graith/issues/2162)) ([b26814b](https://github.com/d0ugal/graith/commit/b26814b2648b8d0e653d18767d33fc71020b0420))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.24.0 ([#2153](https://github.com/d0ugal/graith/issues/2153)) ([cc03c14](https://github.com/d0ugal/graith/commit/cc03c1414d2aa39296d20af87f42a3150922282e))
+* **deps:** update renovate/renovate docker tag to v44.24.3 ([#2159](https://github.com/d0ugal/graith/issues/2159)) ([35f81a0](https://github.com/d0ugal/graith/commit/35f81a0c639a833b9f9bcdc6115dde2d7a7057bc))
+* **deps:** update renovate/renovate docker tag to v44.26.0 ([#2163](https://github.com/d0ugal/graith/issues/2163)) ([77f6366](https://github.com/d0ugal/graith/commit/77f6366f774fa101d2625d51feff98f30cdbc38d))
+
 ## [0.73.10](https://github.com/d0ugal/graith/compare/v0.73.9...v0.73.10) (2026-08-11)
 
 
