@@ -61,18 +61,9 @@ func parseKittyCSIu(input []byte, pos int) (int, int, int, int, bool) {
 
 	i := pos + 2
 
-	numStart := i
-	for i < len(input) && input[i] >= '0' && input[i] <= '9' {
-		i++
-	}
-
-	if i == numStart || i >= len(input) {
+	cp, i, ok := parseUint(input, i)
+	if !ok || i >= len(input) {
 		return 0, 0, 0, 0, false
-	}
-
-	cp := 0
-	for _, b := range input[numStart:i] {
-		cp = cp*10 + int(b-'0')
 	}
 
 	mods := 1
@@ -80,35 +71,18 @@ func parseKittyCSIu(input []byte, pos int) (int, int, int, int, bool) {
 
 	if input[i] == ';' {
 		i++
-		modStart := i
-		mods = 0
 
-		for i < len(input) && input[i] >= '0' && input[i] <= '9' {
-			i++
-		}
-
-		if i == modStart || i >= len(input) {
+		mods, i, ok = parseUint(input, i)
+		if !ok || i >= len(input) {
 			return 0, 0, 0, 0, false
-		}
-
-		for _, b := range input[modStart:i] {
-			mods = mods*10 + int(b-'0')
 		}
 
 		if i < len(input) && input[i] == ':' {
 			i++
 
-			evStart := i
-			for i < len(input) && input[i] >= '0' && input[i] <= '9' {
-				i++
-			}
-
-			if i == evStart || i >= len(input) {
+			evType, i, ok = parseUint(input, i)
+			if !ok || i >= len(input) {
 				return 0, 0, 0, 0, false
-			}
-
-			for _, b := range input[evStart:i] {
-				evType = evType*10 + int(b-'0')
 			}
 		}
 	}
@@ -141,6 +115,12 @@ func processKittyPrefix(input []byte, prefixByte byte) []byte {
 
 		cp, mods, evType, seqLen, ok := parseKittyCSIu(input, i)
 		if !ok || cp != prefixCP || mods != 5 {
+			continue
+		}
+
+		switch evType {
+		case 0, 1, 2, 3:
+		default:
 			continue
 		}
 
