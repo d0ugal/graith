@@ -40,12 +40,13 @@ const (
 
 const defaultDragArrowThreshold = 2
 
-// maxMouseFieldDigits bounds the digit run parseUint will accept for a single
-// SGR field. Real terminal cell coordinates and button codes never approach
-// this, and the cap keeps parsing fail-closed: an overlong (potentially
-// int-overflowing) run makes the sequence malformed so it passes through
-// untranslated rather than wrapping to a bogus negative value.
-const maxMouseFieldDigits = 7
+// maxTerminalFieldDigits bounds the digit run parseUint will accept for a
+// single numeric terminal escape-sequence field. Real terminal cell
+// coordinates, mouse button codes, Kitty codepoints, modifiers, and event types
+// never approach this, and the cap keeps parsing fail-closed: an overlong
+// (potentially int-overflowing) run makes the sequence malformed so it passes
+// through untranslated rather than wrapping to a bogus negative value.
+const maxTerminalFieldDigits = 7
 
 // sgrMouseEvent is a parsed SGR (1006) mouse report: ESC [ < b ; col ; row (M|m).
 type sgrMouseEvent struct {
@@ -107,7 +108,7 @@ func parseUint(input []byte, i int) (int, int, bool) {
 		val = val*10 + int(input[i]-'0')
 		i++
 
-		if i-start > maxMouseFieldDigits {
+		if i-start > maxTerminalFieldDigits {
 			return 0, i, false
 		}
 	}

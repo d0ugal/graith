@@ -1069,6 +1069,7 @@ func TestProcessKittyPrefix(t *testing.T) {
 		{"surrounded by data", "hello\x1b[98;5uworld", "hello\x02world"},
 		{"non-ctrl same codepoint", "\x1b[98u", "\x1b[98u"},
 		{"unrelated sequence", "\x1b[100;5u", "\x1b[100;5u"},
+		{"unknown event type unchanged", "\x1b[98;5:9u", "\x1b[98;5:9u"},
 		{"printable prefix ignores kitty ctrl sequence", "\x1b[161;5u", "\x1b[161;5u"},
 		{"no sequences", "plain text", "plain text"},
 	}
