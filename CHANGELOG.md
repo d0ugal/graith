@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.73.12](https://github.com/d0ugal/graith/compare/v0.73.11...v0.73.12) (2026-08-12)
+
+
+### Tests
+
+* fuzz client terminal escape parsers ([cb657ba](https://github.com/d0ugal/graith/commit/cb657ba54275bbf6232c31dfcd06b99a2689f863))
+* fuzz config validation ([caa6328](https://github.com/d0ugal/graith/commit/caa63288a9a3804b6a27f9ef246613a8075af411))
+* fuzz headless stream-json helpers ([78b4875](https://github.com/d0ugal/graith/commit/78b4875f1c72a2581cfb901d68d9abbd5151881b))
+* fuzz registered protocol payloads ([282408f](https://github.com/d0ugal/graith/commit/282408f4970bc8b7402dc200ebb82ccbc1c90b34))
+* fuzz store key validation ([2d060a4](https://github.com/d0ugal/graith/commit/2d060a4938db6e2507e4ffb2f564925f79aca99e))
+* fuzz wait pattern matching helpers ([7c40524](https://github.com/d0ugal/graith/commit/7c405240c8acba28f2d5ab9940ef75d3261d0de6))
+
 ## [0.73.11](https://github.com/d0ugal/graith/compare/v0.73.10...v0.73.11) (2026-08-12)
 
 
