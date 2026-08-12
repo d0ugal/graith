@@ -1084,7 +1084,8 @@ func validateMouseWheelPolicy(path, policy string) error {
 func validateInputBindings(path string, bindings map[string]string) []error {
 	var errs []error
 
-	for gesture, action := range bindings {
+	for _, gesture := range sortedStringMapKeys(bindings) {
+		action := bindings[gesture]
 		if !ValidInputGesture(gesture) {
 			errs = append(errs, fmt.Errorf("%s.%s: unsupported gesture (must be one of %s)", path, gesture, strings.Join(InputGestureNames(), ", ")))
 			continue
@@ -4116,7 +4117,7 @@ func (info AgentInfoCommands) Command(key string) (AgentInfoCommand, bool, error
 
 func (info AgentInfoCommands) Commands() (map[string]AgentInfoCommand, error) {
 	commands := make(map[string]AgentInfoCommand, len(info))
-	for key := range info {
+	for _, key := range sortedStringMapKeys(info) {
 		command, _, err := info.Command(key)
 		if err != nil {
 			return nil, err
@@ -4151,7 +4152,8 @@ func agentInfoCommandFromValue(raw any) (AgentInfoCommand, error) {
 func agentInfoCommandFromMap(raw map[string]any) (AgentInfoCommand, error) {
 	var command AgentInfoCommand
 
-	for key, value := range raw {
+	for _, key := range sortedStringMapKeys(raw) {
+		value := raw[key]
 		switch key {
 		case "args":
 			switch v := value.(type) {
@@ -4864,7 +4866,8 @@ func (c *Config) Validate() error {
 		errs = append(errs, err)
 	}
 
-	for agentName, agent := range c.Agents {
+	for _, agentName := range sortedStringMapKeys(c.Agents) {
+		agent := c.Agents[agentName]
 		if err := agent.Sandbox.validateSignalMode("agents." + agentName + ".sandbox"); err != nil {
 			errs = append(errs, err)
 		}
@@ -4890,7 +4893,8 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		for key, info := range agent.Info {
+		for _, key := range sortedStringMapKeys(agent.Info) {
+			info := agent.Info[key]
 			if strings.TrimSpace(key) == "" {
 				errs = append(errs, fmt.Errorf("agents.%s.info: key must not be empty", agentName))
 			}
@@ -5968,6 +5972,21 @@ func cloneStringMap(in map[string]string) map[string]string {
 	}
 
 	return out
+}
+
+func sortedStringMapKeys[M ~map[string]V, V any](m M) []string {
+	if len(m) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	return keys
 }
 
 func Default() *Config {
