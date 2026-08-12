@@ -107,7 +107,7 @@ func rejectUnknownNotificationInstructionKeys(data []byte) error {
 	var errs []error
 
 	for i, table := range notificationInstructionRawTables(value) {
-		for key := range table {
+		for _, key := range sortedStringMapKeys(table) {
 			if !allowed[strings.ToLower(key)] {
 				errs = append(errs, fmt.Errorf("notification_instruction[%d].%s: unsupported condition or field", i, key))
 			}
