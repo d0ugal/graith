@@ -165,7 +165,7 @@ func Exists(storePath string) bool {
 // segment so it cannot escape the store root. This lets an ID discovered via
 // `gr store ls -a` round-trip back into `--repo`.
 func StorePathByID(dataDir, id string) (string, bool) {
-	if id == "" || id == "shared" || strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+	if id == "" || strings.EqualFold(id, "shared") || strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
 		return "", false
 	}
 
