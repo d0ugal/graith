@@ -291,7 +291,7 @@ func scanForMatch(re *regexp.Regexp, data []byte) (string, bool) {
 // Write runs synchronously on the PTY read loop (pty.Session.readLoop fans each
 // chunk out to attached writers inline), so matching shares that goroutine. Go's
 // regexp is RE2 (linear time), so a pathological pattern cannot hang it; the
-// per-write cost is bounded by the 64 KiB partial-line cap below.
+// retained partial-line buffer is bounded by maxBuf.
 type matchWriter struct {
 	re      *regexp.Regexp
 	matchCh chan string
@@ -336,6 +336,7 @@ func (m *matchWriter) Write(p []byte) (int, error) {
 		// empty tail that sits between writes.
 		if (!trailing || clean != "") && m.re.MatchString(clean) {
 			m.done = true
+			m.buf = nil
 
 			select {
 			case m.matchCh <- clean:
