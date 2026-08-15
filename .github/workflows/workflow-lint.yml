@@ -59,7 +59,7 @@ jobs:
     # Pin the complete Renovate runtime, including its transitive dependency
     # graph, rather than resolving an npm tree during the workflow run.
     container:
-      image: renovate/renovate:44.30.1@sha256:141f58c82f13f2a1f3a504b0befa72319a2c74fa38004c870bdc00f67633ea0b
+      image: renovate/renovate:44.30.3@sha256:0c31215779f1096112eaa2a7b7bc71e6f4dae99310d262c5b598bddfe833be99
       # GitHub's checkout action writes runner command files mounted as root.
       options: --user 0
     permissions:
