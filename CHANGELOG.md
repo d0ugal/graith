@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.73.13](https://github.com/d0ugal/graith/compare/v0.73.12...v0.73.13) (2026-08-16)
+
+
+### Bug Fixes
+
+* update github.com/charmbracelet/ultraviolet digest to 68fa937 ([#2174](https://github.com/d0ugal/graith/issues/2174)) ([d041184](https://github.com/d0ugal/graith/commit/d0411842c1be81be871dc50e02b2ffacc42a2c0c))
+* update golang.org/x/exp digest to 3d80eb7 ([#2171](https://github.com/d0ugal/graith/issues/2171)) ([6fe3224](https://github.com/d0ugal/graith/commit/6fe32247e40de39d7a6d45ed5ddd4e4ca1bb1ab3))
+* update golang.org/x/exp digest to c1d0aac ([#2181](https://github.com/d0ugal/graith/issues/2181)) ([058c048](https://github.com/d0ugal/graith/commit/058c04897666592e4e6d6b979feac50581fd8ce4))
+* update module golang.org/x/net to v0.58.0 ([#2172](https://github.com/d0ugal/graith/issues/2172)) ([5fd385e](https://github.com/d0ugal/graith/commit/5fd385ef78c104f3b22caa9e6a2808d806007e01))
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.7 ([#2178](https://github.com/d0ugal/graith/issues/2178)) ([3e1f4a5](https://github.com/d0ugal/graith/commit/3e1f4a54c773a8b9b12d3d7966a3ac0d47004273))
+* **deps:** update module golang.org/x/vuln/cmd/govulncheck to v1.7.0 ([#2185](https://github.com/d0ugal/graith/issues/2185)) ([857ea46](https://github.com/d0ugal/graith/commit/857ea4637c1b2098105f421a4814bf8138ec7212))
+* **deps:** update renovate/renovate docker tag to v44.26.3 ([#2175](https://github.com/d0ugal/graith/issues/2175)) ([d54ddd3](https://github.com/d0ugal/graith/commit/d54ddd337500e151877c8cee92bbc42dd5991faf))
+* **deps:** update renovate/renovate docker tag to v44.27.0 ([#2177](https://github.com/d0ugal/graith/issues/2177)) ([6f1a26c](https://github.com/d0ugal/graith/commit/6f1a26c0aeef5d30ea92f5c4b917182887479107))
+* **deps:** update renovate/renovate docker tag to v44.28.0 ([#2179](https://github.com/d0ugal/graith/issues/2179)) ([28ee8a4](https://github.com/d0ugal/graith/commit/28ee8a452390bc44933b0c9305a106cfb910e5d7))
+* **deps:** update renovate/renovate docker tag to v44.29.1 ([#2180](https://github.com/d0ugal/graith/issues/2180)) ([059f122](https://github.com/d0ugal/graith/commit/059f122695f8443d185e6c4c9d71ea60c64848cc))
+* **deps:** update renovate/renovate docker tag to v44.29.2 ([#2182](https://github.com/d0ugal/graith/issues/2182)) ([8f188b7](https://github.com/d0ugal/graith/commit/8f188b7bbeb7e4f653aa6af3fc34ae90bc4497f1))
+* **deps:** update renovate/renovate docker tag to v44.29.4 ([#2184](https://github.com/d0ugal/graith/issues/2184)) ([a83e1bc](https://github.com/d0ugal/graith/commit/a83e1bc858bbe50f9abdd285cca8c5580974a563))
+* **deps:** update renovate/renovate docker tag to v44.30.1 ([#2186](https://github.com/d0ugal/graith/issues/2186)) ([73d7d39](https://github.com/d0ugal/graith/commit/73d7d395819eb218e38adbf74dbd6c1d29cea24e))
+* **deps:** update renovate/renovate docker tag to v44.30.3 ([#2188](https://github.com/d0ugal/graith/issues/2188)) ([9918f0e](https://github.com/d0ugal/graith/commit/9918f0e8211e6cb314d476c161650abf808924a6))
+* **deps:** update renovate/renovate docker tag to v44.30.4 ([#2189](https://github.com/d0ugal/graith/issues/2189)) ([d47f255](https://github.com/d0ugal/graith/commit/d47f255e8a9381a55ea77eb97cd9b42923094f4b))
+* **deps:** update trufflesecurity/trufflehog docker tag to v3.97.0 ([#2187](https://github.com/d0ugal/graith/issues/2187)) ([109020c](https://github.com/d0ugal/graith/commit/109020c82bf23532ed9aa6537b5cd3f832364cd0))
+
 ## [0.73.12](https://github.com/d0ugal/graith/compare/v0.73.11...v0.73.12) (2026-08-12)
 
 
