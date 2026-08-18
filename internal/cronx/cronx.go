@@ -12,11 +12,11 @@
 //
 // The engine underneath is robfig/cron/v3, used only as a parser + Next()
 // (never its scheduler). We evaluated replacing it with github.com/adhocore/gronx
-// (issue #1213) and rejected the swap: gronx v1.20.0 (the latest) computes wrong
-// next-fire times — ones its own IsDue rejects — for day-of-month values absent
-// in the current month (29/30/31), leap-day Feb 29, and DST fall-back
-// transitions. The differential corpus in cronx_diff_test.go pins that evidence
-// and acts as a tripwire if a future gronx fixes it. See
+// (issue #1213) and rejected the swap: although gronx v1.20.2 fixed its
+// day-of-month and leap-day next-tick bugs, v1.20.3 still computes wrong
+// next-fire times around DST fall-back transitions. The differential corpus in
+// cronx_diff_test.go pins that evidence and acts as a tripwire if gronx fixes
+// the remaining bug. See
 // docs/design/2026-07-16-cron-parser-evaluation.md.
 package cronx
 

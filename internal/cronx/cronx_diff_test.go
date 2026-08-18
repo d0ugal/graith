@@ -107,23 +107,22 @@ func TestEnginesAgree(t *testing.T) {
 	}
 }
 
-// TestGronxKnownBugs pins the concrete cases where gronx v1.20.0 (the latest at
-// evaluation time) computes a WRONG next-fire — a time its own IsDue rejects —
-// while robfig is correct. These are why graith keeps robfig. Each case asserts:
+// TestGronxKnownBugs pins the concrete cases where gronx v1.20.3 computes a
+// WRONG next-fire — a time its own IsDue rejects — while robfig is correct.
+// This is why graith keeps robfig. Each case asserts:
 //   - robfig produces the correct answer,
 //   - gronx disagrees with robfig, and
 //   - gronx's answer is not even due per gronx itself (so it's a bug, not a
 //     defensible difference).
 //
-// If a future gronx fixes one of these, the "engines must disagree" assertion
-// fails — re-open issue #1213 and re-evaluate the swap.
+// If a future gronx fixes this, the "engines must disagree" assertion fails —
+// re-open issue #1213 and re-evaluate the swap.
 func TestGronxKnownBugs(t *testing.T) {
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Skipf("America/New_York unavailable: %v", err)
 	}
 
-	utc := time.UTC
 	g := gronx.New()
 
 	at := func(loc *time.Location, s string) time.Time {
@@ -141,20 +140,6 @@ func TestGronxKnownBugs(t *testing.T) {
 		wantRobfig time.Time // the correct answer
 		reason     string
 	}{
-		{
-			name:       "day-of-month 31 overflow",
-			expr:       "0 0 31 * *",
-			ref:        at(utc, "2026-11-01T00:30:00"),
-			wantRobfig: at(utc, "2026-12-31T00:00:00"),
-			reason:     "gronx returns 2026-12-02 (not even day 31) — its per-field bump limit gives up crossing short months",
-		},
-		{
-			name:       "leap-day Feb 29",
-			expr:       "0 0 29 2 *",
-			ref:        at(utc, "2026-01-01T00:00:00"),
-			wantRobfig: at(utc, "2028-02-29T00:00:00"),
-			reason:     "gronx returns 2026-03-04 — it cannot skip forward to the next leap year",
-		},
 		{
 			name:       "DST fall-back day, plain monthly",
 			expr:       "0 0 1 * *",
@@ -190,6 +175,57 @@ func TestGronxKnownBugs(t *testing.T) {
 			} else {
 				t.Logf("confirmed gronx bug: %q from %s -> gronx=%s (NOT due per gronx), robfig=%s. %s",
 					tc.expr, tc.ref.Format(time.RFC3339), gNext.Format(time.RFC3339), rNext.Format(time.RFC3339), tc.reason)
+			}
+		})
+	}
+}
+
+// TestGronxFixedBugs records the two next-tick bugs fixed in gronx v1.20.2:
+// crossing short months for day-of-month values and skipping to the next leap
+// year for February 29. Keep these cases separate from TestGronxKnownBugs so
+// an upstream fix is expressed as an expectation rather than a test failure.
+func TestGronxFixedBugs(t *testing.T) {
+	utc := time.UTC
+	g := gronx.New()
+	cases := map[string]struct {
+		expr, ref, want string
+	}{
+		"day-of-month 31 overflow": {
+			expr: "0 0 31 * *", ref: "2026-11-01T00:30:00", want: "2026-12-31T00:00:00",
+		},
+		"leap-day Feb 29": {
+			expr: "0 0 29 2 *", ref: "2026-01-01T00:00:00", want: "2028-02-29T00:00:00",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ref, err := time.ParseInLocation("2006-01-02T15:04:05", tc.ref, utc)
+			if err != nil {
+				t.Fatalf("bad reference time %q: %v", tc.ref, err)
+			}
+
+			want, err := time.ParseInLocation("2006-01-02T15:04:05", tc.want, utc)
+			if err != nil {
+				t.Fatalf("bad expected time %q: %v", tc.want, err)
+			}
+
+			rNext := robfigNext(t, tc.expr, ref)
+			if !rNext.Equal(want) {
+				t.Fatalf("robfig regressed on %q: got %s want %s", tc.expr, rNext.Format(time.RFC3339), want.Format(time.RFC3339))
+			}
+
+			gNext, err := gronx.NextTickAfter(tc.expr, ref, false)
+			if err != nil {
+				t.Fatalf("gronx error on %q: %v", tc.expr, err)
+			}
+
+			if !gNext.Equal(want) {
+				t.Fatalf("gronx result on %q: got %s want %s", tc.expr, gNext.Format(time.RFC3339), want.Format(time.RFC3339))
+			}
+
+			if due, _ := g.IsDue(tc.expr, gNext); !due {
+				t.Fatalf("gronx does not consider its result due: %s", gNext.Format(time.RFC3339))
 			}
 		})
 	}
