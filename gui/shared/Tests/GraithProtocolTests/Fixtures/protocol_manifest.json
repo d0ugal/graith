@@ -64,6 +64,13 @@
           "optional": false
         },
         {
+          "name": "PromptFile",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
           "name": "Agent",
           "type": {
             "kind": "string"
@@ -74,6 +81,13 @@
           "name": "Model",
           "type": {
             "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "NoRepo",
+          "type": {
+            "kind": "bool"
           },
           "optional": false
         },

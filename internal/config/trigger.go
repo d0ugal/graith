@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -135,9 +136,11 @@ type ActionConfig struct {
 	SandboxConfig *SandboxConfig `toml:"sandbox_config"`
 
 	// session:
-	Prompt string `toml:"prompt"`
-	Agent  string `toml:"agent"`
-	Model  string `toml:"model"`
+	Prompt     string `toml:"prompt"`
+	PromptFile string `toml:"prompt_file"`
+	Agent      string `toml:"agent"`
+	Model      string `toml:"model"`
+	NoRepo     bool   `toml:"no_repo"`
 	// Headless runs the spawned session through the one-shot stream-json
 	// driver. It is opt-in because headless sessions cannot be resumed or
 	// serviced interactively.
@@ -917,6 +920,25 @@ func validateActionStructure(where string, t *TriggerConfig) []error {
 	case ActionCommand:
 		errs = append(errs, validateCommandActionStructure(where, t)...)
 	case ActionSession:
+		if a.NoRepo && a.Repo != "" {
+			errs = append(errs, fmt.Errorf("%s: action.no_repo=true is incompatible with action.repo", where))
+		}
+
+		if a.NoRepo && (t.IsWatch() || t.IsCompletion()) {
+			errs = append(errs, fmt.Errorf("%s: action.no_repo=true is incompatible with watch/completion session actions (they mirror the bound session)", where))
+		}
+		if a.PromptFile != "" {
+			path := ExpandPath(a.PromptFile)
+			info, err := os.Stat(path)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: action.prompt_file %q is not readable: %w", where, a.PromptFile, err))
+			} else if !info.Mode().IsRegular() {
+				errs = append(errs, fmt.Errorf("%s: action.prompt_file %q is not a regular file", where, a.PromptFile))
+			} else if _, err := os.ReadFile(path); err != nil {
+				errs = append(errs, fmt.Errorf("%s: action.prompt_file %q is not readable: %w", where, a.PromptFile, err))
+			}
+		}
+
 		if a.Headless && a.Ensure {
 			errs = append(errs, fmt.Errorf("%s: action.headless is incompatible with ensure=true (headless sessions are one-shot)", where))
 		}

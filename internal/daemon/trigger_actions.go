@@ -296,6 +296,21 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		return "", err
 	}
 
+	if t.Action.PromptFile != "" {
+		contents, err := os.ReadFile(config.ExpandPath(t.Action.PromptFile))
+		if err != nil {
+			return "", fmt.Errorf("read action.prompt_file %q: %w", t.Action.PromptFile, err)
+		}
+		filePrompt, err := config.ExpandTrigger(string(contents), vars)
+		if err != nil {
+			return "", fmt.Errorf("expand action.prompt_file %q: %w", t.Action.PromptFile, err)
+		}
+		if prompt != "" {
+			prompt += "\n\n"
+		}
+		prompt += filePrompt
+	}
+
 	// Session delivery is best-effort prompt injection: the daemon can't capture a
 	// long-running agent's answer, so it instructs the agent to deliver itself.
 	instr, err := sm.sessionDeliveryInstruction(t.Action.Deliver, vars)
@@ -364,6 +379,7 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		repo:                 repo,
 		prompt:               prompt,
 		model:                model,
+		noRepo:               t.Action.NoRepo,
 		headless:             t.Action.Headless,
 		parentID:             orchestratorID,
 		mirror:               mirror,
@@ -672,6 +688,7 @@ type createTriggerReq struct {
 	repo                 string
 	prompt               string
 	model                string
+	noRepo               bool
 	headless             bool
 	parentID             string
 	mirror               string
@@ -702,6 +719,7 @@ func (sm *SessionManager) createTriggerSession(req createTriggerReq) (SessionSta
 		Name:                 req.name,
 		AgentName:            agent,
 		RepoPath:             req.repo,
+		NoRepo:               req.noRepo,
 		Prompt:               req.prompt,
 		Model:                req.model,
 		Headless:             req.headless,
