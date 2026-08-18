@@ -204,6 +204,7 @@ func TestGronxFixedBugs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("bad reference time %q: %v", tc.ref, err)
 			}
+
 			want, err := time.ParseInLocation("2006-01-02T15:04:05", tc.want, utc)
 			if err != nil {
 				t.Fatalf("bad expected time %q: %v", tc.want, err)
@@ -221,6 +222,7 @@ func TestGronxFixedBugs(t *testing.T) {
 			if !gNext.Equal(want) {
 				t.Fatalf("gronx result on %q: got %s want %s", tc.expr, gNext.Format(time.RFC3339), want.Format(time.RFC3339))
 			}
+
 			if due, _ := g.IsDue(tc.expr, gNext); !due {
 				t.Fatalf("gronx does not consider its result due: %s", gNext.Format(time.RFC3339))
 			}
