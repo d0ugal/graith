@@ -301,13 +301,16 @@ func (sm *SessionManager) actionSession(ctx context.Context, t *config.TriggerCo
 		if err != nil {
 			return "", fmt.Errorf("read action.prompt_file %q: %w", t.Action.PromptFile, err)
 		}
+
 		filePrompt, err := config.ExpandTrigger(string(contents), vars)
 		if err != nil {
 			return "", fmt.Errorf("expand action.prompt_file %q: %w", t.Action.PromptFile, err)
 		}
+
 		if prompt != "" {
 			prompt += "\n\n"
 		}
+
 		prompt += filePrompt
 	}
 

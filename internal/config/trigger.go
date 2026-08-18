@@ -927,8 +927,10 @@ func validateActionStructure(where string, t *TriggerConfig) []error {
 		if a.NoRepo && (t.IsWatch() || t.IsCompletion()) {
 			errs = append(errs, fmt.Errorf("%s: action.no_repo=true is incompatible with watch/completion session actions (they mirror the bound session)", where))
 		}
+
 		if a.PromptFile != "" {
 			path := ExpandPath(a.PromptFile)
+
 			info, err := os.Stat(path)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: action.prompt_file %q is not readable: %w", where, a.PromptFile, err))
