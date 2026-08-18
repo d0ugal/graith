@@ -1248,10 +1248,12 @@ type ActionConfig struct {
 	Sandbox       *bool          `json:"Sandbox"`
 	SandboxConfig *SandboxConfig `json:"SandboxConfig"`
 
-	Prompt string `json:"Prompt"`
-	Agent  string `json:"Agent"`
-	Model  string `json:"Model"`
-	Ensure bool   `json:"Ensure"`
+	Prompt     string `json:"Prompt"`
+	PromptFile string `json:"PromptFile"`
+	Agent      string `json:"Agent"`
+	Model      string `json:"Model"`
+	NoRepo     bool   `json:"NoRepo"`
+	Ensure     bool   `json:"Ensure"`
 	// AutoCleanup retains the historical bool|string|null JSON union without
 	// moving normalization or validation out of the config/domain model.
 	AutoCleanup json.RawMessage `json:"AutoCleanup"`

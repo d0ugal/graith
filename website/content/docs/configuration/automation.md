@@ -221,6 +221,22 @@ agent  = "claude"
 prompt = "Review the changes since your last look; send feedback via gr msg."
 ```
 
+Schedule and GCX session actions can use a standalone scratch session with
+`no_repo = true`. A large prompt may be loaded from `prompt_file`; `~` is
+expanded, the file must be readable when configuration is loaded, and its
+contents support the same trigger templates as `prompt`.
+
+```toml
+[trigger.action]
+type        = "session"
+agent       = "codex"
+no_repo     = true
+prompt_file = "~/.config/graith/triggers/morning-briefing.md"
+```
+
+`prompt` and `prompt_file` are combined when both are set. Scratch mode is not
+valid for watch or completion actions, which mirror their bound session.
+
 Actions: `command` (sandboxed by default; `sandbox`/`sandbox_config` control its
 boundary), `session`, `scenario`, `message`, `tracker`. Delivery routes to
 `inbox`/`topic`/`store`. Policy: `catch_up` (default false), `overlap` (default
