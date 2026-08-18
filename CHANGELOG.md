@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.73.14](https://github.com/d0ugal/graith/compare/v0.73.13...v0.73.14) (2026-08-18)
+
+
+### Features
+
+* support scratch trigger sessions ([c7bcfe2](https://github.com/d0ugal/graith/commit/c7bcfe20685cfc3411450500694f142db83f4a6d))
+
+
+### Bug Fixes
+
+* satisfy trigger action lint ([543a256](https://github.com/d0ugal/graith/commit/543a256da5664d8780cc4ff11485cf6617a92bb2))
+* update Go toolchain for vulnerability fixes ([b7ef662](https://github.com/d0ugal/graith/commit/b7ef662b61ce41c82438ed80e43a6128e914b941))
+* update google.golang.org/genproto/googleapis/api digest to ac3dfec ([#2200](https://github.com/d0ugal/graith/issues/2200)) ([dac9976](https://github.com/d0ugal/graith/commit/dac99762f15cfe09c7b37f94f17aff8de23326a2))
+* update google.golang.org/genproto/googleapis/rpc digest to ac3dfec ([#2198](https://github.com/d0ugal/graith/issues/2198)) ([c02a11f](https://github.com/d0ugal/graith/commit/c02a11f1515bb43c7ab13f6c16d7696182ba826a))
+* update module github.com/adhocore/gronx to v1.20.3 ([#2194](https://github.com/d0ugal/graith/issues/2194)) ([35072f6](https://github.com/d0ugal/graith/commit/35072f6aeccd3e9e405165da554af8a7d1ef85c2))
+* update module github.com/fxamacker/cbor/v2 to v2.9.3 ([#2201](https://github.com/d0ugal/graith/issues/2201)) ([49c5330](https://github.com/d0ugal/graith/commit/49c53303ba6313c39b72a58f5e8db248d19c54cf))
+* update module github.com/mattn/go-runewidth to v0.0.28 ([#2202](https://github.com/d0ugal/graith/issues/2202)) ([7167990](https://github.com/d0ugal/graith/commit/7167990f2425aad1c4e15673952f4826758d8c29))
+
+
+### Dependencies
+
+* **deps:** lock file maintenance ([#2191](https://github.com/d0ugal/graith/issues/2191)) ([9694721](https://github.com/d0ugal/graith/commit/969472190915b5d34744b84a937ab73cf667fde4))
+* **deps:** lock file maintenance ([#2193](https://github.com/d0ugal/graith/issues/2193)) ([4efc920](https://github.com/d0ugal/graith/commit/4efc920fbc0e080e8c1eafb427074c07a2b935c3))
+* **deps:** update renovate/renovate docker tag to v44.31.0 ([#2190](https://github.com/d0ugal/graith/issues/2190)) ([dcf0753](https://github.com/d0ugal/graith/commit/dcf0753fc0c430006f7f0e1d573cb76005475b64))
+* **deps:** update renovate/renovate docker tag to v44.32.1 ([#2195](https://github.com/d0ugal/graith/issues/2195)) ([4a86bde](https://github.com/d0ugal/graith/commit/4a86bde3df1f224cee9b3540b812f5bf1513fa5a))
+* **deps:** update renovate/renovate docker tag to v44.32.2 ([#2196](https://github.com/d0ugal/graith/issues/2196)) ([b7b202e](https://github.com/d0ugal/graith/commit/b7b202e39f4af7e32efc05f6b68fa004c70f8012))
+* **deps:** update renovate/renovate docker tag to v44.32.4 ([#2197](https://github.com/d0ugal/graith/issues/2197)) ([d025d64](https://github.com/d0ugal/graith/commit/d025d64f3d71084022333211aa2c8b20f598d257))
+* **deps:** update renovate/renovate docker tag to v44.32.5 ([#2199](https://github.com/d0ugal/graith/issues/2199)) ([acf6582](https://github.com/d0ugal/graith/commit/acf6582a5658b6f3b93a491b2fa3115dc3e3ed35))
+* **deps:** update renovate/renovate docker tag to v44.32.6 ([#2203](https://github.com/d0ugal/graith/issues/2203)) ([99abbc4](https://github.com/d0ugal/graith/commit/99abbc44f9cca5b1a6f418d49b32ae35e2950b12))
+* **deps:** update renovate/renovate docker tag to v44.33.2 ([#2206](https://github.com/d0ugal/graith/issues/2206)) ([3b7471f](https://github.com/d0ugal/graith/commit/3b7471f1b116c45815feb60e80987230d021c7f2))
+
 ## [0.73.13](https://github.com/d0ugal/graith/compare/v0.73.12...v0.73.13) (2026-08-16)
 
 
