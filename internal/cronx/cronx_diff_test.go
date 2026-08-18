@@ -219,6 +219,7 @@ func TestGronxFixedBugs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("gronx error on %q: %v", tc.expr, err)
 			}
+
 			if !gNext.Equal(want) {
 				t.Fatalf("gronx result on %q: got %s want %s", tc.expr, gNext.Format(time.RFC3339), want.Format(time.RFC3339))
 			}
