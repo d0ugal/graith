@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/version"
@@ -5411,6 +5412,14 @@ func TestCoverStatusResponse(t *testing.T) {
 	h := newTestHarness(t)
 
 	h.sm.mu.Lock()
+	h.sm.cfg.DependencyHealth.Enabled = true
+	h.sm.cfg.DependencyHealth.Services = []dependencyhealth.Service{{Name: "github", Global: true}}
+	h.sm.state.DependencyHealth.Services["github"] = dependencyhealth.ServiceState{
+		ObservedState: dependencyhealth.Down, SourceHealth: dependencyhealth.Fresh,
+	}
+	h.sm.mu.Unlock()
+
+	h.sm.mu.Lock()
 	h.sm.state.Sessions["ken2"] = &SessionState{
 		ID: "ken2", Name: "ken-status", Status: StatusRunning,
 		Agent: "claude", CreatedAt: time.Now().UTC(),
@@ -5433,6 +5442,10 @@ func TestCoverStatusResponse(t *testing.T) {
 
 	if resp.UnreadCount != 1 {
 		t.Errorf("unread count = %d, want 1", resp.UnreadCount)
+	}
+
+	if len(resp.Fleet.DependencyHealth) != 1 || resp.Fleet.DependencyHealth[0].Name != "github" {
+		t.Fatalf("status dependency health = %+v, want github", resp.Fleet.DependencyHealth)
 	}
 }
 
