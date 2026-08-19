@@ -645,6 +645,7 @@ func runGCXCommand(ctx context.Context, contextName string, args ...string) ([]b
 		// trigger status explains the actionable failure instead of only saying
 		// "exit status 1".
 		detail := strings.TrimSpace(stderr.String())
+
 		stdoutDetail := strings.TrimSpace(stdout.String())
 		if stdoutDetail != "" {
 			if detail != "" {
@@ -653,6 +654,7 @@ func runGCXCommand(ctx context.Context, contextName string, args ...string) ([]b
 				detail = stdoutDetail
 			}
 		}
+
 		if len(detail) > 4096 {
 			detail = detail[:4096] + "…"
 		}
