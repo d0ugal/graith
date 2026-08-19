@@ -2795,6 +2795,8 @@ func buildScenarioGroupedItems(sessions []protocol.SessionInfo, collapsed map[st
 // A multi-labelled session deliberately appears once in each label group; each
 // group spans repositories because labels, rather than repos, are the axis.
 func buildLabelGroupedItems(sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
+	const noLabelGroupName = "(no label)"
+
 	type labelGroup struct {
 		name     string
 		sessions []protocol.SessionInfo
@@ -2803,7 +2805,14 @@ func buildLabelGroupedItems(sessions []protocol.SessionInfo, collapsed map[strin
 
 	var groups []*labelGroup
 
+	var unlabeled []protocol.SessionInfo
+
 	for _, s := range sessions {
+		if len(s.Labels) == 0 {
+			unlabeled = append(unlabeled, s)
+			continue
+		}
+
 		for _, label := range s.Labels {
 			var group *labelGroup
 
@@ -2846,6 +2855,20 @@ func buildLabelGroupedItems(sessions []protocol.SessionInfo, collapsed map[strin
 		for i, item := range groupItems {
 			if item, ok := item.(sessionItem); ok {
 				item.labelGroup = group.name
+				groupItems[i] = item
+			}
+		}
+
+		items = append(items, groupItems...)
+	}
+
+	if len(unlabeled) > 0 {
+		items = append(items, groupHeader{name: noLabelGroupName, count: len(unlabeled)})
+
+		groupItems := buildTreeItems(unlabeled, collapsed)
+		for i, item := range groupItems {
+			if item, ok := item.(sessionItem); ok {
+				item.labelGroup = noLabelGroupName
 				groupItems[i] = item
 			}
 		}
@@ -3456,14 +3479,7 @@ func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 	case viewDeleted:
 		return sortDeleted(m.deletedSessions)
 	case viewLabels:
-		result := make([]protocol.SessionInfo, 0, len(m.allSessions))
-		for _, s := range m.allSessions {
-			if len(s.Labels) > 0 {
-				result = append(result, s)
-			}
-		}
-
-		return result
+		return m.allSessions
 	default:
 		return m.allSessions
 	}
