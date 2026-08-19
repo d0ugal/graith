@@ -23,6 +23,7 @@ func (fake *fakeDependencyHealthUseCase) Status() (protocol.DependencyStatusResp
 func TestRunDependencyStatusJSONIsVersionedAndEmpty(t *testing.T) {
 	var buf bytes.Buffer
 	deps := commandDependencies{cfg: config.Default(), out: output.NewWithWriter(true, &buf), health: &fakeDependencyHealthUseCase{response: protocol.DependencyStatusResponseMsg{SchemaVersion: 1, Services: []protocol.DependencyStatusService{}}}}
+
 	cmd := &cobra.Command{}
 	cmd.SetContext(withCommandDependencies(context.Background(), deps))
 
@@ -34,6 +35,7 @@ func TestRunDependencyStatusJSONIsVersionedAndEmpty(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("decode JSON: %v\n%s", err, buf.String())
 	}
+
 	if got.SchemaVersion != 1 || got.Services == nil {
 		t.Fatalf("response = %+v, want version 1 and non-nil services", got)
 	}

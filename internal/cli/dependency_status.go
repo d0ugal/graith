@@ -47,6 +47,7 @@ func renderDependencyStatus(writer *output.Writer, response protocol.DependencyS
 		if i > 0 {
 			writer.Printf("\n")
 		}
+
 		writer.Printf("%s\n", service.Name)
 		writer.Printf("  provider: %s\n", service.Provider)
 		writer.Printf("  source: %s\n", service.SourceURL)
@@ -56,6 +57,7 @@ func renderDependencyStatus(writer *output.Writer, response protocol.DependencyS
 		writer.Printf("  last observed: %s\n", formatDependencyTime(service.ObservedAt))
 		writer.Printf("  last success: %s\n", formatDependencyTime(service.LastSuccessAt))
 		writer.Printf("  last failure: %s\n", formatDependencyTime(service.LastFailureAt))
+
 		if len(service.IncidentIDs) > 0 {
 			writer.Printf("  incidents: %s\n", strings.Join(service.IncidentIDs, ", "))
 		} else {
@@ -68,6 +70,7 @@ func dependencyRouting(service protocol.DependencyStatusService) string {
 	if service.Global {
 		return "all agents"
 	}
+
 	if len(service.AgentTypes) == 0 {
 		return "none"
 	}
@@ -78,6 +81,7 @@ func formatDependencyTime(value string) string {
 	if value == "" {
 		return "never"
 	}
+
 	return value
 }
 
