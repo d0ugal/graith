@@ -262,6 +262,9 @@ type Transition struct {
 	Service         string        `json:"service"`
 	Generation      uint64        `json:"generation"`
 	ObservedState   ObservedState `json:"observed_state"`
+	PreviousState   ObservedState `json:"previous_state,omitempty"`
+	SourceURL       string        `json:"source_url,omitempty"`
+	IncidentIDs     []string      `json:"incident_ids,omitempty"`
 	TargetSessionID string        `json:"target_session_id,omitempty"`
 	NextAttemptAt   time.Time     `json:"next_attempt_at,omitempty"`
 	Attempts        int           `json:"attempts,omitempty"`
@@ -346,6 +349,9 @@ func (p *PersistedState) Clone() *PersistedState {
 	}
 
 	out.Outbox = append([]Transition(nil), p.Outbox...)
+	for i := range out.Outbox {
+		out.Outbox[i].IncidentIDs = append([]string(nil), p.Outbox[i].IncidentIDs...)
+	}
 
 	return &out
 }

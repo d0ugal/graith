@@ -993,6 +993,7 @@ func run(
 	startBackground := func() bool {
 		group := newDaemonTaskGroup()
 		jobs := []func(context.Context){
+			sm.RunDependencyHealthLoop,
 			sm.RunDetectionLoop,
 			sm.RunStartupWatchdogLoop,
 			sm.RunResourceMonitorLoop,

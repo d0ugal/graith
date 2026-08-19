@@ -39,14 +39,6 @@ type Observation struct {
 	StatusLabel   string
 }
 
-type PollTransition struct {
-	Service    string
-	Generation uint64
-	Previous   ObservedState
-	Current    ObservedState
-	ObservedAt time.Time
-}
-
 type Statuspage struct {
 	Client *http.Client
 	Now    func() time.Time
