@@ -212,6 +212,9 @@ var registeredTypes = []any{
 	ScrollbackDiagnostic{},
 	MessagesDiagnostic{},
 	DependencyHealthSummary{},
+	DependencyStatusMsg{},
+	DependencyStatusService{},
+	DependencyStatusResponseMsg{},
 	FleetSummary{},
 	StatusResponseMsg{},
 	ScenarioStartMsg{},
@@ -446,6 +449,9 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"TokenInfo":                     {SwiftPlanned, ""},
 	"FleetSummary":                  {SwiftRequired, "FleetSummary"},            // GUI diagnostics panel (#904)
 	"DependencyHealthSummary":       {SwiftRequired, "DependencyHealthSummary"}, // Fleet status metadata (#2219)
+	"DependencyStatusMsg":           {SwiftNA, ""},                              // CLI dependency inspection
+	"DependencyStatusService":       {SwiftNA, ""},                              // CLI dependency inspection
+	"DependencyStatusResponseMsg":   {SwiftNA, ""},                              // CLI dependency inspection
 	"ConfigResponseMsg":             {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
 	"AgentCatalogEntry":             {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
 	"AgentCatalogResponseMsg":       {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)

@@ -1081,6 +1081,124 @@
       ]
     },
     {
+      "name": "DependencyStatusMsg",
+      "swift": "na",
+      "fields": []
+    },
+    {
+      "name": "DependencyStatusResponseMsg",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "schema_version",
+          "type": {
+            "kind": "int"
+          },
+          "optional": false
+        },
+        {
+          "name": "services",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "DependencyStatusService"
+            }
+          },
+          "optional": false
+        }
+      ]
+    },
+    {
+      "name": "DependencyStatusService",
+      "swift": "na",
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "provider",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "source_url",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "global",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        },
+        {
+          "name": "agent_types",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "observed_state",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "source_health",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "observed_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "last_success_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "last_failure_at",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "incident_ids",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "DetachedMsg",
       "swift": "required",
       "swift_type": "DetachedMsg",

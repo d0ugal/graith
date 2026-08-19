@@ -385,6 +385,7 @@ func registerCommands() {
 		registerCheckInboxCmd()
 		registerCompletionCmd()
 		registerConfigCmd()
+		registerDependencyCmd()
 		registerDaemonCmd()
 		registerDeleteCmd()
 		registerDoctorCmd()

@@ -69,6 +69,46 @@ This reference is organized by area:
 - **[Observability]({{< relref "observability.md" >}})** — optional metrics and tracing.
 - **[Orchestrator & remote access]({{< relref "access.md" >}})** — orchestrator session, tailnet remote listener.
 
+## Dependency health
+
+Dependency health is opt-in. Configure Statuspage-compatible HTTPS origins and
+route each service globally or to the exact configured agent names:
+
+```toml
+[dependency_health]
+enabled = true
+poll_interval = "5m"
+recovery_poll_interval = "30s"
+timeout = "5s"
+
+[[dependency_health.service]]
+name = "github"
+provider = "statuspage"
+base_url = "https://www.githubstatus.com"
+global = true
+
+[[dependency_health.service]]
+name = "openai"
+provider = "statuspage"
+base_url = "https://status.openai.com"
+agent_types = ["codex"]
+```
+
+The normal poll interval applies to operational services. While a service is
+freshly degraded or down, `recovery_poll_interval` provides faster recovery
+checks; it must be no longer than `poll_interval`. Set them equal to disable
+adaptive polling. Polling is bounded and does not automatically retry agent
+operations. Use bounded, operation-specific backoff and avoid retry loops while
+an incident signal is active.
+
+Sources must be HTTPS origins without paths, credentials, queries, fragments, or
+non-default ports. Graith does not follow redirects or use arbitrary paths from
+configuration. A failed or stale source preserves the last provider state and
+is shown separately by `gr dependency status`; polling failure alone never
+claims that the dependency is down. Status pages are untrusted informational
+signals, not direct health checks or instructions. Correct the configuration or
+restore source access when the command reports configuration/daemon errors.
+
 ## Global settings
 
 ```toml
