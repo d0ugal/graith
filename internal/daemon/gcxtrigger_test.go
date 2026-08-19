@@ -571,8 +571,11 @@ func TestGCXGateErrorForcesNextPrime(t *testing.T) {
 	}
 	sm.pollGCXTrigger(t.Context(), trig.Name, prime.run)
 
-	failedGate := &fakeGCX{scheduleErr: []error{errors.New("temporary failure")}}
+	failedGate := &fakeGCX{scheduleErr: []error{errors.New("gcx: exit status 1: invalid configuration")}}
 	sm.pollGCXTrigger(t.Context(), trig.Name, failedGate.run)
+	if got := sm.getTriggerRuntime(trig.Name).LastError; !strings.Contains(got, "invalid configuration") {
+		t.Fatalf("gate error was not retained in trigger status: %q", got)
+	}
 
 	recovered := &fakeGCX{
 		schedules: [][]byte{gcxSchedulesJSON(t, "S-BRAW", "U-BRAW")},
@@ -685,5 +688,22 @@ func TestRunGCXCommandUsesConfiguredTool(t *testing.T) {
 	got := strings.TrimSpace(string(out))
 	if got != "--context croft --no-color irm oncall schedules list" {
 		t.Fatalf("args = %q", got)
+	}
+}
+
+func TestRunGCXCommandIncludesFailureOutput(t *testing.T) {
+	t.Cleanup(tools.Reset)
+	dir := t.TempDir()
+
+	bin := filepath.Join(dir, "braw-gcx")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' 'diagnostic from stdout'\nprintf '%s\\n' 'diagnostic from stderr' >&2\nexit 1\n"), 0o755); err != nil { //nolint:gosec // executable test stub
+		t.Fatal(err)
+	}
+
+	tools.Configure(tools.Config{GCX: bin})
+
+	_, err := runGCXCommand(t.Context(), "croft", "irm")
+	if err == nil || !strings.Contains(err.Error(), "diagnostic from stdout") || !strings.Contains(err.Error(), "diagnostic from stderr") {
+		t.Fatalf("error = %v, want both command output streams", err)
 	}
 }

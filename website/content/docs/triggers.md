@@ -210,6 +210,10 @@ schedule read fails or a configured schedule is absent, it fails closed: no
 action fires and `gr trigger status` records the error. `oncall_user_id` cannot
 include leading or trailing whitespace.
 
+If a gcx poll fails, `gr trigger status` includes bounded output from both gcx
+stdout and stderr in `last_error`; this preserves actionable diagnostics from
+gcx versions that emit structured configuration errors on stdout.
+
 The gate answers "is this user on call when the poll runs?", not "when the alert
 began?" — an off-call → on-call transition primes without firing (see below), so
 the previous person's alerts don't become a handoff burst. Team and integration
