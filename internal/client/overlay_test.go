@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1235,8 +1236,20 @@ func TestBuildLabelGroupedItemsCrossesReposAndDuplicatesMultiLabelSessions(t *te
 		t.Fatalf("release group = %v, want braw", got)
 	}
 
-	if len(groups) != 2 {
-		t.Fatalf("groups = %v, unlabelled session should be absent", groups)
+	if got := groups["(no label)"]; len(got) != 1 || got[0] != "dreich" {
+		t.Fatalf("(no label) group = %v, want dreich", got)
+	}
+
+	var groupNames []string
+
+	for _, item := range items {
+		if header, ok := item.(groupHeader); ok {
+			groupNames = append(groupNames, header.name)
+		}
+	}
+
+	if got, want := groupNames, []string{"release", "Urgent", "(no label)"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("group order = %v, want %v", got, want)
 	}
 
 	labelled := items[1].(sessionItem)
@@ -1515,14 +1528,15 @@ func TestLabelViewSearchAndRefreshPreserveLabelSelection(t *testing.T) {
 	}
 }
 
-func TestLabelViewEmptyState(t *testing.T) {
+func TestLabelViewUnlabelledOnlyShowsNoLabelGroup(t *testing.T) {
 	m := newOverlayModel([]protocol.SessionInfo{{ID: "braw", Name: "braw", Status: "running"}}, "", nil, nil, nil, nil)
 	m.view = viewLabels
 	m.rebuildForView()
 	updated, _ := sendWindowSize(m, 100, 30)
 
-	if got := asOverlay(updated).View().Content; !strings.Contains(got, "No labelled sessions") {
-		t.Fatalf("Labels empty view missing guidance:\n%s", got)
+	view := asOverlay(updated).View().Content
+	if !strings.Contains(view, "(no label)") || !strings.Contains(view, "braw") {
+		t.Fatalf("Labels view missing no-label group or session:\n%s", view)
 	}
 }
 
