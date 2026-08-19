@@ -55,7 +55,7 @@ func mutatingControlMessage(msg protocol.Envelope) bool {
 		return false
 	case "handshake", "auth_proof", "repo_list", "store_list", "store_get", "list",
 		"logs", "wait", "msg_topics", "msg_conversation", "msg_jail_list",
-		"msg_jail_show", "screen_preview", "screen_snapshot", "status",
+		"msg_jail_show", "screen_preview", "screen_snapshot", "status", "dependency_status",
 		"diagnostics", "config", "agent_catalog", "agent_info", "search", "scenario_status", "trigger_list",
 		"trigger_status", "todo_list", "scenario_list", "upgrade_preflight", "upgrade":
 		return false
@@ -934,6 +934,9 @@ func HandleConnection(ctx context.Context, conn net.Conn, origin ConnOrigin, sm 
 
 			case "status":
 				handleStatus(sm, auth, sendControl, msg)
+
+			case "dependency_status":
+				handleDependencyStatus(sm, sendControl, msg)
 
 			case "status_report":
 				handleStatusReport(sm, auth, sendControl, msg) //nolint:contextcheck // Accepted hook status and its notification are daemon-owned after the report is recorded.

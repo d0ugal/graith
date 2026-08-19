@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sessionlabel"
@@ -291,6 +292,54 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 	}
 
 	return f
+}
+
+// DependencyStatus returns the configured services joined with their last
+// persisted observations. It deliberately does not poll or mutate state.
+func (sm *SessionManager) DependencyStatus() protocol.DependencyStatusResponseMsg {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	services := make([]protocol.DependencyStatusService, 0, len(sm.cfg.DependencyHealth.Services))
+	for _, configured := range sm.cfg.DependencyHealth.Services {
+		service := protocol.DependencyStatusService{
+			Name:          configured.Name,
+			Provider:      configured.Provider,
+			SourceURL:     configured.BaseURL,
+			Global:        configured.Global,
+			AgentTypes:    append([]string(nil), configured.AgentTypes...),
+			ObservedState: string(dependencyhealth.Unknown),
+			SourceHealth:  string(dependencyhealth.Failed),
+		}
+		if sm.state.DependencyHealth != nil {
+			if observed, ok := sm.state.DependencyHealth.Services[configured.Name]; ok {
+				service.ObservedState = string(observed.ObservedState)
+				service.SourceHealth = string(observed.SourceHealth)
+				service.ObservedAt = dependencyStatusTime(observed.ObservedAt)
+				service.LastSuccessAt = dependencyStatusTimePtr(observed.LastSuccessAt)
+				service.LastFailureAt = dependencyStatusTimePtr(observed.LastFailureAt)
+				service.IncidentIDs = append([]string(nil), observed.IncidentIDs...)
+			}
+		}
+		services = append(services, service)
+	}
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
+
+	return protocol.DependencyStatusResponseMsg{SchemaVersion: dependencyhealth.StateSchemaVersion, Services: services}
+}
+
+func dependencyStatusTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+func dependencyStatusTimePtr(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return dependencyStatusTime(*value)
 }
 
 // Diagnostics collects runtime health data for gr doctor.

@@ -17,6 +17,7 @@ type commandDependencies struct {
 	listSession sessionListUseCase
 	agent       agentUseCase
 	search      conversationSearchUseCase
+	health      dependencyHealthUseCase
 }
 
 // listConn is retained as a test-only-compatible transport shape while
@@ -62,6 +63,9 @@ func commandDeps(ctx context.Context) commandDependencies {
 		if deps.search == nil {
 			deps.search = newClientConversationSearchUseCase(cfg, paths, cfgFile)
 		}
+		if deps.health == nil {
+			deps.health = newClientDependencyHealthUseCase(cfg, paths, cfgFile)
+		}
 
 		return deps
 	}
@@ -75,7 +79,29 @@ func commandDeps(ctx context.Context) commandDependencies {
 		}},
 		agent:  newClientAgentUseCase(cfg, paths, cfgFile),
 		search: newClientConversationSearchUseCase(cfg, paths, cfgFile),
+		health: newClientDependencyHealthUseCase(cfg, paths, cfgFile),
 	}
+}
+
+type dependencyHealthUseCase interface {
+	Status() (protocol.DependencyStatusResponseMsg, error)
+}
+
+type clientDependencyHealthUseCase struct{ connect func() (listConn, error) }
+
+func (useCase clientDependencyHealthUseCase) Status() (protocol.DependencyStatusResponseMsg, error) {
+	return controlRequest[protocol.DependencyStatusResponseMsg](
+		useCase.connect,
+		"dependency_status",
+		protocol.DependencyStatusMsg{},
+		"dependency_status_response",
+	)
+}
+
+func newClientDependencyHealthUseCase(cfg *config.Config, paths config.Paths, cfgFile string) dependencyHealthUseCase {
+	return clientDependencyHealthUseCase{connect: func() (listConn, error) {
+		return listConnectFn(cfg, paths, cfgFile)
+	}}
 }
 
 type clientSessionListUseCase struct{ connect func() (listConn, error) }

@@ -49,11 +49,12 @@ var remoteMessagePolicy = map[string]remotePolicy{
 
 	// Read-only / observational — the guest subset (design §B.4). Kept tight:
 	// only fleet/session observation, no private DMs or scenario/wait targeting.
-	"list":            remoteReadOnly,
-	"status":          remoteReadOnly,
-	"logs":            remoteReadOnly,
-	"screen_preview":  remoteReadOnly,
-	"screen_snapshot": remoteReadOnly,
+	"list":              remoteReadOnly,
+	"status":            remoteReadOnly,
+	"logs":              remoteReadOnly,
+	"screen_preview":    remoteReadOnly,
+	"screen_snapshot":   remoteReadOnly,
+	"dependency_status": remoteReadOnly,
 
 	// Session-originated (a session acting on itself); not users/guests.
 	"status_report": remoteSessionOnly,

@@ -9,6 +9,41 @@ draft: false
 
 ## Information and monitoring
 
+### `gr dependency status`
+
+Show the daemon's last dependency-health snapshot. The command is
+informational: a dependency reported as degraded or down does not make the
+command fail. Configuration, daemon, and connection errors still return a
+non-zero exit status.
+
+```console
+$ gr dependency status
+github
+  provider: statuspage
+  source: https://www.githubstatus.com
+  routing: all agents
+  state: operational
+  source health: fresh
+  last observed: 2026-08-19T19:00:00Z
+  last success: 2026-08-19T19:00:00Z
+  last failure: never
+  incidents: none
+```
+
+Use `--json` for the versioned response. It always contains a `services` array;
+when dependency health is not configured, the array is empty and the command
+still exits zero. Each service includes its routing, validated source URL,
+observed state, source health, last successful and failed polls, and bounded
+incident references. `source_health: failed` means the source could not be
+read; it does not turn the last observed service state into a new outage claim.
+
+Treat status-page data as a useful but imperfect signal. Do not copy incident
+text into agent instructions or assume that a fresh `down` state proves an API
+is unreachable. When a dependency is degraded or down, pause repeated retries,
+inspect this command, and retry only after the source reports recovery or after
+your own operation-specific backoff. A stale or failed source means that the
+last provider observation may no longer describe the current service.
+
 ### `gr list` (alias: `ls`)
 
 List all sessions with status, current activity, and the summary set by

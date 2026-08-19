@@ -1192,6 +1192,29 @@ type StatusResponseMsg struct {
 	Fleet       FleetSummary `json:"fleet"`
 }
 
+// DependencyStatusMsg requests the daemon's last dependency-health snapshot.
+// It never performs a network poll; the command is informational.
+type DependencyStatusMsg struct{}
+
+type DependencyStatusService struct {
+	Name          string   `json:"name"`
+	Provider      string   `json:"provider"`
+	SourceURL     string   `json:"source_url"`
+	Global        bool     `json:"global,omitempty"`
+	AgentTypes    []string `json:"agent_types,omitempty"`
+	ObservedState string   `json:"observed_state"`
+	SourceHealth  string   `json:"source_health"`
+	ObservedAt    string   `json:"observed_at,omitempty"`
+	LastSuccessAt string   `json:"last_success_at,omitempty"`
+	LastFailureAt string   `json:"last_failure_at,omitempty"`
+	IncidentIDs   []string `json:"incident_ids,omitempty"`
+}
+
+type DependencyStatusResponseMsg struct {
+	SchemaVersion int                       `json:"schema_version"`
+	Services      []DependencyStatusService `json:"services"`
+}
+
 // Scenario messages
 
 // The trigger DTOs below deliberately retain their legacy PascalCase JSON

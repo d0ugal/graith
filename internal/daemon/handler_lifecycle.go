@@ -343,6 +343,14 @@ func handleStatus(sm *SessionManager, auth authContext, send func(string, any), 
 	})
 }
 
+func handleDependencyStatus(sm *SessionManager, send func(string, any), msg protocol.Envelope) {
+	if _, ok := decodePayload[protocol.DependencyStatusMsg](msg, send, "invalid dependency_status message"); !ok {
+		return
+	}
+
+	send("dependency_status_response", sm.DependencyStatus())
+}
+
 // handleStatusReport records an agent hook status report for a session. An
 // authenticated session may only report for itself.
 func handleStatusReport(sm *SessionManager, auth authContext, send func(string, any), msg protocol.Envelope) {
