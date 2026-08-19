@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"unicode"
@@ -232,11 +233,88 @@ func formatAttentionSignals(fleet protocol.FleetSummary, bg color.Color, mode st
 		parts = append(parts, formatOrchestratorAttention(text, bg, mode))
 	}
 
+	if dependency := formatDependencyAttention(fleet, bg, mode); dependency != "" {
+		parts = append(parts, dependency)
+	}
+
 	if fleet.JailedComments > 0 && (mode != statusRightCritical || len(parts) == 0) {
 		parts = append(parts, formatJailedAttention(fleet, bg, mode))
 	}
 
 	return parts
+}
+
+//nolint:wsl_v5 // The renderer keeps severity selection, stale decoration, and mode compaction together.
+func formatDependencyAttention(fleet protocol.FleetSummary, bg color.Color, mode statusRightMode) string {
+	services := append([]protocol.DependencyHealthSummary(nil), fleet.DependencyHealth...)
+	if len(services) == 0 {
+		return ""
+	}
+
+	sort.SliceStable(services, func(i, j int) bool {
+		pi, pj := dependencySeverityRank(services[i].Severity), dependencySeverityRank(services[j].Severity)
+		if pi != pj {
+			return pi < pj
+		}
+
+		return sanitizeStatusText(services[i].Name) < sanitizeStatusText(services[j].Name)
+	})
+
+	severity := strings.ToLower(strings.TrimSpace(fleet.DependencyHealthSeverity))
+	if severity == "" {
+		severity = strings.ToLower(strings.TrimSpace(services[0].Severity))
+	}
+	if severity != "down" && severity != "degraded" {
+		severity = "degraded"
+	}
+	icon, fg := "⚠", colorYellow
+	if severity == "down" {
+		icon, fg = "✗", colorRed
+	}
+	style := lipgloss.NewStyle().Foreground(fg).Background(bg).Bold(true)
+	stale := fleet.DependencyHealthStale
+	for _, service := range services {
+		stale = stale || service.Stale
+	}
+	staleSuffix := ""
+	if stale {
+		staleSuffix = lipgloss.NewStyle().Foreground(colorDim).Background(bg).Render(" ~")
+	}
+
+	switch mode {
+	case statusRightCritical:
+		return style.Render(icon+" "+severity) + staleSuffix
+	case statusRightCompact:
+		return style.Render(fmt.Sprintf("%s %s ×%d", icon, severity, len(services))) + staleSuffix
+	default:
+		labels := make([]string, 0, min(len(services), 3))
+		for _, service := range services {
+			name := compactStatusToken(service.Name, 18)
+			if name == "" {
+				continue
+			}
+			labels = append(labels, name+" "+strings.ToLower(strings.TrimSpace(service.Severity)))
+			if len(labels) == 3 {
+				break
+			}
+		}
+		if len(labels) == 0 {
+			return ""
+		}
+
+		return style.Render(icon+" "+strings.Join(labels, ", ")) + staleSuffix
+	}
+}
+
+func dependencySeverityRank(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "down":
+		return 0
+	case "degraded":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func formatOrchestratorAttention(text string, bg color.Color, mode statusRightMode) string {

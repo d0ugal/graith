@@ -164,6 +164,7 @@ private let swiftDecoders: [String: DecodeProbe] = [
     "SessionDiagnostic": probe(SessionDiagnostic.self),
     "ScrollbackDiagnostic": probe(ScrollbackDiagnostic.self),
     "MessagesDiagnostic": probe(MessagesDiagnostic.self),
+    "DependencyHealthSummary": probe(DependencyHealthSummary.self),
     "FleetSummary": probe(FleetSummary.self),
 
     // Session model (daemon -> client).

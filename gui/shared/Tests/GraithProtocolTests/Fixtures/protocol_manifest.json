@@ -1053,6 +1053,34 @@
       ]
     },
     {
+      "name": "DependencyHealthSummary",
+      "swift": "required",
+      "swift_type": "DependencyHealthSummary",
+      "fields": [
+        {
+          "name": "name",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "severity",
+          "type": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        {
+          "name": "stale",
+          "type": {
+            "kind": "bool"
+          },
+          "optional": true
+        }
+      ]
+    },
+    {
       "name": "DetachedMsg",
       "swift": "required",
       "swift_type": "DetachedMsg",
@@ -1638,6 +1666,31 @@
           "name": "orchestrator_attention",
           "type": {
             "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "dependency_health",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "object",
+              "ref": "DependencyHealthSummary"
+            }
+          },
+          "optional": true
+        },
+        {
+          "name": "dependency_health_severity",
+          "type": {
+            "kind": "string"
+          },
+          "optional": true
+        },
+        {
+          "name": "dependency_health_stale",
+          "type": {
+            "kind": "bool"
           },
           "optional": true
         }

@@ -927,6 +927,18 @@ public struct AgentCatalogResponseMsg: Codable, Sendable {
 /// both `DiagnosticsMsg` and `StatusResponseMsg`; the remote boundary also
 /// derives it app-side from the session list (the daemon has no dedicated
 /// per-session `status` RPC over the wire), hence the defaulted initializer.
+public struct DependencyHealthSummary: Codable, Hashable, Sendable {
+    public var name: String
+    public var severity: String
+    public var stale: Bool?
+
+    public init(name: String, severity: String, stale: Bool? = nil) {
+        self.name = name
+        self.severity = severity
+        self.stale = stale
+    }
+}
+
 public struct FleetSummary: Codable, Hashable, Sendable {
     public var total: Int
     public var active: Int
@@ -938,12 +950,18 @@ public struct FleetSummary: Codable, Hashable, Sendable {
     public var jailedNewestRepo: String?
     public var jailedNewestPR: Int?
     public var orchestratorAttention: String?
+    public var dependencyHealth: [DependencyHealthSummary]?
+    public var dependencyHealthSeverity: String?
+    public var dependencyHealthStale: Bool?
 
     public init(total: Int = 0, active: Int = 0, ready: Int = 0,
                 errored: Int = 0, stopped: Int = 0,
                 jailedComments: Int? = nil, jailedNewestAuthor: String? = nil,
                 jailedNewestRepo: String? = nil, jailedNewestPR: Int? = nil,
-                orchestratorAttention: String? = nil) {
+                orchestratorAttention: String? = nil,
+                dependencyHealth: [DependencyHealthSummary]? = nil,
+                dependencyHealthSeverity: String? = nil,
+                dependencyHealthStale: Bool? = nil) {
         self.total = total
         self.active = active
         self.ready = ready
@@ -954,6 +972,9 @@ public struct FleetSummary: Codable, Hashable, Sendable {
         self.jailedNewestRepo = jailedNewestRepo
         self.jailedNewestPR = jailedNewestPR
         self.orchestratorAttention = orchestratorAttention
+        self.dependencyHealth = dependencyHealth
+        self.dependencyHealthSeverity = dependencyHealthSeverity
+        self.dependencyHealthStale = dependencyHealthStale
     }
 
     enum CodingKeys: String, CodingKey {
@@ -967,6 +988,9 @@ public struct FleetSummary: Codable, Hashable, Sendable {
         case jailedNewestRepo = "jailed_newest_repo"
         case jailedNewestPR = "jailed_newest_pr"
         case orchestratorAttention = "orchestrator_attention"
+        case dependencyHealth = "dependency_health"
+        case dependencyHealthSeverity = "dependency_health_severity"
+        case dependencyHealthStale = "dependency_health_stale"
     }
 }
 

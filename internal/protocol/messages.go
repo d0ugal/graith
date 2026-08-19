@@ -1158,6 +1158,15 @@ type MessagesDiagnostic struct {
 	TotalMessages int64 `json:"total_messages"`
 }
 
+// DependencyHealthSummary is the bounded dependency-health metadata carried
+// alongside fleet counts. Entries are active affected services only and are
+// ordered by severity (down before degraded) then name by the daemon.
+type DependencyHealthSummary struct {
+	Name     string `json:"name"`
+	Severity string `json:"severity"`
+	Stale    bool   `json:"stale,omitempty"`
+}
+
 type FleetSummary struct {
 	Total   int `json:"total"`
 	Active  int `json:"active"`
@@ -1171,6 +1180,10 @@ type FleetSummary struct {
 	JailedNewestPR     int    `json:"jailed_newest_pr,omitempty"`
 
 	OrchestratorAttention string `json:"orchestrator_attention,omitempty"`
+
+	DependencyHealth         []DependencyHealthSummary `json:"dependency_health,omitempty"`
+	DependencyHealthSeverity string                    `json:"dependency_health_severity,omitempty"`
+	DependencyHealthStale    bool                      `json:"dependency_health_stale,omitempty"`
 }
 
 type StatusResponseMsg struct {
