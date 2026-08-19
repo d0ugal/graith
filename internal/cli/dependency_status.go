@@ -74,6 +74,7 @@ func dependencyRouting(service protocol.DependencyStatusService) string {
 	if len(service.AgentTypes) == 0 {
 		return "none"
 	}
+
 	return strings.Join(service.AgentTypes, ", ")
 }
 

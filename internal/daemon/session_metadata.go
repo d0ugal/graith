@@ -342,6 +342,7 @@ func dependencyStatusTimePtr(value *time.Time) string {
 	if value == nil {
 		return ""
 	}
+
 	return dependencyStatusTime(*value)
 }
 

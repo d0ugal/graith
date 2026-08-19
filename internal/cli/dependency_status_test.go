@@ -22,6 +22,7 @@ func (fake *fakeDependencyHealthUseCase) Status() (protocol.DependencyStatusResp
 
 func TestRunDependencyStatusJSONIsVersionedAndEmpty(t *testing.T) {
 	var buf bytes.Buffer
+
 	deps := commandDependencies{cfg: config.Default(), out: output.NewWithWriter(true, &buf), health: &fakeDependencyHealthUseCase{response: protocol.DependencyStatusResponseMsg{SchemaVersion: 1, Services: []protocol.DependencyStatusService{}}}}
 
 	cmd := &cobra.Command{}
