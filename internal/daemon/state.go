@@ -954,6 +954,7 @@ func SaveState(path string, state *State) error {
 	if err != nil {
 		return fmt.Errorf("marshal dependency health state: %w", err)
 	}
+
 	if err := writeFileAtomic(dependencyHealthSidecarPath(path), healthData); err != nil {
 		return fmt.Errorf("write dependency health state: %w", err)
 	}

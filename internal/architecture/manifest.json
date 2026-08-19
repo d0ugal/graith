@@ -26,7 +26,7 @@
     "github.com/d0ugal/graith/internal/daemon": "application",
     "github.com/d0ugal/graith/internal/daemonservice": "application",
     "github.com/d0ugal/graith/internal/daemonservice/cmd/generate": "composition",
-    "github.com/d0ugal/graith/internal/dependencyhealth": "utility",
+    "github.com/d0ugal/graith/internal/dependencyhealth": "provider",
     "github.com/d0ugal/graith/internal/detector": "provider",
     "github.com/d0ugal/graith/internal/docspreview": "provider",
     "github.com/d0ugal/graith/internal/executablepin": "provider",
