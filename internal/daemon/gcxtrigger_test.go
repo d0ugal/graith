@@ -573,6 +573,7 @@ func TestGCXGateErrorForcesNextPrime(t *testing.T) {
 
 	failedGate := &fakeGCX{scheduleErr: []error{errors.New("gcx: exit status 1: invalid configuration")}}
 	sm.pollGCXTrigger(t.Context(), trig.Name, failedGate.run)
+
 	if got := sm.getTriggerRuntime(trig.Name).LastError; !strings.Contains(got, "invalid configuration") {
 		t.Fatalf("gate error was not retained in trigger status: %q", got)
 	}
