@@ -65,24 +65,31 @@ func durationOr(raw string, fallback time.Duration) time.Duration {
 // prefix followed by any time.ParseDuration remainder, such as "1d2h".
 func parseDurationWithDays(raw string) (time.Duration, error) {
 	s := strings.TrimSpace(raw)
+
 	var total time.Duration
+
 	if i := strings.Index(s, "d"); i > 0 {
 		var days int
+
 		if _, err := fmt.Sscanf(s[:i+1], "%dd", &days); err == nil {
 			total = time.Duration(days) * 24 * time.Hour
 			s = s[i+1:]
 		}
 	}
+
 	if s != "" {
 		d, err := time.ParseDuration(s)
 		if err != nil {
 			return 0, err
 		}
+
 		total += d
 	}
+
 	if total < 0 {
 		return 0, errors.New("negative duration not allowed")
 	}
+
 	return total, nil
 }
 

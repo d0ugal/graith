@@ -55,91 +55,96 @@
     },
     {
       "id": "package_10",
-      "label": "internal/detector",
+      "label": "internal/dependencyhealth",
       "group": "internal"
     },
     {
       "id": "package_11",
-      "label": "internal/executablepin",
+      "label": "internal/detector",
       "group": "internal"
     },
     {
       "id": "package_12",
-      "label": "internal/git",
+      "label": "internal/executablepin",
       "group": "internal"
     },
     {
       "id": "package_13",
-      "label": "internal/headless",
+      "label": "internal/git",
       "group": "internal"
     },
     {
       "id": "package_14",
-      "label": "internal/hookoutput",
+      "label": "internal/headless",
       "group": "internal"
     },
     {
       "id": "package_15",
-      "label": "internal/ignore",
+      "label": "internal/hookoutput",
       "group": "internal"
     },
     {
       "id": "package_16",
-      "label": "internal/output",
+      "label": "internal/ignore",
       "group": "internal"
     },
     {
       "id": "package_17",
-      "label": "internal/processidentity",
+      "label": "internal/output",
       "group": "internal"
     },
     {
       "id": "package_18",
-      "label": "internal/protocol",
+      "label": "internal/processidentity",
       "group": "internal"
     },
     {
       "id": "package_19",
-      "label": "internal/pty",
+      "label": "internal/protocol",
       "group": "internal"
     },
     {
       "id": "package_20",
-      "label": "internal/sandbox",
+      "label": "internal/pty",
       "group": "internal"
     },
     {
       "id": "package_21",
-      "label": "internal/scenariofile",
+      "label": "internal/sandbox",
       "group": "internal"
     },
     {
       "id": "package_22",
-      "label": "internal/sessionlabel",
+      "label": "internal/scenariofile",
       "group": "internal"
     },
     {
       "id": "package_23",
-      "label": "internal/store",
+      "label": "internal/sessionlabel",
       "group": "internal"
     },
     {
       "id": "package_24",
-      "label": "internal/telemetry",
+      "label": "internal/store",
       "group": "internal"
     },
     {
       "id": "package_25",
-      "label": "internal/testprocess",
+      "label": "internal/telemetry",
       "group": "internal"
     },
     {
       "id": "package_26",
-      "label": "internal/tools",
+      "label": "internal/testprocess",
       "group": "internal"
     },
     {
       "id": "package_27",
+      "label": "internal/tools",
+      "group": "internal"
+    },
+    {
+      "id": "package_28",
       "label": "internal/version",
       "group": "internal"
     }
@@ -151,7 +156,7 @@
     },
     {
       "from": "package_0",
-      "to": "package_19"
+      "to": "package_20"
     },
     {
       "from": "package_4",
@@ -179,15 +184,11 @@
     },
     {
       "from": "package_4",
-      "to": "package_12"
+      "to": "package_13"
     },
     {
       "from": "package_4",
-      "to": "package_14"
-    },
-    {
-      "from": "package_4",
-      "to": "package_16"
+      "to": "package_15"
     },
     {
       "from": "package_4",
@@ -199,7 +200,7 @@
     },
     {
       "from": "package_4",
-      "to": "package_20"
+      "to": "package_19"
     },
     {
       "from": "package_4",
@@ -215,7 +216,7 @@
     },
     {
       "from": "package_4",
-      "to": "package_25"
+      "to": "package_24"
     },
     {
       "from": "package_4",
@@ -224,6 +225,10 @@
     {
       "from": "package_4",
       "to": "package_27"
+    },
+    {
+      "from": "package_4",
+      "to": "package_28"
     },
     {
       "from": "package_5",
@@ -239,10 +244,6 @@
     },
     {
       "from": "package_5",
-      "to": "package_17"
-    },
-    {
-      "from": "package_5",
       "to": "package_18"
     },
     {
@@ -251,15 +252,19 @@
     },
     {
       "from": "package_5",
-      "to": "package_22"
+      "to": "package_20"
     },
     {
       "from": "package_5",
-      "to": "package_25"
+      "to": "package_23"
     },
     {
       "from": "package_5",
-      "to": "package_27"
+      "to": "package_26"
+    },
+    {
+      "from": "package_5",
+      "to": "package_28"
     },
     {
       "from": "package_6",
@@ -267,7 +272,11 @@
     },
     {
       "from": "package_6",
-      "to": "package_26"
+      "to": "package_10"
+    },
+    {
+      "from": "package_6",
+      "to": "package_27"
     },
     {
       "from": "package_8",
@@ -307,11 +316,11 @@
     },
     {
       "from": "package_8",
-      "to": "package_15"
+      "to": "package_14"
     },
     {
       "from": "package_8",
-      "to": "package_17"
+      "to": "package_16"
     },
     {
       "from": "package_8",
@@ -354,6 +363,10 @@
       "to": "package_27"
     },
     {
+      "from": "package_8",
+      "to": "package_28"
+    },
+    {
       "from": "package_9",
       "to": "package_1"
     },
@@ -363,46 +376,46 @@
     },
     {
       "from": "package_9",
-      "to": "package_19"
+      "to": "package_20"
     },
     {
       "from": "package_9",
-      "to": "package_25"
-    },
-    {
-      "from": "package_12",
       "to": "package_26"
     },
     {
       "from": "package_13",
-      "to": "package_19"
+      "to": "package_27"
     },
     {
-      "from": "package_17",
-      "to": "package_26"
+      "from": "package_14",
+      "to": "package_20"
     },
     {
-      "from": "package_20",
-      "to": "package_26"
+      "from": "package_18",
+      "to": "package_27"
     },
     {
       "from": "package_21",
+      "to": "package_27"
+    },
+    {
+      "from": "package_22",
       "to": "package_6"
     },
     {
-      "from": "package_21",
-      "to": "package_18"
+      "from": "package_22",
+      "to": "package_19"
     },
     {
-      "from": "package_23",
+      "from": "package_24",
       "to": "package_3"
     },
     {
-      "from": "package_23",
-      "to": "package_26"
+      "from": "package_24",
+      "to": "package_27"
     },
     {
-      "from": "package_25",
+      "from": "package_26",
       "to": "package_1"
     }
   ]

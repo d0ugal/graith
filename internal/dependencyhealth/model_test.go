@@ -26,6 +26,7 @@ func TestConfigDurationAccessorsSupportDaySyntax(t *testing.T) {
 	if got, want := c.PollIntervalDuration(), 26*time.Hour; got != want {
 		t.Fatalf("poll interval = %s, want %s", got, want)
 	}
+
 	if got, want := c.RecoveryPollIntervalDuration(), 12*time.Hour; got != want {
 		t.Fatalf("recovery interval = %s, want %s", got, want)
 	}

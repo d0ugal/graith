@@ -25,6 +25,7 @@ command = "codex"
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !cfg.DependencyHealth.Enabled || len(cfg.DependencyHealth.Services) != 2 {
 		t.Fatalf("dependency health config = %+v", cfg.DependencyHealth)
 	}

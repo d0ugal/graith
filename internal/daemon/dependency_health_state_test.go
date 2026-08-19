@@ -24,6 +24,7 @@ func TestDependencyHealthStateRoundTripAndOlderVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := loaded.DependencyHealth.Services["github"].ObservedState; got != dependencyhealth.Degraded {
 		t.Fatalf("state = %q", got)
 	}
@@ -32,6 +33,7 @@ func TestDependencyHealthStateRoundTripAndOlderVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -40,6 +42,7 @@ func TestDependencyHealthStateRoundTripAndOlderVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if loaded.DependencyHealth == nil || loaded.DependencyHealth.Services["github"].Generation != 2 {
 		t.Fatal("dependency health lost during migration")
 	}
@@ -57,6 +60,7 @@ func TestDependencyHealthCorruptionDoesNotDiscardSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if state.Sessions["braw"] == nil || state.DependencyHealth == nil || len(state.DependencyHealth.Services) != 0 {
 		t.Fatalf("state = %+v", state)
 	}
@@ -81,6 +85,7 @@ func TestDependencyHealthSidecarSurvivesOlderDaemonRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if loaded.DependencyHealth.Services["github"].ObservedState != dependencyhealth.Down {
 		t.Fatal("sidecar health was lost")
 	}
