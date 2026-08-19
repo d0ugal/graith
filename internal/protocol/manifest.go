@@ -211,6 +211,7 @@ var registeredTypes = []any{
 	PRPushDiagnostic{},
 	ScrollbackDiagnostic{},
 	MessagesDiagnostic{},
+	DependencyHealthSummary{},
 	FleetSummary{},
 	StatusResponseMsg{},
 	ScenarioStartMsg{},
@@ -444,6 +445,7 @@ var swiftAnnotations = map[string]swiftAnnotation{
 	"OrchestratorAttentionResponse": {SwiftNA, ""},
 	"TokenInfo":                     {SwiftPlanned, ""},
 	"FleetSummary":                  {SwiftRequired, "FleetSummary"},            // GUI diagnostics panel (#904)
+	"DependencyHealthSummary":       {SwiftRequired, "DependencyHealthSummary"}, // Fleet status metadata (#2219)
 	"ConfigResponseMsg":             {SwiftRequired, "ConfigResponseMsg"},       // GUI config viewer (#904)
 	"AgentCatalogEntry":             {SwiftRequired, "AgentCatalogEntry"},       // GUI agent catalog (#1234)
 	"AgentCatalogResponseMsg":       {SwiftRequired, "AgentCatalogResponseMsg"}, // GUI agent catalog (#1234)

@@ -438,6 +438,47 @@ func TestFormatFleetSection_NoInterestingBuckets(t *testing.T) {
 	}
 }
 
+func TestFormatDependencyAttention_SortsAndBounds(t *testing.T) {
+	fleet := protocol.FleetSummary{
+		DependencyHealth: []protocol.DependencyHealthSummary{
+			{Name: "zeta", Severity: "degraded"},
+			{Name: "GitHub", Severity: "down"},
+			{Name: "alpha", Severity: "degraded"},
+			{Name: "zzzz", Severity: "degraded"},
+		},
+		DependencyHealthSeverity: "down",
+		DependencyHealthStale:    true,
+	}
+
+	full := formatDependencyAttention(fleet, accentBg, statusRightFull)
+	if !strings.Contains(full, "GitHub down") || !strings.Contains(full, "alpha degraded") || strings.Contains(full, "zzzz") {
+		t.Fatalf("full dependency warning = %q, want severity/name order and three-entry bound", full)
+	}
+
+	if !strings.Contains(full, "~") {
+		t.Fatalf("full dependency warning = %q, want stale marker", full)
+	}
+}
+
+func TestFormatDependencyAttention_AdaptiveModes(t *testing.T) {
+	fleet := protocol.FleetSummary{
+		DependencyHealth: []protocol.DependencyHealthSummary{
+			{Name: "OpenAI", Severity: "down"},
+			{Name: "GitHub", Severity: "degraded"},
+		},
+	}
+
+	compact := formatDependencyAttention(fleet, accentBg, statusRightCompact)
+	if !strings.Contains(compact, "down ×2") {
+		t.Fatalf("compact dependency warning = %q, want highest severity and count", compact)
+	}
+
+	critical := formatDependencyAttention(fleet, accentBg, statusRightCritical)
+	if !strings.Contains(critical, "✗ down") || strings.Contains(critical, "OpenAI") {
+		t.Fatalf("critical dependency warning = %q, want severity only", critical)
+	}
+}
+
 // --- formatFleetMinimal ---
 
 func TestFormatFleetMinimal(t *testing.T) {
