@@ -33,7 +33,7 @@ type Poller struct {
 	Clock         Clock
 	Jitter        time.Duration
 	OnObservation func(Observation)
-	OnTransition  func(PollTransition)
+	OnTransition  func(ObservationTransition)
 	mu            sync.RWMutex
 	services      []ServiceConfig
 	observations  map[string]Observation
@@ -46,6 +46,16 @@ type Provider interface {
 	Poll(context.Context, ServiceConfig) (Observation, error)
 }
 
+// ObservationTransition is a fresh provider-state change. It is distinct
+// from Transition, the durable notification outbox record in model.go.
+type ObservationTransition struct {
+	Service    string
+	Generation uint64
+	Previous   ObservedState
+	Current    ObservedState
+	ObservedAt time.Time
+}
+
 func NewPoller(provider Provider, services []ServiceConfig) *Poller {
 	return &Poller{Provider: provider, Clock: realClock{}, services: append([]ServiceConfig(nil), services...), observations: make(map[string]Observation), generations: make(map[string]uint64), lastPoll: make(map[string]time.Time)}
 }
@@ -54,6 +64,21 @@ func (p *Poller) SetServices(services []ServiceConfig) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.services = append([]ServiceConfig(nil), services...)
+}
+
+// Seed restores the last durable observations before the first poll. The
+// caller supplies only provider-normalized data; no status-page content is
+// interpreted here.
+func (p *Poller) Seed(observations []Observation, generations map[string]uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, observation := range observations {
+		observation.IncidentIDs = append([]string(nil), observation.IncidentIDs...)
+		p.observations[observation.Service] = observation
+	}
+	for service, generation := range generations {
+		p.generations[service] = generation
+	}
 }
 
 func (p *Poller) Snapshot() []Observation {
@@ -137,7 +162,7 @@ func (p *Poller) record(service ServiceConfig, observation Observation, pollErr 
 	observation.LastFailureAt = previous.LastFailureAt
 	if (!existed || previous.SourceHealth == Fresh) && previous.State != observation.State && isNotifiable(previous.State, observation.State) {
 		p.generations[service.Name]++
-		transition := PollTransition{Service: service.Name, Generation: p.generations[service.Name], Previous: previous.State, Current: observation.State, ObservedAt: observation.ObservedAt}
+		transition := ObservationTransition{Service: service.Name, Generation: p.generations[service.Name], Previous: previous.State, Current: observation.State, ObservedAt: observation.ObservedAt}
 		p.observations[service.Name] = observation
 		callback, transitionCallback := p.OnObservation, p.OnTransition
 		p.mu.Unlock()
