@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.73.15](https://github.com/d0ugal/graith/compare/v0.73.14...v0.73.15) (2026-08-19)
+
+
+### Bug Fixes
+
+* clear stale gcx trigger errors ([0cdbf2e](https://github.com/d0ugal/graith/commit/0cdbf2e51d37b5042cdcaa174acb97d4865ef05b))
+* preserve gcx trigger failure diagnostics ([0cbb958](https://github.com/d0ugal/graith/commit/0cbb95871132369a8b67635ea43b661d21c20ddd))
+* satisfy gcx diagnostics lint ([bccb3b1](https://github.com/d0ugal/graith/commit/bccb3b1d7b2ec32a1c699695c729f0d8d87d6e14))
+* update google.golang.org/genproto/googleapis/api digest to 1b09341 ([#2207](https://github.com/d0ugal/graith/issues/2207)) ([7515cd3](https://github.com/d0ugal/graith/commit/7515cd351033b7b66f471a345d0fc94a1b82429b))
+* update google.golang.org/genproto/googleapis/rpc digest to 1b09341 ([#2208](https://github.com/d0ugal/graith/issues/2208)) ([e389734](https://github.com/d0ugal/graith/commit/e38973441b69e4823b650a61732d14a8c0c09fe0))
+
 ## [0.73.14](https://github.com/d0ugal/graith/compare/v0.73.13...v0.73.14) (2026-08-18)
 
 
