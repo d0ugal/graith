@@ -584,6 +584,10 @@ func TestGCXGateErrorForcesNextPrime(t *testing.T) {
 	}
 	sm.pollGCXTrigger(t.Context(), trig.Name, recovered.run)
 
+	if got := sm.getTriggerRuntime(trig.Name).LastError; got != "" {
+		t.Fatalf("successful poll retained stale gate error: %q", got)
+	}
+
 	if messages, _ := ms.Read("blether", "reader", false, ""); len(messages) != 0 {
 		t.Fatalf("gate recovery replayed uncertain backlog: %+v", messages)
 	}
