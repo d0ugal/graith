@@ -223,6 +223,10 @@ func (sm *SessionManager) pollGCXTrigger(ctx context.Context, name string, runne
 	}
 
 	prime, current := sm.updateGCXGate(name, fingerprint, onCall)
+	if rt := sm.getTriggerRuntime(name); rt != nil && rt.LastError != "" {
+		sm.clearTriggerError(name)
+	}
+
 	if !current {
 		return
 	}

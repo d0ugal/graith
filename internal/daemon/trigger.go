@@ -528,6 +528,10 @@ func (sm *SessionManager) recordTriggerError(name, msg string) {
 	_ = sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.LastError = msg })
 }
 
+func (sm *SessionManager) clearTriggerError(name string) {
+	_ = sm.updateTriggerRuntime(name, func(r *TriggerRuntimeState) { r.LastError = "" })
+}
+
 func (sm *SessionManager) recordTriggerRun(name string, run TriggerRun) {
 	maxHistory := sm.Config().TriggersRuntime.RunHistoryMax()
 
