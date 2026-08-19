@@ -17,6 +17,7 @@ import (
 
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 )
 
 const CurrentStateVersion = 32
@@ -634,6 +635,11 @@ type State struct {
 	// session's current ParentID at delivery time, so reparenting cannot leave a
 	// stale target.
 	EventFollowRules map[string]*EventFollowRuleState `json:"event_follow_rules,omitempty"`
+	// DependencyHealth is an optional, independently versioned observation and
+	// notification outbox envelope. It is additive so older daemons can still
+	// read the session state; malformed health data is isolated by the envelope
+	// decoder and never invalidates the rest of state.
+	DependencyHealth *dependencyhealth.PersistedState `json:"dependency_health,omitempty"`
 }
 
 type EventFollowRuleState struct {
@@ -742,6 +748,7 @@ func NewState() *State {
 		UpgradeCleanup:         make(map[string]UpgradeCleanupState),
 		PRWatchPromptedAuthors: make(map[string]bool),
 		EventFollowRules:       make(map[string]*EventFollowRuleState),
+		DependencyHealth:       &dependencyhealth.PersistedState{SchemaVersion: dependencyhealth.StateSchemaVersion, Services: make(map[string]dependencyhealth.ServiceState)},
 	}
 }
 
@@ -759,6 +766,15 @@ func LoadState(path string) (*State, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		slog.Warn("corrupted state file, starting fresh", "path", path, "err", err)
 		return NewState(), nil
+	}
+	// Keep the optional health envelope in a sidecar as well as the main state
+	// document. Older daemons ignore unknown JSON fields and would otherwise
+	// erase health observations when rewriting state during an unrelated update.
+	if healthData, err := os.ReadFile(dependencyHealthSidecarPath(path)); err == nil { // #nosec G703 -- path is the trusted daemon state path derived at startup.
+		var health dependencyhealth.PersistedState
+		if json.Unmarshal(healthData, &health) == nil && health.SchemaVersion == dependencyhealth.StateSchemaVersion {
+			state.DependencyHealth = &health
+		}
 	}
 
 	if state.Sessions == nil {
@@ -787,6 +803,10 @@ func LoadState(path string) (*State, error) {
 
 	if state.EventFollowRules == nil {
 		state.EventFollowRules = make(map[string]*EventFollowRuleState)
+	}
+
+	if state.DependencyHealth == nil {
+		state.DependencyHealth = &dependencyhealth.PersistedState{SchemaVersion: dependencyhealth.StateSchemaVersion, Services: make(map[string]dependencyhealth.ServiceState)}
 	}
 
 	if state.Version > CurrentStateVersion {
@@ -896,6 +916,10 @@ func LoadStateSnapshotForAdoption(data []byte) (*State, int, error) {
 		state.EventFollowRules = make(map[string]*EventFollowRuleState)
 	}
 
+	if state.DependencyHealth == nil {
+		state.DependencyHealth = &dependencyhealth.PersistedState{SchemaVersion: dependencyhealth.StateSchemaVersion, Services: make(map[string]dependencyhealth.ServiceState)}
+	}
+
 	pruneEventFollowRules(&state)
 
 	return &state, originalVersion, nil
@@ -917,8 +941,27 @@ func SaveState(path string, state *State) error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 
-	return writeFileAtomic(path, data)
+	if err := writeFileAtomic(path, data); err != nil {
+		return err
+	}
+
+	health := state.DependencyHealth
+	if health == nil {
+		health = &dependencyhealth.PersistedState{SchemaVersion: dependencyhealth.StateSchemaVersion, Services: make(map[string]dependencyhealth.ServiceState)}
+	}
+
+	healthData, err := json.MarshalIndent(health, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal dependency health state: %w", err)
+	}
+	if err := writeFileAtomic(dependencyHealthSidecarPath(path), healthData); err != nil {
+		return fmt.Errorf("write dependency health state: %w", err)
+	}
+
+	return nil
 }
+
+func dependencyHealthSidecarPath(path string) string { return path + ".dependency_health" }
 
 var migrations = map[int]func(*State) error{
 	0:  migrateV0ToV1,
