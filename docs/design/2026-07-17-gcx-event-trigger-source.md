@@ -172,8 +172,9 @@ and labels are excluded.
 An alert result whose length reaches `limit` is treated as incomplete. The
 daemon neither primes nor advances the cursor, and records a trigger error that
 tells the operator to narrow filters or raise the limit. All gcx subprocesses
-have a timeout and inherit the gcx configuration environment; stdout alone is
-decoded as JSON, while bounded stderr is included in errors.
+have a timeout and inherit the gcx configuration environment; stdout is decoded
+as JSON on success, while bounded stdout and stderr are included in errors so
+structured diagnostics from either stream remain actionable.
 `max_age` must be greater than or equal to `every` so cursor pruning cannot make
 a continuously returned event look new between polls.
 

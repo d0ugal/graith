@@ -640,7 +640,19 @@ func runGCXCommand(ctx context.Context, contextName string, args ...string) ([]b
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		// gcx normally reports command failures on stderr, but newer versions
+		// emit structured diagnostics on stdout. Preserve either stream so a
+		// trigger status explains the actionable failure instead of only saying
+		// "exit status 1".
 		detail := strings.TrimSpace(stderr.String())
+		stdoutDetail := strings.TrimSpace(stdout.String())
+		if stdoutDetail != "" {
+			if detail != "" {
+				detail += "\n" + stdoutDetail
+			} else {
+				detail = stdoutDetail
+			}
+		}
 		if len(detail) > 4096 {
 			detail = detail[:4096] + "…"
 		}
