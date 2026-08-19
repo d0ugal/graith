@@ -321,8 +321,10 @@ func (sm *SessionManager) DependencyStatus() protocol.DependencyStatusResponseMs
 				service.IncidentIDs = append([]string(nil), observed.IncidentIDs...)
 			}
 		}
+
 		services = append(services, service)
 	}
+
 	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
 
 	return protocol.DependencyStatusResponseMsg{SchemaVersion: dependencyhealth.StateSchemaVersion, Services: services}

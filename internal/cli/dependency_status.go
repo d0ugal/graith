@@ -22,6 +22,7 @@ var dependencyStatusCmd = &cobra.Command{
 
 func runDependencyStatus(cmd *cobra.Command, _ []string) error {
 	deps := commandDeps(cmd.Context())
+
 	response, err := deps.health.Status()
 	if err != nil {
 		return err
@@ -32,6 +33,7 @@ func runDependencyStatus(cmd *cobra.Command, _ []string) error {
 	}
 
 	renderDependencyStatus(deps.out, response)
+
 	return nil
 }
 

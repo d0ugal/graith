@@ -29,6 +29,7 @@ func TestRunDependencyStatusJSONIsVersionedAndEmpty(t *testing.T) {
 	if err := runDependencyStatus(cmd, nil); err != nil {
 		t.Fatal(err)
 	}
+
 	var got protocol.DependencyStatusResponseMsg
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("decode JSON: %v\n%s", err, buf.String())
@@ -44,6 +45,7 @@ func TestRenderDependencyStatusIncludesRoutingAndFailureDetails(t *testing.T) {
 		Name: "github", Provider: "statuspage", SourceURL: "https://status.example", Global: true,
 		ObservedState: "degraded", SourceHealth: "stale", LastFailureAt: "2026-08-19T19:00:00Z", IncidentIDs: []string{"inc-7"},
 	}}})
+
 	for _, want := range []string{"github", "all agents", "degraded", "stale", "2026-08-19T19:00:00Z", "inc-7"} {
 		if !bytes.Contains(buf.Bytes(), []byte(want)) {
 			t.Errorf("output %q missing %q", buf.String(), want)
