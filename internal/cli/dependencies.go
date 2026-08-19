@@ -63,6 +63,7 @@ func commandDeps(ctx context.Context) commandDependencies {
 		if deps.search == nil {
 			deps.search = newClientConversationSearchUseCase(cfg, paths, cfgFile)
 		}
+
 		if deps.health == nil {
 			deps.health = newClientDependencyHealthUseCase(cfg, paths, cfgFile)
 		}
