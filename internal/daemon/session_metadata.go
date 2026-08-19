@@ -273,6 +273,7 @@ func (sm *SessionManager) fleetSummary() protocol.FleetSummary {
 	}
 
 	f.OrchestratorAttention = sm.visibleOrchestratorAttentionLocked()
+	sm.addDependencyHealthSummaryLocked(&f)
 
 	messages := sm.messages
 	sm.mu.RUnlock()
@@ -344,6 +345,59 @@ func dependencyStatusTimePtr(value *time.Time) string {
 	}
 
 	return dependencyStatusTime(*value)
+}
+
+const maxDependencyHealthSummary = 3
+
+// addDependencyHealthSummaryLocked projects the daemon's validated, persisted
+// dependency snapshot into the bounded status-bar wire shape. Configuration is
+// the source of truth for active services so removed services do not linger in
+// the fleet signal.
+func (sm *SessionManager) addDependencyHealthSummaryLocked(f *protocol.FleetSummary) {
+	if sm.cfg == nil || !sm.cfg.DependencyHealth.Enabled || sm.state == nil || sm.state.DependencyHealth == nil {
+		return
+	}
+
+	configured := make(map[string]struct{}, len(sm.cfg.DependencyHealth.Services))
+	for _, service := range sm.cfg.DependencyHealth.Services {
+		configured[service.Name] = struct{}{}
+	}
+
+	services := make([]protocol.DependencyHealthSummary, 0, len(configured))
+	for name, state := range sm.state.DependencyHealth.Services {
+		if _, ok := configured[name]; !ok || (state.ObservedState != dependencyhealth.Down && state.ObservedState != dependencyhealth.Degraded) {
+			continue
+		}
+
+		services = append(services, protocol.DependencyHealthSummary{
+			Name:     name,
+			Severity: string(state.ObservedState),
+			Stale:    state.SourceHealth != dependencyhealth.Fresh,
+		})
+	}
+
+	sort.Slice(services, func(i, j int) bool {
+		if services[i].Severity != services[j].Severity {
+			return services[i].Severity == "down"
+		}
+
+		return services[i].Name < services[j].Name
+	})
+
+	if len(services) == 0 {
+		return
+	}
+
+	f.DependencyHealthSeverity = services[0].Severity
+	for _, service := range services {
+		f.DependencyHealthStale = f.DependencyHealthStale || service.Stale
+	}
+
+	if len(services) > maxDependencyHealthSummary {
+		services = services[:maxDependencyHealthSummary]
+	}
+
+	f.DependencyHealth = services
 }
 
 // Diagnostics collects runtime health data for gr doctor.

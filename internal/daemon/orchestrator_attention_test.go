@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -405,5 +406,53 @@ func TestFleetSummarySuppressesStaleAttention(t *testing.T) {
 
 	if got := h.sm.fleetSummary().OrchestratorAttention; got != "" {
 		t.Fatalf("soft-deleted orchestrator attention = %q, want empty", got)
+	}
+}
+
+func TestFleetSummaryIncludesDependencyHealthBoundedAndSorted(t *testing.T) {
+	h := newTestHarness(t)
+	h.sm.mu.Lock()
+	h.sm.cfg.DependencyHealth.Enabled = true
+	h.sm.cfg.DependencyHealth.Services = []dependencyhealth.Service{
+		{Name: "alpha", Global: true}, {Name: "bravo", Global: true},
+		{Name: "charlie", Global: true}, {Name: "delta", Global: true},
+		{Name: "ignored", Global: true},
+	}
+	h.sm.state.DependencyHealth.Services = map[string]dependencyhealth.ServiceState{
+		"alpha":   {ObservedState: dependencyhealth.Degraded, SourceHealth: dependencyhealth.Fresh},
+		"bravo":   {ObservedState: dependencyhealth.Down, SourceHealth: dependencyhealth.Stale},
+		"charlie": {ObservedState: dependencyhealth.Down, SourceHealth: dependencyhealth.Fresh},
+		"delta":   {ObservedState: dependencyhealth.Degraded, SourceHealth: dependencyhealth.Failed},
+		"ignored": {ObservedState: dependencyhealth.Operational, SourceHealth: dependencyhealth.Fresh},
+		"removed": {ObservedState: dependencyhealth.Down, SourceHealth: dependencyhealth.Fresh},
+	}
+	h.sm.mu.Unlock()
+
+	fleet := h.sm.fleetSummary()
+	if fleet.DependencyHealthSeverity != "down" || !fleet.DependencyHealthStale || len(fleet.DependencyHealth) != 3 {
+		t.Fatalf("dependency fleet summary = %+v, want down, stale, and three entries", fleet)
+	}
+
+	want := []string{"bravo", "charlie", "alpha"}
+	for i, service := range fleet.DependencyHealth {
+		if service.Name != want[i] {
+			t.Fatalf("dependency fleet summary[%d] = %+v, want %q", i, service, want[i])
+		}
+	}
+}
+
+func TestFleetSummarySuppressesDisabledDependencyHealth(t *testing.T) {
+	h := newTestHarness(t)
+	h.sm.mu.Lock()
+	h.sm.cfg.DependencyHealth.Services = []dependencyhealth.Service{{Name: "github", Global: true}}
+	h.sm.state.DependencyHealth.Services["github"] = dependencyhealth.ServiceState{
+		ObservedState: dependencyhealth.Down, SourceHealth: dependencyhealth.Fresh,
+	}
+	h.sm.cfg.DependencyHealth.Enabled = false
+	h.sm.mu.Unlock()
+
+	fleet := h.sm.fleetSummary()
+	if len(fleet.DependencyHealth) != 0 || fleet.DependencyHealthSeverity != "" || fleet.DependencyHealthStale {
+		t.Fatalf("disabled dependency health = %+v, want empty metadata", fleet)
 	}
 }
