@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 	"github.com/d0ugal/graith/internal/tools"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -36,41 +37,42 @@ type Config struct {
 
 	NotificationRules []NotificationInstructionRule `toml:"notification_instruction"`
 
-	Messages         Messages               `toml:"messages"`
-	Delete           Delete                 `toml:"delete"`
-	GC               GCConfig               `toml:"gc"`
-	Todo             TodoConfig             `toml:"todo"`
-	Sandbox          SandboxConfig          `toml:"sandbox"`
-	Status           StatusConfig           `toml:"status"`
-	AgentInfo        AgentInfoConfig        `toml:"agent_info"`
-	GitPull          GitPullConfig          `toml:"git_pull"`
-	Launch           LaunchConfig           `toml:"launch"`
-	Logging          LoggingConfig          `toml:"logging"`
-	Telemetry        TelemetryConfig        `toml:"telemetry"`
-	PRWatch          PRWatchConfig          `toml:"pr_watch"`
-	SessionNavigator SessionNavigatorConfig `toml:"session_navigator"`
-	Orchestrator     OrchestratorConfig     `toml:"orchestrator"`
-	Remote           RemoteConfig           `toml:"remote"`
-	Input            InputConfig            `toml:"input"`
-	Agents           map[string]Agent       `toml:"agents"`
-	Triggers         []TriggerConfig        `toml:"trigger"`          // [[trigger]] array
-	TriggersRuntime  TriggersRuntime        `toml:"triggers"`         // [triggers] table (daemon-wide settings)
-	Headless         HeadlessConfig         `toml:"headless"`         // [headless] table (issue #1075)
-	Updates          UpdatesConfig          `toml:"updates"`          // [updates] table (issue #1253)
-	Detection        DetectionConfig        `toml:"detection"`        // [detection] table (issue #1241)
-	ConfigReload     ConfigReload           `toml:"config"`           // [config] table (issue #1237)
-	Tools            ToolsConfig            `toml:"tools"`            // [tools] table (issue #1238)
-	Git              GitConfig              `toml:"git"`              // [git] table (issue #1238)
-	Connection       ConnectionConfig       `toml:"connection"`       // [connection] table (issue #1242)
-	DaemonService    DaemonServiceConfig    `toml:"daemon_service"`   // [daemon_service] table (issue #1473)
-	TokenAccounting  TokenAccounting        `toml:"token_accounting"` // [token_accounting] table (issue #1244)
-	ResourceMonitor  ResourceMonitor        `toml:"resource_monitor"` // [resource_monitor] table (issue #1244)
-	Migration        MigrationConfig        `toml:"migration"`        // [migration] table (issue #1250)
-	Transcript       TranscriptConfig       `toml:"transcript"`       // [transcript] table (issue #1250)
-	Search           SearchConfig           `toml:"search"`           // [search] table (issue #1455)
-	Limits           LimitsConfig           `toml:"limits"`           // [limits] table (issue #1252)
-	Lifecycle        LifecycleConfig        `toml:"lifecycle"`        // [lifecycle] table (issue #1243)
-	Terminal         TerminalConfig         `toml:"terminal"`         // [terminal] table (issue #1254)
+	Messages         Messages                `toml:"messages"`
+	Delete           Delete                  `toml:"delete"`
+	GC               GCConfig                `toml:"gc"`
+	Todo             TodoConfig              `toml:"todo"`
+	Sandbox          SandboxConfig           `toml:"sandbox"`
+	Status           StatusConfig            `toml:"status"`
+	AgentInfo        AgentInfoConfig         `toml:"agent_info"`
+	GitPull          GitPullConfig           `toml:"git_pull"`
+	Launch           LaunchConfig            `toml:"launch"`
+	Logging          LoggingConfig           `toml:"logging"`
+	Telemetry        TelemetryConfig         `toml:"telemetry"`
+	PRWatch          PRWatchConfig           `toml:"pr_watch"`
+	SessionNavigator SessionNavigatorConfig  `toml:"session_navigator"`
+	Orchestrator     OrchestratorConfig      `toml:"orchestrator"`
+	Remote           RemoteConfig            `toml:"remote"`
+	Input            InputConfig             `toml:"input"`
+	Agents           map[string]Agent        `toml:"agents"`
+	Triggers         []TriggerConfig         `toml:"trigger"`           // [[trigger]] array
+	TriggersRuntime  TriggersRuntime         `toml:"triggers"`          // [triggers] table (daemon-wide settings)
+	Headless         HeadlessConfig          `toml:"headless"`          // [headless] table (issue #1075)
+	Updates          UpdatesConfig           `toml:"updates"`           // [updates] table (issue #1253)
+	Detection        DetectionConfig         `toml:"detection"`         // [detection] table (issue #1241)
+	ConfigReload     ConfigReload            `toml:"config"`            // [config] table (issue #1237)
+	Tools            ToolsConfig             `toml:"tools"`             // [tools] table (issue #1238)
+	Git              GitConfig               `toml:"git"`               // [git] table (issue #1238)
+	Connection       ConnectionConfig        `toml:"connection"`        // [connection] table (issue #1242)
+	DaemonService    DaemonServiceConfig     `toml:"daemon_service"`    // [daemon_service] table (issue #1473)
+	TokenAccounting  TokenAccounting         `toml:"token_accounting"`  // [token_accounting] table (issue #1244)
+	ResourceMonitor  ResourceMonitor         `toml:"resource_monitor"`  // [resource_monitor] table (issue #1244)
+	Migration        MigrationConfig         `toml:"migration"`         // [migration] table (issue #1250)
+	Transcript       TranscriptConfig        `toml:"transcript"`        // [transcript] table (issue #1250)
+	Search           SearchConfig            `toml:"search"`            // [search] table (issue #1455)
+	Limits           LimitsConfig            `toml:"limits"`            // [limits] table (issue #1252)
+	Lifecycle        LifecycleConfig         `toml:"lifecycle"`         // [lifecycle] table (issue #1243)
+	Terminal         TerminalConfig          `toml:"terminal"`          // [terminal] table (issue #1254)
+	DependencyHealth dependencyhealth.Config `toml:"dependency_health"` // [dependency_health] opt-in daemon health signals
 
 	// Warnings collects non-fatal configuration problems detected at load time
 	// (e.g. conflicting keybindings). They are surfaced to the user but do not
@@ -4814,6 +4816,16 @@ func (c *Config) validateSearchLimits() []error {
 
 func (c *Config) Validate() error {
 	var errs []error
+
+	configuredAgents := make(map[string]struct{}, len(c.Agents))
+	for name := range c.Agents {
+		configuredAgents[name] = struct{}{}
+	}
+
+	if err := c.DependencyHealth.Validate(ParseDurationWithDays, configuredAgents); err != nil {
+		errs = append(errs, err)
+	}
+
 	if c.DataDir != "" && !filepath.IsAbs(c.DataDir) && !strings.HasPrefix(c.DataDir, "~/") {
 		errs = append(errs, fmt.Errorf("data_dir %q must be an absolute path or start with ~/", c.DataDir))
 	}
