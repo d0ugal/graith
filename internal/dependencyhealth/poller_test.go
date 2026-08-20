@@ -3,7 +3,9 @@ package dependencyhealth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -28,6 +30,121 @@ func TestPollerTransitionsAndFailureStaleness(t *testing.T) {
 	}
 	if len(transitions) != 1 {
 		t.Fatalf("failure emitted transition: %#v", transitions)
+	}
+}
+
+//nolint:wsl_v5 // The fixed test service count is intentionally small and bounded.
+func TestPollerBoundsConcurrencyAndReportsOutcomes(t *testing.T) {
+	provider := &concurrencyProvider{}
+	services := make([]ServiceConfig, 8)
+	for i := range services {
+		services[i] = ServiceConfig{Name: fmt.Sprintf("svc-%d", i), BaseURL: "https://status.example"}
+	}
+	poller := NewPoller(provider, services)
+	var outcomes atomic.Int32
+	var invalid atomic.Bool
+	poller.OnPollOutcome = func(outcome PollOutcome) {
+		if outcome.Result != "success" || outcome.Service == "" || outcome.Duration < 0 {
+			invalid.Store(true)
+		}
+		outcomes.Add(1)
+	}
+	poller.PollOnce(context.Background())
+	if got := provider.max.Load(); got > MaxPollConcurrency {
+		t.Fatalf("maximum concurrent polls = %d, want <= %d", got, MaxPollConcurrency)
+	}
+	if got := provider.max.Load(); got != MaxPollConcurrency {
+		t.Fatalf("maximum concurrent polls = %d, want %d", got, MaxPollConcurrency)
+	}
+	if got := int(outcomes.Load()); got != len(services) {
+		t.Fatalf("outcomes = %d, want %d", got, len(services))
+	}
+	if invalid.Load() {
+		t.Fatal("poller reported an invalid outcome")
+	}
+}
+
+//nolint:wsl_v5 // This test deliberately interleaves reload and cancellation steps.
+func TestPollerReloadAndShutdownAreSafeDuringPoll(t *testing.T) {
+	provider := &blockingProvider{started: make(chan struct{})}
+	poller := NewPoller(provider, []ServiceConfig{{Name: "braw", BaseURL: "https://status.example"}})
+	poller.OnPollOutcome = func(PollOutcome) {}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		poller.PollOnce(ctx)
+		close(done)
+	}()
+	<-provider.started
+	poller.SetServices([]ServiceConfig{{Name: "canny", BaseURL: "https://status.example"}})
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not stop after context cancellation")
+	}
+}
+
+//nolint:wsl_v5 // The ordered calls document the service snapshot transition.
+func TestPollerReloadUsesNewServiceSnapshot(t *testing.T) {
+	provider := &recordingProvider{}
+	poller := NewPoller(provider, []ServiceConfig{{Name: "braw", BaseURL: "https://status.example"}})
+	poller.PollOnce(context.Background())
+	poller.SetServices([]ServiceConfig{{Name: "canny", BaseURL: "https://status.example"}})
+	poller.PollOnce(context.Background())
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.names) != 2 || provider.names[0] != "braw" || provider.names[1] != "canny" {
+		t.Fatalf("polled services = %#v, want [braw canny]", provider.names)
+	}
+}
+
+type recordingProvider struct {
+	mu    sync.Mutex
+	names []string
+}
+
+//nolint:wsl_v5 // Recording is intentionally a short lock-and-return fake.
+func (p *recordingProvider) Poll(_ context.Context, service ServiceConfig) (Observation, error) {
+	p.mu.Lock()
+	p.names = append(p.names, service.Name)
+	p.mu.Unlock()
+	return Observation{Service: service.Name, State: Operational}, nil
+}
+
+type blockingProvider struct{ started chan struct{} }
+
+//nolint:wsl_v5 // Cancellation behavior is the purpose of this fake provider.
+func (p *blockingProvider) Poll(ctx context.Context, service ServiceConfig) (Observation, error) {
+	select {
+	case p.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return Observation{}, ctx.Err()
+}
+
+type concurrencyProvider struct {
+	active atomic.Int32
+	max    atomic.Int32
+}
+
+//nolint:wsl_v5 // The provider keeps the synchronization steps explicit for the race test.
+func (p *concurrencyProvider) Poll(ctx context.Context, service ServiceConfig) (Observation, error) {
+	active := p.active.Add(1)
+	for {
+		previous := p.max.Load()
+		if active <= previous || p.max.CompareAndSwap(previous, active) {
+			break
+		}
+	}
+	defer p.active.Add(-1)
+	select {
+	case <-ctx.Done():
+		return Observation{}, ctx.Err()
+	case <-time.After(time.Millisecond):
+		return Observation{Service: service.Name, State: Operational}, nil
 	}
 }
 

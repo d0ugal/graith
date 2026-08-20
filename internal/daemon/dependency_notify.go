@@ -184,6 +184,13 @@ func (sm *SessionManager) RunDependencyHealthLoop(ctx context.Context) {
 		routes[service.Name] = dependencyHealthRoute{Global: service.Global, AgentTypes: append([]string(nil), service.AgentTypes...)}
 	}
 	poller := dependencyhealth.NewPoller(dependencyhealth.Statuspage{}, services)
+	poller.OnPollOutcome = func(outcome dependencyhealth.PollOutcome) {
+		sm.observeDependencyPoll(outcome.Result)
+		sm.log.Debug("dependency health poll completed",
+			"service", outcome.Service,
+			"result", outcome.Result,
+			"duration_ms", outcome.Duration.Milliseconds())
+	}
 	sm.mu.RLock()
 	var restored []dependencyhealth.Observation
 	generations := make(map[string]uint64)
@@ -251,7 +258,13 @@ func (sm *SessionManager) enqueueDependencyHealthTransition(change dependencyhea
 	if sm.state.DependencyHealth.Services == nil {
 		sm.state.DependencyHealth.Services = make(map[string]dependencyhealth.ServiceState)
 	}
-	sm.state.DependencyHealth.Services[change.Service] = dependencyhealth.ServiceState{ObservedState: change.Current, SourceHealth: dependencyhealth.Fresh, ObservedAt: observation.ObservedAt, IncidentIDs: append([]string(nil), observation.IncidentIDs...), Generation: change.Generation}
+	serviceState := sm.state.DependencyHealth.Services[change.Service]
+	serviceState.ObservedState = change.Current
+	serviceState.SourceHealth = dependencyhealth.Fresh
+	serviceState.ObservedAt = observation.ObservedAt
+	serviceState.IncidentIDs = append([]string(nil), observation.IncidentIDs...)
+	serviceState.Generation = change.Generation
+	sm.state.DependencyHealth.Services[change.Service] = serviceState
 	for _, target := range sm.dependencyHealthTargetsLocked(routes[change.Service]) {
 		key := dependencyHealthPendingKey(transition, target.ID)
 		if dependencyOutboxContains(sm.state.DependencyHealth.Outbox, key) {

@@ -34,11 +34,20 @@ type Poller struct {
 	Jitter        time.Duration
 	OnObservation func(Observation)
 	OnTransition  func(ObservationTransition)
+	OnPollOutcome func(PollOutcome)
 	mu            sync.RWMutex
 	services      []ServiceConfig
 	observations  map[string]Observation
 	generations   map[string]uint64
 	lastPoll      map[string]time.Time
+}
+
+// PollOutcome is deliberately bounded: callers can log the configured service
+// name, but the result is a fixed vocabulary and the error is not included.
+type PollOutcome struct {
+	Service  string
+	Result   string
+	Duration time.Duration
 }
 
 //nolint:inamedparam // Context is conventional for provider implementations.
@@ -108,7 +117,7 @@ func (p *Poller) poll(ctx context.Context, due func(ServiceConfig, time.Time, ti
 	}
 	p.mu.RUnlock()
 	now := p.now()
-	sem := make(chan struct{}, 4)
+	sem := make(chan struct{}, MaxPollConcurrency)
 	var wg sync.WaitGroup
 	for i := range services {
 		service := services[i]
@@ -124,7 +133,15 @@ func (p *Poller) poll(ctx context.Context, due func(ServiceConfig, time.Time, ti
 				return
 			}
 			defer func() { <-sem }()
+			started := time.Now()
 			observation, err := p.Provider.Poll(ctx, service)
+			if callback := p.OnPollOutcome; callback != nil {
+				result := "success"
+				if err != nil {
+					result = "error"
+				}
+				callback(PollOutcome{Service: service.Name, Result: result, Duration: time.Since(started)})
+			}
 			p.record(service, observation, err)
 		}()
 	}
