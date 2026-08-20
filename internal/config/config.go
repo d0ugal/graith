@@ -4056,9 +4056,10 @@ type AgentOptionArg struct {
 }
 
 const (
-	AgentInfoFormatRaw       = "raw"
-	AgentInfoFormatLines     = "lines"
-	AgentInfoFormatModelList = "model_list"
+	AgentInfoFormatRaw          = "raw"
+	AgentInfoFormatLines        = "lines"
+	AgentInfoFormatModelList    = "model_list"
+	AgentInfoFormatCodexCatalog = "codex_model_catalog"
 )
 
 // AgentInfoCommand is one configured provider-info command. The legacy TOML
@@ -4289,15 +4290,9 @@ func (o CodexOptions) IsZero() bool {
 	return o == CodexOptions{}
 }
 
-// Note: graith deliberately does NOT validate the *values* of these options
-// (reasoning effort and service tier). Codex owns those enums and
-// they are version- and model-dependent — e.g. reasoning effort has grown to
-// include `none`/`max`/`ultra` and service tier accepts a legacy `fast` alias
-// across Codex releases. A closed graith allowlist would both reject values
-// Codex accepts and admit ones it rejects (`auto`), so it is worse than nothing:
-// Codex is the source of truth and reports a clear startup error for a bad value.
-// graith only enforces its own invariant — that these are codex-only (see the
-// guard in SessionManager.Create).
+// Values are validated at create time against Codex's runtime model catalog
+// when available. Codex remains the final authority when the catalog is
+// unavailable, because these enums are version- and model-dependent.
 
 // HeadlessCapableEnabled reports whether this agent may run in headless
 // stream-json mode. Defaults to false when unset.
@@ -4926,10 +4921,10 @@ func (c *Config) Validate() error {
 			}
 
 			switch command.FormatOrDefault() {
-			case AgentInfoFormatRaw, AgentInfoFormatLines, AgentInfoFormatModelList:
+			case AgentInfoFormatRaw, AgentInfoFormatLines, AgentInfoFormatModelList, AgentInfoFormatCodexCatalog:
 			default:
-				errs = append(errs, fmt.Errorf("agents.%s.info[%q].format %q: must be one of %q, %q, %q", agentName, key, command.Format,
-					AgentInfoFormatRaw, AgentInfoFormatLines, AgentInfoFormatModelList))
+				errs = append(errs, fmt.Errorf("agents.%s.info[%q].format %q: must be one of %q, %q, %q, %q", agentName, key, command.Format,
+					AgentInfoFormatRaw, AgentInfoFormatLines, AgentInfoFormatModelList, AgentInfoFormatCodexCatalog))
 			}
 
 			if s := strings.TrimSpace(command.CacheTTL); s != "" {

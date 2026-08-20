@@ -906,6 +906,11 @@ args = ["--search"]
 [agents.codex.info]
 version = ["--version"]  # provider CLI version
 
+[agents.codex.info.model_catalog]
+args = ["debug", "models"]
+format = "codex_model_catalog"
+cache_ttl = "10m"
+
 [agents.codex.sandbox]
 read_dirs = ["~/.codex"]
 write_dirs = ["~/.codex"]

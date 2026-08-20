@@ -129,3 +129,68 @@ func TestValidateModel(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateCodexOptionsFromCatalog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses shell scripts")
+	}
+
+	catalog := codexCatalog{Models: []codexCatalogModel{{Slug: "braw", SupportedReasoning: []struct {
+		Effort string `json:"effort"`
+	}{{Effort: "low"}, {Effort: "high"}}, ServiceTiers: []struct {
+		ID string `json:"id"`
+	}{{ID: "default"}, {ID: "priority"}}}}}
+	// An empty configured argv is intentionally replaced by the default probe.
+	tests := map[string]struct {
+		model   string
+		options config.CodexOptions
+		want    string
+	}{
+		"invalid model":     {model: "dreich", want: "invalid Codex model"},
+		"invalid reasoning": {model: "braw", options: config.CodexOptions{ReasoningEffort: "bananas"}, want: "invalid Codex reasoning effort"},
+		"invalid tier":      {model: "braw", options: config.CodexOptions{ServiceTier: "flex"}, want: "invalid Codex service tier"},
+		"fast alias":        {model: "braw", options: config.CodexOptions{ServiceTier: "fast"}},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateCodexOptions(catalog, test.model, test.options)
+			if test.want == "" && err != nil {
+				t.Fatal(err)
+			}
+
+			if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestCodexConfiguredModelProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("model = \"default-model\"\n[profiles.braw]\nmodel = \"profile-model\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := codexConfiguredModel("braw", nil); got != "profile-model" {
+		t.Fatalf("profile model = %q", got)
+	}
+
+	if got := codexConfiguredModel("", nil); got != "default-model" {
+		t.Fatalf("default model = %q", got)
+	}
+
+	if got := codexConfiguredModel("braw", map[string]string{"CODEX_HOME": filepath.Join(home, "missing")}); got != "" {
+		t.Fatalf("overridden home model = %q, want empty", got)
+	}
+}
+
+func TestCodexModelCatalogUnavailableFallsBack(t *testing.T) {
+	sm := &SessionManager{}
+
+	cfg := &config.Config{}
+	if _, ok := sm.codexModelCatalog(cfg, "codex", config.Agent{}); ok {
+		t.Fatal("unconfigured catalog should be unavailable")
+	}
+}
