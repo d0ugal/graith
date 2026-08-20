@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 )
 
 //nolint:wsl_v5
@@ -21,6 +25,33 @@ func TestDependencyHealthRouteTargetsIsExplicitAndActiveOnly(t *testing.T) {
 	}
 	if got := dependencyHealthRouteTargets(dependencyHealthRoute{Global: true}, targets); len(got) != 2 || got[0] != "braw" || got[1] != "canny" {
 		t.Fatalf("global targets = %#v, want [braw canny]", got)
+	}
+}
+
+func TestDependencyHealthTransitionPreservesPollTimestamps(t *testing.T) {
+	lastSuccess := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	lastFailure := time.Date(2026, 8, 20, 10, 1, 0, 0, time.UTC)
+	sm := NewSessionManager(config.Default(), config.Paths{StateFile: t.TempDir() + "/state.json"}, slog.Default())
+	sm.state.DependencyHealth.Services["github"] = dependencyhealth.ServiceState{
+		ObservedState: dependencyhealth.Operational,
+		SourceHealth:  dependencyhealth.Failed,
+		LastSuccessAt: &lastSuccess,
+		LastFailureAt: &lastFailure,
+	}
+
+	sm.enqueueDependencyHealthTransition(
+		dependencyhealth.ObservationTransition{Service: "github", Generation: 2, Previous: dependencyhealth.Operational, Current: dependencyhealth.Degraded, ObservedAt: lastFailure},
+		[]dependencyhealth.Observation{{Service: "github", State: dependencyhealth.Degraded, ObservedAt: lastFailure}},
+		map[string]dependencyHealthRoute{"github": {Global: true}},
+	)
+
+	state := sm.state.DependencyHealth.Services["github"]
+	if state.LastSuccessAt == nil || !state.LastSuccessAt.Equal(lastSuccess) {
+		t.Fatalf("last success timestamp lost: %+v", state.LastSuccessAt)
+	}
+
+	if state.LastFailureAt == nil || !state.LastFailureAt.Equal(lastFailure) {
+		t.Fatalf("last failure timestamp lost: %+v", state.LastFailureAt)
 	}
 }
 

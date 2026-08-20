@@ -68,6 +68,7 @@ type daemonMetrics struct {
 	screenSnapshotRequests     *prometheus.CounterVec
 	screenSnapshotDuration     *prometheus.HistogramVec
 	messagesPublished          *prometheus.CounterVec
+	dependencyPolls            *prometheus.CounterVec
 }
 
 func newDaemonMetrics(sm *SessionManager) *daemonMetrics {
@@ -195,6 +196,12 @@ func newDaemonMetrics(sm *SessionManager) *daemonMetrics {
 			Name:      "published_total",
 			Help:      "Total messages published through the daemon message store.",
 		}, []string{"stream_kind", "sender_kind"}),
+		dependencyPolls: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "graith",
+			Subsystem: "dependency",
+			Name:      "polls_total",
+			Help:      "Total dependency health poll outcomes, by bounded result.",
+		}, []string{"result"}),
 	}
 }
 
@@ -220,6 +227,7 @@ func (m *daemonMetrics) register(registry *prometheus.Registry) error {
 		m.screenSnapshotRequests,
 		m.screenSnapshotDuration,
 		m.messagesPublished,
+		m.dependencyPolls,
 	} {
 		if err := registry.Register(collector); err != nil {
 			return err
@@ -302,6 +310,23 @@ func (m *daemonMetrics) initBoundedLabels() {
 			m.messagesPublished.WithLabelValues(streamKind, senderKind)
 		}
 	}
+
+	for _, result := range metricResults {
+		m.dependencyPolls.WithLabelValues(result)
+	}
+}
+
+func (sm *SessionManager) observeDependencyPoll(result string) {
+	metrics := sm.metrics.Load()
+	if metrics == nil {
+		return
+	}
+
+	if result != metricResultSuccess && result != metricResultError {
+		result = metricLabelUnknown
+	}
+
+	metrics.dependencyPolls.WithLabelValues(result).Inc()
 }
 
 func (sm *SessionManager) observeSessionLaunch(operation, driverKind string, duration time.Duration, err error) {

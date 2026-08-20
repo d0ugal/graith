@@ -83,6 +83,7 @@ func TestTelemetryRuntimeMetricsEndpoint(t *testing.T) {
 		"# TYPE graith_screen_snapshot_requests_total counter",
 		"# TYPE graith_screen_snapshot_duration_seconds histogram",
 		"# TYPE graith_messages_published_total counter",
+		"# TYPE graith_dependency_polls_total counter",
 	} {
 		assertMetricsContain(t, body, want)
 	}
@@ -142,6 +143,9 @@ func TestTelemetryRuntimeMetricsLabelsStayLowCardinality(t *testing.T) {
 	sm.observeSessionLifecycleTransition(string(StatusRunning), string(StatusStopped))
 	sm.observeMessagePublished(Message{Stream: "inbox:braw-id", SenderID: "device:canny-device"})
 	sm.observeMessagePublished(Message{Stream: "blether-topic", SenderID: "headless-id"})
+	sm.observeDependencyPoll(metricResultSuccess)
+	sm.observeDependencyPoll(metricResultError)
+	sm.observeDependencyPoll("provider-error-details-must-not-be-a-label")
 
 	body := scrapeTelemetryMetrics(t, sm)
 
@@ -162,6 +166,9 @@ func TestTelemetryRuntimeMetricsLabelsStayLowCardinality(t *testing.T) {
 		`graith_session_lifecycle_transitions_total{from="running",to="stopped"} 1`,
 		`graith_messages_published_total{sender_kind="device",stream_kind="inbox"} 1`,
 		`graith_messages_published_total{sender_kind="session",stream_kind="topic"} 1`,
+		`graith_dependency_polls_total{result="success"} 1`,
+		`graith_dependency_polls_total{result="error"} 1`,
+		`graith_dependency_polls_total{result="unknown"} 1`,
 	} {
 		assertMetricsContain(t, body, want)
 	}

@@ -147,6 +147,7 @@ func (b *fseventsWatchBackend) translate(ev fsevents.Event) (watchEvent, bool) {
 	if ev.Flags&fsevents.ItemCreated != 0 {
 		out.Op |= fsnotify.Create
 	}
+
 	if ev.Flags&fsevents.ItemModified != 0 ||
 		ev.Flags&fsevents.ItemInodeMetaMod != 0 ||
 		ev.Flags&fsevents.ItemFinderInfoMod != 0 ||
@@ -154,9 +155,11 @@ func (b *fseventsWatchBackend) translate(ev fsevents.Event) (watchEvent, bool) {
 		ev.Flags&fsevents.ItemXattrMod != 0 {
 		out.Op |= fsnotify.Write
 	}
+
 	if ev.Flags&fsevents.ItemRemoved != 0 {
 		out.Op |= fsnotify.Remove
 	}
+
 	if ev.Flags&fsevents.ItemRenamed != 0 {
 		out.Op |= fsnotify.Rename
 		if ev.Flags&fsevents.ItemIsDir != 0 {
