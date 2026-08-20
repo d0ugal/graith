@@ -102,11 +102,19 @@ func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnEr
 	}
 
 	// Typed Codex options are codex-only; reject rather than silently drop them
-	// against another agent (issue #1186). Their *values* are validated by Codex
-	// itself (version/model-dependent enums), not here.
+	// against another agent (issue #1186). Their values are validated against
+	// Codex's runtime model catalog when available.
 	codexOpts := opts.Codex
 	if !codexOpts.IsZero() && agentName != "codex" {
 		return SessionState{}, fmt.Errorf("codex options require --agent codex (got %q)", agentName)
+	}
+
+	if agentName == "codex" && !skipModelValidation {
+		if catalog, ok := sm.codexModelCatalog(preLockCfg, agentName, agent); ok {
+			if err := validateCodexOptionsWithEnv(catalog, model, codexOpts, agent.Env); err != nil {
+				return SessionState{}, err
+			}
+		}
 	}
 
 	// Early validation that doesn't require the lock.

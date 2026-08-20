@@ -317,7 +317,10 @@ func TestEmbeddedDefaultsCarryAgentAdapters(t *testing.T) {
 	t.Run("info commands expose default provider probes", func(t *testing.T) {
 		want := map[string]map[string]AgentInfoCommand{
 			"claude": {"version": {Args: []string{"--version"}}},
-			"codex":  {"version": {Args: []string{"--version"}}},
+			"codex": {
+				"model_catalog": {Args: []string{"debug", "models"}, Format: AgentInfoFormatCodexCatalog, CacheTTL: "10m"},
+				"version":       {Args: []string{"--version"}},
+			},
 			"cursor": {
 				"model":   {Args: []string{"--list-models"}, Format: AgentInfoFormatModelList},
 				"version": {Args: []string{"-v"}},

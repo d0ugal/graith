@@ -626,11 +626,29 @@ func normalizeAgentInfoResult(result *protocol.AgentInfoResult) {
 		result.Lines = agentInfoLines(result.Stdout)
 	case config.AgentInfoFormatModelList:
 		result.Models = parseAgentInfoModelList(result.Stdout)
+	case config.AgentInfoFormatCodexCatalog:
+		result.Models = parseCodexCatalogModels(result.Stdout)
 	default:
 		// Config validation rejects unknown formats. This fallback keeps direct
 		// unit construction from losing raw diagnostics.
 		result.Format = config.AgentInfoFormatRaw
 	}
+}
+
+func parseCodexCatalogModels(stdout string) []protocol.AgentInfoModel {
+	var catalog codexCatalog
+	if json.Unmarshal([]byte(stdout), &catalog) != nil {
+		return nil
+	}
+
+	models := make([]protocol.AgentInfoModel, 0, len(catalog.Models))
+	for _, model := range catalog.Models {
+		if model.Slug != "" {
+			models = append(models, protocol.AgentInfoModel{ID: model.Slug})
+		}
+	}
+
+	return models
 }
 
 func agentInfoLines(stdout string) []string {
