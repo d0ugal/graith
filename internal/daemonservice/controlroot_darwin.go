@@ -4,7 +4,6 @@ package daemonservice
 
 import (
 	"context"
-	"path/filepath"
 )
 
 func ServiceControlRoot(uid int) (string, error) {
@@ -21,5 +20,5 @@ func ServiceControlRootContext(ctx context.Context, uid int) (string, error) {
 		return "", err
 	}
 
-	return filepath.Join(root, "bootstrap"), nil
+	return controlRootAtReceiptRoot(root), nil
 }
