@@ -94,14 +94,24 @@ gr type fix-tests "please also check the integration tests"
 
 ## Choosing a model
 
-Pass `--model` to expand `{model}` in the agent's configured args:
+Set an agent's `default_model` for its usual model, then pass `--model` for a
+single-session override. Graith supplies one effective model to the agent's
+configured `option_args`, so an override replaces the default rather than
+adding a second model flag:
 
-```bash
-gr new quick-fix --model sonnet
-gr new deep-analysis --model opus
+```toml
+[agents.codex]
+default_model = "gpt-5.6-terra"
 ```
 
-The string is passed straight to the agent command, so it only works if the agent's args include `{model}`. Some agents (like `cursor`) validate it via `validate_model`.
+```bash
+gr new quick-fix --agent codex                  # gpt-5.6-terra
+gr new deep-analysis --agent codex --model gpt-5.6-sol
+```
+
+For agents whose model flag is not built in, configure an `option_args` group
+gated on `{model}`. Do not put a raw model flag in launch-argument fields:
+Graith rejects that legacy configuration with migration guidance.
 
 ## Lifecycle operations
 

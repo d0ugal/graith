@@ -71,7 +71,7 @@ These are substituted in `args`, `resume_args`, `fork_args`, `non_interactive_ar
 | `{session_name}` | Human-readable session name |
 | `{username}` | `github_username`, or discovered GitHub username, or literal `"user"` |
 | `{worktree_path}` | Absolute path to the session worktree |
-| `{model}` | Model passed via `gr new --model` (empty if not set) |
+| `{model}` | Explicit `gr new --model`, or the agent's `default_model` (empty if neither is set) |
 | `{fork_source_agent_session_id}` | Agent session ID of the fork source (empty if not a fork) |
 
 Only `{username}` is available in `branch_prefix`.
@@ -103,6 +103,31 @@ args = ["--search"]
 
 This is why an unset option can't just be a `{model}` template inside `args`: an empty model would expand to a literal `--model ""`. The groups are appended after the base args on create, resume, and fork alike. A `when` naming an unknown template variable, or a group with no `args`, is rejected at config load.
 
+### Default model and migration
+
+Use `default_model` for an agent's normal model. It feeds the same `{model}`
+value as `gr new --model`, so the command-line value overrides the default and
+the configured `option_args` emits exactly one agent-native model flag:
+
+```toml
+[agents.codex]
+default_model = "gpt-5.6-terra"
+
+[[agents.codex.option_args]]
+when = "model"
+args = ["--model", "{model}"]
+```
+
+The bundled Codex adapter already includes this `option_args` group; only add
+`default_model` to choose its default. For another agent, define the equivalent
+group using that CLI's model flag.
+
+Older configurations sometimes put a literal `--model <name>`,
+`--model=<name>`, or `-m <name>` in launch arguments such as `args`,
+`resume_args`, `fork_args`, `non_interactive_args`, or `headless_args`. Graith
+now rejects those entries because they conflict with per-session overrides. Move the value
+to `default_model` and retain the model `option_args` group instead.
+
 ### Provider info commands
 
 `[agents.<name>.info]` maps stable info keys to the agent-native arguments that
@@ -124,8 +149,12 @@ cache_ttl = "1h"  # default; "0" disables the daemon memory cache
 
 [agents.cursor]
 command = "agent"
-args = ["--yolo", "--model", "{model}"]
+args = ["--yolo"]
 resume_args = ["--resume", "{agent_session_id}", "--yolo"]
+
+[[agents.cursor.option_args]]
+when = "model"
+args = ["--model", "{model}"]
 
 [agents.cursor.info]
 version = ["-v"]  # legacy argv-array form
@@ -198,11 +227,15 @@ Define additional agents beyond the built-in five:
 ```toml
 [agents.my-agent]
 command     = "/usr/local/bin/my-agent"
-args        = ["--session", "{agent_session_id}", "--model", "{model}"]
+args        = ["--session", "{agent_session_id}"]
 resume_args = ["--resume", "{agent_session_id}"]
 env         = { MY_CONFIG = "production" }
 idle_timeout = "2h"
 prompt_injection = "append_system_prompt"  # how to inject agent_prompt (else the prompt is skipped)
+
+[[agents.my-agent.option_args]]
+when = "model"
+args = ["--model", "{model}"]
 
 [agents.my-agent.info]
 version = ["--version"]
@@ -300,6 +333,7 @@ version = ["--version"]
 ```toml
 [agents.codex]
 command      = "codex"
+default_model = "gpt-5.6-terra"  # optional; `gr new --model` overrides it
 # Empty by default: Codex keeps its own approvals AND its own sandbox. Setting
 # these flags disables both, so only do it behind a guaranteed outer boundary.
 non_interactive_args = []   # e.g. ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] to run unattended

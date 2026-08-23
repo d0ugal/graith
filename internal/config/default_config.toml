@@ -16,7 +16,7 @@
 #   {session_id}                    - Internal graith session ID
 #   {worktree_path}                 - Absolute path to the session worktree
 #   {fork_source_agent_session_id}  - Source session's agent ID (fork only)
-#   {model}                         - Requested model (option_args only)
+#   {model}                         - Explicit or agent default model (option_args only)
 #   {dir}                           - A granted directory (add_dir_args only)
 #   {profile} {reasoning_effort} {service_tier} {web_search}
 #                                   - Codex option_args gates/values (issue #1236)
@@ -864,6 +864,7 @@ write_dirs = ["~/.claude"]
 
 [agents.codex]
 command = "codex"
+# default_model = "gpt-5.6-terra"  # optional; `gr new --model` overrides it
 non_interactive_args = [] # keep Codex's native approvals + sandbox; graith's OS sandbox is the outer boundary. Set e.g. ["--ask-for-approval", "never", "--sandbox", "danger-full-access"] to run fully unattended (see docs; this removes Codex's own safeguards, so only do it behind a guaranteed outer boundary)
 args = []
 # Codex mints its own session id; graith captures it from the rollout on disk

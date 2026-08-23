@@ -80,6 +80,14 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 	}
 
 	sm := newMigrateTestManager(t)
+	recordPath := filepath.Join(t.TempDir(), "argv.txt")
+	cfg := sm.Config()
+	codex := cfg.Agents["codex"]
+	codex.DefaultModel = "gpt-5.6-terra"
+	codex.Args = []string{"-c", `printf '%s\n' "$@" > "$GRAITH_ARGS_RECORD"; exec sleep 30`, "braw"}
+	codex.Env = map[string]string{"GRAITH_ARGS_RECORD": recordPath}
+	codex.OptionArgs = []config.AgentOptionArg{{When: "model", Args: []string{"--model", "{model}"}}}
+	cfg.Agents["codex"] = codex
 	repo := initTempGitRepo(t)
 
 	// Bound the async codex id-capture scan to an empty temp dir so it never
@@ -129,6 +137,12 @@ func TestMigrateInPlaceSwap(t *testing.T) {
 	if res.Agent != "codex" {
 		t.Errorf("result agent = %q, want codex", res.Agent)
 	}
+
+	if res.Model != "gpt-5.6-terra" {
+		t.Errorf("result model = %q, want target default model", res.Model)
+	}
+
+	assertModelArgOccursOnce(t, waitForRecordedArgv(t, recordPath, "--model"), "gpt-5.6-terra")
 
 	if !reflect.DeepEqual(res.Labels, []string{"Urgent", "release"}) {
 		t.Fatalf("result labels = %#v, want labels preserved", res.Labels)

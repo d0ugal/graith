@@ -789,6 +789,44 @@ command = "auld-claude"
 	}
 }
 
+func TestLoadAgentDefaultModel(t *testing.T) {
+	dir := t.TempDir()
+
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`
+[agents.codex]
+default_model = "gpt-5.6-terra"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cfg.Agents["codex"].DefaultModel; got != "gpt-5.6-terra" {
+		t.Errorf("codex DefaultModel = %q, want gpt-5.6-terra", got)
+	}
+}
+
+func TestLoadRejectsLegacyRawModelArgs(t *testing.T) {
+	dir := t.TempDir()
+
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`
+[agents.codex]
+args = ["--model", "gpt-5.6-terra"]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "raw model flag") || !strings.Contains(err.Error(), "default_model") {
+		t.Fatalf("Load() = %v, want actionable raw-model error", err)
+	}
+}
+
 func TestLoadAgentExplicitEmptyArgs(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

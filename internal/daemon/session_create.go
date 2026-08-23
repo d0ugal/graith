@@ -95,6 +95,8 @@ func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnEr
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
+	model = agent.ModelFor(model)
+
 	if !skipModelValidation {
 		if err := validateModel(agent, model); err != nil {
 			return SessionState{}, err
