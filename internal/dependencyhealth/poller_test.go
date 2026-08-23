@@ -15,21 +15,26 @@ func TestPollerTransitionsAndFailureStaleness(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	provider := &fakeProvider{results: []fakeResult{{observation: Observation{State: Degraded}}, {err: errors.New("dreich")}}}
 	var transitions []ObservationTransition
+	var observations []Observation
 	poller := NewPoller(provider, []ServiceConfig{{Name: "braw", BaseURL: "https://status.example", PollInterval: time.Minute, RecoveryPollInterval: time.Second}})
 	poller.Clock = clock
 	poller.OnTransition = func(transition ObservationTransition) { transitions = append(transitions, transition) }
+	poller.OnObservation = func(observation Observation) { observations = append(observations, observation) }
 	poller.PollOnce(context.Background())
 	if len(transitions) != 1 || transitions[0].Current != Degraded {
 		t.Fatalf("transitions = %#v", transitions)
 	}
 	clock.now = clock.now.Add(2 * time.Minute)
 	poller.PollOnce(context.Background())
-	observations := poller.Snapshot()
-	if len(observations) != 1 || observations[0].SourceHealth != Stale {
-		t.Fatalf("observations = %#v", observations)
+	snapshot := poller.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].SourceHealth != Stale {
+		t.Fatalf("observations = %#v", snapshot)
 	}
 	if len(transitions) != 1 {
 		t.Fatalf("failure emitted transition: %#v", transitions)
+	}
+	if len(observations) != 2 || observations[1].SourceHealth != Stale || observations[1].LastFailureAt.IsZero() {
+		t.Fatalf("failure observation callback = %#v", observations)
 	}
 }
 

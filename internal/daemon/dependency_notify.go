@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/d0ugal/graith/internal/dependencyhealth"
@@ -166,14 +167,74 @@ func sanitizeDependencyField(value string) string {
 
 // RunDependencyHealthLoop owns the daemon integration for the provider-neutral
 // poller. It is intentionally opt-in: an empty/disabled config performs no
-// network access. Polling and delivery both happen outside the session lock.
+// network access. It stays alive while disabled so a watched config reload can
+// enable polling without requiring a daemon restart.
 //
 //nolint:wsl_v5
 func (sm *SessionManager) RunDependencyHealthLoop(ctx context.Context) {
-	cfg := sm.Config().DependencyHealth
-	if !cfg.Enabled || len(cfg.Services) == 0 {
-		return
+	var (
+		cancel context.CancelFunc
+		done   <-chan struct{}
+	)
+	stop := func() {
+		if cancel == nil {
+			return
+		}
+		cancel()
+		<-done
+		cancel = nil
+		done = nil
 	}
+	start := func() {
+		cfg := sm.Config().DependencyHealth
+		if !cfg.Enabled || len(cfg.Services) == 0 {
+			return
+		}
+		generationCtx, generationCancel := context.WithCancel(ctx)
+		generationDone := make(chan struct{})
+		cancel = generationCancel
+		done = generationDone
+		go func(cancel context.CancelFunc) {
+			defer close(generationDone)
+			defer cancel()
+
+			// The injected runner avoids status-page I/O in lifecycle tests.
+			if run := sm.dependencyHealthRun; run != nil {
+				run(generationCtx, cfg)
+				return
+			}
+			sm.runDependencyHealthPoller(generationCtx, cfg)
+		}(generationCancel)
+	}
+
+	start()
+	if ready := sm.dependencyHealthControllerReady; ready != nil {
+		ready()
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			stop()
+			return
+		case <-sm.dependencyHealthConfigChanged:
+			stop()
+			start()
+		}
+	}
+}
+
+func (sm *SessionManager) signalDependencyHealthConfigChanged() {
+	select {
+	case sm.dependencyHealthConfigChanged <- struct{}{}:
+	default:
+	}
+}
+
+// runDependencyHealthPoller runs one configuration generation. The controller
+// above cancels and replaces it when dependency-health config changes.
+//
+//nolint:wsl_v5
+func (sm *SessionManager) runDependencyHealthPoller(ctx context.Context, cfg dependencyhealth.Config) {
 	services := make([]dependencyhealth.ServiceConfig, 0, len(cfg.Services))
 	routes := make(map[string]dependencyHealthRoute, len(cfg.Services))
 	for _, service := range cfg.Services {
@@ -208,8 +269,27 @@ func (sm *SessionManager) RunDependencyHealthLoop(ctx context.Context) {
 	poller.OnTransition = func(change dependencyhealth.ObservationTransition) {
 		sm.enqueueDependencyHealthTransition(change, poller.Snapshot(), routes)
 	}
-	go sm.deliverDependencyHealthOutbox(ctx, routes)
-	poller.Run(ctx)
+	runDependencyHealthGeneration(
+		func() { poller.Run(ctx) },
+		func() { sm.deliverDependencyHealthOutbox(ctx, routes) },
+	)
+}
+
+// runDependencyHealthGeneration keeps the poller and its outbox consumer in
+// the same lifecycle generation. A replacement must not begin delivery until
+// the cancelled predecessor has finished its last outbox operation.
+func runDependencyHealthGeneration(poll, deliver func()) {
+	var delivery sync.WaitGroup
+
+	delivery.Add(1)
+	go func() {
+		defer delivery.Done()
+
+		deliver()
+	}()
+
+	poll()
+	delivery.Wait()
 }
 
 //nolint:wsl_v5

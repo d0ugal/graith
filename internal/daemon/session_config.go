@@ -323,6 +323,11 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) (ReloadConfig
 	}
 	sm.mu.Unlock()
 
+	if !reflect.DeepEqual(old.DependencyHealth, newCfg.DependencyHealth) {
+		sm.signalDependencyHealthConfigChanged()
+		sm.log.Info("config changed", "key", "dependency_health")
+	}
+
 	// The replacement listener was synchronously bound before publication, but
 	// begins accepting only now that config, generation, and TLS pin are visible
 	// as one coherent state. A policy-only reload keeps the listener and closes
