@@ -3978,13 +3978,19 @@ type Agent struct {
 	// --model always takes precedence. Keeping this value separate from Args
 	// prevents a configured default and a per-session override from emitting two
 	// model flags.
-	DefaultModel string            `json:"default_model,omitempty" toml:"default_model"`
-	Args         []string          `json:"args,omitempty"          toml:"args"`
-	ResumeArgs   []string          `json:"resume_args,omitempty"   toml:"resume_args"`
-	ForkArgs     []string          `json:"fork_args,omitempty"     toml:"fork_args"`
-	Env          map[string]string `json:"env,omitempty"           toml:"env"`
-	IdleTimeout  string            `json:"idle_timeout,omitempty"  toml:"idle_timeout"`
-	InjectPrompt *bool             `json:"inject_prompt,omitempty" toml:"inject_prompt"`
+	DefaultModel string `json:"default_model,omitempty" toml:"default_model"`
+	// RequireExplicitModel rejects a new session unless its creation input
+	// supplies a model. DefaultModel remains an intentional fallback and does
+	// not satisfy this policy. A pointer preserves the distinction between an
+	// unset value and an explicit false override when agent configuration is
+	// merged with bundled defaults.
+	RequireExplicitModel *bool             `json:"require_explicit_model,omitempty" toml:"require_explicit_model"`
+	Args                 []string          `json:"args,omitempty"          toml:"args"`
+	ResumeArgs           []string          `json:"resume_args,omitempty"   toml:"resume_args"`
+	ForkArgs             []string          `json:"fork_args,omitempty"     toml:"fork_args"`
+	Env                  map[string]string `json:"env,omitempty"           toml:"env"`
+	IdleTimeout          string            `json:"idle_timeout,omitempty"  toml:"idle_timeout"`
+	InjectPrompt         *bool             `json:"inject_prompt,omitempty" toml:"inject_prompt"`
 	// PromptInjection selects HOW graith delivers its operating prompt to this
 	// agent (append_system_prompt / cursor_rules / developer_instructions /
 	// none). It is distinct from InjectPrompt, which is the on/off switch. An
@@ -4059,6 +4065,12 @@ func (a Agent) ModelFor(requested string) string {
 	}
 
 	return a.DefaultModel
+}
+
+// RequiresExplicitModel reports whether new sessions must supply a model in
+// their creation input. It deliberately does not consider DefaultModel.
+func (a Agent) RequiresExplicitModel() bool {
+	return a.RequireExplicitModel != nil && *a.RequireExplicitModel
 }
 
 // AgentOptionArg is one conditional argv group for an agent (see Agent.OptionArgs).
@@ -5901,6 +5913,10 @@ func mergeAgent(def, usr Agent) Agent {
 
 	if usr.DefaultModel != "" {
 		def.DefaultModel = usr.DefaultModel
+	}
+
+	if usr.RequireExplicitModel != nil {
+		def.RequireExplicitModel = usr.RequireExplicitModel
 	}
 
 	if usr.Args != nil {

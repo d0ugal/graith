@@ -23,6 +23,7 @@ idle_timeout   = ""             # auto-stop after idle (default: 1h when resume_
 inject_prompt  = true           # inject agent_prompt into the session
 prompt_injection = ""           # how to inject: append_system_prompt | cursor_rules | developer_instructions | none
 validate_model = ""             # command to validate --model values
+require_explicit_model = false   # require a model in each new-session input
 headless_capable = false        # agent can run in headless (stream-json) mode (experimental)
 add_dir_args   = ["--add-dir", "{dir}"]  # flag for granting an extra directory (see Includes)
 headless_args  = []             # argv prefix prepended in headless mode (see below)
@@ -374,15 +375,34 @@ ask; explicit OpenCode deny rules still apply.
 [agents.cursor]
 command        = "agent"
 non_interactive_args = []   # keep Cursor's prompts; set ["--force"] to run unattended
-args           = []
+args           = ["--yolo"]
 resume_args    = ["resume"]
 validate_model = "agent --list-models"
+require_explicit_model = true
 add_dir_args   = ["--add-dir", "{dir}"]
+
+[[agents.cursor.option_args]]
+when = "model"
+args = ["--model", "{model}"]
 
 [agents.cursor.info]
 model = ["--list-models"]
 version = ["-v"]
 ```
+
+`require_explicit_model` is an adapter-generic creation policy for providers
+with a model catalogue. When it is true, every new session for that agent must
+supply a model in its creation input: for example, `gr new --agent cursor
+--model <id> …`. `default_model` is deliberately not a substitute; it remains
+an intentional fallback for agents that allow omission. The check happens
+before graith creates a worktree, session record, or provider process, and a
+supplied model still runs through `validate_model`.
+
+The policy applies to ordinary, mirror, and `--no-repo` creation. Trigger and
+scenario definitions must set their session `model` when they create an agent
+with this policy. Same-agent forks and resumes retain the source or persisted
+session model; a cross-agent fork or migration to an agent with this policy
+must supply its target `--model`.
 
 When lifecycle hooks are enabled, graith publishes `.cursor/hooks.json` in the
 worktree and records an ownership marker in its per-session data. Concurrent

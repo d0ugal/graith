@@ -236,6 +236,30 @@ func TestForkWithAgentCrossAgentUsesTargetDefaultModel(t *testing.T) {
 	assertModelArgOccursOnce(t, waitForRecordedArgv(t, recordPath, "--model"), "gpt-5.6-terra")
 }
 
+func TestForkWithAgentCrossAgentRequiresExplicitTargetModel(t *testing.T) {
+	sm, _ := crossAgentForkSM(t)
+	cfg := sm.Config()
+	target := cfg.Agents["bide-agent"]
+	target.DefaultModel = "fallback-model"
+	target.RequireExplicitModel = boolPtr(true)
+	cfg.Agents["bide-agent"] = target
+
+	_, err := sm.ForkWithAgent("braw-fork", "src1", "bide-agent", "", 24, 80)
+	if err == nil {
+		t.Fatal("ForkWithAgent() = nil error, want explicit-model rejection")
+	}
+
+	for _, want := range []string{"bide-agent", "--model"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ForkWithAgent() error = %q, want %q", err, want)
+		}
+	}
+
+	if len(sm.state.Sessions) != 1 {
+		t.Fatalf("rejected ForkWithAgent() left sessions = %#v", sm.state.Sessions)
+	}
+}
+
 // TestForkSameAgentIsNativeFork verifies passing --agent equal to the source's
 // agent is a native fork: no rendered context, no MigratedFrom.
 func TestForkSameAgentIsNativeFork(t *testing.T) {

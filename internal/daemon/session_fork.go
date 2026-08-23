@@ -88,6 +88,10 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 			return SessionState{}, fmt.Errorf("unknown target agent %q", targetAgent)
 		}
 
+		if tgtCfg.RequiresExplicitModel() && targetModel == "" {
+			return SessionState{}, fmt.Errorf("agent %q requires an explicit model; fork with --model <id>", targetAgent)
+		}
+
 		if err := validateModel(tgtCfg, tgtCfg.ModelFor(targetModel)); err != nil {
 			return SessionState{}, err
 		}

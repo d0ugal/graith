@@ -137,6 +137,26 @@ func TestAgentOptionArgsForNoGroupsIsNil(t *testing.T) {
 	}
 }
 
+func TestAgentRequiresExplicitModel(t *testing.T) {
+	tests := map[string]struct {
+		agent Agent
+		want  bool
+	}{
+		"unset is disabled":             {agent: Agent{}, want: false},
+		"explicit true is enabled":      {agent: Agent{RequireExplicitModel: boolPtr(true)}, want: true},
+		"explicit false is disabled":    {agent: Agent{RequireExplicitModel: boolPtr(false)}, want: false},
+		"default model does not enable": {agent: Agent{DefaultModel: "gpt-braw"}, want: false},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := test.agent.RequiresExplicitModel(); got != test.want {
+				t.Errorf("RequiresExplicitModel() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAgentModelFor(t *testing.T) {
 	agent := Agent{DefaultModel: "gpt-5.6-terra"}
 

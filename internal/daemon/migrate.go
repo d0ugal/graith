@@ -99,6 +99,10 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("unknown target agent %q", targetAgent)
 	}
 
+	if targetCfg.RequiresExplicitModel() && targetModel == "" {
+		return SessionState{}, fmt.Errorf("agent %q requires an explicit model; migrate with --model <id>", targetAgent)
+	}
+
 	targetModel = targetCfg.ModelFor(targetModel)
 
 	if !transcript.Supported(srcAgent) {
