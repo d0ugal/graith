@@ -74,6 +74,35 @@ func TestMigrateRejectsBadTargets(t *testing.T) {
 	}
 }
 
+func TestMigrateRequiresExplicitTargetModel(t *testing.T) {
+	sm := newMigrateTestManager(t)
+	sm.state.Sessions["s1"] = &SessionState{
+		ID: "s1", Name: "braw-bothy", Agent: "claude", Status: StatusStopped,
+		WorktreePath: t.TempDir(), RepoPath: t.TempDir(), Model: "source-model",
+	}
+
+	cfg := sm.Config()
+	target := cfg.Agents["codex"]
+	target.DefaultModel = "fallback-model"
+	target.RequireExplicitModel = boolPtr(true)
+	cfg.Agents["codex"] = target
+
+	_, err := sm.Migrate("s1", "codex", "", 24, 80)
+	if err == nil {
+		t.Fatal("Migrate() = nil error, want explicit-model rejection")
+	}
+
+	for _, want := range []string{"codex", "--model"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Migrate() error = %q, want %q", err, want)
+		}
+	}
+
+	if got := sm.state.Sessions["s1"].Agent; got != "claude" {
+		t.Fatalf("rejected Migrate() changed source agent to %q", got)
+	}
+}
+
 func TestMigrateInPlaceSwap(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh not available")

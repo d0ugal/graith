@@ -796,6 +796,7 @@ func TestLoadAgentDefaultModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(`
 [agents.codex]
 default_model = "gpt-5.6-terra"
+require_explicit_model = true
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -807,6 +808,10 @@ default_model = "gpt-5.6-terra"
 
 	if got := cfg.Agents["codex"].DefaultModel; got != "gpt-5.6-terra" {
 		t.Errorf("codex DefaultModel = %q, want gpt-5.6-terra", got)
+	}
+
+	if !cfg.Agents["codex"].RequiresExplicitModel() {
+		t.Error("codex RequireExplicitModel = false, want true")
 	}
 }
 
@@ -968,6 +973,16 @@ func TestMergeAgent(t *testing.T) {
 
 		if len(got.ForkArgs) != 2 {
 			t.Errorf("ForkArgs = %v, want defaults preserved", got.ForkArgs)
+		}
+	})
+
+	t.Run("explicit false overrides required default", func(t *testing.T) {
+		defWithPolicy := def
+		defWithPolicy.RequireExplicitModel = boolPtr(true)
+
+		got := mergeAgent(defWithPolicy, Agent{RequireExplicitModel: boolPtr(false)})
+		if got.RequiresExplicitModel() {
+			t.Error("RequireExplicitModel = true, want explicit false override")
 		}
 	})
 

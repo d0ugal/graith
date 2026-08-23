@@ -216,9 +216,10 @@ func TestTriggerCreatedSessionInheritsParentLabels(t *testing.T) {
 	cfg.FetchOnCreate = false
 	cfg.DefaultAgent = "sleeper"
 	cfg.Agents["sleeper"] = config.Agent{
-		NonInteractiveArgs: []string{},
-		Command:            "sleep",
-		Args:               []string{"60"},
+		NonInteractiveArgs:   []string{},
+		Command:              "sleep",
+		Args:                 []string{"60"},
+		RequireExplicitModel: boolPtr(true),
 	}
 	sm := newSMWithConfig(t, cfg)
 
@@ -232,7 +233,7 @@ func TestTriggerCreatedSessionInheritsParentLabels(t *testing.T) {
 
 	created, err := sm.createTriggerSession(createTriggerReq{
 		name: "trigger-bairn", agent: "sleeper", repo: repo,
-		parentID: "orch-id", triggerName: "thrawn",
+		parentID: "orch-id", triggerName: "thrawn", model: "model-braw",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +243,10 @@ func TestTriggerCreatedSessionInheritsParentLabels(t *testing.T) {
 
 	if !reflect.DeepEqual(created.Labels, []string{"strath", "thrawn"}) {
 		t.Fatalf("trigger-created labels = %#v, want inherited parent labels", created.Labels)
+	}
+
+	if created.Model != "model-braw" {
+		t.Fatalf("trigger-created model = %q, want configured explicit model", created.Model)
 	}
 }
 

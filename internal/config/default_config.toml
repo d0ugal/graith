@@ -819,6 +819,7 @@ preview_bytes = 16384       # scrollback tail rendered by the overlay/screen_pre
 # Each agent needs at minimum: command, args
 # Optional: resume_args, fork_args, env, idle_timeout, sandbox,
 #   validate_model, interrupt_count, interrupt_delay_ms, inject_prompt,
+#   require_explicit_model,
 #   pre_trust_workspace, headless_capable, non_interactive_args, add_dir_args, headless_args,
 #   input, option_args (conditional [[agents.<name>.option_args]] groups)
 
@@ -933,6 +934,9 @@ mouse_wheel_policy = "respect_terminal_modes"
 command = "agent"           # the Cursor CLI binary is named `agent`
 non_interactive_args = [] # keep Cursor's native prompts. Set ["--force"] to run unattended
 args = []
+# Set true to require every new Cursor session to pass `gr new --model <id>`.
+# A configured default_model is deliberately not accepted as a substitute.
+# require_explicit_model = true
 resume_args = ["resume"]
 # Command listing valid model IDs ("id - description" per line); a requested
 # {model} not in the list is rejected before the session starts.

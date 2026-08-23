@@ -95,6 +95,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnEr
 		return SessionState{}, fmt.Errorf("unknown agent %q", agentName)
 	}
 
+	if agent.RequiresExplicitModel() && model == "" {
+		return SessionState{}, fmt.Errorf("agent %q requires an explicit model; create with --model <id>", agentName)
+	}
+
 	model = agent.ModelFor(model)
 
 	if !skipModelValidation {

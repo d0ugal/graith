@@ -146,9 +146,10 @@ func TestCreateSkipModelValidation(t *testing.T) {
 	sm := newTestSessionManager(t)
 	script := writeScript(t, "#!/bin/sh\necho 'model-a - Model A'\necho 'model-b - Model B'\n")
 	sm.cfg.Agents["claude"] = config.Agent{
-		NonInteractiveArgs: []string{},
-		Command:            "/nonexistent-graith-test-binary",
-		ValidateModel:      script,
+		NonInteractiveArgs:   []string{},
+		Command:              "/nonexistent-graith-test-binary",
+		ValidateModel:        script,
+		RequireExplicitModel: boolPtr(true),
 	}
 
 	t.Run("validation rejects unknown model by default", func(t *testing.T) {
@@ -168,6 +169,42 @@ func TestCreateSkipModelValidation(t *testing.T) {
 			t.Fatalf("--skip-model-validation should bypass model check, got: %v", err)
 		}
 	})
+}
+
+func TestCreateRequireExplicitModelRejectsBeforeSessionReservation(t *testing.T) {
+	sm := newTestSessionManager(t)
+	configured := sm.cfg.Agents["claude"]
+	configured.DefaultModel = "fallback-model"
+	configured.RequireExplicitModel = boolPtr(true)
+	sm.cfg.Agents["claude"] = configured
+
+	tests := map[string]CreateOpts{
+		"no repo": {
+			Name: "braw-no-repo", AgentName: "claude", NoRepo: true, Rows: 24, Cols: 80,
+		},
+		"mirror": {
+			Name: "braw-mirror", AgentName: "claude", Mirror: "missing-source", Rows: 24, Cols: 80,
+		},
+	}
+
+	for name, opts := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := sm.Create(opts)
+			if err == nil {
+				t.Fatal("Create() = nil error, want explicit-model rejection")
+			}
+
+			for _, want := range []string{"claude", "--model"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("Create() error = %q, want %q", err, want)
+				}
+			}
+
+			if len(sm.state.Sessions) != 0 {
+				t.Fatalf("rejected Create() left sessions = %#v", sm.state.Sessions)
+			}
+		})
+	}
 }
 
 func TestUpdateRejectsUnsafeName(t *testing.T) {
