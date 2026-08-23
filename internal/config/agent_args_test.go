@@ -137,6 +137,18 @@ func TestAgentOptionArgsForNoGroupsIsNil(t *testing.T) {
 	}
 }
 
+func TestAgentModelFor(t *testing.T) {
+	agent := Agent{DefaultModel: "gpt-5.6-terra"}
+
+	if got := agent.ModelFor(""); got != "gpt-5.6-terra" {
+		t.Errorf("ModelFor(empty) = %q, want default model", got)
+	}
+
+	if got := agent.ModelFor("gpt-5.6-sol"); got != "gpt-5.6-sol" {
+		t.Errorf("ModelFor(override) = %q, want override", got)
+	}
+}
+
 // TestAgentOptionArgsForUnknownVarErrors ensures a group args template that
 // references an undefined variable fails loudly rather than silently emitting a
 // literal placeholder.
@@ -212,6 +224,63 @@ func TestValidateOptionArgsEmptyWhenAllowed(t *testing.T) {
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() with empty when = %v, want nil", err)
+	}
+}
+
+func TestValidateRejectsRawModelArgs(t *testing.T) {
+	tests := map[string]struct {
+		field func(*Agent) *[]string
+		args  []string
+	}{
+		"args separate flag": {
+			field: func(agent *Agent) *[]string { return &agent.Args },
+			args:  []string{"--model", "gpt-5.6-terra"},
+		},
+		"resume args equals flag": {
+			field: func(agent *Agent) *[]string { return &agent.ResumeArgs },
+			args:  []string{"resume", "--model=gpt-5.6-terra"},
+		},
+		"fork args template flag": {
+			field: func(agent *Agent) *[]string { return &agent.ForkArgs },
+			args:  []string{"fork", "--model={model}"},
+		},
+		"short model flag": {
+			field: func(agent *Agent) *[]string { return &agent.Args },
+			args:  []string{"-m", "gpt-5.6-terra"},
+		},
+		"non interactive args": {
+			field: func(agent *Agent) *[]string { return &agent.NonInteractiveArgs },
+			args:  []string{"--model", "gpt-5.6-terra"},
+		},
+		"headless args": {
+			field: func(agent *Agent) *[]string { return &agent.HeadlessArgs },
+			args:  []string{"--model=gpt-5.6-terra"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := Default()
+			braw := cfg.Agents["codex"]
+			*test.field(&braw) = test.args
+			cfg.Agents["codex"] = braw
+
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "raw model flag") || !strings.Contains(err.Error(), "default_model") {
+				t.Fatalf("Validate() = %v, want actionable raw-model error", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsTrimmedDefaultModel(t *testing.T) {
+	cfg := Default()
+	braw := cfg.Agents["codex"]
+	braw.DefaultModel = " gpt-5.6-terra "
+	cfg.Agents["codex"] = braw
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "default_model") {
+		t.Fatalf("Validate() = %v, want default_model whitespace error", err)
 	}
 }
 

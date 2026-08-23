@@ -3971,7 +3971,14 @@ func (a AgentInfoConfig) CacheTTLDuration() time.Duration {
 }
 
 type Agent struct {
-	Command      string            `json:"command"                 toml:"command"`
+	Command string `json:"command" toml:"command"`
+	// DefaultModel is the model used when a session does not supply --model. It
+	// becomes TemplateVars.Model, so each agent's configured option_args (or
+	// another {model} template) owns the agent-native flag syntax. An explicit
+	// --model always takes precedence. Keeping this value separate from Args
+	// prevents a configured default and a per-session override from emitting two
+	// model flags.
+	DefaultModel string            `json:"default_model,omitempty" toml:"default_model"`
 	Args         []string          `json:"args,omitempty"          toml:"args"`
 	ResumeArgs   []string          `json:"resume_args,omitempty"   toml:"resume_args"`
 	ForkArgs     []string          `json:"fork_args,omitempty"     toml:"fork_args"`
@@ -4042,6 +4049,16 @@ type Agent struct {
 	// their own PATH. The TOML parser accepts both the legacy argv array and the
 	// richer table form with args/format/cache_ttl.
 	Info AgentInfoCommands `json:"info,omitempty" toml:"info"`
+}
+
+// ModelFor returns the session's effective model. A caller-provided value wins
+// over the agent default so the same config works for every agent adapter.
+func (a Agent) ModelFor(requested string) string {
+	if requested != "" {
+		return requested
+	}
+
+	return a.DefaultModel
 }
 
 // AgentOptionArg is one conditional argv group for an agent (see Agent.OptionArgs).
@@ -4875,6 +4892,27 @@ func (c *Config) Validate() error {
 
 	for _, agentName := range sortedStringMapKeys(c.Agents) {
 		agent := c.Agents[agentName]
+		if strings.TrimSpace(agent.DefaultModel) != agent.DefaultModel {
+			errs = append(errs, fmt.Errorf("agents.%s.default_model must not have leading or trailing whitespace", agentName))
+		}
+
+		for _, args := range []struct {
+			name  string
+			value []string
+		}{
+			{"args", agent.Args},
+			{"resume_args", agent.ResumeArgs},
+			{"fork_args", agent.ForkArgs},
+			{"non_interactive_args", agent.NonInteractiveArgs},
+			{"headless_args", agent.HeadlessArgs},
+		} {
+			for i, arg := range args.value {
+				if arg == "--model" || strings.HasPrefix(arg, "--model=") || arg == "-m" {
+					errs = append(errs, fmt.Errorf("agents.%s.%s[%d] configures a raw model flag; use default_model for the agent default and an option_args group gated on {model} for the agent flag", agentName, args.name, i))
+				}
+			}
+		}
+
 		if err := agent.Sandbox.validateSignalMode("agents." + agentName + ".sandbox"); err != nil {
 			errs = append(errs, err)
 		}
@@ -5859,6 +5897,10 @@ func mergeAgents(defaults, user map[string]Agent) map[string]Agent {
 func mergeAgent(def, usr Agent) Agent {
 	if usr.Command != "" {
 		def.Command = usr.Command
+	}
+
+	if usr.DefaultModel != "" {
+		def.DefaultModel = usr.DefaultModel
 	}
 
 	if usr.Args != nil {

@@ -256,6 +256,99 @@ func TestCodexModelPassedOnLaunchAndResume(t *testing.T) {
 	assertContiguousPair(t, argv, "--model", model)
 }
 
+// TestCodexDefaultModelAndOverridePassedExactlyOnce proves that agent defaults
+// use the same option_args adapter as explicit values. It covers creation and
+// restart, then verifies an explicit value replaces (rather than appends to)
+// the configured default.
+func TestCodexDefaultModelAndOverridePassedExactlyOnce(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+
+	repoDir := initTempGitRepo(t)
+	sm, recordPath := newCodexRecorderManager(t, repoDir)
+	cfg := sm.Config()
+	codex := cfg.Agents["codex"]
+	codex.DefaultModel = "gpt-5.6-terra"
+	cfg.Agents["codex"] = codex
+	sm.cfg = cfg
+
+	created, err := sm.Create(CreateOpts{Name: "canny", AgentName: "codex", RepoPath: repoDir, BaseBranch: "main", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatalf("Create(default) error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, created.ID) })
+
+	argv := waitForRecordedArgv(t, recordPath, "--model")
+	assertModelArgOccursOnce(t, argv, "gpt-5.6-terra")
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before restart: %v", err)
+	}
+
+	if err := sm.Stop(created.ID); err != nil {
+		t.Fatalf("Stop(default) error = %v", err)
+	}
+
+	waitForStatus(t, sm, created.ID, StatusStopped)
+	sm.mu.Lock()
+	sm.state.Sessions[created.ID].Model = "" // Simulate a session created before default_model existed.
+	sm.mu.Unlock()
+
+	restarted, err := sm.Restart(created.ID, 24, 80)
+	if err != nil {
+		t.Fatalf("Restart(default) error = %v", err)
+	}
+
+	if restarted.Model != "gpt-5.6-terra" {
+		t.Errorf("Restart(default) Model = %q, want configured default", restarted.Model)
+	}
+
+	argv = waitForRecordedArgv(t, recordPath, "--model")
+	assertModelArgOccursOnce(t, argv, "gpt-5.6-terra")
+
+	if err := sm.Stop(created.ID); err != nil {
+		t.Fatalf("Stop before override error = %v", err)
+	}
+
+	waitForStatus(t, sm, created.ID, StatusStopped)
+
+	if err := os.Remove(recordPath); err != nil {
+		t.Fatalf("remove record before override: %v", err)
+	}
+
+	override, err := sm.Create(CreateOpts{Name: "braw", AgentName: "codex", RepoPath: repoDir, BaseBranch: "main", Model: "gpt-5.6-sol", Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatalf("Create(override) error = %v", err)
+	}
+
+	t.Cleanup(func() { stopAndClosePTY(sm, override.ID) })
+
+	argv = waitForRecordedArgv(t, recordPath, "--model")
+	assertModelArgOccursOnce(t, argv, "gpt-5.6-sol")
+}
+
+func assertModelArgOccursOnce(t *testing.T, argv []string, want string) {
+	t.Helper()
+
+	count := 0
+
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "--model" {
+			count++
+
+			if argv[i+1] != want {
+				t.Fatalf("model value = %q, want %q; argv = %v", argv[i+1], want, argv)
+			}
+		}
+	}
+
+	if count != 1 {
+		t.Fatalf("--model count = %d, want 1; argv = %v", count, argv)
+	}
+}
+
 // newCodexRecorderManager builds a SessionManager whose "codex" agent is a shell
 // script that records its launch argv to recordPath (mirrors newRecorderManager
 // but keyed on codex). The option_args groups carry over from the embedded

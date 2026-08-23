@@ -452,6 +452,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 	prevNativeStateRoot := sessState.NativeStateRoot
 	prevNativeCaptureStartedAt := sessState.NativeCaptureStartedAt
 	prevFreshStart := sessState.FreshStart
+	prevModel := sessState.Model
 	prevLaunchGeneration := sessState.LaunchGeneration
 
 	// For a forced-id agent (Claude), the resume command is decided by whether a
@@ -501,6 +502,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 
 	sessState.Token = newToken
 	sm.tokenIndex[newToken] = id
+	sessState.Model = agent.ModelFor(sessState.Model)
 
 	// Mark as creating so concurrent operations see it's busy.
 	prevStatusChangedAt := sessState.StatusChangedAt
@@ -520,6 +522,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		sessState.NativeStateRoot = prevNativeStateRoot
 		sessState.NativeCaptureStartedAt = prevNativeCaptureStartedAt
 		sessState.FreshStart = prevFreshStart
+		sessState.Model = prevModel
 
 		delete(sm.tokenIndex, newToken)
 
@@ -590,6 +593,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 			s.NativeStateRoot = prevNativeStateRoot
 			s.NativeCaptureStartedAt = prevNativeCaptureStartedAt
 			s.FreshStart = prevFreshStart
+			s.Model = prevModel
 			s.LaunchGeneration = prevLaunchGeneration
 
 			delete(sm.tokenIndex, newToken)

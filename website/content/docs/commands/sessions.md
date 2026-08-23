@@ -117,14 +117,17 @@ watch triggers skip these sessions just like `--mirror` sessions.
 ### Codex options
 
 For `--agent codex`, graith passes typed per-session options to the Codex CLI.
-`--model` becomes `codex --model <name>`; reasoning effort and service tier ride
+`--model` becomes `codex --model <name>`; `default_model` in `[agents.codex]`
+sets the same value when the flag is omitted, and an explicit flag replaces it.
+Reasoning effort and service tier ride
 `-c model_reasoning_effort=…` / `-c service_tier=…`; profile and web search map to
 `--profile` and `--search`. Each is passed only when set (unset leaves Codex's
 default), and all persist so resume or fork replays them. The `--codex-*` flags
 are Codex-specific — using one with another agent is an error. Their *values* are
 validated by Codex, not graith, so an unrecognised value surfaces as a Codex
-startup error. Don't also template `{model}` into the codex `args` — use
-`--model` (or `-m`), or `--model` is passed twice. Example:
+startup error. Configure a persistent default as `default_model`, not a raw
+model flag in Codex launch arguments; Graith rejects those legacy entries and
+tells you how to migrate. Example:
 
 ```bash
 gr new review --agent codex \

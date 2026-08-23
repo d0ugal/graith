@@ -211,6 +211,31 @@ func TestForkWithAgentCrossAgentModelOverride(t *testing.T) {
 	}
 }
 
+func TestForkWithAgentCrossAgentUsesTargetDefaultModel(t *testing.T) {
+	sm, repoDir := crossAgentForkSM(t)
+	recordPath := filepath.Join(t.TempDir(), "argv.txt")
+	cfg := sm.Config()
+	target := cfg.Agents["bide-agent"]
+	target.DefaultModel = "gpt-5.6-terra"
+	target.Args = []string{"-c", `printf '%s\n' "$@" > "$GRAITH_ARGS_RECORD"; exec sleep 60`, "braw"}
+	target.Env = map[string]string{"GRAITH_ARGS_RECORD": recordPath}
+	target.OptionArgs = []config.AgentOptionArg{{When: "model", Args: []string{"--model", "{model}"}}}
+	cfg.Agents["bide-agent"] = target
+
+	forked, err := sm.ForkWithAgent("braw-fork", "src1", "bide-agent", "", 24, 80)
+	if err != nil {
+		t.Fatalf("ForkWithAgent() unexpected error: %v", err)
+	}
+
+	forkTestCleanup(t, sm, repoDir, forked.ID, forked.WorktreePath)
+
+	if forked.Model != "gpt-5.6-terra" {
+		t.Errorf("forked Model = %q, want target default model", forked.Model)
+	}
+
+	assertModelArgOccursOnce(t, waitForRecordedArgv(t, recordPath, "--model"), "gpt-5.6-terra")
+}
+
 // TestForkSameAgentIsNativeFork verifies passing --agent equal to the source's
 // agent is a native fork: no rendered context, no MigratedFrom.
 func TestForkSameAgentIsNativeFork(t *testing.T) {

@@ -99,14 +99,14 @@ func (sm *SessionManager) Migrate(id, targetAgent, targetModel string, rows, col
 		return SessionState{}, fmt.Errorf("unknown target agent %q", targetAgent)
 	}
 
+	targetModel = targetCfg.ModelFor(targetModel)
+
 	if !transcript.Supported(srcAgent) {
 		return SessionState{}, fmt.Errorf("migration from agent %q is not supported (no transcript reader)", srcAgent)
 	}
 
-	if targetModel != "" {
-		if err := validateModel(targetCfg, targetModel); err != nil {
-			return SessionState{}, err
-		}
+	if err := validateModel(targetCfg, targetModel); err != nil {
+		return SessionState{}, err
 	}
 
 	// --- Phase 0: read + render the source transcript (fail fast) ---

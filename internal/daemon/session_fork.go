@@ -79,16 +79,16 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// cheap agent/transcript checks are re-done under the lock below.
 	crossAgentPre := targetAgent != "" && sourceOk && targetAgent != srcAgentPre
 	if targetModel != "" && !crossAgentPre {
-		return SessionState{}, errors.New("--model requires forking to a different agent (--agent); it is ignored for a same-agent fork")
+		return SessionState{}, errors.New("--model requires forking to a different agent (--agent); same-agent forks inherit the source model")
 	}
 
-	if crossAgentPre && targetModel != "" {
+	if crossAgentPre {
 		tgtCfg, ok := cfgSnapshot.Agents[targetAgent]
 		if !ok {
 			return SessionState{}, fmt.Errorf("unknown target agent %q", targetAgent)
 		}
 
-		if err := validateModel(tgtCfg, targetModel); err != nil {
+		if err := validateModel(tgtCfg, tgtCfg.ModelFor(targetModel)); err != nil {
 			return SessionState{}, err
 		}
 	}
@@ -208,9 +208,9 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 	// requested target model (empty = the target agent's default).
 	sourceModel := source.Model
 
-	effectiveModel := sourceModel
+	effectiveModel := agent.ModelFor(sourceModel)
 	if crossAgent {
-		effectiveModel = targetModel
+		effectiveModel = agent.ModelFor(targetModel)
 	}
 
 	// A same-agent codex fork replays the source's typed Codex options (issue
