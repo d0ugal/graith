@@ -172,20 +172,21 @@ func resolveWith(ctx context.Context, options ResolveOptions) (Resolution, error
 		return Resolution{}, err
 	}
 
-	controlRoot := options.ControlRoot
-	if controlRoot == "" {
-		controlRoot, err = ServiceControlRootContext(ctx, options.UID)
+	receiptRoot := options.ReceiptRoot
+	if receiptRoot == "" {
+		if err := ctx.Err(); err != nil {
+			return Resolution{}, err
+		}
+
+		receiptRoot, err = ReceiptRoot(options.UID)
 		if err != nil {
 			return Resolution{}, err
 		}
 	}
 
-	receiptRoot := options.ReceiptRoot
-	if receiptRoot == "" {
-		receiptRoot, err = ReceiptRoot(options.UID)
-		if err != nil {
-			return Resolution{}, err
-		}
+	controlRoot := options.ControlRoot
+	if controlRoot == "" {
+		controlRoot = controlRootAtReceiptRoot(receiptRoot)
 	}
 
 	controller := options.Controller
