@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -572,19 +571,6 @@ type landlockInfo struct {
 }
 
 // landlockState reports the host's Landlock enforcement capability.
-func landlockState() landlockInfo {
-	if runtime.GOOS != "linux" {
-		return landlockInfo{kind: landlockNotApplicable, detail: runtime.GOOS + " uses Seatbelt, not Landlock"}
-	}
-
-	rel, err := kernelRelease()
-	if err != nil {
-		return landlockInfo{kind: landlockNotEnforced, detail: "could not read kernel release: " + err.Error()}
-	}
-
-	return classifyLandlock(rel)
-}
-
 // classifyLandlock maps a kernel release string to a Landlock capability.
 //   - < 5.13         : Landlock absent          -> NotEnforced
 //   - 5.13 .. < 6.7  : FS control, no TCP filter -> Partial

@@ -61,14 +61,8 @@ func pinUpgradeTarget(path string) (_ *upgradeTargetPin, returnErr error) {
 	}
 
 	pin := &upgradeTargetPin{file: file, info: info, digest: digest, original: path}
-	if runtime.GOOS == "linux" {
-		if err := pin.retainLinuxCopy(); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := pin.retainDarwinCopy(); err != nil {
-			return nil, err
-		}
+	if err := pin.retainPlatformCopy(); err != nil {
+		return nil, err
 	}
 
 	keep = true
