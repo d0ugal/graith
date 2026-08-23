@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -9,6 +10,107 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/dependencyhealth"
 )
+
+func TestDependencyHealthLoopStartsAfterConfigReload(t *testing.T) {
+	cfg := config.Default()
+	sm := NewSessionManager(cfg, config.Paths{StateFile: t.TempDir() + "/state.json"}, slog.Default())
+	started := make(chan dependencyhealth.Config, 1)
+	stopped := make(chan struct{}, 1)
+	controllerReady := make(chan struct{})
+	sm.dependencyHealthControllerReady = func() { close(controllerReady) }
+	sm.dependencyHealthRun = func(ctx context.Context, got dependencyhealth.Config) {
+		started <- got
+
+		<-ctx.Done()
+
+		stopped <- struct{}{}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+
+		sm.RunDependencyHealthLoop(ctx)
+	}()
+
+	select {
+	case <-controllerReady:
+	case <-time.After(time.Second):
+		t.Fatal("dependency-health controller did not start")
+	}
+
+	reloaded := *cfg
+
+	reloaded.DependencyHealth = dependencyhealth.Config{
+		Enabled: true,
+		Services: []dependencyhealth.Service{{
+			Name: "github", Provider: "statuspage", BaseURL: "https://www.githubstatus.com", Global: true,
+		}},
+	}
+	if err := sm.applyConfig(&reloaded); err != nil {
+		t.Fatalf("applyConfig() error = %v", err)
+	}
+
+	select {
+	case got := <-started:
+		if !got.Enabled || len(got.Services) != 1 || got.Services[0].Name != "github" {
+			t.Fatalf("poller config = %+v, want enabled github service", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("dependency-health loop did not start after config reload")
+	}
+
+	cancel()
+
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("dependency-health poller did not stop on daemon shutdown")
+	}
+
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("dependency-health controller did not stop on daemon shutdown")
+	}
+}
+
+func TestDependencyHealthGenerationWaitsForDelivery(t *testing.T) {
+	pollReturned := make(chan struct{})
+	releaseDelivery := make(chan struct{})
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+
+		runDependencyHealthGeneration(
+			func() { close(pollReturned) },
+			func() { <-releaseDelivery },
+		)
+	}()
+
+	select {
+	case <-pollReturned:
+	case <-time.After(time.Second):
+		t.Fatal("dependency-health poller did not run")
+	}
+
+	select {
+	case <-finished:
+		t.Fatal("generation finished before delivery stopped")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseDelivery)
+
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("generation did not finish after delivery stopped")
+	}
+}
 
 //nolint:wsl_v5
 func TestDependencyHealthRouteTargetsIsExplicitAndActiveOnly(t *testing.T) {

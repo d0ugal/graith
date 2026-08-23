@@ -21,6 +21,7 @@ import (
 	"github.com/d0ugal/graith/internal/agent/transcript"
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
+	"github.com/d0ugal/graith/internal/dependencyhealth"
 	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/store"
@@ -210,6 +211,13 @@ type SessionManager struct {
 	signalRequests      map[string]signalRequest
 	newLoopTicker       func(time.Duration) loopTicker // injectable clock boundary for background-loop tests
 	newLoopTimer        func(time.Duration) loopTimer  // injectable resettable clock boundary for purge tests
+	// dependencyHealthConfigChanged wakes the dependency-health controller after
+	// a hot reload. It is buffered so a reload cannot block on a poll in flight.
+	dependencyHealthConfigChanged chan struct{}
+	// dependencyHealthRun is a test seam for the poller generation. Production
+	// uses runDependencyHealthPoller below.
+	dependencyHealthRun             func(context.Context, dependencyhealth.Config)
+	dependencyHealthControllerReady func() // test-only synchronization seam
 
 	// purgeStatsMu guards the last/next purge-sweep timestamps surfaced in
 	// diagnostics. It is separate from sm.mu so recording a sweep never contends
@@ -336,6 +344,7 @@ func NewSessionManager(cfg *config.Config, paths config.Paths, log *slog.Logger)
 		startedAt:                 time.Now(),
 		instanceID:                newDaemonInstanceID(),
 	}
+	sm.dependencyHealthConfigChanged = make(chan struct{}, 1)
 	sm.scenarioResults = gitScenarioResultPersistence{dataDir: func() string { return sm.paths.DataDir }}
 	sm.pushDispatch = sm.newPushDispatch()
 

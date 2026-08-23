@@ -166,7 +166,11 @@ func (p *Poller) record(service ServiceConfig, observation Observation, pollErr 
 			previous.SourceHealth = Stale
 		}
 		p.observations[service.Name] = previous
+		callback := p.OnObservation
 		p.mu.Unlock()
+		if callback != nil {
+			callback(previous)
+		}
 		return
 	}
 	if observation.ObservedAt.IsZero() {
