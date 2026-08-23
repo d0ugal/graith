@@ -3985,12 +3985,12 @@ type Agent struct {
 	// unset value and an explicit false override when agent configuration is
 	// merged with bundled defaults.
 	RequireExplicitModel *bool             `json:"require_explicit_model,omitempty" toml:"require_explicit_model"`
-	Args                 []string          `json:"args,omitempty"          toml:"args"`
-	ResumeArgs           []string          `json:"resume_args,omitempty"   toml:"resume_args"`
-	ForkArgs             []string          `json:"fork_args,omitempty"     toml:"fork_args"`
-	Env                  map[string]string `json:"env,omitempty"           toml:"env"`
-	IdleTimeout          string            `json:"idle_timeout,omitempty"  toml:"idle_timeout"`
-	InjectPrompt         *bool             `json:"inject_prompt,omitempty" toml:"inject_prompt"`
+	Args                 []string          `json:"args,omitempty"                   toml:"args"`
+	ResumeArgs           []string          `json:"resume_args,omitempty"            toml:"resume_args"`
+	ForkArgs             []string          `json:"fork_args,omitempty"              toml:"fork_args"`
+	Env                  map[string]string `json:"env,omitempty"                    toml:"env"`
+	IdleTimeout          string            `json:"idle_timeout,omitempty"           toml:"idle_timeout"`
+	InjectPrompt         *bool             `json:"inject_prompt,omitempty"          toml:"inject_prompt"`
 	// PromptInjection selects HOW graith delivers its operating prompt to this
 	// agent (append_system_prompt / cursor_rules / developer_instructions /
 	// none). It is distinct from InjectPrompt, which is the on/off switch. An
