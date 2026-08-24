@@ -45,6 +45,82 @@ func TestStatuspagePollPartialIncidentFailure(t *testing.T) {
 	}
 }
 
+func TestStatuspagePollAcceptsStatuspageStatusShapes(t *testing.T) {
+	tests := map[string]struct {
+		indicator  string
+		status     string
+		wantLabel  string
+		wantErrMsg string
+	}{
+		"legacy string":  {indicator: "none", status: `"All Systems Operational"`, wantLabel: "All Systems Operational"},
+		"current object": {status: `{"indicator":"none","description":"All Systems Operational"}`, wantLabel: "All Systems Operational"},
+		"invalid number": {status: `42`, wantErrMsg: "cannot unmarshal number"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+
+				if strings.HasSuffix(r.URL.Path, "summary.json") {
+					_, _ = w.Write([]byte(`{"indicator":"` + test.indicator + `","status":` + test.status + `}`))
+					return
+				}
+
+				_, _ = w.Write([]byte(`{"incidents":[]}`))
+			}))
+			defer server.Close()
+
+			client := &http.Client{Transport: rewriteTransport{base: server.URL, transport: server.Client().Transport}}
+
+			observation, err := (Statuspage{Client: client}).Poll(context.Background(), ServiceConfig{Name: "braw", BaseURL: "https://status.example"})
+			if test.wantErrMsg != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErrMsg) {
+					t.Fatalf("Poll() error = %v, want %q", err, test.wantErrMsg)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if observation.SourceHealth != Fresh || observation.State != Operational || observation.StatusLabel != test.wantLabel {
+				t.Fatalf("observation = %#v", observation)
+			}
+		})
+	}
+}
+
+func TestPollerPersistsCurrentStatuspageStatusShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.HasSuffix(r.URL.Path, "summary.json") {
+			_, _ = w.Write([]byte(`{"status":{"indicator":"major","description":"Major system outage"}}`))
+			return
+		}
+
+		_, _ = w.Write([]byte(`{"incidents":[]}`))
+	}))
+	defer server.Close()
+
+	client := &http.Client{Transport: rewriteTransport{base: server.URL, transport: server.Client().Transport}}
+	poller := NewPoller(Statuspage{Client: client}, []ServiceConfig{{Name: "braw", BaseURL: "https://status.example"}})
+	poller.PollOnce(context.Background())
+
+	snapshot := poller.Snapshot()
+
+	if len(snapshot) != 1 {
+		t.Fatalf("snapshot = %#v, want one observation", snapshot)
+	}
+
+	if got := snapshot[0]; got.SourceHealth != Fresh || got.State != Down || got.StatusLabel != "Major system outage" || got.LastSuccessAt.IsZero() {
+		t.Fatalf("persisted observation = %#v", got)
+	}
+}
+
 type rewriteTransport struct {
 	base      string
 	transport http.RoundTripper

@@ -45,8 +45,8 @@ type Statuspage struct {
 }
 
 type summaryResponse struct {
-	Indicator string `json:"indicator"`
-	Status    string `json:"status"`
+	Indicator string          `json:"indicator"`
+	Status    json.RawMessage `json:"status"`
 }
 
 type incidentsResponse struct {
@@ -81,7 +81,16 @@ func (p Statuspage) Poll(ctx context.Context, service ServiceConfig) (Observatio
 		return Observation{}, err
 	}
 
-	state := normalizeIndicator(summary.Indicator)
+	statusLabel, statusIndicator, err := decodeStatusLabel(summary.Status)
+	if err != nil {
+		return Observation{}, fmt.Errorf("decode statuspage status: %w", err)
+	}
+
+	if statusIndicator == "" {
+		statusIndicator = summary.Indicator
+	}
+
+	state := normalizeIndicator(statusIndicator)
 	ids := make([]string, 0)
 	// Incidents are useful evidence but not required for a valid summary. This
 	// permits Statuspage installations that omit or temporarily reject the feed.
@@ -97,8 +106,31 @@ func (p Statuspage) Poll(ctx context.Context, service ServiceConfig) (Observatio
 	return Observation{
 		Service: service.Name, State: state, SourceHealth: Fresh, ObservedAt: now(),
 		LastSuccessAt: now(), SourceURL: base, IncidentIDs: ids,
-		StatusLabel: boundedLabel(summary.Status),
+		StatusLabel: boundedLabel(statusLabel),
 	}, nil
+}
+
+// decodeStatusLabel accepts both Statuspage's original string status and the
+// object shape currently returned by its summary endpoint.
+func decodeStatusLabel(raw json.RawMessage) (string, string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", "", nil
+	}
+
+	var label string
+	if err := json.Unmarshal(raw, &label); err == nil {
+		return label, "", nil
+	}
+
+	var object struct {
+		Indicator   string `json:"indicator"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return "", "", err
+	}
+
+	return object.Description, object.Indicator, nil
 }
 
 func normalizeIndicator(indicator string) ObservedState {
