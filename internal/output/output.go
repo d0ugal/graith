@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"golang.org/x/term"
 )
 
 type Writer struct {
@@ -12,6 +14,8 @@ type Writer struct {
 	out      io.Writer
 	errOut   io.Writer
 }
+
+var isTerminal = term.IsTerminal
 
 func New(jsonMode bool) *Writer {
 	return &Writer{jsonMode: jsonMode, out: os.Stdout, errOut: os.Stderr}
@@ -70,4 +74,11 @@ func (w *Writer) Error(err error) {
 
 func (w *Writer) IsJSON() bool {
 	return w.jsonMode
+}
+
+// IsTerminal reports whether this writer's output destination is a terminal.
+func (w *Writer) IsTerminal() bool {
+	f, ok := w.out.(*os.File)
+
+	return ok && isTerminal(int(f.Fd()))
 }
