@@ -31,3 +31,33 @@ func AgentStatusColor(agentStatus string) color.Color {
 		return colorDim
 	}
 }
+
+// DependencyStateColor returns the shared palette colour for a dependency
+// provider's reported state.
+func DependencyStateColor(state string) color.Color {
+	switch state {
+	case "operational":
+		return colorGreen
+	case "degraded":
+		return colorYellow
+	case "down":
+		return colorRed
+	default:
+		return colorDim
+	}
+}
+
+// DependencySourceHealthColor returns the shared palette colour for whether a
+// dependency status source can currently be trusted.
+func DependencySourceHealthColor(health string) color.Color {
+	switch health {
+	case "fresh":
+		return colorGreen
+	case "stale":
+		return colorYellow
+	case "failed":
+		return colorRed
+	default:
+		return colorDim
+	}
+}

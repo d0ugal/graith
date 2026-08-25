@@ -18,24 +18,18 @@ non-zero exit status.
 
 ```console
 $ gr dependency status
-github
-  provider: statuspage
-  source: https://www.githubstatus.com
-  routing: all agents
-  state: operational
-  source health: fresh
-  last observed: 2026-08-19T19:00:00Z
-  last success: 2026-08-19T19:00:00Z
-  last failure: never
-  incidents: none
+SERVICE  STATE        SOURCE HEALTH  OBSERVED              ROUTING
+github   operational  fresh          2026-08-19T19:00:00Z  all agents
 ```
 
-Use `--json` for the versioned response. It always contains a `services` array;
-when dependency health is not configured, the array is empty and the command
-still exits zero. Each service includes its routing, validated source URL,
-observed state, source health, last successful and failed polls, and bounded
-incident references. `source_health: failed` means the source could not be
-read; it does not turn the last observed service state into a new outage claim.
+The table colours the service state and source health when standard output is a
+terminal. Use `--no-color`, set `NO_COLOR`, or pipe the command to receive plain
+text. Use `--json` for the versioned response and detailed data such as source
+URLs, poll success/failure times, and bounded incident references. It always
+contains a `services` array; when dependency health is not configured, the array
+is empty and the command still exits zero. `source_health: failed` means the
+source could not be read; it does not turn the last observed service state into
+a new outage claim.
 
 Treat status-page data as a useful but imperfect signal. Do not copy incident
 text into agent instructions or assume that a fresh `down` state proves an API

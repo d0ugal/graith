@@ -71,7 +71,7 @@ func TestPollerBoundsConcurrencyAndReportsOutcomes(t *testing.T) {
 
 //nolint:wsl_v5 // This test deliberately interleaves reload and cancellation steps.
 func TestPollerReloadAndShutdownAreSafeDuringPoll(t *testing.T) {
-	provider := &blockingProvider{started: make(chan struct{})}
+	provider := &blockingProvider{started: make(chan struct{}, 1)}
 	poller := NewPoller(provider, []ServiceConfig{{Name: "braw", BaseURL: "https://status.example"}})
 	poller.OnPollOutcome = func(PollOutcome) {}
 	ctx, cancel := context.WithCancel(context.Background())

@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"os"
 	"strings"
 
+	"github.com/d0ugal/graith/internal/client"
 	"github.com/d0ugal/graith/internal/output"
 	"github.com/d0ugal/graith/internal/protocol"
 	"github.com/spf13/cobra"
 )
+
+var dependencyStatusNoColor bool
 
 var dependencyCmd = &cobra.Command{
 	Use:   "dependency",
@@ -32,38 +36,39 @@ func runDependencyStatus(cmd *cobra.Command, _ []string) error {
 		return deps.out.JSON(response)
 	}
 
-	renderDependencyStatus(deps.out, response)
+	renderDependencyStatus(deps.out, response, dependencyStatusColorEnabled(deps.out))
 
 	return nil
 }
 
-func renderDependencyStatus(writer *output.Writer, response protocol.DependencyStatusResponseMsg) {
+func renderDependencyStatus(writer *output.Writer, response protocol.DependencyStatusResponseMsg, colorOn bool) {
 	if len(response.Services) == 0 {
 		writer.Printf("No dependencies configured.\n")
 		return
 	}
 
-	for i, service := range response.Services {
-		if i > 0 {
-			writer.Printf("\n")
-		}
+	rows := make([][]string, 0, len(response.Services)+1)
+	rows = append(rows, []string{"SERVICE", "STATE", "SOURCE HEALTH", "OBSERVED", "ROUTING"})
 
-		writer.Printf("%s\n", service.Name)
-		writer.Printf("  provider: %s\n", service.Provider)
-		writer.Printf("  source: %s\n", service.SourceURL)
-		writer.Printf("  routing: %s\n", dependencyRouting(service))
-		writer.Printf("  state: %s\n", service.ObservedState)
-		writer.Printf("  source health: %s\n", service.SourceHealth)
-		writer.Printf("  last observed: %s\n", formatDependencyTime(service.ObservedAt))
-		writer.Printf("  last success: %s\n", formatDependencyTime(service.LastSuccessAt))
-		writer.Printf("  last failure: %s\n", formatDependencyTime(service.LastFailureAt))
-
-		if len(service.IncidentIDs) > 0 {
-			writer.Printf("  incidents: %s\n", strings.Join(service.IncidentIDs, ", "))
-		} else {
-			writer.Printf("  incidents: none\n")
-		}
+	for _, service := range response.Services {
+		rows = append(rows, []string{
+			service.Name,
+			colorize(service.ObservedState, client.DependencyStateColor(service.ObservedState), colorOn),
+			colorize(service.SourceHealth, client.DependencySourceHealthColor(service.SourceHealth), colorOn),
+			formatDependencyTime(service.ObservedAt),
+			dependencyRouting(service),
+		})
 	}
+
+	var rendered strings.Builder
+	renderRows(&rendered, rows)
+	writer.Printf("%s", rendered.String())
+}
+
+// dependencyStatusColorEnabled follows the same terminal and NO_COLOR rules as
+// gr list while checking the writer that receives the rendered table.
+func dependencyStatusColorEnabled(writer *output.Writer) bool {
+	return shouldColor(dependencyStatusNoColor, os.Getenv("NO_COLOR"), writer.IsTerminal())
 }
 
 func dependencyRouting(service protocol.DependencyStatusService) string {
@@ -87,6 +92,7 @@ func formatDependencyTime(value string) string {
 }
 
 func registerDependencyCmd() {
+	dependencyStatusCmd.Flags().BoolVar(&dependencyStatusNoColor, "no-color", false, "disable coloured status output")
 	dependencyCmd.AddCommand(dependencyStatusCmd)
 	rootCmd.AddCommand(dependencyCmd)
 }

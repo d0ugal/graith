@@ -3,6 +3,8 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"os"
 	"testing"
 )
 
@@ -75,5 +77,40 @@ func TestJSONLineWritesInJSONMode(t *testing.T) {
 
 	if got != want {
 		t.Errorf("JSONLine() output = %q, want %q", got, want)
+	}
+}
+
+func TestWriterIsTerminal(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "braw")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+
+	previous := isTerminal
+	isTerminal = func(int) bool { return true }
+
+	t.Cleanup(func() {
+		isTerminal = previous
+
+		if closeErr := file.Close(); closeErr != nil {
+			t.Errorf("Close: %v", closeErr)
+		}
+	})
+
+	tests := map[string]struct {
+		writer io.Writer
+		want   bool
+	}{
+		"non-file writer is not a terminal":    {writer: &bytes.Buffer{}, want: false},
+		"file writer delegates terminal check": {writer: file, want: true},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			writer := NewWithWriter(false, test.writer)
+			if got := writer.IsTerminal(); got != test.want {
+				t.Errorf("IsTerminal() = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
