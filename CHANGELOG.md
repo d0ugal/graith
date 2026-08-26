@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.73.17](https://github.com/d0ugal/graith/compare/v0.73.16...v0.73.17) (2026-08-26)
+
+
+### Bug Fixes
+
+* update google.golang.org/genproto/googleapis/api digest to da73d73 ([#2290](https://github.com/d0ugal/graith/issues/2290)) ([55de920](https://github.com/d0ugal/graith/commit/55de920ab3eb2f95f0e863d9286ed12318361c3e))
+* update google.golang.org/genproto/googleapis/rpc digest to da73d73 ([#2291](https://github.com/d0ugal/graith/issues/2291)) ([6c7e745](https://github.com/d0ugal/graith/commit/6c7e745dd9f3859db18de9c0774e4494712c4a2a))
+* update opentelemetry-go monorepo to v1.46.0 ([#2287](https://github.com/d0ugal/graith/issues/2287)) ([b58ab01](https://github.com/d0ugal/graith/commit/b58ab01143b01d0c1022e09eedb02da061fc8cbd))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.45.0 ([#2289](https://github.com/d0ugal/graith/issues/2289)) ([2531dfa](https://github.com/d0ugal/graith/commit/2531dfa384b52bcddaed2941d380b429a577bdcb))
+* **deps:** update renovate/renovate docker tag to v44.45.4 ([#2293](https://github.com/d0ugal/graith/issues/2293)) ([439d31f](https://github.com/d0ugal/graith/commit/439d31f9c160e050c22569a01c4bc5118a29367f))
+
 ## [0.73.16](https://github.com/d0ugal/graith/compare/v0.73.15...v0.73.16) (2026-08-25)
 
 
