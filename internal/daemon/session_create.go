@@ -922,7 +922,7 @@ func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnEr
 
 	// Headless sessions skip lifecycle hooks because their typed stream reports
 	// status directly.
-	if hookFilesNeeded && driverKind != DriverHeadless {
+	if driverKind != DriverHeadless && (hookFilesNeeded || agentName == "codex") {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, true)
 		if err != nil {
 			cleanupOnError()

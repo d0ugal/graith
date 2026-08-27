@@ -256,7 +256,7 @@ func TestEmbeddedDefaultAgentPolicies(t *testing.T) {
 			t.Errorf("agent %q: InjectPrompt = %v, want explicit true", name, agent.InjectPrompt)
 		}
 
-		if agent.PreTrustWorkspace == nil || !*agent.PreTrustWorkspace {
+		if name != "codex" && (agent.PreTrustWorkspace == nil || !*agent.PreTrustWorkspace) {
 			t.Errorf("agent %q: PreTrustWorkspace = %v, want explicit true", name, agent.PreTrustWorkspace)
 		}
 

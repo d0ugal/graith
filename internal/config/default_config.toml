@@ -877,7 +877,6 @@ fork_args = ["fork", "{fork_source_agent_session_id}"]
 idle_timeout        = "1h"                       # auto-stop after this long idle (0 disables)
 inject_prompt       = true                       # inject agent_prompt into the session
 prompt_injection    = "developer_instructions"   # delivery mechanism: Codex's -c developer_instructions=...
-pre_trust_workspace = true                       # pre-trust the worktree so the agent skips its trust prompt
 add_dir_args        = ["--add-dir", "{dir}"]     # grant an included repo's worktree
 # Conditional launch flags for the session model and typed Codex options (issue
 # #1186), each emitted only when its `when` template variable is set — an unset
