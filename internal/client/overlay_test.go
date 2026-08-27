@@ -1253,12 +1253,12 @@ func TestBuildLabelGroupedItemsCrossesReposAndDuplicatesMultiLabelSessions(t *te
 	}
 
 	labelled := items[1].(sessionItem)
-	if got := labelled.displayName(); got != "croft/braw" {
-		t.Fatalf("label view display name = %q, want repository-qualified name", got)
+	if got := labelled.displayName(); got != "braw" {
+		t.Fatalf("label view display name = %q, want session name", got)
 	}
 
-	if width := maxSessionNameWidthFromItems(items, 0); width < lipgloss.Width("croft/braw") {
-		t.Fatalf("label view name width = %d, want at least %d", width, lipgloss.Width("croft/braw"))
+	if width := maxSessionNameWidthFromItems(items, 0); width < lipgloss.Width("braw") {
+		t.Fatalf("label view name width = %d, want at least %d", width, lipgloss.Width("braw"))
 	}
 }
 
@@ -3541,7 +3541,7 @@ func TestView_SessionNavigatorContextAtCompactAndWideSizes(t *testing.T) {
 			for _, want := range []string{
 				sessionNavigatorTitle,
 				"3 sessions",
-				"Selected: graith/braw-fix",
+				"Selected: braw-fix",
 				"attached",
 				"status: running",
 			} {
@@ -3788,7 +3788,7 @@ func TestView_CompactOmitsWideSelectedSessionDetailPanel(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Selected: graith/braw-detail",
+		"Selected: braw-detail",
 		"attached",
 		"enter attach",
 	} {
@@ -3823,7 +3823,7 @@ func TestView_WideSelectedSessionDetailMinHeightFallbackKeepsFooter(t *testing.T
 	}
 
 	for _, want := range []string{
-		"Selected: graith/braw-detail  attached",
+		"Selected: braw-detail  attached",
 		"branch: issue-1870-wide-details",
 		"agent: codex",
 		"/tmp/graith/strath/braw-detail  id:",
@@ -3954,7 +3954,7 @@ func TestView_WideSelectedSessionDetailTooTallFallbackKeepsFooter(t *testing.T) 
 	}
 
 	for _, want := range []string{
-		"Selected: graith/braw-detail  attached",
+		"Selected: braw-detail  attached",
 		"branch: issue-1870-wide-details  base: main  agent: codex",
 		"PR #1870 open",
 		"/tmp/graith/strath/braw-detail  id:",
@@ -4041,7 +4041,7 @@ func TestView_DisablesWideSelectedSessionDetailPanel(t *testing.T) {
 		t.Fatalf("disabled selected-detail config should hide the wide panel:\n%s", view)
 	}
 
-	if !strings.Contains(view, "Selected: graith/braw-detail") {
+	if !strings.Contains(view, "Selected: braw-detail") {
 		t.Fatalf("disabled selected-detail config should preserve the compact footer:\n%s", view)
 	}
 }
@@ -4212,7 +4212,7 @@ func TestView_SessionNavigatorCompactRichDetailsKeepHelpVisible(t *testing.T) {
 	view := ansi.Strip(asOverlay(updated).View().Content)
 
 	for _, want := range []string{
-		"Selected: graith/braw-rich",
+		"Selected: braw-rich",
 		"config stale",
 		"PR #7 open",
 		"enter attach",
@@ -4725,7 +4725,6 @@ func TestView_ConfirmDeleteWideDetailLongStatusKeepsPrompt(t *testing.T) {
 	view := ansi.Strip(asOverlay(updated).View().Content)
 
 	for _, want := range []string{
-		"Selected Session",
 		"Session has unsaved work",
 		"Delete 'braw-delete-status'? [y/N]",
 	} {
@@ -5252,7 +5251,7 @@ func TestCompactDelegate_RenderCompactLabelsInAllView(t *testing.T) {
 	d.Render(&buf, l, 0, items[0])
 	line := ansi.Strip(buf.String())
 
-	for _, want := range []string{"croft/braw", "cli", "ui"} {
+	for _, want := range []string{"braw", "croft", "cli", "ui"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("all view row missing %q:\n%s", want, line)
 		}
@@ -5284,8 +5283,8 @@ func TestCompactDelegate_SuppressesCompactLabelsInLabelView(t *testing.T) {
 	d.Render(&buf, l, 1, items[1])
 	line := ansi.Strip(buf.String())
 
-	if !strings.Contains(line, "croft/braw") {
-		t.Fatalf("label view row should keep repo-qualified session name:\n%s", line)
+	if !strings.Contains(line, "braw") || !strings.Contains(line, "croft") {
+		t.Fatalf("label view row should show separate session and repo columns:\n%s", line)
 	}
 
 	if strings.Contains(line, "strath") || strings.Contains(line, "bothy") {

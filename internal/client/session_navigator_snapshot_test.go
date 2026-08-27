@@ -94,7 +94,9 @@ func TestRenderSessionNavigatorSnapshot(t *testing.T) {
 	plain := ansi.Strip(out)
 	for _, want := range []string{
 		"Session Navigator",
-		"graith/dreich-session-with-a-long-name",
+		"dreich-session-with-a-long-name",
+		"dreich-session-with-a-long-name    graith",
+		"Repo",
 		"Selected Session",
 		"#1870 open CI:16/22",
 		"Config:   restart to apply changes",
@@ -104,6 +106,10 @@ func TestRenderSessionNavigatorSnapshot(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, plain)
 		}
+	}
+
+	if strings.Contains(plain, "graith/dreich-session-with-a-long-name") {
+		t.Fatalf("session name still has repository prefix:\n%s", plain)
 	}
 
 	for i, line := range strings.Split(out, "\n") {

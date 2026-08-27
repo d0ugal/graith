@@ -316,14 +316,6 @@ func (s sessionItem) FilterValue() string {
 }
 
 func (s sessionItem) displayName() string {
-	if s.showRepo {
-		return sessionRepositoryLabel(s.info) + "/" + s.info.Name
-	}
-
-	if s.labelGroup != "" && s.info.RepoName != "" {
-		return s.info.RepoName + "/" + s.info.Name
-	}
-
 	return s.info.Name
 }
 
@@ -614,6 +606,7 @@ func (g groupHeader) FilterValue() string { return "" }
 
 type columnWidths struct {
 	name       int
+	repo       int
 	treeIndent int
 	status     int
 	summary    int
@@ -642,6 +635,10 @@ func (cw columnWidths) totalWidth() int {
 	// match the per-row render arithmetic in compactDelegate.Render exactly, so
 	// they are deliberately excluded from the [terminal] config block (#1254).
 	width := 9 + cw.treeIndent + cw.name + 4
+	if cw.repo > 0 {
+		width += 2 + cw.repo
+	}
+
 	for _, c := range tuiColumns() {
 		width += 2 + cw.col(c.Key)
 	}
@@ -1000,11 +997,15 @@ func computeColumnWidths(sessions []protocol.SessionInfo, _ string) columnWidths
 	tuiCols := tuiColumns()
 	widths := make(map[string]int, len(tuiCols))
 
-	var nameWidth int
+	var nameWidth, repoWidth int
 
 	for _, s := range sessions {
 		if n := lipgloss.Width(s.Name); n > nameWidth {
 			nameWidth = n
+		}
+
+		if n := lipgloss.Width(sessionRepositoryLabel(s)); n > repoWidth {
+			repoWidth = n
 		}
 
 		for _, c := range tuiCols {
@@ -1016,6 +1017,10 @@ func computeColumnWidths(sessions []protocol.SessionInfo, _ string) columnWidths
 
 	if nameWidth < 7 {
 		nameWidth = 7
+	}
+
+	if repoWidth < lipgloss.Width("Repo") {
+		repoWidth = lipgloss.Width("Repo")
 	}
 
 	for _, c := range tuiCols {
@@ -1034,6 +1039,7 @@ func computeColumnWidths(sessions []protocol.SessionInfo, _ string) columnWidths
 
 	return columnWidths{
 		name:     nameWidth,
+		repo:     repoWidth,
 		status:   widths["status"],
 		summary:  widths["summary"],
 		git:      widths["git"],
@@ -2176,6 +2182,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	b.WriteString(treePrefixRendered)
 	b.WriteString(name)
 
+	if d.cols.repo > 0 {
+		b.WriteString(sep)
+
+		repo := fitStyledLine(sessionRepositoryLabel(si.info), d.cols.repo)
+		b.WriteString(pad(dim.Render(repo), d.cols.repo))
+	}
+
 	for _, c := range tuiColumns() {
 		b.WriteString(sep)
 
@@ -3297,6 +3310,10 @@ func (m *overlayModel) rebuildForView() {
 	assignSessionIndices(items)
 
 	m.cols = computeColumnWidths(filtered, m.currentSessionID)
+	if m.view == viewRepo {
+		m.cols.repo = 0
+	}
+
 	m.cols.name = maxSessionNameWidthFromItems(items, m.cols.name)
 
 	m.cols.treeIndent = maxTreeIndentFromItems(items)
@@ -4248,6 +4265,11 @@ func (m *overlayModel) View() tea.View {
 		// is padded to its width except for the last column, which flows freely.
 		headerCells := []string{pad("Session", nameColWidth)}
 		sepCells := []string{strings.Repeat("─", nameColWidth)}
+
+		if m.cols.repo > 0 {
+			headerCells = append(headerCells, pad("Repo", m.cols.repo))
+			sepCells = append(sepCells, strings.Repeat("─", m.cols.repo))
+		}
 
 		tuiCols := tuiColumns()
 		for i, c := range tuiCols {
