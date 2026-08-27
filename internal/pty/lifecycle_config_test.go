@@ -546,14 +546,19 @@ func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 	const sessionCount = 3
 
 	var (
-		factoryCalls     atomic.Int32
-		backendAvailable atomic.Bool
+		factoryCalls            atomic.Int32
+		backendAvailable        atomic.Bool
+		recoveryFailureObserved atomic.Bool
 	)
 	backendAvailable.Store(true)
 
 	factory := func(cols, rows int) (Terminal, error) {
 		call := factoryCalls.Add(1)
 		if call == 2 || !backendAvailable.Load() {
+			if call > 2 {
+				recoveryFailureObserved.Store(true)
+			}
+
 			return nil, errors.New("injected terminal construction failure")
 		}
 
@@ -613,11 +618,27 @@ func TestAdoptSessionKthScreenFailurePreservesAllPTYsAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	if !waitForScrollbackMarker(fixtures[1].session, "canny raw recovery marker", time.Second) {
+		t.Fatal("raw recovery marker was not durably appended while screen backend was unavailable")
+	}
+
+	failureDeadline := time.Now().Add(time.Second)
+	for !recoveryFailureObserved.Load() && time.Now().Before(failureDeadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !recoveryFailureObserved.Load() {
+		t.Fatal("screen recovery did not observe the unavailable backend")
+	}
+
 	backendAvailable.Store(true)
 
 	if _, err := fixtures[1].writer.Write([]byte("\x1b[2J\x1b[Hdreich recovery trigger")); err != nil {
 		t.Fatal(err)
+	}
+
+	if !waitForScrollbackMarker(fixtures[1].session, "dreich recovery trigger", 3*time.Second) {
+		t.Fatal("recovery trigger was not durably appended")
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
