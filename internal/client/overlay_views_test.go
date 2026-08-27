@@ -65,16 +65,16 @@ func TestAllViewBuildsOneGlobalCrossRepoTree(t *testing.T) {
 		byID[item.info.ID] = item
 	}
 
-	if got := byID["ben"].displayName(); got != "System/ben" {
-		t.Errorf("system display name = %q, want System/ben", got)
+	if got := byID["ben"].displayName(); got != "ben" {
+		t.Errorf("system display name = %q, want ben", got)
 	}
 
-	if got := byID["bairn"].displayName(); got != "croft/bairn" {
-		t.Errorf("cross-repo child display name = %q, want croft/bairn", got)
+	if got := byID["bairn"].displayName(); got != "bairn" {
+		t.Errorf("cross-repo child display name = %q, want bairn", got)
 	}
 
-	if got := byID["wee-bairn"].displayName(); got != "bothy/wee-bairn" {
-		t.Errorf("grandchild display name = %q, want bothy/wee-bairn", got)
+	if got := byID["wee-bairn"].displayName(); got != "wee-bairn" {
+		t.Errorf("grandchild display name = %q, want wee-bairn", got)
 	}
 
 	if byID["bairn"].treePrefix == "" || byID["wee-bairn"].treePrefix == "" {
@@ -115,6 +115,53 @@ func TestRepoViewKeepsRepositoryGroupsAndSplitsCrossRepoEdges(t *testing.T) {
 		if strings.Contains(item.displayName(), "/") {
 			t.Errorf("Repo-view display name %q should rely on its group header", item.displayName())
 		}
+	}
+}
+
+func TestNonRepoViewsKeepSessionAndRepositoryNamesSeparate(t *testing.T) {
+	sessions := []protocol.SessionInfo{{
+		ID:       "dreich",
+		Name:     "session-with-a-distinctly-long-assigned-name",
+		RepoName: "repository-with-a-distinctly-long-name",
+		Status:   "running",
+	}}
+
+	for name, view := range map[string]viewMode{
+		"all":      viewAll,
+		"starred":  viewStarred,
+		"labels":   viewLabels,
+		"scenario": viewScenario,
+		"deleted":  viewDeleted,
+	} {
+		t.Run(name, func(t *testing.T) {
+			items := buildViewItems(view, sessions, nil)
+
+			var session sessionItem
+
+			for _, item := range items {
+				if candidate, ok := item.(sessionItem); ok {
+					session = candidate
+					break
+				}
+			}
+
+			if session.info.ID == "" {
+				t.Fatal("view did not contain a session")
+			}
+
+			if got := session.displayName(); got != sessions[0].Name {
+				t.Fatalf("display name = %q, want %q", got, sessions[0].Name)
+			}
+
+			if strings.Contains(session.displayName(), "/") {
+				t.Fatalf("display name %q contains repository prefix", session.displayName())
+			}
+		})
+	}
+
+	cols := computeColumnWidths(sessions, "")
+	if cols.repo < lipgloss.Width(sessions[0].RepoName) {
+		t.Fatalf("repository column width = %d, want at least %d", cols.repo, lipgloss.Width(sessions[0].RepoName))
 	}
 }
 
@@ -190,7 +237,7 @@ func TestAllViewSearchPromotesMatchingChildAndResizesColumns(t *testing.T) {
 		t.Errorf("child with filtered-out parent should be a root, prefix = %q", items[0].treePrefix)
 	}
 
-	wantNameWidth := lipgloss.Width("a-very-long-bothy/bairn")
+	wantNameWidth := lipgloss.Width("bairn")
 	if m.cols.name < wantNameWidth {
 		t.Errorf("All name width = %d, want at least %d", m.cols.name, wantNameWidth)
 	}
@@ -198,8 +245,8 @@ func TestAllViewSearchPromotesMatchingChildAndResizesColumns(t *testing.T) {
 	updated, _ := sendKey(m, "right")
 
 	m = asOverlay(updated)
-	if m.cols.name >= wantNameWidth {
-		t.Errorf("Repo name width = %d, should be recomputed without repeated repo identity", m.cols.name)
+	if m.cols.repo != 0 {
+		t.Errorf("Repo view repository column width = %d, want hidden", m.cols.repo)
 	}
 }
 
