@@ -10,6 +10,52 @@ import (
 	"github.com/d0ugal/graith/internal/config"
 )
 
+func TestFallbackPrompt(t *testing.T) {
+	tests := map[string]struct {
+		envSet     bool
+		prompt     string
+		promptFlag bool
+		promptFile bool
+		want       string
+	}{
+		"agent context gets parent instructions": {
+			envSet: true,
+			want: "You were created by ben-session, but no task was supplied. " +
+				"Send the parent a message requesting instructions, then wait.",
+		},
+		"human keeps prompt-less behavior": {},
+		"explicit prompt wins": {
+			envSet:     true,
+			prompt:     "inspect the croft",
+			promptFlag: true,
+			want:       "inspect the croft",
+		},
+		"explicit empty prompt wins": {
+			envSet:     true,
+			promptFlag: true,
+		},
+		"explicit prompt file wins": {
+			envSet:     true,
+			promptFile: true,
+			want:       "",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if test.envSet {
+				t.Setenv("GRAITH_SESSION_ID", "ben-session")
+			} else {
+				_ = os.Unsetenv("GRAITH_SESSION_ID")
+			}
+
+			if got := fallbackPrompt(test.prompt, test.promptFlag, test.promptFile); got != test.want {
+				t.Errorf("fallbackPrompt() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestNewPromptAndPromptFileMutuallyExclusive(t *testing.T) {
 	promptFile := filepath.Join(t.TempDir(), "prompt.txt")
 	if err := os.WriteFile(promptFile, []byte("file prompt"), 0o600); err != nil {

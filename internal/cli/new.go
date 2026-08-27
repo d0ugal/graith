@@ -110,6 +110,8 @@ var newCmd = &cobra.Command{
 			prompt = string(data)
 		}
 
+		prompt = fallbackPrompt(prompt, cmd.Flags().Changed("prompt"), cmd.Flags().Changed("prompt-file"))
+
 		// Typed Codex options (issue #1186). Sent only when at least one is set;
 		// the daemon rejects them against a non-codex agent.
 		codexOpts := config.CodexOptions{
@@ -188,6 +190,25 @@ var newCmd = &cobra.Command{
 
 		return runAttachByID(c, info.ID, nil)
 	},
+}
+
+// fallbackPrompt supplies a safe starting instruction only for an agent
+// creating a child through Graith. Explicit prompt flags, including flags
+// whose value is empty, retain their exact behavior.
+func fallbackPrompt(prompt string, promptFlagExplicit, promptFileExplicit bool) string {
+	if prompt != "" || promptFlagExplicit || promptFileExplicit {
+		return prompt
+	}
+
+	parentID := os.Getenv("GRAITH_SESSION_ID")
+
+	_, agentContext := os.LookupEnv("GRAITH_SESSION_ID")
+	if !agentContext || parentID == "" {
+		return prompt
+	}
+
+	return protocol.GeneratedFallbackPromptPrefix + parentID +
+		", but no task was supplied. Send the parent a message requesting instructions, then wait."
 }
 
 func createLabelsFromRaw(labels []string, flagChanged bool) ([]string, error) {
