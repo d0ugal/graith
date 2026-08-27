@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,9 +25,13 @@ func codexPreTrustArgs(worktreePath string) []string {
 		return []string{}
 	}
 
-	projectKey := strconv.Quote(filepath.Clean(worktreePath))
+	// Codex's -c override parser splits dotted keys on every period, even
+	// inside quoted TOML key segments. Scratch paths commonly contain periods
+	// (for example, the hidden .graith directory), so put the path in the TOML
+	// value instead of the override key. This preserves it as one map key.
+	projectPath := tomlBasicString(filepath.Clean(worktreePath))
 
-	return []string{"-c", "projects." + projectKey + `.trust_level="trusted"`}
+	return []string{"-c", "projects={" + projectPath + `={trust_level="trusted"}}`}
 }
 
 func isScratchWorkspace(dataDir, worktreePath string) bool {
