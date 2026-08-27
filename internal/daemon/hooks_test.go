@@ -30,8 +30,8 @@ func TestCodexPreTrustArgs(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	workspace := filepath.Join(root, "scratch", "braw")
-	want := []string{"-c", `projects."` + workspace + `".trust_level="trusted"`}
+	workspace := filepath.Join(root, ".graith", "scratch", "braw.with.dots")
+	want := []string{"-c", `projects={"` + workspace + `"={trust_level="trusted"}}`}
 
 	if got := codexPreTrustArgs(workspace); !reflect.DeepEqual(got, want) {
 		t.Fatalf("codexPreTrustArgs() = %#v, want %#v", got, want)
