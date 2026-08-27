@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/d0ugal/graith/internal/config"
 	"github.com/d0ugal/graith/internal/headless"
+	"github.com/d0ugal/graith/internal/protocol"
 	grpty "github.com/d0ugal/graith/internal/pty"
 	"github.com/d0ugal/graith/internal/sandbox"
 	"github.com/d0ugal/graith/internal/sessionlabel"
@@ -1249,6 +1251,10 @@ func (sm *SessionManager) Create(opts CreateOpts) (result SessionState, returnEr
 	if sessState.ParentID != "" {
 		if parent, ok := sm.state.Sessions[sessState.ParentID]; ok {
 			applyLifecycleSummaryLocked(sessState, "Created by "+parent.Name)
+
+			if strings.HasPrefix(prompt, protocol.GeneratedFallbackPromptPrefix) {
+				applyLifecycleSummaryLocked(sessState, "Generated fallback prompt; awaiting parent instructions")
+			}
 		}
 	}
 
