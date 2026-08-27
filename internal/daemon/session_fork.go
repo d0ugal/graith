@@ -563,7 +563,7 @@ func (sm *SessionManager) ForkWithAgent(name, sourceSessionID, targetAgent, targ
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
-	if hookFilesNeeded {
+	if hookFilesNeeded || agentName == "codex" {
 		hookArgs, hookEnv, err := sm.injectHooks(agentName, id, worktreePath, true)
 		if err != nil {
 			forkCleanup()

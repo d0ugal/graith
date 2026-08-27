@@ -788,7 +788,7 @@ func (sm *SessionManager) resumeWithSummaryAndPromptLocked(ctx context.Context, 
 		env[config.IncludeEnvVarName(inc.RepoName)] = inc.WorktreePath
 	}
 
-	if hookFilesNeeded {
+	if hookFilesNeeded || sessAgent == "codex" {
 		hookArgs, hookEnv, err := sm.injectHooks(sessAgent, id, sessWorktreePath, true)
 		if err != nil {
 			rollbackState()

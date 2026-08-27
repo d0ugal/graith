@@ -43,6 +43,7 @@ Every agent-specific flag graith appends is defined here — a custom agent can 
 
 - **`add_dir_args`** — the flag template graith uses to grant the agent an extra directory (each [included repo](#includes)'s co-located worktree). It is expanded once per directory with `{dir}` bound to that path. Leave it unset for an agent whose CLI has no such flag; those agents rely on the `GRAITH_INCLUDE_*_PATH` environment variables instead.
 - **`non_interactive_args`** — optional argv prepended on every create, resume, and fork. It is **empty by default** for every bundled agent, so each keeps its own approval TUI (and, for Codex, its own sandbox) out of the box; Graith treats time spent in that TUI as ordinary running state and never answers on your behalf. Set it to the agent's unattended flag(s) — e.g. `["--dangerously-skip-permissions"]` for Claude, `["--ask-for-approval", "never", "--sandbox", "danger-full-access"]` for Codex, `["--force"]` for Cursor, `["--auto"]` for OpenCode — to run without those prompts. Doing so disables the agent's native safeguards, so only enable it behind a boundary you control (Graith's `[sandbox]`, an external sandbox, or a VM). Graith does not provide a semantic shell-command policy; configure an agent-native hook or external policy tool directly if needed.
+- **`pre_trust_workspace`** — the generic setting for agents that support configurable workspace trust. For Cursor it creates its workspace trust marker, and can be set to `false` to retain Cursor's native trust prompt. Codex does not use this setting: scratch sessions are always pre-trusted because graith creates those directories as ephemeral, agent-owned workspaces; regular Codex repository worktrees retain Codex's native Git trust behavior.
 - **`headless_args`** — the control-channel argv prefix graith prepends when launching the agent in [headless mode]({{< relref "sessions.md#headless-sessions" >}}); the agent's own args follow it. Claude's default is `["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]`.
 - **`option_args`** — conditional flag groups appended on every launch. Each group is emitted only when its `when` template variable is set, so an unset option leaves the agent's own default untouched (see [Conditional option flags](#conditional-option-flags)).
 - **`info`** — provider-neutral info keys mapped to agent-native argv fragments (see [Provider info commands](#provider-info-commands)).
@@ -303,8 +304,10 @@ Validation rules:
 ## Default agent configurations
 
 Every built-in agent also sets the shared lifecycle and prompt-delivery
-defaults explicitly, so they show up in `gr config show`: `idle_timeout = "1h"`,
-`inject_prompt = true`, and `pre_trust_workspace = true`. Each also sets
+defaults explicitly, so they show up in `gr config show`: `idle_timeout = "1h"`
+and `inject_prompt = true`. Agents that support configurable workspace trust
+also set `pre_trust_workspace = true`. Codex intentionally omits that setting;
+its scratch-session trust behavior is unconditional. Each also sets
 `prompt_injection` to its native mechanism — `append_system_prompt` (Claude),
 `developer_instructions` (Codex), `cursor_rules` (Cursor), and `none` (OpenCode,
 Agy) — and sets

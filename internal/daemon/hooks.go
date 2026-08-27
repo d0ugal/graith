@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +20,25 @@ import (
 	"github.com/d0ugal/graith/internal/atomicfile"
 	"github.com/d0ugal/graith/internal/config"
 )
+
+func codexPreTrustArgs(worktreePath string) []string {
+	if worktreePath == "" {
+		return []string{}
+	}
+
+	projectKey := strconv.Quote(filepath.Clean(worktreePath))
+
+	return []string{"-c", "projects." + projectKey + `.trust_level="trusted"`}
+}
+
+func isScratchWorkspace(dataDir, worktreePath string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dataDir), filepath.Clean(worktreePath))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+
+	return strings.HasPrefix(rel, "scratch"+string(filepath.Separator))
+}
 
 // shellQuote wraps s in single quotes for use in shell scripts,
 // escaping any embedded single quotes with the '\” idiom.
@@ -1259,15 +1279,22 @@ func (sm *SessionManager) removeGeneratedCursorHooks(sessionID, worktreePath str
 // injectHooks dispatches lifecycle-hook injection to the agent-specific
 // implementation. It returns nil for agents that don't support hooks.
 func (sm *SessionManager) injectHooks(agentName, sessionID, worktreePath string, lifecycle bool) (extraArgs []string, extraEnv map[string]string, err error) {
+	if agentName == "codex" {
+		if isScratchWorkspace(sm.paths.DataDir, worktreePath) {
+			extraArgs = codexPreTrustArgs(worktreePath)
+		}
+	}
+
 	if !lifecycle {
-		return nil, nil, nil
+		return extraArgs, nil, nil
 	}
 
 	switch agentName {
 	case "claude":
 		return sm.injectClaudeHooks(sessionID)
 	case "codex":
-		return sm.injectCodexHooks(sessionID, true)
+		hookArgs, hookEnv, err := sm.injectCodexHooks(sessionID, true)
+		return append(extraArgs, hookArgs...), hookEnv, err
 	case "cursor":
 		return sm.injectCursorHooks(sessionID, worktreePath)
 	default:

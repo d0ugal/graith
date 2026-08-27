@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,6 +24,30 @@ func newTestSessionManagerWithDataDir(t *testing.T) *SessionManager {
 		StateFile: filepath.Join(dir, "state.json"),
 		DataDir:   dir,
 	}, slog.Default())
+}
+
+func TestCodexPreTrustArgs(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "scratch", "braw")
+	want := []string{"-c", `projects."` + workspace + `".trust_level="trusted"`}
+
+	if got := codexPreTrustArgs(workspace); !reflect.DeepEqual(got, want) {
+		t.Fatalf("codexPreTrustArgs() = %#v, want %#v", got, want)
+	}
+
+	if got := codexPreTrustArgs(""); len(got) != 0 {
+		t.Fatalf("codexPreTrustArgs(\"\") = %#v, want empty", got)
+	}
+
+	if !isScratchWorkspace(root, filepath.Join(root, "scratch", "canny")) {
+		t.Fatal("scratch workspace was not recognized")
+	}
+
+	if isScratchWorkspace(root, filepath.Join(root, "worktrees", "canny")) {
+		t.Fatal("regular worktree was recognized as scratch")
+	}
 }
 
 func TestGenerateClaudeSettings(t *testing.T) {
