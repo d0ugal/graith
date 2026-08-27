@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.73.18](https://github.com/d0ugal/graith/compare/v0.73.17...v0.73.18) (2026-08-27)
+
+
+### Features
+
+* pre-trust Codex scratch sessions ([ef052a9](https://github.com/d0ugal/graith/commit/ef052a9e4e5e567443f4be55dedd302d3de6bd6d))
+* separate repository column in session navigator ([3f2177b](https://github.com/d0ugal/graith/commit/3f2177bc93cea4af53ebf53180efaa5c6e85c424))
+
+
+### Tests
+
+* synchronize PTY recovery assertions ([d07a80d](https://github.com/d0ugal/graith/commit/d07a80db0d33eb6027a2de412c6ccde9435c6f6a))
+
+
+### Dependencies
+
+* **deps:** update github/codeql-action action to v4.37.9 ([#2296](https://github.com/d0ugal/graith/issues/2296)) ([87f9ae3](https://github.com/d0ugal/graith/commit/87f9ae3b8b2fdcbc06c3e2d837b215abe6a15ff2))
+* **deps:** update renovate/renovate docker tag to v44.46.0 ([#2294](https://github.com/d0ugal/graith/issues/2294)) ([33d6239](https://github.com/d0ugal/graith/commit/33d6239420ee4ae77d8040d4bfeb61e90013795a))
+* **deps:** update renovate/renovate docker tag to v44.46.4 ([#2297](https://github.com/d0ugal/graith/issues/2297)) ([ddcda14](https://github.com/d0ugal/graith/commit/ddcda145f42611be048f17a54f2a31f52f65e996))
+* **deps:** update renovate/renovate docker tag to v44.46.5 ([#2298](https://github.com/d0ugal/graith/issues/2298)) ([59bef04](https://github.com/d0ugal/graith/commit/59bef047eaaa49020c15c2222ef1a04d3cce6edb))
+* **deps:** update renovate/renovate docker tag to v44.46.6 ([#2300](https://github.com/d0ugal/graith/issues/2300)) ([54847ea](https://github.com/d0ugal/graith/commit/54847eae91ca7b84a888ef6c3d75494a88e4c440))
+* **deps:** update renovate/renovate docker tag to v44.47.0 ([#2302](https://github.com/d0ugal/graith/issues/2302)) ([25e59bd](https://github.com/d0ugal/graith/commit/25e59bdab2841dbb63a509deb368e2aa40d5140c))
+
 ## [0.73.17](https://github.com/d0ugal/graith/compare/v0.73.16...v0.73.17) (2026-08-26)
 
 
