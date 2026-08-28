@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.73.19](https://github.com/d0ugal/graith/compare/v0.73.18...v0.73.19) (2026-08-28)
+
+
+### Features
+
+* pin orchestrator in session navigator ([699e546](https://github.com/d0ugal/graith/commit/699e546d9d8168f19a9e1e510e101dd1340740f1))
+
+
+### Bug Fixes
+
+* add fallback prompt for agent-created children ([6507e82](https://github.com/d0ugal/graith/commit/6507e82e5d2547ba81ca5f881a0d885d003483e4))
+* **ci:** bound dev release asset retention ([4a04dc3](https://github.com/d0ugal/graith/commit/4a04dc3bbb09c6bbeef2a46ecbddb1125fd724e1))
+* encode Codex scratch trust override as table ([7b8a730](https://github.com/d0ugal/graith/commit/7b8a730c5bbf0f9fd46a5b53643a063ec8abfcad))
+* update module github.com/prometheus/procfs to v0.22.0 ([#2319](https://github.com/d0ugal/graith/issues/2319)) ([8ffae85](https://github.com/d0ugal/graith/commit/8ffae8590ec40c7bf0b2c4b4ae9f60b5c6063031))
+
+
+### Dependencies
+
+* **deps:** update golangci/golangci-lint docker tag to v2.13.2 ([#2312](https://github.com/d0ugal/graith/issues/2312)) ([cab92a7](https://github.com/d0ugal/graith/commit/cab92a772f8460132c5289fa89b6b25619a2dc43))
+* **deps:** update renovate/renovate docker tag to v44.48.0 ([#2305](https://github.com/d0ugal/graith/issues/2305)) ([aecff1e](https://github.com/d0ugal/graith/commit/aecff1e24b6ae08e1fbfa0fd1855f59b9c3f53ea))
+* **deps:** update renovate/renovate docker tag to v44.48.1 ([#2310](https://github.com/d0ugal/graith/issues/2310)) ([9e5c056](https://github.com/d0ugal/graith/commit/9e5c056eaf6166256e1821ce4363050a766cc1a0))
+* **deps:** update renovate/renovate docker tag to v44.48.3 ([#2313](https://github.com/d0ugal/graith/issues/2313)) ([bd380a6](https://github.com/d0ugal/graith/commit/bd380a647b620d6f68250e15c43fcff46a1bc2c1))
+* **deps:** update renovate/renovate docker tag to v44.49.0 ([#2316](https://github.com/d0ugal/graith/issues/2316)) ([78c3627](https://github.com/d0ugal/graith/commit/78c36279259fa35b4b97f5e48adb158d8495c503))
+
 ## [0.73.18](https://github.com/d0ugal/graith/compare/v0.73.17...v0.73.18) (2026-08-27)
 
 
