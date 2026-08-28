@@ -765,6 +765,73 @@ jobs:
               --notes "$release_notes"
           fi
 
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/dev" --jq '.id')"
+
+          # GitHub limits a release to 1,000 assets. Keep a few version groups
+          # for rollback/debugging, while retaining the current
+          # group even when a retry is resuming a partial upload. This runs
+          # before uploads so a failed run cannot strand the release at its
+          # limit. The serialized push concurrency prevents two publishers
+          # from pruning each other's in-flight assets.
+          cleanup_dev_assets() {
+            local assets_json stale_assets name url
+            assets_json="$(gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq -c 'add')"
+
+            while IFS=$'\t' read -r url name; do
+              [[ -z "$url" ]] && continue
+              gh api --method DELETE "$url" --silent
+            done < <(jq -r '
+              .[] | select(
+                .name == "checksums.txt" or
+                .name == "graith-dev_darwin_arm64.tar.gz" or
+                .name == "graith-dev_linux_amd64.tar.gz" or
+                .name == "graith-dev_linux_arm64.tar.gz"
+              ) | [(.url // .api_url // .apiUrl), .name] | @tsv
+            ' <<<"$assets_json")
+
+            stale_assets="$(jq -r --arg current "graith-dev_${GRAITH_DEV_VERSION}" '
+              [ .[] |
+                .name as $name |
+                (if ($name | endswith("_darwin_arm64.tar.gz")) then
+                  ($name | sub("_darwin_arm64.tar.gz$"; ""))
+                elif ($name | endswith("_linux_amd64.tar.gz")) then
+                  ($name | sub("_linux_amd64.tar.gz$"; ""))
+                elif ($name | endswith("_linux_arm64.tar.gz")) then
+                  ($name | sub("_linux_arm64.tar.gz$"; ""))
+                elif ($name | endswith("_checksums.txt")) then
+                  ($name | sub("_checksums.txt$"; ""))
+                else empty end) as $group |
+                select($group | startswith("graith-dev_")) |
+                {group: $group, created_at: (.created_at // ""), url: (.url // .api_url // .apiUrl), name: $name}
+              ]
+              | group_by(.group)
+              | map({group: .[0].group, newest: (map(.created_at) | max), assets: .})
+              | sort_by(.newest) | reverse
+              | .[8:][]
+              | select(.group != $current)
+              | .assets[] | [(.url // .api_url // .apiUrl), .name] | @tsv
+            ' <<<"$assets_json")"
+            while IFS=$'\t' read -r url name; do
+              [[ -z "$url" ]] && continue
+              gh api --method DELETE "$url" --silent
+            done <<<"$stale_assets"
+          }
+
+          cleanup_dev_assets
+
+          release_json="$(gh release view dev --repo "$GITHUB_REPOSITORY" --json assets)"
+          asset_count="$(jq '.assets | length' <<<"$release_json")"
+          missing_count="$(jq -r --arg names "$upload_order" '
+            ($names | split("\n") | map(select(length > 0))) as $wanted |
+            ([.assets[].name]) as $existing |
+            [$wanted[] as $name | select(($existing | index($name)) == null)] | length
+          ' <<<"$release_json")"
+          if (( asset_count + missing_count > 1000 )); then
+            echo "::error::Dev release has $asset_count assets and needs room for $missing_count more"
+            exit 1
+          fi
+
           upload_or_confirm_asset() {
             local name path local_sha release_json remote_status
             name="$1"
@@ -954,26 +1021,3 @@ jobs:
           git add graith-dev.rb
           git diff --cached --quiet || git commit -m "chore: update graith-dev to ${VERSION}"
           git_with_tap_credentials push
-
-      - name: Prune legacy unversioned dev assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          release_json="$(gh release view dev --repo "$GITHUB_REPOSITORY" --json assets)"
-          for name in \
-            checksums.txt \
-            graith-dev_darwin_arm64.tar.gz \
-            graith-dev_linux_amd64.tar.gz \
-            graith-dev_linux_arm64.tar.gz; do
-            urls="$(jq -er --arg name "$name" \
-              '[.assets[] | select(.name == $name) | .apiUrl] | @tsv' \
-              <<<"$release_json")"
-            if [[ -z "$urls" ]]; then
-              continue
-            fi
-            while IFS= read -r url; do
-              test -n "$url"
-              gh api --method DELETE "$url" --silent
-            done < <(tr '\t' '\n' <<<"$urls")
-          done
