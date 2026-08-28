@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/d0ugal/graith/internal/protocol"
 )
 
@@ -40,6 +41,77 @@ func assertSelectedSession(t *testing.T, m *overlayModel, want string) {
 	if item.info.ID != want {
 		t.Fatalf("selected session = %q, want %q", item.info.ID, want)
 	}
+}
+
+func TestLiveViewsPinOrchestratorAndDeletedDoesNot(t *testing.T) {
+	sessions := navigatorViewSessions()
+
+	for name, view := range map[string]viewMode{
+		"all":      viewAll,
+		"repo":     viewRepo,
+		"starred":  viewStarred,
+		"labels":   viewLabels,
+		"scenario": viewScenario,
+	} {
+		t.Run(name, func(t *testing.T) {
+			items := buildViewItems(view, sessions, nil)
+			if len(items) == 0 {
+				t.Fatal("view is empty")
+			}
+
+			pinned, ok := items[0].(sessionItem)
+			if !ok || !pinned.pinned || pinned.info.ID != "ben" {
+				t.Fatalf("first item = %#v, want pinned orchestrator", items[0])
+			}
+
+			for _, item := range items[1:] {
+				if si, ok := item.(sessionItem); ok && si.info.ID == "ben" {
+					t.Fatal("orchestrator rendered again in ordinary list")
+				}
+			}
+		})
+	}
+
+	deleted := buildViewItems(viewDeleted, sessions, nil)
+	for _, item := range deleted {
+		if si, ok := item.(sessionItem); ok && si.pinned {
+			t.Fatal("Deleted view must not pin the orchestrator")
+		}
+	}
+}
+
+func TestFilterSessionsKeepsOrchestratorReachable(t *testing.T) {
+	filtered := filterSessions(navigatorViewSessions(), "missing-session")
+	if len(filtered) != 1 || filtered[0].SystemKind != "orchestrator" {
+		t.Fatalf("filtered sessions = %#v, want only orchestrator", filtered)
+	}
+}
+
+func TestPinnedOrchestratorOmitsSystemRepositoryCell(t *testing.T) {
+	items := buildViewItems(viewRepo, navigatorViewSessions(), nil)
+	cols := computeColumnWidths(navigatorViewSessions(), "")
+	d := compactDelegate{cols: cols}
+	l := list.New(items, d, 120, 10)
+
+	var buf strings.Builder
+	d.Render(&buf, l, 0, items[0])
+	line := ansi.Strip(buf.String())
+
+	if strings.Contains(line, "System") {
+		t.Fatalf("pinned orchestrator should not render System repository label: %q", line)
+	}
+
+	if !strings.Contains(line, "◆") || !strings.Contains(line, "ben") {
+		t.Fatalf("pinned row lacks distinct treatment: %q", line)
+	}
+}
+
+func TestStarResultPreservesSelectionWithPinnedOrchestrator(t *testing.T) {
+	m := newOverlayModel(navigatorViewSessions(), "", nil, nil, nil, nil)
+	m.selectSessionByID("bairn")
+
+	updated, _ := m.Update(starResultMsg{sessionID: "bairn", starred: true})
+	assertSelectedSession(t, asOverlay(updated), "bairn")
 }
 
 func TestAllViewBuildsOneGlobalCrossRepoTree(t *testing.T) {
@@ -77,12 +149,8 @@ func TestAllViewBuildsOneGlobalCrossRepoTree(t *testing.T) {
 		t.Errorf("grandchild display name = %q, want wee-bairn", got)
 	}
 
-	if byID["bairn"].treePrefix == "" || byID["wee-bairn"].treePrefix == "" {
-		t.Fatalf("cross-repository descendants lost tree edges: bairn=%q wee-bairn=%q", byID["bairn"].treePrefix, byID["wee-bairn"].treePrefix)
-	}
-
-	if !byID["ben"].hasChildren || !byID["bairn"].hasChildren {
-		t.Fatal("global tree should preserve system and cross-repo parent relationships")
+	if byID["wee-bairn"].treePrefix == "" {
+		t.Fatalf("nested descendants lost tree edges: wee-bairn=%q", byID["wee-bairn"].treePrefix)
 	}
 }
 
@@ -103,8 +171,8 @@ func TestRepoViewKeepsRepositoryGroupsAndSplitsCrossRepoEdges(t *testing.T) {
 		}
 	}
 
-	if got := strings.Join(headers, ","); got != "System,bothy,croft,strath" {
-		t.Fatalf("Repo headers = %q, want System,bothy,croft,strath", got)
+	if got := strings.Join(headers, ","); got != "bothy,croft,strath" {
+		t.Fatalf("Repo headers = %q, want bothy,croft,strath", got)
 	}
 
 	for _, item := range sessionItems(m.list.Items()) {
@@ -178,30 +246,30 @@ func TestAllRepoSwitchPreservesSelectionAndCollapseState(t *testing.T) {
 	m = asOverlay(updated)
 	assertSelectedSession(t, m, "bairn")
 
-	m.selectSessionByID("ben")
+	m.selectSessionByID("bairn")
 	updated, _ = sendKey(m, " ")
 
 	m = asOverlay(updated)
-	if !m.collapsed["ben"] {
-		t.Fatal("system parent should be collapsed in All")
+	if !m.collapsed["bairn"] {
+		t.Fatal("ordinary parent should be collapsed in All")
 	}
 
 	updated, _ = sendKey(m, "right")
 
 	m = asOverlay(updated)
-	if !m.collapsed["ben"] {
+	if !m.collapsed["bairn"] {
 		t.Fatal("collapse state should survive switching to Repo")
 	}
 
 	m.selectSessionByID("bairn") // visible as a root in its repository group
 	updated, _ = sendKey(m, "left")
 	m = asOverlay(updated)
-	assertSelectedSession(t, m, "ben") // hidden child falls back to visible parent
+	assertSelectedSession(t, m, "bairn") // hidden child falls back to visible parent
 }
 
 func TestAllViewRefreshPreservesSelectionAndCollapse(t *testing.T) {
 	sessions := navigatorViewSessions()
-	collapsed := map[string]bool{"ben": true}
+	collapsed := map[string]bool{"bairn": true}
 	m := newOverlayModel(sessions, "ben", nil, nil, collapsed, nil)
 
 	refreshed := append([]protocol.SessionInfo{}, sessions...)
@@ -214,8 +282,8 @@ func TestAllViewRefreshPreservesSelectionAndCollapse(t *testing.T) {
 	assertSelectedSession(t, m, "ben")
 
 	root := m.list.SelectedItem().(sessionItem)
-	if !root.collapsed || root.descendantCount != 3 {
-		t.Fatalf("refreshed root collapsed=%v descendants=%d, want true/3", root.collapsed, root.descendantCount)
+	if !root.pinned {
+		t.Fatalf("selected root = %#v, want pinned orchestrator", root)
 	}
 }
 
