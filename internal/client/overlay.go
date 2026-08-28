@@ -289,6 +289,7 @@ func overlayUserHomeDir() (string, error) {
 type sessionItem struct {
 	info            protocol.SessionInfo
 	labelGroup      string
+	pinned          bool
 	showRepo        bool
 	treePrefix      string
 	hasChildren     bool
@@ -958,6 +959,28 @@ func filterSessions(sessions []protocol.SessionInfo, query string) []protocol.Se
 
 		if allMatch {
 			result = append(result, s)
+		}
+	}
+
+	// The orchestrator is a pinned control-plane session, so keep it reachable
+	// while filtering the user sessions. It is rendered separately at the top
+	// of every live Navigator view.
+	if query != "" {
+		for _, s := range sessions {
+			if s.SystemKind == "orchestrator" {
+				found := false
+
+				for _, candidate := range result {
+					if candidate.ID == s.ID {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					result = append([]protocol.SessionInfo{s}, result...)
+				}
+			}
 		}
 	}
 
@@ -2093,6 +2116,13 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		dim = lipgloss.NewStyle().Foreground(colorSelectDim)
 	}
 
+	if si, ok := item.(sessionItem); ok && si.pinned {
+		dim = lipgloss.NewStyle().Foreground(colorPurple)
+		if selected {
+			dim = lipgloss.NewStyle().Foreground(colorSelectDim)
+		}
+	}
+
 	isCurrent := si.info.ID == d.currentSessionID
 
 	indicator := "●"
@@ -2109,6 +2139,15 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	case "errored":
 		indicator = "✗"
 		indicatorColor = colorRed
+	}
+
+	if si.pinned {
+		indicator = "◆"
+		indicatorColor = colorPurple
+
+		if selected {
+			indicatorColor = colorSelectDim
+		}
 	}
 
 	if selected {
@@ -2159,6 +2198,10 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 
 	nameText := si.displayName() + childSuffix
+	if si.pinned {
+		nameText = lipgloss.NewStyle().Bold(true).Render(nameText)
+	}
+
 	nameWidth := d.cols.treeIndent + d.cols.name - lipgloss.Width(si.treePrefix) - lipgloss.Width(collapseIndicator)
 	name := collapseIndicator + pad(nameText, nameWidth)
 
@@ -2185,7 +2228,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if d.cols.repo > 0 {
 		b.WriteString(sep)
 
-		repo := fitStyledLine(sessionRepositoryLabel(si.info), d.cols.repo)
+		repo := ""
+		if !si.pinned {
+			repo = fitStyledLine(sessionRepositoryLabel(si.info), d.cols.repo)
+		}
+
 		b.WriteString(pad(dim.Render(repo), d.cols.repo))
 	}
 
@@ -2893,6 +2940,44 @@ func buildLabelGroupedItems(sessions []protocol.SessionInfo, collapsed map[strin
 }
 
 func buildViewItems(view viewMode, sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
+	// Deleted is intentionally kept on its original path: soft-deleted data is
+	// not part of the pinned live-session treatment.
+	if view == viewDeleted {
+		items := make([]list.Item, 0, len(sessions))
+		for _, s := range sessions {
+			items = append(items, sessionItem{info: s})
+		}
+
+		return items
+	}
+
+	var orchestrator *protocol.SessionInfo
+
+	ordinary := make([]protocol.SessionInfo, 0, len(sessions))
+	for i := range sessions {
+		if sessions[i].SystemKind == "orchestrator" {
+			if orchestrator == nil {
+				candidate := sessions[i]
+				orchestrator = &candidate
+			}
+
+			continue
+		}
+
+		ordinary = append(ordinary, sessions[i])
+	}
+
+	items := buildViewItemsWithoutOrchestrator(view, ordinary, collapsed)
+
+	if orchestrator != nil {
+		pinned := sessionItem{info: *orchestrator, pinned: true}
+		items = append([]list.Item{pinned}, items...)
+	}
+
+	return items
+}
+
+func buildViewItemsWithoutOrchestrator(view viewMode, sessions []protocol.SessionInfo, collapsed map[string]bool) []list.Item {
 	switch view {
 	case viewAll:
 		items := buildTreeItems(sessions, collapsed)
@@ -2913,12 +2998,7 @@ func buildViewItems(view viewMode, sessions []protocol.SessionInfo, collapsed ma
 	case viewScenario:
 		return buildScenarioGroupedItems(sessions, collapsed)
 	default:
-		items := make([]list.Item, 0, len(sessions))
-		for _, s := range sessions {
-			items = append(items, sessionItem{info: s})
-		}
-
-		return items
+		return nil
 	}
 }
 
@@ -3492,7 +3572,25 @@ func (m *overlayModel) parentsWithChildren() []string {
 func (m *overlayModel) sessionsForView() []protocol.SessionInfo {
 	switch m.view {
 	case viewStarred:
-		return filterStarred(m.allSessions)
+		sessions := filterStarred(m.allSessions)
+		for _, s := range m.allSessions {
+			if s.SystemKind == "orchestrator" {
+				found := false
+
+				for _, candidate := range sessions {
+					if candidate.ID == s.ID {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					sessions = append(sessions, s)
+				}
+			}
+		}
+
+		return sessions
 	case viewDeleted:
 		return sortDeleted(m.deletedSessions)
 	case viewLabels:
@@ -3528,6 +3626,12 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case starResultMsg:
 		if msg.err == nil {
+			selectedID, selectedLabel := "", ""
+			if item, ok := m.list.SelectedItem().(sessionItem); ok {
+				selectedID = item.info.ID
+				selectedLabel = item.labelGroup
+			}
+
 			for i, s := range m.allSessions {
 				if s.ID == msg.sessionID {
 					m.allSessions[i].Starred = msg.starred
@@ -3536,6 +3640,10 @@ func (m *overlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.rebuildForView()
+
+			if selectedID != "" {
+				m.selectSessionByIDAndLabel(selectedID, selectedLabel)
+			}
 		}
 
 		return m, m.fetchPreviewCmd()
