@@ -876,7 +876,7 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		}
 	}
 
-	publishAt, homebrewAt, pruneAt := -1, -1, -1
+	publishAt, homebrewAt := -1, -1
 
 	for index, step := range publishJob.Steps {
 		switch step.Name {
@@ -884,17 +884,11 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 			publishAt = index
 		case "Update Homebrew tap":
 			homebrewAt = index
-		case "Prune legacy unversioned dev assets":
-			pruneAt = index
 		}
 	}
 
 	if publishAt < 0 || homebrewAt <= publishAt {
 		t.Errorf("Homebrew update can run before dev release promotion: publish=%d homebrew=%d", publishAt, homebrewAt)
-	}
-
-	if pruneAt <= homebrewAt {
-		t.Errorf("legacy asset pruning can run before Homebrew update: prune=%d homebrew=%d", pruneAt, homebrewAt)
 	}
 
 	publishScript := workflowStep(publishJob, "Upload dev release").Run
@@ -904,6 +898,12 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 
 	for _, want := range []string{
 		`gh api --paginate --slurp`,
+		`releases/$release_id/assets?per_page=100`,
+		`release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/dev" --jq '.id')"`,
+		`.[8:][]`,
+		`select(.group != $current)`,
+		`gh api --method DELETE "$url" --silent`,
+		`asset_count + missing_count > 1000`,
 		`repos/$GITHUB_REPOSITORY/releases?per_page=100`,
 		`repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev`,
 		`gh api --method PATCH`,
@@ -945,22 +945,15 @@ func TestDevReleaseWorkflowBuildsAndAggregatesPlatformArtifacts(t *testing.T) {
 		t.Error("publisher suppresses release or tag mutation errors")
 	}
 
-	if strings.Contains(publishScript, "--method DELETE") || strings.Contains(publishScript, "--clobber") {
-		t.Error("publisher can create a release-absence or asset-clobber window")
+	if strings.Contains(publishScript, "--clobber") {
+		t.Error("publisher can create an asset-clobber window")
 	}
 
-	pruneScript := workflowStep(publishJob, "Prune legacy unversioned dev assets").Run
-	for _, want := range []string{
-		`gh release view dev --repo "$GITHUB_REPOSITORY" --json assets`,
-		"checksums.txt",
-		"graith-dev_darwin_arm64.tar.gz",
-		"graith-dev_linux_amd64.tar.gz",
-		"graith-dev_linux_arm64.tar.gz",
-		`gh api --method DELETE "$url" --silent`,
-	} {
-		if !strings.Contains(pruneScript, want) {
-			t.Errorf("legacy asset pruning step missing %q", want)
-		}
+	cleanupAt := strings.Index(publishScript, "cleanup_dev_assets")
+
+	uploadAt := strings.Index(publishScript, `gh release upload dev "$path"`)
+	if cleanupAt < 0 || uploadAt < 0 || cleanupAt > uploadAt {
+		t.Errorf("dev asset cleanup does not happen before upload: cleanup=%d upload=%d", cleanupAt, uploadAt)
 	}
 
 	var (
@@ -1193,11 +1186,24 @@ case "$args" in
     ;;
   *"releases/tags/dev"*)
     release_exists || exit 91
-    if release_is_draft; then
-      exit 91
-    fi
     record get-release-api
-    release_json
+    if [[ "$args" == *"--jq .id"* ]]; then
+      printf '2718\n'
+    else
+      release_json
+    fi
+    ;;
+  *"releases/2718/assets?per_page=100"*)
+    release_exists || exit 91
+    record list-assets
+    release_json | jq '[.assets]'
+    ;;
+  *"--method DELETE"*)
+    release_exists || exit 91
+    url="${4:?}"
+    asset="${url##*/}"
+    record "delete:$asset"
+    rm -f "$FAKE_GH_STATE/assets/$asset"
     ;;
   *"git/matching-refs/tags/dev"*)
     record list-tags
@@ -1360,25 +1366,25 @@ esac
 	newAssets := assetNames()
 	newUploadOrder := uploadOrder()
 	wantFirstPublish := slices.Concat(
-		[]string{"get-main", "list-releases", "list-tags", "create-tag", "create-release"},
+		[]string{"get-main", "list-releases", "list-tags", "create-tag", "create-release", "get-release-api", "list-assets", "get-release"},
 		uploadEvents(newUploadOrder),
 		downloadEvents(newAssets),
 		[]string{"list-tags", "update-tag", "edit-release", "verify-tag"},
 	)
 	wantNormalUpdate := slices.Concat(
-		[]string{"get-main", "list-releases"},
+		[]string{"get-main", "list-releases", "get-release-api", "list-assets", "delete:checksums.txt", "delete:graith-dev_darwin_arm64.tar.gz", "delete:graith-dev_linux_amd64.tar.gz", "delete:graith-dev_linux_arm64.tar.gz", "get-release"},
 		uploadEvents(newUploadOrder),
 		downloadEvents(newAssets),
 		[]string{"list-tags", "update-tag", "edit-release", "verify-tag"},
 	)
 	wantMissingTagRepair := slices.Concat(
-		[]string{"get-main", "list-releases"},
+		[]string{"get-main", "list-releases", "get-release-api", "list-assets", "delete:checksums.txt", "delete:graith-dev_darwin_arm64.tar.gz", "delete:graith-dev_linux_amd64.tar.gz", "delete:graith-dev_linux_arm64.tar.gz", "get-release"},
 		uploadEvents(newUploadOrder),
 		downloadEvents(newAssets),
 		[]string{"list-tags", "create-tag", "edit-release", "verify-tag"},
 	)
 	wantExactRetry := slices.Concat(
-		[]string{"get-main", "list-releases"},
+		[]string{"get-main", "list-releases", "get-release-api", "list-assets", "delete:checksums.txt", "delete:graith-dev_darwin_arm64.tar.gz", "delete:graith-dev_linux_amd64.tar.gz", "delete:graith-dev_linux_arm64.tar.gz", "get-release"},
 		confirmEvents(newUploadOrder),
 		downloadEvents(newAssets),
 		[]string{"list-tags", "update-tag", "edit-release", "verify-tag"},
