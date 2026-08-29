@@ -2,8 +2,8 @@
   "name": "graith-docs",
   "private": true,
   "dependencies": {
-    "@grafana/faro-instrumentation-replay": "2.10.0",
-    "@grafana/faro-web-sdk": "2.10.0",
-    "@grafana/faro-web-tracing": "2.10.0"
+    "@grafana/faro-instrumentation-replay": "2.11.0",
+    "@grafana/faro-web-sdk": "2.11.0",
+    "@grafana/faro-web-tracing": "2.11.0"
   }
 }
