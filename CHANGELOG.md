@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.73.20](https://github.com/d0ugal/graith/compare/v0.73.19...v0.73.20) (2026-09-02)
+
+
+### Bug Fixes
+
+* **deps:** update grafana faro frontend observability packages to v2.11.0 ([#2323](https://github.com/d0ugal/graith/issues/2323)) ([54f0b53](https://github.com/d0ugal/graith/commit/54f0b53e58116939b4a6b433d08f4040e49ed9e3))
+* update github.com/charmbracelet/ultraviolet digest to d60c349 ([#2334](https://github.com/d0ugal/graith/issues/2334)) ([e77e647](https://github.com/d0ugal/graith/commit/e77e6478a7267e1e9ec31bb7ef0f95791a288042))
+* update google.golang.org/genproto/googleapis/api digest to 18b4a75 ([#2331](https://github.com/d0ugal/graith/issues/2331)) ([811767d](https://github.com/d0ugal/graith/commit/811767d9437eb1a2abce2206642a653407834a71))
+* update google.golang.org/genproto/googleapis/rpc digest to 18b4a75 ([#2332](https://github.com/d0ugal/graith/issues/2332)) ([595bd27](https://github.com/d0ugal/graith/commit/595bd27d73b1eec66fc4456c2111179866159d2a))
+* update module github.com/mattn/go-runewidth to v0.0.29 ([#2339](https://github.com/d0ugal/graith/issues/2339)) ([d8a99cb](https://github.com/d0ugal/graith/commit/d8a99cb6c7a599eee3ced8a9c191c8ee374cea11))
+* update module github.com/prometheus/client_model to v0.6.3 ([#2328](https://github.com/d0ugal/graith/issues/2328)) ([6c11f78](https://github.com/d0ugal/graith/commit/6c11f78d41f93c22574b4c6a80a24b4a404bdcfe))
+* update module github.com/prometheus/common to v0.71.0 ([#2329](https://github.com/d0ugal/graith/issues/2329)) ([a1133fd](https://github.com/d0ugal/graith/commit/a1133fdfca95c67e40b1bed8305572be3be49678))
+
+
+### Dependencies
+
+* **deps:** lock file maintenance ([#2327](https://github.com/d0ugal/graith/issues/2327)) ([02079e3](https://github.com/d0ugal/graith/commit/02079e3ae032b2a217f96629cf05bdbcb526c6fe))
+* **deps:** update actions/deploy-pages action to v5.0.1 ([#2338](https://github.com/d0ugal/graith/issues/2338)) ([f36a7e9](https://github.com/d0ugal/graith/commit/f36a7e95a0e8fdc9950b54fcd1b223d33966b355))
+* **deps:** update dependency nolabs-ai/nono to v0.75.0 ([#2336](https://github.com/d0ugal/graith/issues/2336)) ([cd97182](https://github.com/d0ugal/graith/commit/cd971825388932c131db67b9f44e3f156712c3be))
+* **deps:** update dependency zizmorcore/zizmor to v1.30.0 ([#2326](https://github.com/d0ugal/graith/issues/2326)) ([7ab8a30](https://github.com/d0ugal/graith/commit/7ab8a306ac9f72b91a0d2ae4d1a510453d8202eb))
+* **deps:** update renovate/renovate docker tag to v44.50.3 ([#2320](https://github.com/d0ugal/graith/issues/2320)) ([a105e11](https://github.com/d0ugal/graith/commit/a105e113cc55451e818d7e060ea4fdb1b628312d))
+* **deps:** update renovate/renovate docker tag to v44.51.0 ([#2322](https://github.com/d0ugal/graith/issues/2322)) ([e720a4b](https://github.com/d0ugal/graith/commit/e720a4b9f02998018458aba1b6b35cba32ce7ffb))
+* **deps:** update renovate/renovate docker tag to v44.51.2 ([#2324](https://github.com/d0ugal/graith/issues/2324)) ([684ded5](https://github.com/d0ugal/graith/commit/684ded5fc6cbf9438c00007305d240e87e774ef9))
+* **deps:** update renovate/renovate docker tag to v44.52.0 ([#2325](https://github.com/d0ugal/graith/issues/2325)) ([5145e94](https://github.com/d0ugal/graith/commit/5145e94ba17e01985fca58dafd9ea7be26ae77d3))
+* **deps:** update renovate/renovate docker tag to v44.53.0 ([#2333](https://github.com/d0ugal/graith/issues/2333)) ([a1d71b5](https://github.com/d0ugal/graith/commit/a1d71b5cbf8fe02990352226071620e1d900a7a7))
+* **deps:** update renovate/renovate docker tag to v44.56.0 ([#2337](https://github.com/d0ugal/graith/issues/2337)) ([a427d8a](https://github.com/d0ugal/graith/commit/a427d8aa5b12f38e9d949c7e87f702b4c60ba685))
+
 ## [0.73.19](https://github.com/d0ugal/graith/compare/v0.73.18...v0.73.19) (2026-08-28)
 
 
