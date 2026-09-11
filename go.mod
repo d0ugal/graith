@@ -32,7 +32,7 @@ require (
 	golang.org/x/term v0.46.0
 	google.golang.org/grpc v1.83.2
 	modernc.org/sqlite v1.58.0
-	tailscale.com v1.102.3
+	tailscale.com v1.102.4
 )
 
 require (
