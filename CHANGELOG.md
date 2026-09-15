@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.73.23](https://github.com/d0ugal/graith/compare/v0.73.22...v0.73.23) (2026-09-15)
+
+
+### Bug Fixes
+
+* update module github.com/fxamacker/cbor/v2 to v2.9.4 ([#2418](https://github.com/d0ugal/graith/issues/2418)) ([aacddaf](https://github.com/d0ugal/graith/commit/aacddafacb4f35a5dd780158c76b0919f795bc02))
+* update module github.com/xo/terminfo to v1.2.0 ([#2410](https://github.com/d0ugal/graith/issues/2410)) ([63ecacf](https://github.com/d0ugal/graith/commit/63ecacf1524ba1d20b6b9fb4d3a234a00a6e55e7))
+
+
+### Dependencies
+
+* **deps:** lock file maintenance ([#2411](https://github.com/d0ugal/graith/issues/2411)) ([fb9671f](https://github.com/d0ugal/graith/commit/fb9671f95bae9f52eee66eca5729aae9b2133f44))
+* **deps:** update renovate/renovate docker tag to v44.83.0 ([#2408](https://github.com/d0ugal/graith/issues/2408)) ([ca1e225](https://github.com/d0ugal/graith/commit/ca1e2254930697b38d2fa5fccfb18617ac3476e5))
+* **deps:** update renovate/renovate docker tag to v44.83.1 ([#2412](https://github.com/d0ugal/graith/issues/2412)) ([fb44a71](https://github.com/d0ugal/graith/commit/fb44a71a50ffafacb2931e999042b512a92075ac))
+* **deps:** update renovate/renovate docker tag to v44.83.2 ([#2413](https://github.com/d0ugal/graith/issues/2413)) ([36a3fd4](https://github.com/d0ugal/graith/commit/36a3fd403929e5cd53b210d36f044b1f2185edac))
+* **deps:** update renovate/renovate docker tag to v44.83.3 ([#2414](https://github.com/d0ugal/graith/issues/2414)) ([0ee8c82](https://github.com/d0ugal/graith/commit/0ee8c828921ea34c59b1f3bc269424854fef2410))
+* **deps:** update renovate/renovate docker tag to v44.87.1 ([#2415](https://github.com/d0ugal/graith/issues/2415)) ([d30b036](https://github.com/d0ugal/graith/commit/d30b036888b173b2cfdf9bd1770a1e6660e3b922))
+* **deps:** update renovate/renovate docker tag to v44.88.0 ([#2417](https://github.com/d0ugal/graith/issues/2417)) ([4c58e64](https://github.com/d0ugal/graith/commit/4c58e6473e5f908f1d2b340befb5018b505bef83))
+* **deps:** update renovate/renovate docker tag to v44.90.1 ([#2419](https://github.com/d0ugal/graith/issues/2419)) ([25a7bb7](https://github.com/d0ugal/graith/commit/25a7bb723470fb65062fd97ee1dcb67c356ebaa5))
+* **deps:** update renovate/renovate docker tag to v44.90.2 ([#2420](https://github.com/d0ugal/graith/issues/2420)) ([3a3befa](https://github.com/d0ugal/graith/commit/3a3befa10ef1af18c8ec555104aba23b3039a951))
+* **deps:** update renovate/renovate docker tag to v44.92.0 ([#2421](https://github.com/d0ugal/graith/issues/2421)) ([7818b8e](https://github.com/d0ugal/graith/commit/7818b8e01102d051cc937ebeeb4e6805a003e74a))
+
 ## [0.73.22](https://github.com/d0ugal/graith/compare/v0.73.21...v0.73.22) (2026-09-13)
 
 
