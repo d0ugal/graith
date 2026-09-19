@@ -56,7 +56,7 @@ jobs:
     if: >-
       !cancelled() &&
       (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       revision: ${{ steps.release.outputs.revision }}
@@ -293,7 +293,7 @@ jobs:
   build-linux:
     name: Build and verify stable Linux artifacts (${{ matrix.goarch }})
     needs: release-context
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -525,7 +525,7 @@ jobs:
       - build-darwin
       - build-linux
       - execute-linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
       GRAITH_RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
@@ -616,7 +616,7 @@ jobs:
     needs:
       - release-context
       - assemble-stable
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -817,7 +817,7 @@ jobs:
       - release-context
       - assemble-stable
       - attest-stable
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     concurrency:
       group: stable-publisher
