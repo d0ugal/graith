@@ -88,7 +88,7 @@ jobs:
     if: >-
       !cancelled() &&
       (needs.changes.result != 'success' || needs.changes.outputs.release == 'true')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       base_tag: ${{ steps.release.outputs.base_tag }}
@@ -339,7 +339,7 @@ jobs:
   build-linux:
     name: Build and verify Linux dev archive (${{ matrix.goarch }})
     needs: release-context
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -467,7 +467,7 @@ jobs:
       - release-context
       - build-linux
       - execute-linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -558,7 +558,7 @@ jobs:
       - build-darwin
       - build-linux
       - execute-linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -657,7 +657,7 @@ jobs:
       - release-context
       - assemble-dev
       - attest-linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: write
