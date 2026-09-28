@@ -414,10 +414,10 @@ func (sm *SessionManager) applyConfigLocked(newCfg *config.Config) (ReloadConfig
 		sm.log.Info("config changed", "key", "launch.max_concurrent", "old", oldMax, "new", newMax)
 	}
 
-	// Push a changed [lifecycle] input_delay to every live PTY so `gr type` uses
-	// the new type-then-submit pause without a restart or resume (issue #1294).
+	// Push a changed [lifecycle] input_delay to every live PTY so typed submits
+	// use the new type-then-submit pause without a restart or resume (issue #1294).
 	// The resolved (validated, defaulted) duration is compared so an equivalent
-	// edit — e.g. "" -> "50ms", both the default — is a no-op rather than a churny
+	// edit — e.g. "" -> "150ms", both the default — is a no-op rather than a churny
 	// re-apply. applyLiveInputDelay snapshots the drivers under the lock and calls
 	// each setter after releasing it, honouring the no-slow-work-under-sm.mu rule.
 	if oldDelay, newDelay := old.Lifecycle.InputDelayDuration(), newCfg.Lifecycle.InputDelayDuration(); oldDelay != newDelay {

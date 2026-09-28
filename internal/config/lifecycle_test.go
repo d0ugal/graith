@@ -57,7 +57,7 @@ func TestLaunchLifecycleFields_EmbeddedDefaults(t *testing.T) {
 			{"process_kill_grace", l.ProcessKillGrace, "5s"},
 			{"adopted_timeout", l.AdoptedTimeout, "24h"},
 			{"adopted_poll_interval", l.AdoptedPollInterval, "1s"},
-			{"input_delay", l.InputDelay, "50ms"},
+			{"input_delay", l.InputDelay, "150ms"},
 		}
 		for _, c := range checks {
 			if c.raw != c.want {

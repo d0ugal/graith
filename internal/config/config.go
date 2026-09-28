@@ -1850,10 +1850,9 @@ type LifecycleConfig struct {
 	// hydration.
 	ScrollbackHydrationBytes int `toml:"scrollback_hydration_bytes"`
 	// InputDelay is the pause between writing text and the submit carriage return
-	// in WriteInputAndSubmit, so a TUI doesn't treat text+CR as a paste. Empty,
-	// unparseable, or non-positive uses the default (InputDelayDefault) — a zero
-	// pause would defeat the paste guard. Applies to sessions launched after the
-	// change.
+	// in WriteInputAndSubmit, so a TUI can process the text before Enter arrives.
+	// Empty, unparseable, or non-positive uses InputDelayDefault. The daemon
+	// applies changes to live sessions on their next typed submit.
 	InputDelay string `toml:"input_delay"`
 	// DefaultCols / DefaultRows are the terminal geometry used by daemon launch
 	// paths (watchdog restart, orchestrator, scenarios, triggers, adoption) when
@@ -1880,7 +1879,7 @@ const (
 	AdoptedTimeoutDefault           = 24 * time.Hour
 	AdoptedPollIntervalDefault      = time.Second
 	ScrollbackHydrationBytesDefault = 128 * 1024
-	InputDelayDefault               = 50 * time.Millisecond
+	InputDelayDefault               = 150 * time.Millisecond
 	DefaultColsDefault              = 80
 	DefaultRowsDefault              = 24
 	MaxLogBytesDefault              = 100 * 1024 * 1024
