@@ -116,7 +116,8 @@ func TestSetInputDelayNonPositiveRestoresDefault(t *testing.T) {
 }
 
 // TestSessionOptsInputDelayDefault proves an unset (zero) InputDelay falls back
-// to the built-in typeInputDelay rather than writing text and CR back to back.
+// to the built-in delay and leaves enough time for paste-aware TUIs to process
+// typed notification text before the submit CR arrives.
 func TestSessionOptsInputDelayDefault(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "test.log")
 
@@ -133,6 +134,16 @@ func TestSessionOptsInputDelayDefault(t *testing.T) {
 
 	if got := time.Duration(s.inputDelay.Load()); got != typeInputDelay {
 		t.Fatalf("inputDelay = %v, want the typeInputDelay default %v", got, typeInputDelay)
+	}
+
+	start := time.Now()
+
+	if err := s.WriteInputAndSubmit([]byte("braw")); err != nil {
+		t.Fatal(err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 140*time.Millisecond {
+		t.Fatalf("default WriteInputAndSubmit took %v, want >= 140ms to outlast paste Enter guards", elapsed)
 	}
 }
 

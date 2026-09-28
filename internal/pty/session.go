@@ -1632,9 +1632,10 @@ func (s *Session) WriteInput(data []byte) error {
 // submit key in WriteInputAndSubmit, used when SessionOpts.InputDelay is unset.
 // TUI frameworks treat text+CR in a single read as a paste (inserting a newline)
 // rather than "type then press Enter". Separating the writes lets the TUI drain
-// the text before the CR arrives. The daemon overrides it via the [lifecycle]
-// input_delay policy.
-const typeInputDelay = 50 * time.Millisecond
+// the text before the CR arrives. Codex also suppresses Enter for 120ms after a
+// paste-like burst, so leave margin beyond that window. The daemon overrides it
+// via the [lifecycle] input_delay policy.
+const typeInputDelay = 150 * time.Millisecond
 
 // WriteInputAndSubmit writes text followed by a carriage return, with a brief
 // pause between the two so that TUI frameworks treat them as separate events.
