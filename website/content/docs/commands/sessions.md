@@ -38,13 +38,13 @@ Create a new agent session.
 is unavailable (e.g. a biometric agent that can't sign non-interactively) or when
 you're offline.
 
-Interactive sessions use terminal-owned attach by default. The daemon seeds the
-client with a coherent current-screen snapshot and bounded terminal-aware
-primary-screen history before live output resumes, and the client owns the outer
-alternate screen instead of injecting chrome into the child PTY stream. Sessions
-created by older versions with the former `--experimental-attach` opt-in need no
-manual migration: the persisted opt-in bit is ignored because upgraded clients
-request terminal-owned attach for every interactive session, and the daemon drops
+Every current interactive session uses terminal-owned attach; there is no mode
+to enable. The daemon seeds the client with a coherent current-screen snapshot
+and bounded terminal-aware primary-screen history before live output resumes,
+and the client owns the outer alternate screen instead of injecting chrome into
+the child PTY stream. The retired `--experimental-attach` option may remain in
+state saved by older versions, but upgraded clients ignore that setting and
+request terminal-owned attach for every interactive session. The daemon removes
 the obsolete state key the next time it saves state. The control protocol is
 bumped to 3.0 so older clients and daemons do not silently reconnect through the
 removed experimental attach request.

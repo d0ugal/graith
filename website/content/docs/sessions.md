@@ -107,17 +107,16 @@ whose queued write cannot complete within 2 seconds, and the session keeps
 running. Terminal-owned attach coalesces live output into repaint
 hints because snapshots carry the screen state.
 
-Interactive attach renders from daemon-maintained screen snapshots by default
-instead of forwarding all child terminal control traffic directly to your
-emulator. The daemon sends a coherent current-screen seed before live output
-resumes, including bounded terminal-aware primary-screen history retained by the
-daemon, and the client owns the outer alternate screen for that attach. Existing
-sessions created with the removed `gr new --experimental-attach` flag need no
-manual migration; upgraded clients request terminal-owned attach for every
-interactive session, and the daemon drops the obsolete persisted state key the
-next time it saves state. The control protocol is bumped to 3.0 so older clients
-and daemons do not silently reconnect through the removed experimental attach
-request.
+Every current interactive attach renders from daemon-maintained screen snapshots;
+there is no attach mode to enable. The daemon sends a coherent current-screen
+seed before live output resumes, including bounded terminal-aware primary-screen
+history retained by the daemon, and the client owns the outer alternate screen
+for that attach. The retired `gr new --experimental-attach` option may remain in
+state saved by older versions, but upgraded clients ignore that setting and
+request terminal-owned attach for every interactive session. The daemon removes
+the obsolete persisted state key the next time it saves state. The control
+protocol is bumped to 3.0 so older clients and daemons do not silently reconnect
+through the removed experimental attach request.
 
 CLI attach requires that seed; if the daemon cannot provide one, attach fails
 with an error. The initial terminal-owned attach uses a full-screen seed; later
