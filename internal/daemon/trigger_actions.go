@@ -208,6 +208,11 @@ func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.Acti
 		writeDirs = append(append([]string{}, writeDirs...), cs.scratch)
 	}
 
+	unixSockets := make([]string, 0, len(merged.UnixSockets))
+	for _, socket := range merged.UnixSockets {
+		unixSockets = append(unixSockets, resolveSocketPath(config.ExpandPath(socket)))
+	}
+
 	opts := sandbox.WrapOpts{
 		Backend:        merged.Backend,
 		WorktreeDir:    worktreeDir,
@@ -215,6 +220,7 @@ func (sm *SessionManager) buildCommandSandbox(cfg *config.Config, a *config.Acti
 		WriteDirs:      writeDirs,
 		ReadFiles:      merged.ReadFiles,
 		WriteFiles:     merged.WriteFiles,
+		UnixSockets:    dedupSandboxPaths(unixSockets),
 		EnvKeys:        []string{"PATH", "HOME", "SHELL", "TERM", "LANG", "TMPDIR", "GRAITH_TMPDIR"},
 		SignalMode:     merged.SignalMode,
 		Network:        netPolicy,

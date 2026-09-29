@@ -4458,6 +4458,9 @@ type SandboxConfig struct {
 	// them into its read-only / read-write path lists.
 	ReadFiles  []string `json:"read_files,omitempty"  toml:"read_files"`
 	WriteFiles []string `json:"write_files,omitempty" toml:"write_files"`
+	// UnixSockets grants connect access to specific Unix-domain sockets.
+	// Connecting to a socket may give the agent the authority exposed by its service.
+	UnixSockets []string `json:"unix_sockets,omitempty" toml:"unix_sockets"`
 	// SignalMode controls whether the sandboxed process may signal other
 	// processes. It maps to nono's security.signal_mode ("isolated",
 	// "allow_same_sandbox", "allow_all"). Empty inherits nono's base-profile
@@ -4513,6 +4516,7 @@ func (s SandboxConfig) Merge(agent SandboxConfig) SandboxConfig {
 	merged.WriteDirs = dedup(append(s.WriteDirs, agent.WriteDirs...))
 	merged.ReadFiles = dedup(append(s.ReadFiles, agent.ReadFiles...))
 	merged.WriteFiles = dedup(append(s.WriteFiles, agent.WriteFiles...))
+	merged.UnixSockets = dedup(append(s.UnixSockets, agent.UnixSockets...))
 
 	if agent.Backend != "" {
 		merged.Backend = agent.Backend
@@ -5946,7 +5950,7 @@ func mergeAgent(def, usr Agent) Agent {
 	if usr.Sandbox.Enabled || usr.Sandbox.Disabled != nil || usr.Sandbox.Backend != "" ||
 		usr.Sandbox.Command != "" || strings.TrimSpace(usr.Sandbox.Profile) != "" || usr.Sandbox.Features != nil ||
 		usr.Sandbox.ReadDirs != nil || usr.Sandbox.WriteDirs != nil ||
-		usr.Sandbox.ReadFiles != nil || usr.Sandbox.WriteFiles != nil ||
+		usr.Sandbox.ReadFiles != nil || usr.Sandbox.WriteFiles != nil || usr.Sandbox.UnixSockets != nil ||
 		usr.Sandbox.SignalMode != "" || usr.Sandbox.Network != nil {
 		def.Sandbox = usr.Sandbox
 	}

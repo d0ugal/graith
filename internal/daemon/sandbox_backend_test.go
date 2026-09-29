@@ -199,6 +199,68 @@ func TestSandboxOptsGrantDaemonSocket(t *testing.T) {
 	}
 }
 
+func TestSandboxOptsMergeConfiguredUnixSockets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+
+	target := filepath.Join(root, "podman.sock")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	alias := filepath.Join(root, "docker.sock")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.Sandbox = config.SandboxConfig{Enabled: true, Backend: "safehouse", UnixSockets: []string{target}}
+	sm := newSandboxTestManager(t, cfg)
+	agent := config.SandboxConfig{UnixSockets: []string{alias, "~/podman.sock", target}}
+	opts := requireSandboxOpts(t, sm, cfg.Sandbox.Merge(agent), "braw124", "/tmp/bothy", "claude", nil, false)
+	want := resolveSocketPath(target)
+
+	count := 0
+
+	for _, socket := range opts.UnixSockets {
+		if socket == want {
+			count++
+		}
+	}
+
+	if count != 1 {
+		t.Fatalf("configured socket grant %q should be present once: %v", want, opts.UnixSockets)
+	}
+
+	if !slices.Contains(opts.UnixSockets, resolveSocketPath(sm.paths.SocketPath)) {
+		t.Fatalf("mandatory Graith socket grant missing: %v", opts.UnixSockets)
+	}
+
+	_, args, err := sandbox.Wrap("claude", nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fragment := ""
+
+	for i, arg := range args {
+		if arg == "--append-profile" && i+1 < len(args) {
+			fragment = args[i+1]
+		}
+	}
+
+	data, err := os.ReadFile(fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantGrant := `(allow network-outbound (remote unix-socket (path-literal "` + want + `")))`
+
+	if !strings.Contains(string(data), wantGrant) {
+		t.Fatalf("missing configured Seatbelt grant %q in:\n%s", wantGrant, data)
+	}
+}
+
 func TestSandboxOptsNeverAutoGrantDaemonServiceControl(t *testing.T) {
 	oldProtectedRoot := protectedDaemonServiceControlRoot
 

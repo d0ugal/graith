@@ -409,12 +409,14 @@ func TestLoadConfigSandbox(t *testing.T) {
 enabled = true
 features = ["ssh", "process-control"]
 read_dirs = ["~/Code"]
+unix_sockets = ["/run/global.sock"]
 
 [agents.claude]
 command = "claude"
 
 [agents.claude.sandbox]
 features = ["clipboard"]
+unix_sockets = ["/run/agent.sock"]
 `
 	_ = os.WriteFile(cfgPath, []byte(toml), 0o600)
 
@@ -435,23 +437,33 @@ features = ["clipboard"]
 		t.Errorf("Sandbox.ReadDirs = %v, want [~/Code]", cfg.Sandbox.ReadDirs)
 	}
 
+	if !reflect.DeepEqual(cfg.Sandbox.UnixSockets, []string{"/run/global.sock"}) {
+		t.Errorf("Sandbox.UnixSockets = %v", cfg.Sandbox.UnixSockets)
+	}
+
 	claude := cfg.Agents["claude"]
 	if len(claude.Sandbox.Features) != 1 || claude.Sandbox.Features[0] != "clipboard" {
 		t.Errorf("claude.Sandbox.Features = %v, want [clipboard]", claude.Sandbox.Features)
+	}
+
+	if !reflect.DeepEqual(claude.Sandbox.UnixSockets, []string{"/run/agent.sock"}) {
+		t.Errorf("claude.Sandbox.UnixSockets = %v", claude.Sandbox.UnixSockets)
 	}
 }
 
 func TestSandboxConfigMerge(t *testing.T) {
 	global := SandboxConfig{
-		Enabled:   true,
-		Features:  []string{"ssh", "process-control"},
-		ReadDirs:  []string{"~/Code"},
-		ReadFiles: []string{"~/.gitconfig"},
+		Enabled:     true,
+		Features:    []string{"ssh", "process-control"},
+		ReadDirs:    []string{"~/Code"},
+		ReadFiles:   []string{"~/.gitconfig"},
+		UnixSockets: []string{"/run/global.sock"},
 	}
 	agent := SandboxConfig{
-		Features:   []string{"clipboard"},
-		WriteDirs:  []string{"~/.claude"},
-		WriteFiles: []string{"~/.claude.json"},
+		Features:    []string{"clipboard"},
+		WriteDirs:   []string{"~/.claude"},
+		WriteFiles:  []string{"~/.claude.json"},
+		UnixSockets: []string{"/run/agent.sock", "/run/global.sock"},
 	}
 
 	merged := global.Merge(agent)
@@ -485,6 +497,10 @@ func TestSandboxConfigMerge(t *testing.T) {
 
 	if len(merged.WriteFiles) != 1 || merged.WriteFiles[0] != "~/.claude.json" {
 		t.Errorf("merged.WriteFiles = %v, want [~/.claude.json]", merged.WriteFiles)
+	}
+
+	if !reflect.DeepEqual(merged.UnixSockets, []string{"/run/global.sock", "/run/agent.sock"}) {
+		t.Errorf("merged.UnixSockets = %v", merged.UnixSockets)
 	}
 }
 
@@ -1039,6 +1055,17 @@ func TestMergeAgent(t *testing.T) {
 		got := mergeAgent(defWithSbx, usr)
 		if got.Sandbox.Profile != "always-further/claude" {
 			t.Errorf("Sandbox.Profile = %q, want always-further/claude", got.Sandbox.Profile)
+		}
+	})
+
+	t.Run("sandbox socket-only override replaces default sandbox", func(t *testing.T) {
+		defWithSbx := def
+		defWithSbx.Sandbox = SandboxConfig{ReadDirs: []string{"~/.claude"}}
+		usr := Agent{Sandbox: SandboxConfig{UnixSockets: []string{"/run/bothy.sock"}}}
+
+		got := mergeAgent(defWithSbx, usr)
+		if !reflect.DeepEqual(got.Sandbox.UnixSockets, []string{"/run/bothy.sock"}) {
+			t.Errorf("Sandbox.UnixSockets = %v, want configured socket", got.Sandbox.UnixSockets)
 		}
 	})
 

@@ -136,7 +136,8 @@ func sandboxToProtocol(sandbox *config.SandboxConfig) *protocol.SandboxConfig {
 		Command: sandbox.Command, Profile: sandbox.Profile, Features: cloneStrings(sandbox.Features),
 		ReadDirs: cloneStrings(sandbox.ReadDirs), WriteDirs: cloneStrings(sandbox.WriteDirs),
 		ReadFiles: cloneStrings(sandbox.ReadFiles), WriteFiles: cloneStrings(sandbox.WriteFiles),
-		SignalMode: sandbox.SignalMode, Network: sandboxNetworkToProtocol(sandbox.Network),
+		UnixSockets: cloneStrings(sandbox.UnixSockets),
+		SignalMode:  sandbox.SignalMode, Network: sandboxNetworkToProtocol(sandbox.Network),
 	}
 }
 
@@ -278,7 +279,8 @@ func sandboxFromProtocol(sandbox *protocol.SandboxConfig) *config.SandboxConfig 
 		Command: sandbox.Command, Profile: sandbox.Profile, Features: cloneStrings(sandbox.Features),
 		ReadDirs: cloneStrings(sandbox.ReadDirs), WriteDirs: cloneStrings(sandbox.WriteDirs),
 		ReadFiles: cloneStrings(sandbox.ReadFiles), WriteFiles: cloneStrings(sandbox.WriteFiles),
-		SignalMode: sandbox.SignalMode, Network: sandboxNetworkFromProtocol(sandbox.Network),
+		UnixSockets: cloneStrings(sandbox.UnixSockets),
+		SignalMode:  sandbox.SignalMode, Network: sandboxNetworkFromProtocol(sandbox.Network),
 	}
 }
 
