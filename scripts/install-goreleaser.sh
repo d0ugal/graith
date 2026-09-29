@@ -53,9 +53,10 @@ curl_args=(
     --location
     --silent
     --show-error
-    --retry 4
-    --retry-delay 2
-    --retry-max-time 120
+    # GitHub release assets can return transient 5xx responses. Use exponential
+    # backoff for up to five minutes before failing the build.
+    --retry 10
+    --retry-max-time 300
 )
 
 curl "${curl_args[@]}" \
