@@ -19,6 +19,7 @@ read_dirs   = ["~/Code"]      # additional read-only paths (directories)
 write_dirs  = []              # additional read-write paths (directories)
 read_files  = []              # additional read-only single files
 write_files = []              # additional read-write single files
+unix_sockets = []             # exact Unix sockets the agent may connect to
 signal_mode = "isolated"      # nono only: "isolated" | "allow_same_sandbox" | "allow_all"
 
 [sandbox.network]             # nono only; needs Landlock ABI v4 (kernel 6.7+)
@@ -37,14 +38,28 @@ read_dirs  = ["~/.claude"]    # merged with global read_dirs
 write_dirs = ["~/.claude"]    # merged with global write_dirs
 write_files = ["~/.claude.json", "~/.claude.json.lock", "~/.claude.lock"]  # login file (read+write)
 
+[agents.dem-dev.sandbox]
+unix_sockets = ["/var/run/docker.sock"] # Podman Docker-compatible API
+
 ```
 
 ## Merge behavior
 
-- `features`, `read_dirs`, `write_dirs`, `read_files`, and `write_files` merge (global + agent, deduplicated)
+- `features`, `read_dirs`, `write_dirs`, `read_files`, `write_files`, and `unix_sockets` merge (global + agent, deduplicated)
 - `backend`, `command`, and `signal_mode` are per-agent overridable (agent wins)
 - `network` is per-agent overridable — an agent's `[agents.*.sandbox.network]` replaces the global policy wholesale, not merged element-wise
 - `enabled = false` or `disabled = true` starts the agent without Graith's sandbox and emits a startup warning — use it only with deliberate native or external isolation
+
+`unix_sockets` grants connect access to each listed Unix-domain socket. Paths
+expand `~` and resolve symlinks before the backend profile is generated. The
+grant applies to both `safehouse` and `nono`; Graith's own control socket is
+always added separately. Connecting to a socket can give the agent the
+authority exposed by that service (for example, a Podman socket may allow
+container management), so grant only the specific service sockets the agent
+needs. Configured socket paths follow symlinks when a session launches or
+resumes. Keep the socket and its parent directories outside paths the agent or
+other untrusted users can modify, so they cannot retarget a later grant. A
+socket grant does not replace the sandbox's other filesystem or network rules.
 
 ## Feature gate caveats
 

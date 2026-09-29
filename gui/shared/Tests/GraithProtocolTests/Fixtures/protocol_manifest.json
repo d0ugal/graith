@@ -3476,6 +3476,16 @@
           "optional": true
         },
         {
+          "name": "unix_sockets",
+          "type": {
+            "kind": "array",
+            "elem": {
+              "kind": "string"
+            }
+          },
+          "optional": true
+        },
+        {
           "name": "signal_mode",
           "type": {
             "kind": "string"

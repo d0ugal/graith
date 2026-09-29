@@ -1341,18 +1341,19 @@ type TriggerPolicy struct {
 // SandboxConfig is the wire representation of action-specific sandbox grants.
 // Its lowercase keys were already explicit on the former config-backed shape.
 type SandboxConfig struct {
-	Enabled    bool                  `json:"enabled"`
-	Disabled   *bool                 `json:"disabled,omitempty"`
-	Backend    string                `json:"backend,omitempty"`
-	Command    string                `json:"command,omitempty"`
-	Profile    string                `json:"profile,omitempty"`
-	Features   []string              `json:"features,omitempty"`
-	ReadDirs   []string              `json:"read_dirs,omitempty"`
-	WriteDirs  []string              `json:"write_dirs,omitempty"`
-	ReadFiles  []string              `json:"read_files,omitempty"`
-	WriteFiles []string              `json:"write_files,omitempty"`
-	SignalMode string                `json:"signal_mode,omitempty"`
-	Network    *SandboxNetworkConfig `json:"network,omitempty"`
+	Enabled     bool                  `json:"enabled"`
+	Disabled    *bool                 `json:"disabled,omitempty"`
+	Backend     string                `json:"backend,omitempty"`
+	Command     string                `json:"command,omitempty"`
+	Profile     string                `json:"profile,omitempty"`
+	Features    []string              `json:"features,omitempty"`
+	ReadDirs    []string              `json:"read_dirs,omitempty"`
+	WriteDirs   []string              `json:"write_dirs,omitempty"`
+	ReadFiles   []string              `json:"read_files,omitempty"`
+	WriteFiles  []string              `json:"write_files,omitempty"`
+	UnixSockets []string              `json:"unix_sockets,omitempty"`
+	SignalMode  string                `json:"signal_mode,omitempty"`
+	Network     *SandboxNetworkConfig `json:"network,omitempty"`
 }
 
 // SandboxNetworkConfig is the wire representation of sandbox egress policy.

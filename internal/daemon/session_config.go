@@ -893,6 +893,11 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 	// match canonical paths, so a data/runtime dir under a symlinked prefix
 	// would otherwise make the grant's path-literal miss and silently re-deny.
 	unixSockets := []string{resolveSocketPath(sm.paths.SocketPath)}
+	for _, socket := range merged.UnixSockets {
+		unixSockets = append(unixSockets, resolveSocketPath(config.ExpandPath(socket)))
+	}
+
+	unixSockets = dedupSandboxPaths(unixSockets)
 
 	// nono does not auto-grant the launched command's location (only system
 	// paths like /usr/bin). Grant read on the agent binary's directory so the
@@ -933,6 +938,22 @@ func (sm *SessionManager) sandboxOptsFromConfig(merged config.SandboxConfig, ses
 		ProfilePath:           profilePath,
 		SafehouseFragmentPath: fragmentPath,
 	}, nil
+}
+
+func dedupSandboxPaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	result := make([]string, 0, len(paths))
+
+	for _, path := range paths {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+
+	return result
 }
 
 func (sm *SessionManager) validateAutomaticSandboxGrants(opts sandbox.WrapOpts, explicit config.SandboxConfig) error {
