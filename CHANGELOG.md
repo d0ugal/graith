@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.73.25](https://github.com/d0ugal/graith/compare/v0.73.24...v0.73.25) (2026-09-29)
+
+
+### Features
+
+* configure sandbox unix socket grants ([#2503](https://github.com/d0ugal/graith/issues/2503)) ([ac78d4c](https://github.com/d0ugal/graith/commit/ac78d4c1197dd8c4d5d41c23396fecf0711dfd4f))
+
+
+### Bug Fixes
+
+* give paste-aware TUIs time before submit ([#2493](https://github.com/d0ugal/graith/issues/2493)) ([fe1e704](https://github.com/d0ugal/graith/commit/fe1e704ad97c6ef659a29a361aef34adb32f6202))
+* update github.com/charmbracelet/ultraviolet digest to 666ce5e ([#2501](https://github.com/d0ugal/graith/issues/2501)) ([46f4e01](https://github.com/d0ugal/graith/commit/46f4e01e2409d80d1d67c6e281331b377046ee68))
+* update github.com/charmbracelet/ultraviolet digest to bbf040a ([#2489](https://github.com/d0ugal/graith/issues/2489)) ([60e3b78](https://github.com/d0ugal/graith/commit/60e3b7816b4fd45de87984d7d5131947bbb2d627))
+* update google.golang.org/genproto/googleapis/api digest to 8a89bd6 ([#2496](https://github.com/d0ugal/graith/issues/2496)) ([6bc0820](https://github.com/d0ugal/graith/commit/6bc0820f9025f9f74355257731f75418902efb3c))
+* update google.golang.org/genproto/googleapis/rpc digest to 8a89bd6 ([#2497](https://github.com/d0ugal/graith/issues/2497)) ([f756664](https://github.com/d0ugal/graith/commit/f7566640963cc124fb52accaeb1b538434f2dc6d))
+* update module github.com/prometheus/common to v0.72.0 ([#2494](https://github.com/d0ugal/graith/issues/2494)) ([4efc050](https://github.com/d0ugal/graith/commit/4efc05092790d08cf3b35886af413e571b4e3a9e))
+* update module modernc.org/sqlite to v1.60.0 ([#2500](https://github.com/d0ugal/graith/issues/2500)) ([985d796](https://github.com/d0ugal/graith/commit/985d796f7fe9ccb30e94449a249a9099ed671df4))
+* update module modernc.org/sqlite to v1.60.1 ([#2504](https://github.com/d0ugal/graith/issues/2504)) ([f5a1683](https://github.com/d0ugal/graith/commit/f5a16831875efe2e0cdab8524e851c75b1593e13))
+
+
+### Documentation
+
+* clarify retired experimental attach option ([#2492](https://github.com/d0ugal/graith/issues/2492)) ([cb0609a](https://github.com/d0ugal/graith/commit/cb0609a25fa1eb2426be22a7be6b823772d2166d))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.116.0 ([#2495](https://github.com/d0ugal/graith/issues/2495)) ([d364c67](https://github.com/d0ugal/graith/commit/d364c67fd2d5b2dfdb999d7f3048bf7dc1a4d792))
+* **deps:** update renovate/renovate docker tag to v44.117.0 ([#2499](https://github.com/d0ugal/graith/issues/2499)) ([a090fc2](https://github.com/d0ugal/graith/commit/a090fc2d154a911d148f1ed255cbe01f86dabb34))
+* **deps:** update renovate/renovate docker tag to v44.118.1 ([#2502](https://github.com/d0ugal/graith/issues/2502)) ([dd3b951](https://github.com/d0ugal/graith/commit/dd3b9516512d5f3f0abf7893c11248dd3a782c4e))
+
 ## [0.73.24](https://github.com/d0ugal/graith/compare/v0.73.23...v0.73.24) (2026-09-28)
 
 
