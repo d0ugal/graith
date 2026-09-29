@@ -277,6 +277,25 @@ func TestScenarioCompletionActionSuccessSchedulesDelayedCleanup(t *testing.T) {
 	sm, _ := newScenarioCompletionTestSM(t, completionCommandTrigger("report"), config.ScenarioLifecycleConfig{
 		Cleanup: config.ScenarioCleanupOnSuccess, Delay: "1h",
 	})
+	// Success is published before the worker persists its trigger history.
+	// Drain that worker before TempDir cleanup can remove its state directory.
+	group := newDaemonTaskGroup()
+	if !sm.installBackgroundTasks(group) {
+		t.Fatal("background generation was not installed")
+	}
+
+	group.Activate()
+	t.Cleanup(func() {
+		group.BeginDrain()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := group.Wait(ctx); err != nil {
+			t.Fatalf("completion worker drain: %v", err)
+		}
+	})
+
 	if err := sm.reconcileScenarioCompletion("sc-braw"); err != nil {
 		t.Fatal(err)
 	}
