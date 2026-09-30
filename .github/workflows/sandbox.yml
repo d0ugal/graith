@@ -392,7 +392,7 @@ jobs:
         # digest before merging. Roll back by restoring the previous version and
         # digest pair; the enforcement tests below exercise the resulting bytes.
         env:
-          SAFEHOUSE_VERSION: "0.11.1"
+          SAFEHOUSE_VERSION: "0.12.0"
           SAFEHOUSE_SHA256: "dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
         run: |
           set -euo pipefail
