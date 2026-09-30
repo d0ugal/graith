@@ -472,7 +472,12 @@ gr sandbox watch my-session --proc node
 
 ### `gr type <name-or-id> <text>` (alias: `t`)
 
-Type text into a session's PTY stdin. Appends a newline by default.
+Type text into a session's PTY stdin, then send one Enter. When the application
+advertises bracketed paste, plain text is framed as a paste so a delayed reader
+can distinguish it from the submit key. Control-key sequences retain raw
+semantics. `--no-newline` writes raw bytes without framing or Enter. See
+[PTY input timing]({{< relref "/docs/configuration/sessions.md" >}}) for delays and
+terminal-recovery limitations.
 
 When a user is attached, graith waits for their input to go idle before
 injecting. The `inbox_idle_timeout` and `inbox_max_wait` settings under

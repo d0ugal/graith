@@ -1634,11 +1634,14 @@ func (s *Session) WriteInput(data []byte) error {
 // rather than "type then press Enter". Separating the writes lets the TUI drain
 // the text before the CR arrives. Codex also suppresses Enter for 120ms after a
 // paste-like burst, so leave margin beyond that window. The daemon overrides it
-// via the [lifecycle] input_delay policy.
+// via the [lifecycle] input_delay policy. This remains a heuristic for the raw
+// fallback; negotiated paste framing establishes the explicit text boundary.
 const typeInputDelay = 150 * time.Millisecond
 
-// WriteInputAndSubmit writes text followed by a carriage return, with a brief
-// pause between the two so that TUI frameworks treat them as separate events.
+// WriteInputAndSubmit pastes text when the application advertises bracketed
+// paste, then writes a single carriage return after the configured pause.
+// Explicit framing survives a delayed consumer reading text and CR together;
+// a writer-side sleep alone cannot establish an application event boundary.
 // The entire operation holds writeMu to prevent interleaving from other sources.
 func (s *Session) WriteInputAndSubmit(data []byte) error {
 	if err := s.lockInputWriter(); err != nil {
@@ -1647,6 +1650,7 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 	defer s.writeMu.Unlock()
 
 	if len(data) > 0 {
+		data = s.frameSubmittedText(data)
 		if err := s.writeInputLocked(data); err != nil {
 			return err
 		}
@@ -1660,6 +1664,36 @@ func (s *Session) WriteInputAndSubmit(data []byte) error {
 	}
 
 	return s.writeInputLocked([]byte("\r"))
+}
+
+// frameSubmittedText preserves raw key sequences and falls back to raw input
+// when the application's paste capability is unknown. Call with writeMu held.
+func (s *Session) frameSubmittedText(data []byte) []byte {
+	for _, b := range data {
+		if (b < 0x20 && b != '\n') || b == 0x7f {
+			return data
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed || s.screenInitializing || s.screen == nil {
+		return data
+	}
+
+	snapshot, err := snapshotTerminal(s.screen)
+	if err != nil || !snapshot.InputModes.BracketedPaste {
+		return data
+	}
+
+	const pasteStart, pasteEnd = "\x1b[200~", "\x1b[201~"
+
+	framed := make([]byte, 0, len(data)+len(pasteStart)+len(pasteEnd))
+	framed = append(framed, pasteStart...)
+	framed = append(framed, data...)
+
+	return append(framed, pasteEnd...)
 }
 
 // SetInputDelay updates the pause WriteInputAndSubmit inserts between the typed
