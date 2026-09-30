@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.73.27](https://github.com/d0ugal/graith/compare/v0.73.26...v0.73.27) (2026-09-30)
+
+
+### Bug Fixes
+
+* frame submitted text with negotiated bracketed paste ([#2518](https://github.com/d0ugal/graith/issues/2518)) ([149556d](https://github.com/d0ugal/graith/commit/149556da2d2d173a3307a85872b259439009d83b))
+* update module go.opentelemetry.io/proto/otlp to v1.11.1 ([#2520](https://github.com/d0ugal/graith/issues/2520)) ([49df28a](https://github.com/d0ugal/graith/commit/49df28a31cdf1b4ee77c98e825c416a37b9d6e94))
+
+
+### Dependencies
+
+* **deps:** update dependency nolabs-ai/nono to v0.79.0 ([#2521](https://github.com/d0ugal/graith/issues/2521)) ([65fa99f](https://github.com/d0ugal/graith/commit/65fa99fd1adebebef08bcbeaf8752a1c58c97a06))
+* **deps:** update renovate/renovate docker tag to v44.125.1 ([#2522](https://github.com/d0ugal/graith/issues/2522)) ([491360b](https://github.com/d0ugal/graith/commit/491360b586ff24ba39db0bbc441e170990b13ce3))
+
 ## [0.73.26](https://github.com/d0ugal/graith/compare/v0.73.25...v0.73.26) (2026-09-30)
 
 
