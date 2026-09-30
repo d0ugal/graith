@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.73.26](https://github.com/d0ugal/graith/compare/v0.73.25...v0.73.26) (2026-09-30)
+
+
+### Bug Fixes
+
+* retry transient GoReleaser asset failures ([#2511](https://github.com/d0ugal/graith/issues/2511)) ([59ff504](https://github.com/d0ugal/graith/commit/59ff50419b960b66367f888234d45bcd094ad4a6))
+* update module github.com/ncruces/go-strftime to v1.1.0 ([#2507](https://github.com/d0ugal/graith/issues/2507)) ([ef5a1cb](https://github.com/d0ugal/graith/commit/ef5a1cb0e7703ef0aa7726fa1122bdbb88229911))
+
+
+### Performance Improvements
+
+* avoid redundant transcript reads and viewport extraction ([#2517](https://github.com/d0ugal/graith/issues/2517)) ([72c4bcc](https://github.com/d0ugal/graith/commit/72c4bcc707de675b6cca2ef0b3caf18ea773ed9f))
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.119.1 ([#2505](https://github.com/d0ugal/graith/issues/2505)) ([c5efd48](https://github.com/d0ugal/graith/commit/c5efd48dc6a8b7683c6f70eeccd2e17e51acee60))
+* **deps:** update renovate/renovate docker tag to v44.121.2 ([#2510](https://github.com/d0ugal/graith/issues/2510)) ([f2d1374](https://github.com/d0ugal/graith/commit/f2d13745446609805fc760cee32df64edacf59a7))
+* **deps:** update renovate/renovate docker tag to v44.121.3 ([#2516](https://github.com/d0ugal/graith/issues/2516)) ([2a6d4e1](https://github.com/d0ugal/graith/commit/2a6d4e17a838e3df3f7e5ebf716b5423ea1c4ca5))
+
 ## [0.73.25](https://github.com/d0ugal/graith/compare/v0.73.24...v0.73.25) (2026-09-29)
 
 
