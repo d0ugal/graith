@@ -235,6 +235,8 @@ func (gt *ghosttyTerminal) Resize(cols, rows int) (err error) {
 
 	gt.cols = cols
 	gt.rows = rows
+	// A resize can change row boundaries without changing the cell count.
+	gt.cells = gt.cells[:0]
 	gt.dirty = true
 
 	return nil
@@ -571,25 +573,41 @@ func (gt *ghosttyTerminal) refreshCells() error {
 		return fmt.Errorf("update go-libghostty render state: %w", err)
 	}
 
+	dirty, err := gt.renderState.Dirty()
+	if err != nil {
+		return fmt.Errorf("read go-libghostty dirty state: %w", err)
+	}
+
 	if err := gt.renderState.RowIterator(gt.rowIterator); err != nil {
 		return fmt.Errorf("read go-libghostty rows: %w", err)
 	}
 
 	count := gt.cols * gt.rows
+
+	full := len(gt.cells) != count || dirty == libghostty.RenderStateDirtyFull
 	if cap(gt.cells) < count {
 		gt.cells = make([]Cell, count)
 	} else {
 		gt.cells = gt.cells[:count]
-		clear(gt.cells)
-	}
-
-	for i := range gt.cells {
-		gt.cells[i].Content = " "
 	}
 
 	for y := 0; y < gt.rows && gt.rowIterator.Next(); y++ {
+		rowDirty, err := gt.rowIterator.Dirty()
+		if err != nil {
+			return fmt.Errorf("read go-libghostty row %d dirty state: %w", y, err)
+		}
+
+		if !full && !rowDirty {
+			continue
+		}
+
 		if err := gt.rowIterator.Cells(gt.rowCells); err != nil {
 			return fmt.Errorf("read go-libghostty row %d cells: %w", y, err)
+		}
+
+		row := gt.cells[y*gt.cols : (y+1)*gt.cols]
+		for x := range row {
+			row[x] = Cell{Content: " "}
 		}
 
 		for x := 0; x < gt.cols && gt.rowCells.Next(); x++ {
@@ -600,6 +618,14 @@ func (gt *ghosttyTerminal) refreshCells() error {
 
 			gt.cells[y*gt.cols+x] = cell
 		}
+
+		if err := gt.rowIterator.SetDirty(false); err != nil {
+			return fmt.Errorf("clear go-libghostty row %d dirty state: %w", y, err)
+		}
+	}
+
+	if err := gt.renderState.SetDirty(libghostty.RenderStateDirtyFalse); err != nil {
+		return fmt.Errorf("clear go-libghostty dirty state: %w", err)
 	}
 
 	gt.dirty = false

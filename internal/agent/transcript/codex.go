@@ -117,12 +117,27 @@ func locateCodexInRoot(root, agentSessionID, worktreePath string) (string, error
 	return best, nil
 }
 
-// findCodexRolloutByID scans for a rollout whose session_meta.id matches.
+// findCodexRolloutByID prefers Codex's ID-suffixed filenames, but always
+// verifies session_meta.id. Legacy or renamed rollouts retain the metadata
+// scan fallback. This avoids opening every historical rollout on each token
+// accounting tick, even when the transcript itself is unchanged.
 func findCodexRolloutByID(sessionsDir, id string) (string, bool) {
+	if found := scanCodexRolloutByID(sessionsDir, id, true); found != "" {
+		return found, true
+	}
+
+	found := scanCodexRolloutByID(sessionsDir, id, false)
+
+	return found, found != ""
+}
+
+func scanCodexRolloutByID(sessionsDir, id string, filenameOnly bool) string {
 	var found string
 
+	suffix := "-" + id + ".jsonl"
+
 	_ = filepath.WalkDir(sessionsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || found != "" {
+		if err != nil || d.IsDir() {
 			return nil
 		}
 
@@ -131,18 +146,19 @@ func findCodexRolloutByID(sessionsDir, id string) (string, bool) {
 			return nil
 		}
 
+		if filenameOnly && !strings.HasSuffix(name, suffix) {
+			return nil
+		}
+
 		if rid, ok := CodexRolloutID(path); ok && rid == id {
 			found = path
+			return fs.SkipAll
 		}
 
 		return nil
 	})
 
-	if found == "" {
-		return "", false
-	}
-
-	return found, true
+	return found
 }
 
 // CodexSessionIDSince returns the native session id of the Codex rollout for a

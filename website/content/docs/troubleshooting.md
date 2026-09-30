@@ -80,6 +80,30 @@ Enabling or disabling metrics or tracing, or changing settings for an enabled
 telemetry runtime, requires a daemon restart. For Alloy collection setup and
 missing logs, metrics, or traces checks, see [Observability]({{< relref "/docs/configuration/observability.md#troubleshooting-collection" >}}).
 
+### Slow input or navigation
+
+Compare command response time with typing and opening the Session Navigator.
+Use `gr doctor --json` for daemon, session, and watcher diagnostics; omit
+`--disk` when investigating latency because it walks the data directory.
+
+If metrics are already enabled, collect two scrapes around the slow interaction.
+Compare the differences in histogram counts, sums, and buckets for
+`graith_session_input_duration_seconds`,
+`graith_session_input_readback_latency_seconds`, and
+`graith_screen_snapshot_duration_seconds`. Lifetime averages can hide a recent
+regression. See [Observability]({{< relref "/docs/configuration/observability.md" >}})
+for configuration and the other attach metrics. Enabling metrics requires a
+daemon restart; coordinate that with running work.
+
+`lifecycle.input_delay` controls submission of injected text such as `gr type`
+and notifications. It does not add that delay to each interactively typed key.
+Reducing it can prevent paste-aware agents from submitting injected prompts.
+
+Also check machine CPU, memory pressure, and concurrent builds. Large historical
+log files alone do not establish the cause of an interactive slowdown. Keep raw
+logs and profiles private and redact paths, session details, and content before
+sharing diagnostics.
+
 ### Daemon not responding
 
 If `gr` commands hang or return connection errors:

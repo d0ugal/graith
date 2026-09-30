@@ -385,3 +385,52 @@ func TestLocateCodexSkipsCompressedCov(t *testing.T) {
 		t.Errorf("expected the uncompressed rollout to be located: %v", err)
 	}
 }
+
+func TestFindCodexRolloutByIDFilenameCandidates(t *testing.T) {
+	tests := map[string]struct {
+		files map[string]string
+		want  string
+	}{
+		"prefer verified native filename": {map[string]string{"rollout-000-legacy.jsonl": "canny", "strath/2026/09/29/rollout-100-canny.jsonl": "canny"}, "strath/2026/09/29/rollout-100-canny.jsonl"},
+		"verify filename identity":        {map[string]string{"rollout-000-canny.jsonl": "thrawn", "rollout-100-legacy.jsonl": "canny"}, "rollout-100-legacy.jsonl"},
+		"skip malformed candidate":        {map[string]string{"rollout-000-canny.jsonl": "", "rollout-100-canny.jsonl": "canny"}, "rollout-100-canny.jsonl"},
+		"legacy metadata fallback":        {map[string]string{"rollout-000-braw.jsonl": "canny"}, "rollout-000-braw.jsonl"},
+		"missing identity":                {map[string]string{"rollout-000-canny.jsonl": "thrawn"}, ""},
+		"ignore non rollout":              {map[string]string{"blether-canny.jsonl": "canny", "rollout-000-canny.jsonl.zst": "canny"}, ""},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			for name, id := range test.files {
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+
+				data := []byte("dreich")
+				if id != "" {
+					data = []byte(`{"type":"session_meta","payload":{"id":"` + id + `"}}` + "\n")
+				}
+
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			got, ok := findCodexRolloutByID(root, "canny")
+			if test.want == "" {
+				if ok {
+					t.Fatalf("unexpected rollout %q", got)
+				}
+
+				return
+			}
+
+			if !ok || got != filepath.Join(root, test.want) {
+				t.Fatalf("rollout = %q, %v; want %q", got, ok, test.want)
+			}
+		})
+	}
+}

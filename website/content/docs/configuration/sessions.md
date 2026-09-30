@@ -138,7 +138,16 @@ Empty or non-positive values fall back to the defaults shown. Values are read li
 
 ## Token accounting
 
-The daemon periodically re-derives each session's token usage from its agent's on-disk transcript, surfaced by `gr ls --wide`, `gr ls --tokens`, and `gr ls --json`. A fingerprint cache means an idle fleet does almost no work between ticks.
+The daemon periodically re-derives each session's token usage from its agent's
+on-disk transcript, surfaced by `gr ls --wide`, `gr ls --tokens`, and
+`gr ls --json`. A fingerprint cache skips parsing unchanged transcript contents;
+locating those transcripts still requires filesystem lookups.
+
+For Codex, usage lookup prefers a standard rollout filename containing the
+captured session ID, and verifies that ID in the file's metadata. Renamed or
+legacy rollout files remain supported through a metadata scan. If both forms
+claim the same session ID, the verified standard filename takes precedence.
+Missing or unresolved session IDs still require scanning rollout metadata.
 
 ```toml
 [token_accounting]
