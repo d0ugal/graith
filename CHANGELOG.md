@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.73.28](https://github.com/d0ugal/graith/compare/v0.73.27...v0.73.28) (2026-10-04)
+
+
+### Bug Fixes
+
+* update github.com/charmbracelet/ultraviolet digest to 8786532 ([#2528](https://github.com/d0ugal/graith/issues/2528)) ([abbe50d](https://github.com/d0ugal/graith/commit/abbe50df947993a9b34c4d7b414f4035d6439b7b))
+* update module github.com/go-git/go-billy/v5 to v5.9.2 ([#2535](https://github.com/d0ugal/graith/issues/2535)) ([64ce36c](https://github.com/d0ugal/graith/commit/64ce36c23e1be2ec4529860814bc241e3fe5d312))
+* update module tailscale.com to v1.104.0 ([#2524](https://github.com/d0ugal/graith/issues/2524)) ([dc2652d](https://github.com/d0ugal/graith/commit/dc2652dc04288cbbb913f7945f8bc161d42bf1a0))
+* update opentelemetry-go monorepo to v1.47.0 ([#2533](https://github.com/d0ugal/graith/issues/2533)) ([e2236df](https://github.com/d0ugal/graith/commit/e2236df72adc3261b1accfafb53c9b173f913e20))
+
+
+### Dependencies
+
+* **deps:** lock file maintenance ([#2523](https://github.com/d0ugal/graith/issues/2523)) ([8c7a47f](https://github.com/d0ugal/graith/commit/8c7a47f3049eaae590e8b2e5602cc1f1be770e78))
+* **deps:** update renovate/renovate docker tag to v44.125.2 ([#2527](https://github.com/d0ugal/graith/issues/2527)) ([bcaa389](https://github.com/d0ugal/graith/commit/bcaa38903b0114ebe8426a75066278c134124ffe))
+* **deps:** update renovate/renovate docker tag to v44.131.0 ([#2529](https://github.com/d0ugal/graith/issues/2529)) ([7d0cc47](https://github.com/d0ugal/graith/commit/7d0cc477f5b87eee980a50dac6b0d1b5a59cf595))
+* **deps:** update renovate/renovate docker tag to v44.131.3 ([#2530](https://github.com/d0ugal/graith/issues/2530)) ([961ec69](https://github.com/d0ugal/graith/commit/961ec693689f5822d26c222f2aef709c5a3ec3f5))
+* **deps:** update renovate/renovate docker tag to v44.132.0 ([#2531](https://github.com/d0ugal/graith/issues/2531)) ([45afb87](https://github.com/d0ugal/graith/commit/45afb8747ae1ca92950c444e49e289fe307cfe5a))
+* **deps:** update renovate/renovate docker tag to v44.132.2 ([#2532](https://github.com/d0ugal/graith/issues/2532)) ([5fb7284](https://github.com/d0ugal/graith/commit/5fb7284a05383520855c37ba13016b850fe103ff))
+* **deps:** update renovate/renovate docker tag to v44.132.4 ([#2536](https://github.com/d0ugal/graith/issues/2536)) ([4e0d65a](https://github.com/d0ugal/graith/commit/4e0d65af7b0d7c1812739abc9e2c15699371f8e5))
+* **deps:** update renovate/renovate docker tag to v44.132.5 ([#2537](https://github.com/d0ugal/graith/issues/2537)) ([55d70ed](https://github.com/d0ugal/graith/commit/55d70ed2307cc73f70ba97c46b527328453d8947))
+
 ## [0.73.27](https://github.com/d0ugal/graith/compare/v0.73.26...v0.73.27) (2026-09-30)
 
 
