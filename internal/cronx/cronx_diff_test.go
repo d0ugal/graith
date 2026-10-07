@@ -107,105 +107,39 @@ func TestEnginesAgree(t *testing.T) {
 	}
 }
 
-// TestGronxKnownBugs pins the concrete cases where gronx v1.20.3 computes a
-// WRONG next-fire — a time its own IsDue rejects — while robfig is correct.
-// This is why graith keeps robfig. Each case asserts:
-//   - robfig produces the correct answer,
-//   - gronx disagrees with robfig, and
-//   - gronx's answer is not even due per gronx itself (so it's a bug, not a
-//     defensible difference).
-//
-// If a future gronx fixes this, the "engines must disagree" assertion fails —
-// re-open issue #1213 and re-evaluate the swap.
-func TestGronxKnownBugs(t *testing.T) {
+// TestGronxFixedBugs records next-tick bugs fixed by gronx. Keep these cases
+// as positive expectations so upstream fixes are expressed as regressions
+// rather than making a newer dependency fail because it agrees with robfig.
+func TestGronxFixedBugs(t *testing.T) {
+	utc := time.UTC
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Skipf("America/New_York unavailable: %v", err)
 	}
-
-	g := gronx.New()
-
-	at := func(loc *time.Location, s string) time.Time {
-		ts, err := time.ParseInLocation("2006-01-02T15:04:05", s, loc)
-		if err != nil {
-			t.Fatalf("bad time %q: %v", s, err)
-		}
-
-		return ts
-	}
-
-	cases := []struct {
-		name, expr string
-		ref        time.Time
-		wantRobfig time.Time // the correct answer
-		reason     string
-	}{
-		{
-			name:       "DST fall-back day, plain monthly",
-			expr:       "0 0 1 * *",
-			ref:        at(ny, "2026-11-01T00:30:00"), // 2026-11-01 is US fall-back
-			wantRobfig: at(ny, "2026-12-01T00:00:00"),
-			reason:     "gronx returns 2026-11-02 — the fall-back transition corrupts the day search",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rNext := robfigNext(t, tc.expr, tc.ref)
-			if !rNext.Equal(tc.wantRobfig) {
-				t.Fatalf("robfig regressed on %q: got %s want %s", tc.expr, rNext.Format(time.RFC3339), tc.wantRobfig.Format(time.RFC3339))
-			}
-
-			gNext, gErr := gronx.NextTickAfter(tc.expr, tc.ref, false)
-			if gErr != nil {
-				// A future gronx that returns an error instead of a wrong answer is
-				// an improvement, but still not correct — note and move on.
-				t.Logf("%s: gronx now errors (%v) instead of returning a wrong time", tc.name, gErr)
-				return
-			}
-
-			if rNext.Equal(gNext) {
-				t.Fatalf("gronx now AGREES with robfig on %q (%s) — the bug appears fixed; re-evaluate issue #1213 (was: %s)",
-					tc.expr, gNext.Format(time.RFC3339), tc.reason)
-			}
-
-			// The smoking gun: gronx's own IsDue rejects the time gronx returned.
-			if due, _ := g.IsDue(tc.expr, gNext); due {
-				t.Errorf("%s: gronx returned %s and considers it due — bug characterization changed, re-verify", tc.name, gNext.Format(time.RFC3339))
-			} else {
-				t.Logf("confirmed gronx bug: %q from %s -> gronx=%s (NOT due per gronx), robfig=%s. %s",
-					tc.expr, tc.ref.Format(time.RFC3339), gNext.Format(time.RFC3339), rNext.Format(time.RFC3339), tc.reason)
-			}
-		})
-	}
-}
-
-// TestGronxFixedBugs records the two next-tick bugs fixed in gronx v1.20.2:
-// crossing short months for day-of-month values and skipping to the next leap
-// year for February 29. Keep these cases separate from TestGronxKnownBugs so
-// an upstream fix is expressed as an expectation rather than a test failure.
-func TestGronxFixedBugs(t *testing.T) {
-	utc := time.UTC
 	g := gronx.New()
 	cases := map[string]struct {
 		expr, ref, want string
+		loc             *time.Location
 	}{
 		"day-of-month 31 overflow": {
-			expr: "0 0 31 * *", ref: "2026-11-01T00:30:00", want: "2026-12-31T00:00:00",
+			expr: "0 0 31 * *", ref: "2026-11-01T00:30:00", want: "2026-12-31T00:00:00", loc: utc,
 		},
 		"leap-day Feb 29": {
-			expr: "0 0 29 2 *", ref: "2026-01-01T00:00:00", want: "2028-02-29T00:00:00",
+			expr: "0 0 29 2 *", ref: "2026-01-01T00:00:00", want: "2028-02-29T00:00:00", loc: utc,
+		},
+		"DST fall-back day, plain monthly": {
+			expr: "0 0 1 * *", ref: "2026-11-01T00:30:00", want: "2026-12-01T00:00:00", loc: ny,
 		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			ref, err := time.ParseInLocation("2006-01-02T15:04:05", tc.ref, utc)
+			ref, err := time.ParseInLocation("2006-01-02T15:04:05", tc.ref, tc.loc)
 			if err != nil {
 				t.Fatalf("bad reference time %q: %v", tc.ref, err)
 			}
 
-			want, err := time.ParseInLocation("2006-01-02T15:04:05", tc.want, utc)
+			want, err := time.ParseInLocation("2006-01-02T15:04:05", tc.want, tc.loc)
 			if err != nil {
 				t.Fatalf("bad expected time %q: %v", tc.want, err)
 			}
