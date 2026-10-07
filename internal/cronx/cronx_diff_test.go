@@ -112,10 +112,12 @@ func TestEnginesAgree(t *testing.T) {
 // rather than making a newer dependency fail because it agrees with robfig.
 func TestGronxFixedBugs(t *testing.T) {
 	utc := time.UTC
+
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Skipf("America/New_York unavailable: %v", err)
 	}
+
 	g := gronx.New()
 	cases := map[string]struct {
 		expr, ref, want string
