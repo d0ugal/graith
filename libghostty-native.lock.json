@@ -3,7 +3,7 @@
   "goLibghostty": {
     "repository": "https://tangled.org/mitchellh.com/go-libghostty",
     "renovateRef": "main",
-    "commit": "bea702a427236e605957dd6966508bf2dab75eda",
+    "commit": "8812ad0e0f796d35ed30eb9738d5feaf279c05f7",
     "version": "v0.0.0-20260810222103-bea702a42723",
     "moduleSum": "h1:7YvkbTHIYizaanAiMKiw9k37VmWP0lV+ymk1VG7exWk=",
     "testedGhosttyCommit": "d929e6a34a091dcfd69d45011b96cc70b5575dac",
@@ -14,7 +14,7 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "d929e6a34a091dcfd69d45011b96cc70b5575dac",
+    "commit": "e3ac62001ef2a6c9c4b4bb4231535c1c3c3e4ae3",
     "version": "1.3.2-dev",
     "headersSHA256": "0485974bbdb0d4813174e2d56454ca75a4624a7ab577fa769451a7a55772d91b",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
@@ -37,7 +37,7 @@
   },
   "zig": {
     "repository": "https://codeberg.org/ziglang/zig",
-    "version": "0.16.0",
+    "version": "0.17.0",
     "sourceURL": "https://ziglang.org/download/0.16.0/zig-0.16.0.tar.xz",
     "sourceSHA256": "43186959edc87d5c7a1be7b7d2a25efffd22ce5807c7af99067f86f99641bfdf",
     "linuxX8664URL": "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz",
@@ -72,7 +72,7 @@
   },
   "simdutf": {
     "repository": "simdutf/simdutf",
-    "version": "9.0.0",
+    "version": "9.2.1",
     "manifestVersion": "5.2.8",
     "commit": "ca7acbcea967b5dcbab490066e99e3a6e6925539",
     "cppSHA256": "38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263",
