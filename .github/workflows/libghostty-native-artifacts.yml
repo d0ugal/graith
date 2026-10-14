@@ -1,67 +1,182 @@
 name: Publish native libghostty dependency artifacts
 
 on:
-  # zizmor: ignore[dangerous-triggers] This privileged trigger is limited to same-repository
-  # lock-only PRs after maintainer labeling; artifact jobs run trusted base code
-  # with the PR lock as data, and RELEASE_TOKEN is isolated in a no-code push job.
+  # zizmor: ignore[dangerous-triggers] pull_request_target only posts a static guidance
+  # comment from a no-checkout job. Publication is authorized by an approving review from a
+  # write/admin reviewer on the exact current head SHA of a same-repository lock-only PR.
+  # Artifact jobs run trusted base code with the PR lock as data, and
+  # RELEASE_TOKEN is isolated in a no-code push job.
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
     paths:
       - libghostty-native.lock.json
+  # pull_request_review runs the workflow file from the PR merge ref. That adds no
+  # capability: a same-repository branch author already has write access, and the
+  # authorize job refuses anything but a same-repository lock-only PR, so a Renovate
+  # lock update cannot alter this file and still be eligible. Fork PRs get a read-only
+  # token with no secrets and are rejected before any privileged job runs.
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: libghostty-native-artifacts-${{ github.event.pull_request.number }}
+  # Guidance comments must not displace a pending publication run, so they get their own group.
+  group: libghostty-native-artifacts-${{ github.event.pull_request.number }}-${{ github.event_name == 'pull_request_review' && 'publish' || 'comment' }}
   cancel-in-progress: false
 
 jobs:
+  guidance:
+    name: Post native artifact approval guidance
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Upsert approval guidance comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          marker='<!-- graith-native-artifact-approval -->'
+
+          if [ "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]; then
+            echo "::notice::Native artifact guidance applies only to same-repository PR branches."
+            exit 0
+          fi
+
+          case "$HEAD_REF" in
+            renovate/*) ;;
+            *)
+              echo "::notice::Native artifact guidance applies only to Renovate branches."
+              exit 0
+              ;;
+          esac
+
+          body="$RUNNER_TEMP/guidance.md"
+          {
+            printf '%s\n' "$marker"
+            printf '%s\n' "An approving review from a maintainer with write access is required to build and publish the native libghostty artifacts for this PR. The approval authorizes exactly the current head \`${HEAD_SHA:0:12}\`; any new push needs a fresh approval."
+            printf '\n%s\n' "Check before approving:"
+            printf '%s\n' "- go-libghostty's tested Ghostty pin matches the proposed Ghostty commit."
+            printf '%s\n' "- If license or embedded-notice hashes change, inspect the evidence and run the \`accept-license-reviews\` subcommand of the libghostty native helper script before regenerating."
+            printf '%s\n' "- Only \`libghostty-native.lock.json\` changes in this PR (lock-only); other changes are not eligible."
+          } > "$body"
+
+          existing="$(gh api --paginate "repos/$REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id" | head -n1)"
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$REPOSITORY/issues/comments/$existing" -F "body=@$body" >/dev/null
+          else
+            gh api --method POST "repos/$REPOSITORY/issues/$PR_NUMBER/comments" -F "body=@$body" >/dev/null
+          fi
+
   authorize:
     name: Authorize native artifact publication
+    if: github.event_name == 'pull_request_review'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       should_publish: ${{ steps.classify.outputs.should_publish }}
+      base_sha: ${{ steps.classify.outputs.base_sha }}
+      head_sha: ${{ steps.classify.outputs.head_sha }}
+      head_ref: ${{ steps.classify.outputs.head_ref }}
     steps:
-      - name: Require same-repository lock-only approved PR
+      - name: Require approved same-repository lock-only PR
         id: classify
         env:
-          APPROVAL_LABEL: native-artifact-approved
           BASE_REPOSITORY: ${{ github.repository }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT_ACTION: ${{ github.event.action }}
-          EVENT_LABEL: ${{ github.event.label.name }}
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
+          REVIEW_ID: ${{ github.event.review.id }}
         run: |
           set -euo pipefail
           should_publish=false
           trap 'echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"' EXIT
 
-          if [ "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]; then
+          # Re-read everything from the API at run time instead of trusting the event payload.
+          pr="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          review="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews/$REVIEW_ID")"
+
+          state="$(jq -er '.state' <<<"$review")"
+          if [ "$state" != "APPROVED" ]; then
+            echo "::notice::Only an approving review authorizes native artifact publication (review is $state)."
+            exit 0
+          fi
+
+          head_repository="$(jq -er '.head.repo.full_name // ""' <<<"$pr")"
+          if [ "$head_repository" != "$BASE_REPOSITORY" ]; then
             echo "::notice::Native artifact publication is available only for same-repository PR branches."
             exit 0
           fi
 
-          if [ "$EVENT_ACTION" != "labeled" ] || [ "$EVENT_LABEL" != "$APPROVAL_LABEL" ]; then
-            echo "::notice::Apply $APPROVAL_LABEL after reviewing this exact native dependency head SHA to publish artifacts."
+          pr_state="$(jq -er '.state' <<<"$pr")"
+          if [ "$pr_state" != "open" ]; then
+            echo "::notice::Native artifact publication requires an open PR."
+            exit 0
+          fi
+
+          base_sha="$(jq -er '.base.sha' <<<"$pr")"
+          head_sha="$(jq -er '.head.sha' <<<"$pr")"
+          head_ref="$(jq -er '.head.ref' <<<"$pr")"
+          review_commit="$(jq -er '.commit_id' <<<"$review")"
+          if [ "$review_commit" != "$head_sha" ]; then
+            echo "::notice::The approval is for $review_commit but the PR head is $head_sha; approve the current head to publish artifacts."
+            exit 0
+          fi
+
+          reviewer="$(jq -er '.user.login' <<<"$review")"
+          permission="$(gh api "repos/$REPOSITORY/collaborators/$reviewer/permission" --jq '.permission')"
+          case "$permission" in
+            admin|write) ;;
+            *)
+              echo "::notice::Reviewer $reviewer has $permission permission; write or admin is required to authorize native artifact publication."
+              exit 0
+              ;;
+          esac
+
+          # A blocking review from anyone (latest non-comment review per reviewer) vetoes publication.
+          blocking="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/reviews" |
+            jq -s '[.[][] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")]
+              | group_by(.user.login) | map(max_by(.submitted_at)) | map(select(.state == "CHANGES_REQUESTED")) | length')"
+          if [ "$blocking" != "0" ]; then
+            echo "::notice::A reviewer has requested changes; resolve it before publishing native artifacts."
             exit 0
           fi
 
           files="$RUNNER_TEMP/native-pr-files.txt"
-          gh api "repos/$REPOSITORY/compare/$BASE_SHA...$HEAD_SHA" \
+          gh api "repos/$REPOSITORY/compare/$base_sha...$head_sha" \
             --jq '.files[].filename' > "$files"
           file_count="$(wc -l < "$files" | tr -d ' ')"
           if [ "$file_count" != "1" ] ||
             ! grep -Fxq "libghostty-native.lock.json" "$files"; then
-            echo "::notice::Native artifact publication only handles lock-only dependency PRs; split other changes before applying $APPROVAL_LABEL."
+            echo "::notice::Native artifact publication only handles lock-only dependency PRs; split other changes before requesting approval."
             exit 0
           fi
 
+          # Re-check that the head did not move while the checks above ran.
+          current_head="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
+          if [ "$current_head" != "$head_sha" ]; then
+            echo "::notice::PR head moved during authorization; approve the new head."
+            exit 0
+          fi
+
+          {
+            echo "base_sha=$base_sha"
+            echo "head_sha=$head_sha"
+            echo "head_ref=$head_ref"
+          } >> "$GITHUB_OUTPUT"
           should_publish=true
 
   validate:
@@ -94,7 +209,7 @@ jobs:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.authorize.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -104,10 +219,10 @@ jobs:
 
       - name: Overlay reviewed PR lock
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_SHA: ${{ needs.authorize.outputs.head_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
@@ -117,7 +232,7 @@ jobs:
 
       - name: Materialize artifact lock
         env:
-          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ needs.authorize.outputs.base_sha }}
         run: scripts/libghostty-native.sh prepare-artifact-lock
 
       - name: Upload materialized artifact lock
@@ -338,7 +453,7 @@ jobs:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.authorize.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -348,10 +463,10 @@ jobs:
 
       - name: Overlay reviewed PR lock
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_SHA: ${{ needs.authorize.outputs.head_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
@@ -361,7 +476,7 @@ jobs:
 
       - name: Materialize artifact lock
         env:
-          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ needs.authorize.outputs.base_sha }}
         run: scripts/libghostty-native.sh prepare-artifact-lock
 
       - name: Check for existing Linux artifact
@@ -421,7 +536,7 @@ jobs:
       - name: Generate artifact build inputs
         if: steps.linux-cache.outputs.exists != 'true'
         env:
-          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ needs.authorize.outputs.base_sha }}
         run: scripts/libghostty-native.sh generate-artifact-inputs
 
       - name: Build and pack Linux artifact
@@ -638,7 +753,7 @@ jobs:
       - name: Check out trusted base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.authorize.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -648,10 +763,10 @@ jobs:
 
       - name: Overlay reviewed PR lock
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ needs.authorize.outputs.base_sha }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_SHA: ${{ needs.authorize.outputs.head_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
@@ -661,13 +776,13 @@ jobs:
 
       - name: Generate dependency unit from published artifacts
         env:
-          GRAITH_LIBGHOSTTY_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          GRAITH_LIBGHOSTTY_BASE_REF: ${{ needs.authorize.outputs.base_sha }}
         run: scripts/libghostty-native.sh generate-dependency-unit
 
       - name: Commit generated native files if changed
         id: commit
         env:
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_SHA: ${{ needs.authorize.outputs.head_sha }}
         run: |
           set -euo pipefail
           git fetch --no-tags origin "$SOURCE_SHA"
@@ -747,7 +862,7 @@ jobs:
         if: needs.generate.result == 'success' && needs.generate.outputs.changed == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ needs.authorize.outputs.head_sha }}
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
           persist-credentials: true
@@ -762,8 +877,8 @@ jobs:
       - name: Push generated native commit
         if: needs.generate.result == 'success' && needs.generate.outputs.changed == 'true'
         env:
-          HEAD_REF: ${{ github.head_ref }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ needs.authorize.outputs.head_ref }}
+          SOURCE_SHA: ${{ needs.authorize.outputs.head_sha }}
         run: |
           set -euo pipefail
           remote_sha="$(git ls-remote origin "refs/heads/$HEAD_REF" | awk '{print $1}')"

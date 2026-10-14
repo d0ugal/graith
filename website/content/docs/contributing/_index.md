@@ -192,17 +192,19 @@ trusted workflows project every approved lock update.
 
 For same-repository Renovate PRs that change only `libghostty-native.lock.json`,
 inspect the dependency proposal, including the go-libghostty commit and its
-tested Ghostty pin, then apply the `native-artifact-approved` label. The
-`Publish native libghostty dependency artifacts` workflow consumes that exact
-`labeled` event only: if the branch is rebased or synchronized again, remove and
-reapply the label after reviewing the new head. The workflow runs only
+tested Ghostty pin, then approve the PR. The
+`Publish native libghostty dependency artifacts` workflow treats an approving
+review from a user with write access as the authorization, and only when the
+review is for the PR's current head: if the branch is rebased or synchronized
+again, review the new head and approve again. A bot comment on the PR reminds
+reviewers of this. The workflow runs only
 base-branch code, overlays the PR lock as data, builds the reviewed Apple and
 Linux assets, publishes immutable releases, regenerates the mechanical
 projections, and pushes the generated commit back to the Renovate branch with
 the workflow-triggering `RELEASE_TOKEN`. The write-token publisher and push jobs
 do not check out the repository, do not run repository-controlled or
 Ghostty-controlled build code, and the push job accepts only an allowlisted
-generated commit whose parent is the labeled PR head. Forks, mixed-code PRs,
+generated commit whose parent is the approved PR head. Forks, mixed-code PRs,
 missing tokens, and artifact build failures fail or skip with an actionable
 message instead of publishing bytes.
 
@@ -211,8 +213,8 @@ The generated commit is authored by
 Renovate is configured to ignore only that generated author when deciding
 whether its branch was manually edited, so Renovate can still rebase or retry
 native dependency PRs after metadata generation. If Renovate refreshes the
-branch after a generated commit, repeat the exact-head review and reapply
-`native-artifact-approved` so the workflow regenerates the commit on the new
+branch after a generated commit, repeat the exact-head review and approve
+the PR again so the workflow regenerates the commit on the new
 head.
 
 New Apple artifacts use the tag
