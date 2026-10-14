@@ -127,7 +127,7 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 
 	p11AssertJobUsesOnlyAllowedActions(t, "regen", regen, map[string]string{
 		"Check out source head with workflow-triggering credentials": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-		"Download generated commit":                                  "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+		"Download generated commit":                                  "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
 	})
 
 	initialCheckout := p11WorkflowStep(t, prepare, "Check out PR head without persisted credentials")
@@ -435,7 +435,7 @@ func TestP11RepositoryControlledCommandDetectionAllowsDataOnlyGitLines(t *testin
 func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing.T) {
 	workflow := p11ReadMutatedRegenWorkflow(
 		t,
-		"        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8\n",
+		"        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8\n",
 		"        uses: ./.github/actions/download-generated\n",
 	)
 
