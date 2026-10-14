@@ -329,7 +329,7 @@ func refreshGhosttyClosure(ctx context.Context, source string, lock *Lock, deriv
 		return err
 	}
 
-	if err := requireDependencyURL(uucodeURL, "uucode-"); err != nil {
+	if err := requireUucodeURL(uucodeURL); err != nil {
 		return err
 	}
 
@@ -339,6 +339,10 @@ func refreshGhosttyClosure(ctx context.Context, source string, lock *Lock, deriv
 	uucodeArchive, err := download(ctx, uucodeURL)
 	if err != nil {
 		return fmt.Errorf("download uucode source: %w", err)
+	}
+
+	if err := requireUucodeArchiveBinding(uucodeURL, uucodeArchive); err != nil {
+		return err
 	}
 
 	lock.Uucode.ArchiveSHA256 = bytesSHA256(uucodeArchive)
@@ -1042,6 +1046,82 @@ func requireDependencyURL(rawURL, prefix string) error {
 
 	if parsed.Scheme != "https" || parsed.Host != "deps.files.ghostty.org" || !strings.HasPrefix(filepath.Base(parsed.Path), prefix) {
 		return fmt.Errorf("untrusted Ghostty dependency URL %q", rawURL)
+	}
+
+	return nil
+}
+
+// uucodeGitHubArchivePattern is the one non-deps.files.ghostty.org source
+// accepted for any dependency: the GitHub archive of an exact uucode commit.
+var uucodeGitHubArchivePattern = regexp.MustCompile(`^https://github\.com/jacobsandlund/uucode/archive/([0-9a-f]{40})\.tar\.gz$`)
+
+// requireUucodeURL accepts the Ghostty-hosted uucode archive or, as a narrow
+// exception, a GitHub archive of an exact 40-character uucode commit. The
+// exception exists because newer Ghostty manifests point uucode at GitHub. The
+// match is on the raw string, so query strings, fragments, userinfo, ports,
+// encoded or traversing paths, and uppercase or short SHAs are all rejected.
+func requireUucodeURL(rawURL string) error {
+	if uucodeGitHubArchivePattern.MatchString(rawURL) {
+		return nil
+	}
+
+	return requireDependencyURL(rawURL, "uucode-")
+}
+
+// requireUucodeArchiveBinding checks that a GitHub-sourced archive really is
+// the commit named in its URL: every member must live under the
+// uucode-<commit>/ root GitHub generates, and a pax global header comment, when
+// present, must carry the same commit. Archives from deps.files.ghostty.org are
+// not constrained here. Either way the archive SHA-256 is recorded in the lock
+// and the Zig hash is pinned for the build, so different bytes fail verification.
+func requireUucodeArchiveBinding(rawURL string, archive []byte) error {
+	match := uucodeGitHubArchivePattern.FindStringSubmatch(rawURL)
+	if match == nil {
+		return nil
+	}
+
+	commit := match[1]
+	root := "uucode-" + commit + "/"
+
+	gzipReader, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return fmt.Errorf("open uucode archive: %w", err)
+	}
+
+	defer func() {
+		_ = gzipReader.Close()
+	}()
+
+	tarReader := tar.NewReader(gzipReader)
+	members := 0
+
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("read uucode archive: %w", err)
+		}
+
+		if header.Typeflag == tar.TypeXGlobalHeader {
+			if comment, ok := header.PAXRecords["comment"]; ok && comment != commit {
+				return fmt.Errorf("uucode archive commit %q does not match URL commit %s", comment, commit)
+			}
+
+			continue
+		}
+
+		members++
+
+		if !strings.HasPrefix(header.Name, root) {
+			return fmt.Errorf("uucode archive member %q is outside %s", header.Name, root)
+		}
+	}
+
+	if members == 0 {
+		return fmt.Errorf("uucode archive from %s is empty", rawURL)
 	}
 
 	return nil

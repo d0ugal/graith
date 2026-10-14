@@ -95,6 +95,21 @@ release-asset digest. This is an explicit trust boundary: normal generation
 consumes separately built and reviewed artifacts and never accepts stale,
 placeholder, or locally guessed artifact checksums.
 
+Dependency source URLs are a second trust boundary. Every Ghostty-manifest
+dependency must be served from `deps.files.ghostty.org` with its own filename
+prefix. The single exception is uucode: newer Ghostty manifests point it at
+`https://github.com/jacobsandlund/uucode/archive/<commit>.tar.gz`, so for uucode
+only, that exact shape is accepted (https, host `github.com`, that owner and
+repository, a full lowercase 40-character commit, no query, fragment, userinfo,
+port, or path traversal; matched against the raw string). Highway and any other
+dependency keep the Ghostty-hosted rule. A GitHub-sourced archive is also bound
+to its URL: every member must sit under the `uucode-<commit>/` root that GitHub
+generates, and a pax global header commit, when present, must match. The
+archive SHA-256 is recorded in the lock and the Zig hash stays pinned for the
+build, so a URL serving different bytes fails offline verification and the Zig
+fetch. Revisit this exception, and remove it, if upstream restores uucode to
+`deps.files.ghostty.org`.
+
 Same-repository lock-only Renovate PRs use a trusted `pull_request_target`
 workflow to fill that publication step. A maintainer first reviews the native
 proposal, including go-libghostty's tested Ghostty pin, and applies
