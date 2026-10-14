@@ -124,11 +124,15 @@ See [`internal/daemon/AGENTS.md`](internal/daemon/AGENTS.md).
 
 ### GitHub Action digest bumps
 
-The `internal/ciworkflow` policy tests hardcode the pinned action SHAs. When a
-Renovate PR bumps a GitHub Action digest, update the pinned SHAs in the same PR
-in the affected tests (for example `session_navigator_preview_policy_test.go`,
-`workflow_lint_policy_test.go`, and `p11_js_surface_test.go`). The pins are
-deliberate; do not loosen the assertions to accept any SHA.
+The `internal/ciworkflow` policy tests compare workflow `uses:` lines against
+expected pins in `internal/ciworkflow/testdata/action_pins.json`. That file is
+generated from the `uses:` lines in `.github/workflows/regen.yml` by
+`make action-pins` (`cmd/actionpins`), and `.github/workflows/regen.yml`
+runs it on same-repo PRs and commits the result. A Renovate action-digest PR
+therefore only needs merging once regen has pushed its commit; run
+`make action-pins` locally if you need the update before then. If other
+workflows drift from `regen.yml`, the policy tests fail and the workflows must
+be fixed. The pins are deliberate; never loosen the assertions to accept any SHA.
 
 ### Frontend capabilities
 
