@@ -159,7 +159,7 @@ github.event.action != 'closed' &&
 	}
 
 	upload := p11WorkflowStep(t, preview, "Upload diff assets")
-	if upload.Uses != "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" ||
+	if upload.Uses != pinnedUses(t, "actions/upload-artifact") ||
 		upload.With["path"] != "nav/out" ||
 		upload.With["if-no-files-found"] != "error" {
 		t.Fatalf("upload step = %#v", upload)
@@ -197,7 +197,7 @@ github.event.pull_request.head.repo.full_name == github.repository`)
 	}
 
 	download := p11WorkflowStep(t, publish, "Download diff assets")
-	if download.Uses != "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333" ||
+	if download.Uses != pinnedUses(t, "actions/download-artifact") ||
 		download.If != "steps.trusted-publisher.outputs.supported == 'true'" ||
 		download.With["path"] != "nav/out" {
 		t.Fatalf("download step = %#v", download)
