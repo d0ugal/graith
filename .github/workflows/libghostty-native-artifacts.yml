@@ -20,7 +20,7 @@ concurrency:
 jobs:
   authorize:
     name: Authorize native artifact publication
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       should_publish: ${{ steps.classify.outputs.should_publish }}
@@ -68,7 +68,7 @@ jobs:
     name: Validate artifact publication credentials
     needs: authorize
     if: needs.authorize.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Require workflow-triggering token
@@ -213,7 +213,7 @@ jobs:
     name: Publish Apple libghostty artifact
     needs: [authorize, apple-build]
     if: needs.authorize.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: write
@@ -321,7 +321,7 @@ jobs:
     name: Build Linux libghostty artifact (${{ matrix.goarch }})
     needs: [authorize, apple-publish]
     if: needs.authorize.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       contents: read
@@ -519,7 +519,7 @@ jobs:
     name: Publish Linux libghostty artifact (${{ matrix.goarch }})
     needs: [authorize, apple-build, linux-build]
     if: needs.authorize.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: write
@@ -630,7 +630,7 @@ jobs:
     name: Generate native dependency projections
     needs: [authorize, validate, apple-publish, linux-publish]
     if: needs.authorize.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     outputs:
       changed: ${{ steps.commit.outputs.changed }}
@@ -730,7 +730,7 @@ jobs:
     name: Push generated native dependency commit
     needs: [authorize, validate, generate]
     if: always() && needs.authorize.outputs.should_publish == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Propagate generation failure
