@@ -772,6 +772,26 @@ expected_static_archive_members() {
         simdutf.o targets.o vt.o | LC_ALL=C sort
 }
 
+# Print which members are missing from, or unexpected in, an archive so a failed
+# closure audit shows exactly what changed. Diagnostic only: it never decides
+# the audit outcome, and it always succeeds.
+report_archive_member_diff() {
+    local expected="${1:-}" actual="${2:-}"
+    local missing extra
+
+    missing="$(LC_ALL=C comm -23 <(printf '%s\n' "$expected" | LC_ALL=C sort) \
+        <(printf '%s\n' "$actual" | LC_ALL=C sort) 2>/dev/null)" || true
+    extra="$(LC_ALL=C comm -13 <(printf '%s\n' "$expected" | LC_ALL=C sort) \
+        <(printf '%s\n' "$actual" | LC_ALL=C sort) 2>/dev/null)" || true
+    {
+        echo "audited archive members missing from the archive:"
+        printf '%s\n' "${missing:-(none)}" | sed 's/^/  - /'
+        echo "archive members not in the audited closure:"
+        printf '%s\n' "${extra:-(none)}" | sed 's/^/  + /'
+    } >&2
+    return 0
+}
+
 file_identity() {
     local path="${1:-}"
     local host identity
@@ -1173,6 +1193,7 @@ verify_static_archive() {
     fi
     if ! expected_members="$(expected_static_archive_members)" ||
         [[ -z "$expected_members" || "$actual_members" != "$expected_members" ]]; then
+        report_archive_member_diff "$expected_members" "$actual_members"
         die "static archive contents do not match the audited dependency closure"
         return 1
     fi
@@ -1330,6 +1351,7 @@ materialize_static_archive() (
         return 1
     fi
     [[ "$actual_members" == "$expected_members" ]] || {
+        report_archive_member_diff "$expected_members" "$actual_members"
         die "thin archive does not match the exact audited 11-member closure"
         return 1
     }
