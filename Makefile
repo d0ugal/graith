@@ -120,6 +120,14 @@ package-graph:
 package-graph-check:
 	cd website && GOFLAGS=-mod=readonly GOWORK=off go run ./cmd/packagegraph -repo .. -check
 
+# Rewrite the expected GitHub Action SHAs the ciworkflow policy tests compare
+# against, from the `uses:` lines in .github/workflows/regen.yml.
+action-pins:
+	go run ./cmd/actionpins
+
+action-pins-check:
+	go run ./cmd/actionpins -check
+
 # Documentation builds consume the committed package graph without rewriting it.
 website/node_modules/.package-lock-stamp: website/package.json website/package-lock.json
 	cd website && npm ci
