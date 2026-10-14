@@ -10,6 +10,22 @@ import (
 	"testing"
 )
 
+// p11ArtifactActionPin matches upload-artifact and download-artifact pinned to
+// any full 40-hex commit SHA, so Renovate digest bumps do not break tests.
+// Tags and branches are still rejected.
+func p11ArtifactActionPin(action string) string {
+	return "^" + regexp.QuoteMeta(action) + "@[0-9a-f]{40}$"
+}
+
+// p11AssertArtifactActionPinned fails unless uses is action pinned to a full commit SHA.
+func p11AssertArtifactActionPinned(t *testing.T, uses, action string) {
+	t.Helper()
+
+	if !regexp.MustCompile(p11ArtifactActionPin(action)).MatchString(uses) {
+		t.Fatalf("uses = %q, want %s pinned to a full 40-hex commit SHA", uses, action)
+	}
+}
+
 const p11SameRepositoryGuard = "github.event.pull_request.head.repo.full_name == github.repository"
 
 var (
@@ -127,7 +143,7 @@ func TestP11RegenWorkflowTrustSemantics(t *testing.T) {
 
 	p11AssertJobUsesOnlyAllowedActions(t, "regen", regen, map[string]string{
 		"Check out source head with workflow-triggering credentials": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-		"Download generated commit":                                  "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+		"Download generated commit":                                  p11ArtifactActionPin("actions/download-artifact"),
 	})
 
 	initialCheckout := p11WorkflowStep(t, prepare, "Check out PR head without persisted credentials")
@@ -435,7 +451,7 @@ func TestP11RepositoryControlledCommandDetectionAllowsDataOnlyGitLines(t *testin
 func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing.T) {
 	workflow := p11ReadMutatedRegenWorkflow(
 		t,
-		"        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8\n",
+		p11RegenDownloadArtifactLine(t),
 		"        uses: ./.github/actions/download-generated\n",
 	)
 
@@ -443,6 +459,24 @@ func TestP11RegenWorkflowTrustSemanticsRejectsCredentialedLocalAction(t *testing
 	if !p11JobRunsRepositoryControlledCode(regen) {
 		t.Fatal("credentialed local action execution was not surfaced to semantic assertions")
 	}
+}
+
+// p11RegenDownloadArtifactLine returns the SHA-pinned download-artifact line from
+// regen.yml, whatever commit it is currently pinned to.
+func p11RegenDownloadArtifactLine(t *testing.T) string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(p11RepoRoot(), ".github/workflows/regen.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	line := regexp.MustCompile(`        uses: actions/download-artifact@[0-9a-f]{40} # v8\n`).FindString(string(data))
+	if line == "" {
+		t.Fatal("regen workflow download-artifact step pinned to a full SHA with a # v8 comment not found")
+	}
+
+	return line
 }
 
 func p11ReadMutatedRegenWorkflow(t *testing.T, needle, replacement string) P11WorkflowSummary {
@@ -583,7 +617,11 @@ func p11AssertJobUsesOnlyAllowedActions(t *testing.T, jobID string, job P11Workf
 			t.Fatalf("job %s step %q uses unexpected action %q", jobID, step.Name, step.Uses)
 		}
 
-		if step.Uses != want {
+		if strings.HasPrefix(want, "^") {
+			if !regexp.MustCompile(want).MatchString(step.Uses) {
+				t.Fatalf("job %s step %q uses %q, want match for %q", jobID, step.Name, step.Uses, want)
+			}
+		} else if step.Uses != want {
 			t.Fatalf("job %s step %q uses %q, want %q", jobID, step.Name, step.Uses, want)
 		}
 

@@ -159,8 +159,9 @@ github.event.action != 'closed' &&
 	}
 
 	upload := p11WorkflowStep(t, preview, "Upload diff assets")
-	if upload.Uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
-		upload.With["path"] != "nav/out" ||
+	p11AssertArtifactActionPinned(t, upload.Uses, "actions/upload-artifact")
+
+	if upload.With["path"] != "nav/out" ||
 		upload.With["if-no-files-found"] != "error" {
 		t.Fatalf("upload step = %#v", upload)
 	}
@@ -197,8 +198,9 @@ github.event.pull_request.head.repo.full_name == github.repository`)
 	}
 
 	download := p11WorkflowStep(t, publish, "Download diff assets")
-	if download.Uses != "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
-		download.If != "steps.trusted-publisher.outputs.supported == 'true'" ||
+	p11AssertArtifactActionPinned(t, download.Uses, "actions/download-artifact")
+
+	if download.If != "steps.trusted-publisher.outputs.supported == 'true'" ||
 		download.With["path"] != "nav/out" {
 		t.Fatalf("download step = %#v", download)
 	}
