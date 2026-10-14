@@ -122,6 +122,14 @@ local, remote, session, descendant, and user authorization boundaries.
 
 See [`internal/daemon/AGENTS.md`](internal/daemon/AGENTS.md).
 
+### GitHub Action digest bumps
+
+The `internal/ciworkflow` policy tests hardcode the pinned action SHAs. When a
+Renovate PR bumps a GitHub Action digest, update the pinned SHAs in the same PR
+in the affected tests (for example `session_navigator_preview_policy_test.go`,
+`workflow_lint_policy_test.go`, and `p11_js_surface_test.go`). The pins are
+deliberate; do not loosen the assertions to accept any SHA.
+
 ### Frontend capabilities
 
 `internal/capabilities/capabilities.json` is the source of truth. When a
