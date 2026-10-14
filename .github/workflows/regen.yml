@@ -1,10 +1,11 @@
 # Auto-regenerate committed generated artifacts on a PR.
 #
-# Three files in this repo are mechanical generated outputs:
+# Four files in this repo are mechanical generated outputs:
 #   - gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json
 #     (from internal/protocol/messages.go)
 #   - website/content/docs/capabilities.md                   (from capabilities.json)
 #   - website/data/package_dependencies.json                 (from Go package imports)
+#   - internal/ciworkflow/testdata/action_pins.json          (from this workflow's action `uses:` pins)
 # Native dependency PRs additionally project `libghostty-native.lock.json` into
 # the Go module, headers, Apple artifact pin, SPDX inventory, and notices.
 #
@@ -100,6 +101,7 @@ jobs:
           go test ./internal/protocol -run TestManifestUpToDate -update
           go test ./internal/capabilities -run TestDocMatchesManifest -update
           make package-graph
+          make action-pins
 
       - name: Detect a native dependency lock update
         id: native-lock
@@ -131,6 +133,7 @@ jobs:
           go test ./internal/protocol -run TestManifestUpToDate
           go test ./internal/capabilities -run 'TestDocMatchesManifest|TestManifestLoads'
           make package-graph-check
+          make action-pins-check
           if [ "${{ steps.native-lock.outputs.changed }}" = "true" ]; then
             scripts/libghostty-native.sh verify-generated-dependency-unit
           else
@@ -150,6 +153,7 @@ jobs:
             gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json \
             website/content/docs/capabilities.md \
             website/data/package_dependencies.json \
+            internal/ciworkflow/testdata/action_pins.json \
             go.mod go.sum gui/shared/Package.swift \
             gui/shared/Sources/CGhosttyVT/include \
             libghostty-native.lock.json libghostty-native.spdx.json \
@@ -254,6 +258,7 @@ jobs:
               gui/shared/Tests/GraithProtocolTests/Fixtures/protocol_manifest.json|\
               website/content/docs/capabilities.md|\
               website/data/package_dependencies.json|\
+              internal/ciworkflow/testdata/action_pins.json|\
               go.mod|go.sum|gui/shared/Package.swift|\
               gui/shared/Sources/CGhosttyVT/include/*|\
               libghostty-native.lock.json|libghostty-native.spdx.json|\
