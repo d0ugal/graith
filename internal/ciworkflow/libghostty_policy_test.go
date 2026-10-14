@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -409,17 +410,19 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if got := p11WorkflowJobIDs(workflow); strings.Join(got, ",") != "apple-build,apple-publish,authorize,generate,linux-build,linux-publish,push,validate" {
+	if got := p11WorkflowJobIDs(workflow); strings.Join(got, ",") != "apple-build,apple-publish,authorize,generate,guidance,linux-build,linux-publish,push,validate" {
 		t.Fatalf("artifact workflow jobs = %#v", got)
 	}
 
 	assertContains(t, nativeArtifacts, "pull_request_target")
 	assertContains(t, nativeArtifacts, "zizmor: ignore[dangerous-triggers]")
 	assertContains(t, nativeArtifacts, "RELEASE_TOKEN is isolated in a no-code push job")
-	assertContains(t, nativeArtifacts, "native-artifact-approved")
+	assertContains(t, nativeArtifacts, "pull_request_review")
+	assertNotContains(t, nativeArtifacts, "native-artifact-approved")
+	assertNotContains(t, nativeArtifacts, "labeled")
 	assertContains(t, nativeArtifacts, "libghostty-native.lock.json")
 	assertContains(t, nativeArtifacts, "same-repository PR branches")
-	assertContains(t, nativeArtifacts, "reviewing this exact native dependency head SHA")
+	assertContains(t, nativeArtifacts, "approve the current head to publish artifacts")
 	assertContains(t, nativeArtifacts, "lock-only dependency PRs")
 	assertContains(t, nativeArtifacts, "prepare-artifact-lock")
 	assertContains(t, nativeArtifacts, "generate-artifact-inputs")
@@ -427,8 +430,11 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 	assertContains(t, nativeArtifacts, "libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag")
 	assertContains(t, nativeArtifacts, "libghostty-vt-${ghostty_commit:0:7}-go-${go_libghostty_commit:0:7}-zig-$zig_tag-linux")
 
-	if !reflect.DeepEqual(workflow.Events, []string{"pull_request_target"}) {
-		t.Fatalf("artifact workflow events = %#v, want pull_request_target", workflow.Events)
+	events := append([]string(nil), workflow.Events...)
+	sort.Strings(events)
+
+	if !reflect.DeepEqual(events, []string{"pull_request_review", "pull_request_target"}) {
+		t.Fatalf("artifact workflow events = %#v, want pull_request_review and pull_request_target", workflow.Events)
 	}
 
 	if !reflect.DeepEqual(workflow.Permissions, map[string]string{"contents": "read", "pull-requests": "read"}) {
@@ -452,10 +458,52 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 		t.Fatal("artifact authorization job must not check out or run repository-controlled code")
 	}
 
-	authorizeStep := p11WorkflowStep(t, authorize, "Require same-repository lock-only approved PR")
-	assertContains(t, authorizeStep.Run, `[ "$EVENT_ACTION" != "labeled" ] || [ "$EVENT_LABEL" != "$APPROVAL_LABEL" ]`)
-	assertContains(t, authorizeStep.Run, `repos/$REPOSITORY/compare/$BASE_SHA...$HEAD_SHA`)
+	if authorize.If != "github.event_name == 'pull_request_review'" {
+		t.Fatalf("authorize job if = %q, want review events only", authorize.If)
+	}
+
+	authorizeStep := p11WorkflowStep(t, authorize, "Require approved same-repository lock-only PR")
+	assertContains(t, authorizeStep.Run, `"$state" != "APPROVED"`)
+	assertContains(t, authorizeStep.Run, `repos/$REPOSITORY/pulls/$PR_NUMBER/reviews/$REVIEW_ID`)
+	assertContains(t, authorizeStep.Run, `[ "$review_commit" != "$head_sha" ]`)
+	assertContains(t, authorizeStep.Run, `repos/$REPOSITORY/collaborators/$reviewer/permission`)
+	assertContains(t, authorizeStep.Run, `admin|write`)
+	assertContains(t, authorizeStep.Run, `[ "$head_repository" != "$BASE_REPOSITORY" ]`)
+	assertContains(t, authorizeStep.Run, `CHANGES_REQUESTED`)
+	assertContains(t, authorizeStep.Run, `repos/$REPOSITORY/compare/$base_sha...$head_sha`)
+	assertContains(t, authorizeStep.Run, `[ "$current_head" != "$head_sha" ]`)
 	assertNotContains(t, authorizeStep.Run, `pulls/$PR_NUMBER/files`)
+
+	if _, ok := authorizeStep.Env["RELEASE_TOKEN"]; ok || p11JobHasReleaseTokenExpression(authorize) {
+		t.Fatal("authorize job must not receive RELEASE_TOKEN")
+	}
+
+	// Privileged jobs must take SHAs from the freshly verified authorize outputs, never the event payload.
+	for _, forbidden := range []string{"github.event.pull_request.base.sha", "github.event.pull_request.head.sha", "github.head_ref"} {
+		body := nativeArtifacts
+		if i := strings.Index(body, "  authorize:"); i >= 0 {
+			// guidance runs before authorize and only reads display data from the event.
+			body = body[i:]
+		}
+
+		assertNotContains(t, body, forbidden)
+	}
+
+	guidance := p11WorkflowJob(t, workflow, "guidance")
+	if p11JobUsesAction(guidance, "actions/checkout") || p11JobRunsRepositoryControlledCode(guidance) || p11JobHasReleaseTokenExpression(guidance) {
+		t.Fatal("guidance job must be no-checkout, run no repository code and not receive RELEASE_TOKEN")
+	}
+
+	if guidance.Permissions["pull-requests"] != "write" || guidance.Permissions["contents"] != "read" {
+		t.Fatalf("guidance permissions = %#v", guidance.Permissions)
+	}
+
+	guidanceStep := p11WorkflowStep(t, guidance, "Upsert approval guidance comment")
+	assertContains(t, guidanceStep.Run, "<!-- graith-native-artifact-approval -->")
+	assertContains(t, guidanceStep.Run, `.user.login == \"github-actions[bot]\"`)
+	assertContains(t, guidanceStep.Run, "--method PATCH")
+	assertContains(t, guidanceStep.Run, "accept-license-reviews")
+	assertContains(t, guidanceStep.Run, "tested Ghostty pin")
 
 	if p11JobUsesAction(validate, "actions/checkout") || p11JobRunsRepositoryControlledCode(validate) {
 		t.Fatal("artifact credential validation job must not check out or run repository-controlled code")
@@ -516,7 +564,7 @@ func TestLibghosttyNativeArtifactWorkflowPublishesBeforeGeneration(t *testing.T)
 		"generate":    generate,
 	} {
 		checkout := p11WorkflowStep(t, job, "Check out trusted base")
-		if checkout.With["ref"] != "${{ github.event.pull_request.base.sha }}" ||
+		if checkout.With["ref"] != "${{ needs.authorize.outputs.base_sha }}" ||
 			checkout.With["persist-credentials"] != "false" {
 			t.Fatalf("%s trusted checkout = %#v", id, checkout.With)
 		}

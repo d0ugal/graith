@@ -58,7 +58,7 @@
       commitMessageTopic: 'native libghostty dependency unit',
       prBodyNotes: [
         'This group is an exact native dependency unit and must never be automerged.',
-        'For same-repository lock-only PRs, a maintainer should review the proposal, including go-libghostty\'s tested Ghostty pin, and apply native-artifact-approved. The trusted artifact workflow consumes that exact label event, builds/publishes Apple and Linux assets keyed by the Ghostty, go-libghostty, and Zig inputs, then pushes the generated go.mod/go.sum, Ghostty and wrapper revisions, Zig/transitive source and license hashes, committed headers, SPDX, and notices back to this branch. Reapply the label after a rebase or synchronize event.',
+        'For same-repository lock-only PRs, a maintainer should review the proposal, including go-libghostty\'s tested Ghostty pin, and approve the PR. An approving review from a user with write access, on the current head, authorizes the trusted artifact workflow to build/publish Apple and Linux assets keyed by the Ghostty, go-libghostty, and Zig inputs, then pushes the generated go.mod/go.sum, Ghostty and wrapper revisions, Zig/transitive source and license hashes, committed headers, SPDX, and notices back to this branch. A new push needs a fresh approval.',
         'If license or embedded-notice hashes changed, inspect the exact evidence and run scripts/libghostty-native.sh accept-license-reviews before regenerating. Run every required libghostty native check before merge. See the contributing guide for commit-pinned and vendored discovery rules.',
       ],
     },

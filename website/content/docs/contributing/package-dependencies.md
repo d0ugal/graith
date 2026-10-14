@@ -74,13 +74,14 @@ The lock records each URL and SHA-256. CI uses
 digest before extraction and then checks the manifest, target, archive member
 types, static-library contents, and pkg-config metadata.
 
-For same-repository lock-only Renovate updates, review the proposal and apply
-the `native-artifact-approved` label. The trusted `Publish native libghostty
-dependency artifacts` workflow consumes that exact label event, builds both
+For same-repository lock-only Renovate updates, review the proposal and approve
+the PR. The trusted `Publish native libghostty
+dependency artifacts` workflow treats that approving review (from a user with
+write access, on the current head) as the authorization, builds both
 Linux targets from base-branch code, publishes immutable release assets keyed by
 the Ghostty, go-libghostty, and Zig inputs, and pushes the generated
-lock/SPDX/notices commit back to the Renovate branch. Reapply the label after a
-rebase or synchronize event. The workflow refuses to overwrite an existing
+lock/SPDX/notices commit back to the Renovate branch. A new push needs a fresh
+approval. The workflow refuses to overwrite an existing
 release asset and fails closed if the selected Ghostty/Zig pair cannot be built.
 A mutable Actions cache is never a native-code trust boundary; use
 `GRAITH_LIBGHOSTTY_SOURCE_BUILD=1` only for local comparison.

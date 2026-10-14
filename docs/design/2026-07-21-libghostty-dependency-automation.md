@@ -110,16 +110,33 @@ build, so a URL serving different bytes fails offline verification and the Zig
 fetch. Revisit this exception, and remove it, if upstream restores uucode to
 `deps.files.ghostty.org`.
 
-Same-repository lock-only Renovate PRs use a trusted `pull_request_target`
-workflow to fill that publication step. A maintainer first reviews the native
-proposal, including go-libghostty's tested Ghostty pin, and applies
-`native-artifact-approved`. The workflow authorizes only that exact `labeled`
-event, runs only base-branch repository code, overlays the PR lock as data,
-builds the Apple and Linux artifacts in read-only jobs, publishes immutable
+Same-repository lock-only Renovate PRs use a trusted workflow to fill that
+publication step. A maintainer reviews the native proposal, including
+go-libghostty's tested Ghostty pin, and approves the PR; the approving review is
+the authorization (there is no label to apply). The workflow triggers on
+`pull_request_review` (submitted). Because that event runs the workflow file from
+the PR merge ref, the `authorize` job treats the event as a hint only and
+re-reads state from the API: the review must still be `APPROVED`, its
+`commit_id` must equal the PR's current head SHA (so the approval is bound to
+exactly what is built and any new push needs a fresh approval), the reviewer must
+have `write` or `admin` permission on the repository, no reviewer may have an
+outstanding changes request, the PR must be open, same-repository, and change
+only `libghostty-native.lock.json`, and the head must not have moved by the end
+of the checks. Later jobs use the SHAs verified by `authorize`, never the event
+payload. A same-repository branch author already has write access, so running the
+merge-ref copy of the workflow grants nothing new, and a lock-only Renovate PR
+cannot change the workflow and stay eligible; forks get a read-only token without
+secrets and are rejected. A dismissed or changes-requested review never builds,
+and dismissal after a build has nothing to revoke because published releases are
+immutable. A separate no-checkout `guidance` job on `pull_request_target`
+(opened, synchronize, reopened) upserts one PR comment, found by a hidden marker
+and authored by `github-actions[bot]`, explaining that an approval is required
+and what to check first. The artifact jobs run only base-branch repository code, overlay the PR lock as data,
+build the Apple and Linux artifacts in read-only jobs, publish immutable
 releases from no-checkout/no-build write-token jobs keyed by the Ghostty,
-go-libghostty, and Zig inputs, runs strict generation against those releases,
-and passes only an allowlisted generated commit bundle to an isolated
-`RELEASE_TOKEN` push job. Forks, mixed-code PRs, stale approval labels, missing
+go-libghostty, and Zig inputs, run strict generation against those releases,
+and pass only an allowlisted generated commit bundle to an isolated
+`RELEASE_TOKEN` push job. Forks, mixed-code PRs, stale approvals, missing
 credentials, branch races, existing asset mismatches, and unbuildable selected
 pins fail or skip without exposing maintainer credentials to unreviewed code.
 
