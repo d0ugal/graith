@@ -197,7 +197,7 @@ github.event.pull_request.head.repo.full_name == github.repository`)
 	}
 
 	download := p11WorkflowStep(t, publish, "Download diff assets")
-	if download.Uses != "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
+	if download.Uses != "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333" ||
 		download.If != "steps.trusted-publisher.outputs.supported == 'true'" ||
 		download.With["path"] != "nav/out" {
 		t.Fatalf("download step = %#v", download)
