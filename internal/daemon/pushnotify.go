@@ -416,7 +416,7 @@ func resolveNotifierExecutable(path string) (string, bool) {
 		exe = filepath.Join(exe, macNotifierExecutable)
 	}
 
-	if info, err := os.Stat(exe); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+	if info, err := os.Stat(exe); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 { // #nosec G703 -- exe is a notifier candidate from graith config or fixed install locations, only stat-ed for existence and mode.
 		return exe, true
 	}
 
