@@ -316,7 +316,7 @@ jobs:
             }}' > dist/dev-darwin-manifest.json
 
       - name: Upload verified Darwin archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           # run_id is stable across job retries, so successful platform jobs from
           # an earlier attempt remain available to a retried downstream job.
@@ -452,7 +452,7 @@ jobs:
             "$release_dir/dev-linux-${GOARCH}-manifest.json"
 
       - name: Upload verified Linux archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dev-linux-${{ matrix.goarch }}-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: ${{ runner.temp }}/release-${{ matrix.goarch }}/
@@ -638,7 +638,7 @@ jobs:
           )
 
       - name: Upload assembled dev release for verification
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dev-release-${{ needs.release-context.outputs.revision }}-${{ github.run_id }}
           path: |

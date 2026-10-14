@@ -159,7 +159,7 @@ github.event.action != 'closed' &&
 	}
 
 	upload := p11WorkflowStep(t, preview, "Upload diff assets")
-	if upload.Uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
+	if upload.Uses != "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" ||
 		upload.With["path"] != "nav/out" ||
 		upload.With["if-no-files-found"] != "error" {
 		t.Fatalf("upload step = %#v", upload)

@@ -748,7 +748,7 @@ func TestCIToolVersionsArePinnedAndManaged(t *testing.T) {
 	}
 
 	gitleaksUpload := p11WorkflowStep(t, p11WorkflowJob(t, secretScan, "gitleaks"), "Upload Gitleaks SARIF")
-	if gitleaksUpload.Uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" {
+	if gitleaksUpload.Uses != "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" {
 		t.Fatalf("Gitleaks SARIF upload action = %q, want pinned upload-artifact v7", gitleaksUpload.Uses)
 	}
 
