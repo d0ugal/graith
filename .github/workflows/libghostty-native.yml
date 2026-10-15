@@ -191,7 +191,9 @@ jobs:
       (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') &&
       (github.event_name != 'workflow_dispatch' || inputs.include_linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A dependency-unit change also runs Ghostty's Debug test-lib-vt suite
+    # (about 16 minutes on x86_64) on top of the ~18 minute baseline.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
