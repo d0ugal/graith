@@ -4242,14 +4242,10 @@ func TestForkUsesSourceBaseBranch(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		sm.mu.RLock()
-		sess, ok := sm.sessions[forked.ID]
-		sm.mu.RUnlock()
-
-		if ok {
-			_ = sess.Kill()
-			sess.Close()
-		}
+		// Wait for the killed process to be reaped before the temp dir is
+		// removed; otherwise exit handling can still write into it and
+		// TempDir cleanup fails with "directory not empty".
+		stopAndClosePTY(sm, forked.ID)
 
 		if forked.WorktreePath != "" {
 			cmd := testutil.GitCommand("worktree", "remove", "--force", forked.WorktreePath)
