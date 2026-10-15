@@ -104,7 +104,7 @@ public final class GhosttyMetalRenderer: NSObject, TerminalRenderer {
         if let cursor = state.getCursorInfo() {
             cursorInfo = MetalTerminalRenderer.CursorInfo(
                 x: Int(cursor.x), y: Int(cursor.y),
-                ghosttyStyle: cursor.style.rawValue,
+                ghosttyStyle: UInt32(cursor.style.rawValue),
                 colors: metalColors
             )
         }

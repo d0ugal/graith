@@ -105,7 +105,7 @@ final class MetalTerminalNSView: BaseTerminalNSView {
         if let cursor = terminalState.getCursorInfo() {
             cursorInfo = MetalTerminalRenderer.CursorInfo(
                 x: Int(cursor.x), y: Int(cursor.y),
-                ghosttyStyle: cursor.style.rawValue,
+                ghosttyStyle: UInt32(cursor.style.rawValue),
                 colors: metalColors
             )
         }

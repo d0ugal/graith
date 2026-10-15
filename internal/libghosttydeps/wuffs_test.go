@@ -36,6 +36,9 @@ func testWuffsEntry() *Wuffs {
 	}
 }
 
+// committedLock loads the committed lock with its Wuffs entry removed, so
+// tests start from a lock that does not track Wuffs whether or not the
+// committed lock currently does. Wuffs-tracking fixtures add their own entry.
 func committedLock(t *testing.T) Lock {
 	t.Helper()
 
@@ -49,17 +52,13 @@ func committedLock(t *testing.T) Lock {
 		t.Fatal(err)
 	}
 
+	lock.Wuffs = nil
+
 	return lock
 }
 
-func TestCommittedLockOmitsWuffsUntilGenerated(t *testing.T) {
-	lock := committedLock(t)
-
-	if lock.Wuffs != nil {
-		t.Fatal("the committed lock tracks Wuffs; it may only be added by generation against a Ghostty that links it")
-	}
-
-	data, err := json.Marshal(lock)
+func TestLockWithoutWuffsOmitsTheKey(t *testing.T) {
+	data, err := json.Marshal(committedLock(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,8 +215,13 @@ func TestWuffsRenderingIsLockDriven(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(string(committedNotices), noticesWithout) {
-		t.Fatal("a lock without Wuffs no longer renders the committed notice inventory")
+	realLock, err := LoadLock(filepath.Join(sourceRoot, LockFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(committedNotices), RenderNoticesInventory(realLock)) {
+		t.Fatal("the committed lock no longer renders the committed notice inventory")
 	}
 
 	tests := []struct {
