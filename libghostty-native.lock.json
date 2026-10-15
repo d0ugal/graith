@@ -84,7 +84,7 @@
     "mitLicenseSHA256": "bb811a4b485eac3caeb8bdc58bbafb355fbcb6116010a7ea9179e5c70b0bc878",
     "licenseConclusion": "MIT",
     "licenseDeclared": "Apache-2.0 OR MIT",
-    "licenseReview": "0000000000000000000000000000000000000000000000000000000000000000"
+    "licenseReview": "d2662564a0745c5974038e55e077bd3f8d7928a4c1c4cc1838b037ce001d2316"
   },
   "simdutf": {
     "repository": "simdutf/simdutf",
