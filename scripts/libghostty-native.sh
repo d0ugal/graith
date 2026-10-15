@@ -30,6 +30,14 @@ UUCODE_VERSION="$(jq -er '.uucode.version' "$DEPENDENCY_LOCK")"
 UUCODE_HASH="$(jq -er '.uucode.zigHash' "$DEPENDENCY_LOCK")"
 HIGHWAY_VERSION="$(jq -er '.highway.version' "$DEPENDENCY_LOCK")"
 HIGHWAY_SHA="$(jq -er '.highway.commit' "$DEPENDENCY_LOCK")"
+# Wuffs is tracked only when the pinned Ghostty graph links it into
+# libghostty-vt. Without a lock entry these stay empty and nothing about Wuffs is
+# expected or accepted anywhere below. No -e: a missing entry is a valid lock.
+WUFFS_VERSION="$(jq -r '.wuffs.version // ""' "$DEPENDENCY_LOCK")"
+WUFFS_SHA="$(jq -r '.wuffs.commit // ""' "$DEPENDENCY_LOCK")"
+WUFFS_HASH="$(jq -r '.wuffs.zigHash // ""' "$DEPENDENCY_LOCK")"
+WUFFS_C_SOURCE="$(jq -r '.wuffs.cSource // ""' "$DEPENDENCY_LOCK")"
+WUFFS_C_SHA256="$(jq -r '.wuffs.cSourceSHA256 // ""' "$DEPENDENCY_LOCK")"
 SIMDUTF_VERSION="$(jq -er '.simdutf.version' "$DEPENDENCY_LOCK")"
 SIMDUTF_MANIFEST_VERSION="$(jq -er '.simdutf.manifestVersion' "$DEPENDENCY_LOCK")"
 SIMDUTF_UPSTREAM_SHA="$(jq -er '.simdutf.commit' "$DEPENDENCY_LOCK")"
@@ -45,6 +53,7 @@ readonly LINUX_ARM64_ARTIFACT_URL LINUX_ARM64_ARTIFACT_SHA256
 readonly GHOSTTY_HEADERS_SHA256 GHOSTTY_LICENSE_SHA256
 readonly REQUIRED_ZIG GO_LIBGHOSTTY_SHA GO_LIBGHOSTTY_VERSION GO_LIBGHOSTTY_SUM
 readonly UUCODE_VERSION UUCODE_HASH HIGHWAY_VERSION HIGHWAY_SHA
+readonly WUFFS_VERSION WUFFS_SHA WUFFS_HASH WUFFS_C_SOURCE WUFFS_C_SHA256
 readonly SIMDUTF_VERSION SIMDUTF_MANIFEST_VERSION SIMDUTF_UPSTREAM_SHA
 readonly SIMDUTF_CPP_SHA256 SIMDUTF_HEADER_SHA256 ZIG_SOURCE_SHA256
 readonly SPDX_TOOLS_VERSION SPDX_TOOLS_URL SPDX_TOOLS_SHA256
@@ -564,6 +573,8 @@ verify_metadata() {
         --arg go_libghostty "$GO_LIBGHOSTTY_VERSION" \
         --arg uucode "$UUCODE_VERSION" \
         --arg highway "$HIGHWAY_VERSION+$HIGHWAY_SHA" \
+        --arg wuffs "$WUFFS_VERSION" \
+        --arg wuffs_c "$WUFFS_C_SHA256" \
         --arg simdutf "$SIMDUTF_VERSION+$SIMDUTF_UPSTREAM_SHA" \
         --arg simdutf_cpp "$SIMDUTF_CPP_SHA256" \
         --arg simdutf_h "$SIMDUTF_HEADER_SHA256" \
@@ -575,7 +586,12 @@ verify_metadata() {
         def relates($from; $type; $to): any(.relationships[];
             .spdxElementId == $from and .relationshipType == $type and .relatedSpdxElement == $to);
         .spdxVersion == "SPDX-2.3" and
-        (.packages | length) == 6 and
+        (.packages | length) == (if $wuffs == "" then 6 else 7 end) and
+        (any(.packages[]; .SPDXID == "SPDXRef-Package-Wuffs") == ($wuffs != "")) and
+        ($wuffs == "" or (
+            package("SPDXRef-Package-Wuffs").versionInfo == $wuffs and
+            (package("SPDXRef-Package-Wuffs").sourceInfo | contains($wuffs_c)) and
+            relates("SPDXRef-Package-Ghostty"; "STATIC_LINK"; "SPDXRef-Package-Wuffs"))) and
         (package("SPDXRef-Package-Ghostty").versionInfo | contains($ghostty)) and
         (package("SPDXRef-Package-Ghostty").sourceInfo |
             contains("-Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast")) and
@@ -600,7 +616,8 @@ verify_metadata() {
         "$GO_LIBGHOSTTY_SHA" "$GO_LIBGHOSTTY_SUM" "$UUCODE_HASH" \
         "$HIGHWAY_SHA" "$SIMDUTF_VERSION" "$SIMDUTF_UPSTREAM_SHA" \
         "$SIMDUTF_CPP_SHA256" "$SIMDUTF_HEADER_SHA256" \
-        "$REQUIRED_ZIG" "$ZIG_SOURCE_SHA256"; do
+        "$REQUIRED_ZIG" "$ZIG_SOURCE_SHA256" \
+        ${WUFFS_SHA:+"$WUFFS_SHA" "$WUFFS_HASH" "$WUFFS_VERSION" "$WUFFS_C_SHA256"}; do
         if ! grep -Fq "$required" "$notices"; then
             echo "error: native notice inventory is missing $required" >&2
             return 1
@@ -618,6 +635,21 @@ verify_metadata() {
         grep -Fq "$UUCODE_HASH" "$source/build.zig.zon"
     grep -Fq ".version = \"$HIGHWAY_VERSION\"" "$source/pkg/highway/build.zig.zon"
     grep -Fq "$HIGHWAY_SHA" "$source/pkg/highway/build.zig.zon"
+    # The lock tracks Wuffs exactly when the selected Ghostty links it into
+    # libghostty-vt; either mismatch makes the audited closure wrong.
+    local wuffs_linked=""
+    if grep -Fq 'b.lazyDependency("wuffs"' "$source/src/build/GhosttyZig.zig"; then
+        wuffs_linked=1
+    fi
+    if [[ "${wuffs_linked:-}" != "${WUFFS_SHA:+1}" ]]; then
+        echo "error: the lock's Wuffs tracking does not match Ghostty's libghostty-vt build graph" >&2
+        return 1
+    fi
+    if [[ -n "$WUFFS_SHA" ]]; then
+        grep -Fq "$WUFFS_SHA" "$source/pkg/wuffs/build.zig.zon"
+        grep -Fq "$WUFFS_HASH" "$source/pkg/wuffs/build.zig.zon"
+        grep -Fq "\"$WUFFS_C_SOURCE\"" "$source/pkg/wuffs/build.zig"
+    fi
     grep -Fq ".version = \"$SIMDUTF_MANIFEST_VERSION\"" "$source/pkg/simdutf/build.zig.zon"
     grep -Fq "#define SIMDUTF_VERSION \"$SIMDUTF_VERSION\"" \
         "$source/pkg/simdutf/vendor/simdutf.h"
@@ -765,11 +797,27 @@ archive_magic_hex() {
     printf '%s\n' "$magic"
 }
 
+# The audited closure is the fixed base set plus, only when the lock tracks
+# Wuffs, the one object Zig derives from its C source (release/c/wuffs-vX.Y.c
+# compiles to wuffs-vX.Y.o). Exact set equality is still required; there are no
+# wildcards, and a malformed lock value fails closed instead of widening it.
 expected_static_archive_members() {
+    local wuffs_member=""
+    if [[ -n "${WUFFS_SHA:-}" && -z "${WUFFS_C_SOURCE:-}" ]]; then
+        die "lock tracks Wuffs without naming its C source"
+        return 1
+    fi
+    if [[ -n "${WUFFS_C_SOURCE:-}" ]]; then
+        if [[ ! "$WUFFS_C_SOURCE" =~ ^release/c/(wuffs-v[0-9]+\.[0-9]+)\.c$ ]]; then
+            die "lock names an unsupported Wuffs C source path"
+            return 1
+        fi
+        wuffs_member="${BASH_REMATCH[1]}.o"
+    fi
     printf '%s\n' \
         abort.o base64.o codepoint_width.o compiler_rt.o index_of.o \
         libghostty-vt-static_zcu.o libhighway_zcu.o per_target.o \
-        simdutf.o targets.o vt.o | LC_ALL=C sort
+        simdutf.o targets.o vt.o ${wuffs_member:+"$wuffs_member"} | LC_ALL=C sort
 }
 
 # Print which members are missing from, or unexpected in, an archive so a failed
@@ -1352,7 +1400,7 @@ materialize_static_archive() (
     fi
     [[ "$actual_members" == "$expected_members" ]] || {
         report_archive_member_diff "$expected_members" "$actual_members"
-        die "thin archive does not match the exact audited 11-member closure"
+        die "thin archive does not match the exact audited $(printf '%s\n' "$expected_members" | grep -c '')-member closure"
         return 1
     }
 
