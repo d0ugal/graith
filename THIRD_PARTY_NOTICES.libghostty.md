@@ -14,10 +14,11 @@ dependency unit.
 
 | Component | Exact compiled pin | Distributed license conclusion |
 |-----------|--------------------|--------------------------------|
-| go-libghostty | `v0.0.0-20260810222103-bea702a42723` / `bea702a427236e605957dd6966508bf2dab75eda` | MIT |
-| Ghostty libghostty-vt | `1.3.2-dev` / `d929e6a34a091dcfd69d45011b96cc70b5575dac` | MIT |
-| uucode | `0.2.0`, Zig hash `uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA` | MIT AND Unicode-3.0 |
+| go-libghostty | `v0.0.0-20261014030425-15bfda9e85fb` / `15bfda9e85fbcb04a4fc88a0f96044f449a3ce65` | MIT |
+| Ghostty libghostty-vt | `1.3.2-dev` / `81598385d608dda4946093d6d6a234d204a2f225` | MIT |
+| uucode | `0.2.0`, Zig hash `uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7` | MIT AND Unicode-3.0 |
 | Highway | `1.2.0`, upstream `66486a10623fa0d72fe91260f96c892e41aceb06`, Zig hash `N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE` | BSD-3-Clause, elected from Apache-2.0 OR BSD-3-Clause |
+| Wuffs | `0.4.0-alpha.10+3966.20260623`, mirror `7411f488fe2e2c205c3d3b3d28638b7356522930`, Zig hash `N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI` | MIT, declared Apache-2.0 OR MIT |
 | simdutf amalgamation | compiled version `9.0.0`, corresponding upstream `ca7acbcea967b5dcbab490066e99e3a6e6925539` | MIT AND BSD-3-Clause AND Apache-2.0 |
 | Zig bundled runtime | `0.16.0` compiler runtime and UBSan runtime | MIT AND (Apache-2.0 WITH LLVM-exception) |
 
@@ -31,27 +32,27 @@ build-only tool.
 The exact verified inputs are:
 
 - go-libghostty module sum
-  `h1:7YvkbTHIYizaanAiMKiw9k37VmWP0lV+ymk1VG7exWk=`, wrapper-tested Ghostty commit
-  `d929e6a34a091dcfd69d45011b96cc70b5575dac`, and LICENSE SHA-256
+  `h1:91eStTkG5zyJ4k6gbrHc+nXs87SALgqYA6GtGHzbBW0=`, wrapper-tested Ghostty commit
+  `81598385d608dda4946093d6d6a234d204a2f225`, and LICENSE SHA-256
   `fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9`;
 - Ghostty LICENSE SHA-256
   `386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1` and committed-header tree SHA-256
-  `0485974bbdb0d4813174e2d56454ca75a4624a7ab577fa769451a7a55772d91b`;
+  `174473992ced9db6741c4be6093b46214814db08f46365b2ff31944edeb173a8`;
 - Linux source-build configuration `-Demit-lib-vt=true`,
   `-Demit-xcframework=false`, `-Doptimize=ReleaseFast`, and the
   target-specific `-Dtarget=x86_64-linux-gnu` or
   `-Dtarget=aarch64-linux-gnu`; no Apple archive is used for Linux;
 - Apple testing archive used by the macOS native candidate
-  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0/libghostty-vt.xcframework.zip`
+  `https://github.com/d0ugal/graith/releases/download/libghostty-vt-8159838-go-15bfda9-zig-0.16.0/libghostty-vt.xcframework.zip`
   SHA-256
-  `50aa562e33a9aa8028ffd922e733c218c92c217db3a8ba23e0e28c8818e5e10a`;
+  `673de3a7d2f202c4385673023d37a4ef3e094eb54fd6fdd3798b50b31fc66e31`;
 - Zig source URL `https://ziglang.org/download/0.16.0/zig-0.16.0.tar.xz`,
   source SHA-256
   `43186959edc87d5c7a1be7b7d2a25efffd22ce5807c7af99067f86f99641bfdf`,
   and LICENSE SHA-256
   `5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177`;
-- uucode archive `https://deps.files.ghostty.org/uucode-2826a37a4562284fdacd8fa029d49509cc9bffcd.tar.gz` SHA-256
-  `7e76fc7fab1e7ac728c52b35bbb3e5b8c639841abfc7fe1a4bcb13050594bc9e`,
+- uucode archive `https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz` SHA-256
+  `68d23543cb2c6c5dfdbdf38b38375e0c6d412a5c5fb72ce06bd139f7a4d25132`,
   LICENSE SHA-256
   `312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33`,
   Bjoern Hoehrmann notice SHA-256
@@ -61,6 +62,17 @@ The exact verified inputs are:
 - Highway archive `https://deps.files.ghostty.org/highway-66486a10623fa0d72fe91260f96c892e41aceb06.tar.gz` SHA-256
   `87d4f8893ef4e08f224973608ffebf94268a81380ba79c12e8841968c80aa212` and elected BSD license SHA-256
   `d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2`;
+- Wuffs archive `https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz` SHA-256
+  `17877d346f7988651d6c62e45b2e3b05c86809a6442c5e34612374b2a9719a1c`,
+  compiled C source `release/c/wuffs-v0.4.c` SHA-256
+  `1f8039ef82911604c063f6ac2ed57254bdb17d742aebdeae06356530d4a0fde7`,
+  LICENSE SHA-256
+  `f8ac2c75e7f629a87565c80d61ff9fe5aa15cdea0bda997d52a4dc13fdbd19cb`,
+  LICENSE-APACHE SHA-256
+  `0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594`,
+  and LICENSE-MIT SHA-256
+  `bb811a4b485eac3caeb8bdc58bbafb355fbcb6116010a7ea9179e5c70b0bc878`
+  (Copyright 2023 The Wuffs Authors; the MIT and Apache-2.0 texts reproduced below are the Wuffs license texts);
 - vendored simdutf.cpp SHA-256
   `38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263`,
   simdutf.h SHA-256
