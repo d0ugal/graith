@@ -267,6 +267,10 @@ func validateRepositories(lock Lock) error {
 		"SPDX tools":    {lock.SPDXTools.Repository, "spdx/tools-java"},
 	}
 
+	if lock.Wuffs != nil {
+		want["Wuffs"] = [2]string{lock.Wuffs.Repository, wuffsRepository}
+	}
+
 	var problems []error
 
 	for name, pair := range want {
@@ -410,6 +414,10 @@ func refreshGhosttyClosure(ctx context.Context, source string, lock *Lock, deriv
 
 	lock.Highway.LicenseSHA256 = bytesSHA256(highwayLicense)
 
+	if err := refreshWuffs(ctx, source, lock, deriveVersions); err != nil {
+		return err
+	}
+
 	simdutfManifest, err := os.ReadFile(filepath.Join(source, "pkg/simdutf/build.zig.zon"))
 	if err != nil {
 		return fmt.Errorf("read Ghostty simdutf manifest: %w", err)
@@ -454,6 +462,173 @@ func refreshGhosttyClosure(ctx context.Context, source string, lock *Lock, deriv
 	}
 
 	lock.Simdutf.LicenseSHA256 = bytesSHA256(simdutfLicense)
+
+	return nil
+}
+
+const (
+	// wuffsRepository identifies the upstream that deps.files.ghostty.org
+	// mirrors for Ghostty: the single-file C release repository of Wuffs. The
+	// Ghostty-hosted archive is a byte-for-byte tree of one commit of it.
+	wuffsRepository = "google/wuffs-mirror-release-c"
+
+	// maxWuffsCSource bounds the extracted single-file Wuffs C source. It is a
+	// multi-megabyte amalgamation, so it needs more room than the license-sized
+	// members the general 4 MiB cap is meant for.
+	maxWuffsCSource = 16 << 20
+
+	// The Ghostty package that provides Wuffs, and the module that wires it into
+	// libghostty-vt.
+	wuffsPackageManifest = "pkg/wuffs/build.zig.zon"
+	wuffsPackageBuild    = "pkg/wuffs/build.zig"
+	wuffsVTWiring        = "src/build/GhosttyZig.zig"
+)
+
+var (
+	// wuffsVTWiringPattern matches the libghostty-vt module importing Wuffs.
+	// Only this wiring places the Wuffs object in the audited archive; Wuffs
+	// that is merely present in the Ghostty tree (for the full application) is
+	// not part of the closure.
+	wuffsVTWiringPattern = regexp.MustCompile(`b\.lazyDependency\("wuffs"`)
+	wuffsSPDXPattern     = regexp.MustCompile(`(?m)^//\s*SPDX-License-Identifier:\s*(.+?)\s*$`)
+)
+
+// ghosttyLinksWuffs reports whether the selected Ghostty tree compiles Wuffs
+// into libghostty-vt. The result decides whether the lock tracks Wuffs, which in
+// turn decides whether the audited archive closure contains the Wuffs object.
+func ghosttyLinksWuffs(source string) (bool, error) {
+	wiring, err := os.ReadFile(filepath.Join(source, wuffsVTWiring))
+	if err != nil {
+		return false, fmt.Errorf("read Ghostty libghostty-vt module wiring: %w", err)
+	}
+
+	return wuffsVTWiringPattern.Match(wiring), nil
+}
+
+// refreshWuffs makes the lock track Wuffs exactly when the selected Ghostty
+// libghostty-vt module links it. The source is the Ghostty-hosted archive named
+// by Ghostty's own pkg/wuffs manifest; it must pass the ordinary
+// deps.files.ghostty.org rule, so Wuffs needs no URL exception.
+//
+// A newly tracked or changed Wuffs entry never carries an accepted license
+// review: the conclusion is only a proposal copied from the declared license,
+// and the review stays pending until a human runs accept-license-reviews.
+func refreshWuffs(ctx context.Context, source string, lock *Lock, deriveVersions bool) error {
+	linked, err := ghosttyLinksWuffs(source)
+	if err != nil {
+		return err
+	}
+
+	if !linked {
+		lock.Wuffs = nil
+
+		return nil
+	}
+
+	manifest, err := os.ReadFile(filepath.Join(source, wuffsPackageManifest))
+	if err != nil {
+		return fmt.Errorf("read Ghostty Wuffs manifest: %w", err)
+	}
+
+	build, err := os.ReadFile(filepath.Join(source, wuffsPackageBuild))
+	if err != nil {
+		return fmt.Errorf("read Ghostty Wuffs build script: %w", err)
+	}
+
+	block, err := capture(manifest, `(?s)\.wuffs\s*=\s*\.\{(.*?)\n\s*\},`)
+	if err != nil {
+		return fmt.Errorf("Ghostty Wuffs dependency: %w", err)
+	}
+
+	sourceURL, err := capture([]byte(block), `\.url\s*=\s*"([^"]*wuffs-[0-9a-f]{40}\.tar\.gz)"`)
+	if err != nil {
+		return err
+	}
+
+	commit, err := capture([]byte(sourceURL), `wuffs-([0-9a-f]{40})\.tar\.gz$`)
+	if err != nil {
+		return err
+	}
+
+	zigHash, err := capture([]byte(block), `\.hash\s*=\s*"([^"]+)"`)
+	if err != nil {
+		return err
+	}
+
+	cSource, err := capture(build, `wuffs_dep\.path\("(release/c/wuffs-v[0-9]+\.[0-9]+\.c)"\)`)
+	if err != nil {
+		return fmt.Errorf("Ghostty Wuffs C source: %w", err)
+	}
+
+	if err := requireDependencyURL(sourceURL, "wuffs-"); err != nil {
+		return err
+	}
+
+	archive, err := download(ctx, sourceURL)
+	if err != nil {
+		return fmt.Errorf("download Wuffs source: %w", err)
+	}
+
+	cSourceBytes, err := tarGzipMemberLimit(archive, "/"+cSource, maxWuffsCSource)
+	if err != nil {
+		return err
+	}
+
+	version, err := capture(cSourceBytes, `(?m)^#define WUFFS_VERSION_STRING "([^"]+)"`)
+	if err != nil {
+		return fmt.Errorf("Wuffs compiled version: %w", err)
+	}
+
+	declared, err := capture(cSourceBytes, wuffsSPDXPattern.String())
+	if err != nil {
+		return fmt.Errorf("Wuffs declared license: %w", err)
+	}
+
+	previous := lock.Wuffs
+
+	if previous != nil {
+		selected := previous.Version
+		if err := reconcileVersion("Wuffs", version, &selected, deriveVersions); err != nil {
+			return err
+		}
+	}
+
+	entry := Wuffs{
+		Repository:      wuffsRepository,
+		Version:         version,
+		Commit:          commit,
+		CSource:         cSource,
+		SourceURL:       sourceURL,
+		ZigHash:         zigHash,
+		ArchiveSHA256:   bytesSHA256(archive),
+		CSourceSHA256:   bytesSHA256(cSourceBytes),
+		LicenseDeclared: declared,
+		// Proposal only: a new entry is unreviewed.
+		LicenseConclusion: declared,
+		LicenseReview:     pendingLicenseReview,
+	}
+
+	if previous != nil {
+		// Keep the human decision. The merge gate recomputes the fingerprint
+		// from the refreshed evidence, so any change no longer matches it.
+		entry.LicenseConclusion = previous.LicenseConclusion
+		entry.LicenseReview = previous.LicenseReview
+	}
+
+	for suffix, destination := range map[string]*string{
+		"/LICENSE":        &entry.LicenseSHA256,
+		"/LICENSE-APACHE": &entry.ApacheSHA256,
+		"/LICENSE-MIT":    &entry.MITSHA256,
+	} {
+		content, archiveErr := tarGzipMember(archive, suffix)
+		if archiveErr != nil {
+			return archiveErr
+		}
+
+		*destination = bytesSHA256(content)
+	}
+
+	lock.Wuffs = &entry
 
 	return nil
 }
@@ -1236,6 +1411,10 @@ func downloadRequest(request *http.Request) ([]byte, error) {
 }
 
 func tarGzipMember(archive []byte, suffix string) ([]byte, error) {
+	return tarGzipMemberLimit(archive, suffix, 4<<20)
+}
+
+func tarGzipMemberLimit(archive []byte, suffix string, limit int64) ([]byte, error) {
 	gzipReader, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, fmt.Errorf("open gzip archive: %w", err)
@@ -1270,13 +1449,13 @@ func tarGzipMember(archive []byte, suffix string) ([]byte, error) {
 			return nil, fmt.Errorf("archive contains more than one member ending in %s", suffix)
 		}
 
-		data, err := io.ReadAll(io.LimitReader(tarReader, (4<<20)+1))
+		data, err := io.ReadAll(io.LimitReader(tarReader, limit+1))
 		if err != nil {
 			return nil, err
 		}
 
-		if len(data) > 4<<20 {
-			return nil, fmt.Errorf("archive member %s exceeded 4 MiB", cleanName)
+		if int64(len(data)) > limit {
+			return nil, fmt.Errorf("archive member %s exceeded %d MiB", cleanName, limit>>20)
 		}
 
 		matched = data

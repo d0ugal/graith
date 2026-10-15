@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -23,7 +24,18 @@ const (
 var (
 	fullSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	sha256Pattern  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+	// wuffsCSourcePattern is the only shape of Wuffs C source path the lock may
+	// name. The archive member name is derived from it, so it must be a single
+	// release-series file below release/c and nothing that could traverse.
+	wuffsCSourcePattern = regexp.MustCompile(`^release/c/wuffs-v[0-9]+\.[0-9]+\.c$`)
 )
+
+// pendingLicenseReview marks a license review that no human has accepted yet.
+// It is a well-formed digest so the lock stays structurally valid, but it can
+// never equal a real review fingerprint, so the merge gate stays red until
+// accept-license-reviews binds the exact evidence.
+var pendingLicenseReview = strings.Repeat("0", 64)
 
 type Lock struct {
 	SchemaVersion int          `json:"schemaVersion"`
@@ -32,6 +44,7 @@ type Lock struct {
 	Zig           Zig          `json:"zig"`
 	Uucode        Uucode       `json:"uucode"`
 	Highway       Highway      `json:"highway"`
+	Wuffs         *Wuffs       `json:"wuffs,omitempty"`
 	Simdutf       Simdutf      `json:"simdutf"`
 	SPDXTools     SPDXTools    `json:"spdxTools"`
 }
@@ -112,6 +125,32 @@ type Highway struct {
 	LicenseConclusion string `json:"licenseConclusion"`
 	LicenseDeclared   string `json:"licenseDeclared"`
 	LicenseReview     string `json:"licenseReview"`
+}
+
+// Wuffs is present only when the pinned Ghostty graph links Wuffs into
+// libghostty-vt. A nil entry means the audited archive closure does not include
+// the Wuffs object; a non-nil entry adds exactly that one object.
+type Wuffs struct {
+	Repository        string `json:"repository"`
+	Version           string `json:"version"`
+	Commit            string `json:"commit"`
+	CSource           string `json:"cSource"`
+	SourceURL         string `json:"sourceURL"`
+	ZigHash           string `json:"zigHash"`
+	ArchiveSHA256     string `json:"archiveSHA256"`
+	CSourceSHA256     string `json:"cSourceSHA256"`
+	LicenseSHA256     string `json:"licenseSHA256"`
+	ApacheSHA256      string `json:"apacheLicenseSHA256"`
+	MITSHA256         string `json:"mitLicenseSHA256"`
+	LicenseConclusion string `json:"licenseConclusion"`
+	LicenseDeclared   string `json:"licenseDeclared"`
+	LicenseReview     string `json:"licenseReview"`
+}
+
+// ArchiveMember is the static-archive object name Zig derives from the C source
+// file it compiles, for example wuffs-v0.4.o.
+func (wuffs Wuffs) ArchiveMember() string {
+	return strings.TrimSuffix(path.Base(wuffs.CSource), ".c") + ".o"
 }
 
 type Simdutf struct {
@@ -216,6 +255,18 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 	check(fullSHAPattern.MatchString(lock.Highway.Commit), "invalid Highway commit")
 	check(fullSHAPattern.MatchString(lock.Simdutf.Commit), "invalid simdutf commit")
 
+	if wuffs := lock.Wuffs; wuffs != nil {
+		check(fullSHAPattern.MatchString(wuffs.Commit), "invalid Wuffs commit")
+		check(wuffsCSourcePattern.MatchString(wuffs.CSource), "invalid Wuffs C source path")
+		check(wuffs.Repository != "", "missing Wuffs repository")
+		check(wuffs.Version != "", "missing Wuffs version")
+		check(wuffs.ZigHash != "", "missing Wuffs Zig hash")
+		check(wuffs.LicenseConclusion != "", "missing Wuffs license conclusion")
+		check(wuffs.LicenseDeclared != "", "missing Wuffs declared license")
+		check(strings.HasSuffix(wuffs.SourceURL, "/wuffs-"+wuffs.Commit+".tar.gz"),
+			"Wuffs source URL does not name the Wuffs commit")
+	}
+
 	for name, value := range map[string]string{
 		"go-libghostty license":        lock.GoLibghostty.LicenseSHA256,
 		"Ghostty headers":              lock.Ghostty.HeadersSHA256,
@@ -242,6 +293,19 @@ func (lock Lock) validate(requireProjectionConsistency bool) error {
 		"simdutf license review":       lock.Simdutf.LicenseReview,
 	} {
 		check(sha256Pattern.MatchString(value), "invalid %s SHA-256", name)
+	}
+
+	if wuffs := lock.Wuffs; wuffs != nil {
+		for name, value := range map[string]string{
+			"Wuffs archive":            wuffs.ArchiveSHA256,
+			"Wuffs C source":           wuffs.CSourceSHA256,
+			"Wuffs license":            wuffs.LicenseSHA256,
+			"Wuffs Apache-2.0 license": wuffs.ApacheSHA256,
+			"Wuffs MIT license":        wuffs.MITSHA256,
+			"Wuffs license review":     wuffs.LicenseReview,
+		} {
+			check(sha256Pattern.MatchString(value), "invalid %s SHA-256", name)
+		}
 	}
 
 	if requireProjectionConsistency {
@@ -324,6 +388,16 @@ func AcceptLicenseReviews(lock *Lock) {
 	lock.Simdutf.LicenseReview = licenseReviewFingerprint(
 		"simdutf", lock.Simdutf.LicenseSHA256, lock.Simdutf.LicenseConclusion,
 		lock.Simdutf.LicenseDeclared)
+
+	if wuffs := lock.Wuffs; wuffs != nil {
+		// Wuffs is a distinct value so a later acceptance never mutates the
+		// caller's shared entry through the copied pointer.
+		accepted := *wuffs
+		accepted.LicenseReview = licenseReviewFingerprint(
+			"Wuffs", accepted.LicenseSHA256, accepted.ApacheSHA256, accepted.MITSHA256,
+			accepted.LicenseConclusion, accepted.LicenseDeclared)
+		lock.Wuffs = &accepted
+	}
 }
 
 func VerifyLicenseReviews(lock Lock) error {
@@ -343,6 +417,10 @@ func VerifyLicenseReviews(lock Lock) error {
 		if pair[0] != pair[1] {
 			problems = append(problems, fmt.Errorf("%s license evidence or conclusion changed; review it and run scripts/libghostty-native.sh accept-license-reviews", name))
 		}
+	}
+
+	if lock.Wuffs != nil && expected.Wuffs.LicenseReview != lock.Wuffs.LicenseReview {
+		problems = append(problems, errors.New("Wuffs license evidence or conclusion changed; review it and run scripts/libghostty-native.sh accept-license-reviews"))
 	}
 
 	return errors.Join(problems...)
