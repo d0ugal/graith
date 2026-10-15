@@ -1,10 +1,10 @@
 name: Mainline Failure Notifier
 
 on:
-  # zizmor: ignore[dangerous-triggers] The notifier deliberately runs after
+  # The notifier deliberately runs after
   # selected workflows complete, but never checks out or executes triggering-run
   # code and gates mutation to trusted push runs on main or version tags.
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows:
       - CI
       - Release Please
