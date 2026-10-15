@@ -331,7 +331,9 @@ The path-scoped native workflow performs these checks:
   native amd64 wrapper, PTY, daemon, race, fuzz, and lifecycle execution;
 - a fail-closed Linux build-output snapshot that converts either the current
   Zig regular archive or its historical thin-archive form into the same
-  deterministic, self-contained 11-member archive before publication;
+  deterministic, self-contained archive before publication, whose audited member
+  set is the 11 base objects plus the Wuffs object only when the lock tracks
+  Wuffs;
 - committed-header diff against the exact Ghostty checkout;
 - upstream `go-libghostty` tests against Graith's newer Ghostty pin;
 - tagged PTY, focused race, and candidate executable builds; and

@@ -251,7 +251,10 @@ Ghostty commit can be proposed through Renovate's dependency dashboard, but it
 needs explicit approval and the complete native compatibility suite.
 
 Zig is discovered from its Codeberg Forgejo tag feed, while uucode, Highway,
-and simdutf are discovered from their upstream release feeds. Compatibility
+and simdutf are discovered from their upstream release feeds. Wuffs, which newer
+Ghostty commits compile into libghostty-vt, is not discovered separately: the
+generator tracks it only when the selected Ghostty links it, and it can only
+move with a Ghostty update. Compatibility
 comes from the selected Ghostty source tree. The generator reads Ghostty's root
 and package `build.zig.zon` declarations and the vendored simdutf header, then
 derives the exact compiled versions, commits, Zig content hashes, source
@@ -275,7 +278,9 @@ policy directly:
 scripts/libghostty-native.sh test-source-archive-policy
 ```
 
-The policy accepts only the audited 11-member Ghostty archive closure and
+The policy accepts only the audited Ghostty archive closure, which is the
+11 base objects plus the one Wuffs object (for example `wuffs-v0.4.o`) when and
+only when `libghostty-native.lock.json` has a `wuffs` entry, and
 publishes a deterministic, self-contained regular archive. Injected path,
 stat, hash, format, temporary-directory, copy, Zig archiver, verifier, and
 final-move failures must leave no archive, pkg-config file, snapshot, or private
