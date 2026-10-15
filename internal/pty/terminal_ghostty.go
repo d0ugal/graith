@@ -85,8 +85,8 @@ func newGhosttyTerminalWithScrollback(cols, rows, historyRows int) (gt *ghosttyT
 		libghostty.WithWritePty(func(_ *libghostty.Terminal, data []byte) {
 			gt.pendingPtyReplies = append(gt.pendingPtyReplies, data...)
 		}),
-		libghostty.WithClipboardWrite(func(_ *libghostty.Terminal, _ libghostty.ClipboardWrite) libghostty.ClipboardWriteResult {
-			return libghostty.ClipboardWriteDenied
+		libghostty.WithClipboardWrite(func(_ *libghostty.Terminal, _ libghostty.ClipboardWrite) libghostty.ClipboardWriteReply {
+			return libghostty.ClipboardWriteReply{Result: libghostty.ClipboardWriteDenied}
 		}),
 		libghostty.WithTitleChanged(func(_ *libghostty.Terminal) {}),
 		libghostty.WithEnquiry(func(_ *libghostty.Terminal) []byte {
