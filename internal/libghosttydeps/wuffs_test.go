@@ -457,7 +457,7 @@ func TestRefreshWuffsTracksOnlyWhatGhosttyLinks(t *testing.T) {
 					t.Errorf("new entry review = %q, want pending", got.LicenseReview)
 				}
 
-				if got.LicenseConclusion != "Apache-2.0 OR MIT" || got.LicenseDeclared != "Apache-2.0 OR MIT" {
+				if got.LicenseConclusion != "MIT" || got.LicenseDeclared != "Apache-2.0 OR MIT" {
 					t.Errorf("conclusion/declared = %q/%q", got.LicenseConclusion, got.LicenseDeclared)
 				}
 
@@ -466,7 +466,7 @@ func TestRefreshWuffsTracksOnlyWhatGhosttyLinks(t *testing.T) {
 					CSource: "release/c/wuffs-v0.4.c", SourceURL: testWuffsURL, ZigHash: testWuffsZigHash,
 					LicenseSHA256: bytesSHA256([]byte("both licenses")), ApacheSHA256: bytesSHA256([]byte("apache text")),
 					MITSHA256: bytesSHA256([]byte("mit text")), CSourceSHA256: bytesSHA256([]byte(testWuffsCSource)),
-					LicenseConclusion: "Apache-2.0 OR MIT", LicenseDeclared: "Apache-2.0 OR MIT",
+					LicenseConclusion: "MIT", LicenseDeclared: "Apache-2.0 OR MIT",
 					LicenseReview: pendingLicenseReview, ArchiveSHA256: got.ArchiveSHA256,
 				}
 				if got != want {

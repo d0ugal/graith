@@ -603,8 +603,9 @@ func refreshWuffs(ctx context.Context, source string, lock *Lock, deriveVersions
 		ArchiveSHA256:   bytesSHA256(archive),
 		CSourceSHA256:   bytesSHA256(cSourceBytes),
 		LicenseDeclared: declared,
-		// Proposal only: a new entry is unreviewed.
-		LicenseConclusion: declared,
+		// Proposal only: a new entry is unreviewed. Wuffs is declared
+		// "Apache-2.0 OR MIT"; Graith elects MIT, as it does for simdutf.
+		LicenseConclusion: wuffsElectedLicense,
 		LicenseReview:     pendingLicenseReview,
 	}
 
@@ -632,6 +633,9 @@ func refreshWuffs(ctx context.Context, source string, lock *Lock, deriveVersions
 
 	return nil
 }
+
+// wuffsElectedLicense is the license Graith elects from Wuffs' dual license.
+const wuffsElectedLicense = "MIT"
 
 func refreshGoLibghostty(ctx context.Context, root string, lock *Lock) (bool, error) {
 	output, err := runGoModuleDownload(ctx, root, "go.mitchellh.com/libghostty@"+lock.GoLibghostty.Commit)
