@@ -110,6 +110,39 @@ build, so a URL serving different bytes fails offline verification and the Zig
 fetch. Revisit this exception, and remove it, if upstream restores uucode to
 `deps.files.ghostty.org`.
 
+Wuffs, which newer Ghostty commits compile into libghostty-vt for Kitty graphics,
+is served from `deps.files.ghostty.org` (`wuffs-<commit>.tar.gz`, the Ghostty
+mirror of one commit of `google/wuffs-mirror-release-c`), so it uses the ordinary
+Ghostty-hosted rule and needs no URL exception. Its entry is optional in the
+lock. The generator tracks Wuffs exactly when the selected Ghostty's
+`src/build/GhosttyZig.zig` wires it into the libghostty-vt module, and removes
+the entry when it does not; Wuffs that is only present in the Ghostty tree for
+the full application is not part of the closure. Ghostty's own `pkg/wuffs`
+manifest supplies the URL, commit and Zig hash, and the compiled C source file
+(`release/c/wuffs-vX.Y.c`). The version string, SPDX declaration, source hash,
+archive hash and the LICENSE, LICENSE-APACHE and LICENSE-MIT hashes come from
+the fetched archive. Wuffs has no Renovate manager of its own: it is a
+vendored mirror whose version is chosen by Ghostty, so it can only move with a
+Ghostty update.
+
+A new Wuffs entry never arrives reviewed. The generator copies the declared
+license as a proposed conclusion and writes a pending review digest that can
+never equal a real fingerprint, so generation produces the usual deliberately
+red review branch and the merge gate stays red until a human inspects the
+evidence and runs `accept-license-reviews`. Later changes to any Wuffs license
+hash, the declaration, or the conclusion invalidate the review the same way as
+for Highway and simdutf.
+
+The audited static archive closure is lock-driven. The base is the 11 objects
+Graith has always audited. Only when the lock tracks Wuffs does the expected set
+gain exactly one object, named from the lock's C source (`wuffs-v0.4.o` for
+`release/c/wuffs-v0.4.c`). The comparison remains exact set equality with no
+wildcards, so an untracked Wuffs object, a missing one, or a different release
+series all fail the audit, and a malformed C source path in the lock fails
+closed. Offline verification also requires the lock's Wuffs tracking to agree
+with the selected Ghostty's build graph and the SPDX package count to be 7
+rather than 6 when Wuffs is tracked.
+
 Same-repository lock-only Renovate PRs use a trusted workflow to fill that
 publication step. A maintainer reviews the native proposal, including
 go-libghostty's tested Ghostty pin, and approves the PR; the approving review is
