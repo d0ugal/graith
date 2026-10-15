@@ -7,7 +7,7 @@
     ]
   },
   "dataLicense": "CC0-1.0",
-  "documentNamespace": "https://github.com/d0ugal/graith/sbom/libghostty-native/d929e6a34a091dcfd69d45011b96cc70b5575dac/bea702a427236e605957dd6966508bf2dab75eda",
+  "documentNamespace": "https://github.com/d0ugal/graith/sbom/libghostty-native/81598385d608dda4946093d6d6a234d204a2f225/15bfda9e85fbcb04a4fc88a0f96044f449a3ce65",
   "name": "graith-libghostty-native-dependencies",
   "packages": [
     {
@@ -17,17 +17,17 @@
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:golang/go.mitchellh.com/libghostty@v0.0.0-20260810222103-bea702a42723",
+          "referenceLocator": "pkg:golang/go.mitchellh.com/libghostty@v0.0.0-20261014030425-15bfda9e85fb",
           "referenceType": "purl"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "Exact revision bea702a427236e605957dd6966508bf2dab75eda; module sum h1:7YvkbTHIYizaanAiMKiw9k37VmWP0lV+ymk1VG7exWk=; wrapper build tests pin Ghostty d929e6a34a091dcfd69d45011b96cc70b5575dac; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
+      "licenseComments": "Exact revision 15bfda9e85fbcb04a4fc88a0f96044f449a3ce65; module sum h1:91eStTkG5zyJ4k6gbrHc+nXs87SALgqYA6GtGHzbBW0=; wrapper build tests pin Ghostty 81598385d608dda4946093d6d6a234d204a2f225; LICENSE SHA-256 fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "go-libghostty",
       "supplier": "Person: Mitchell Hashimoto",
-      "versionInfo": "v0.0.0-20260810222103-bea702a42723"
+      "versionInfo": "v0.0.0-20261014030425-15bfda9e85fb"
     },
     {
       "SPDXID": "SPDXRef-Package-Ghostty",
@@ -36,29 +36,29 @@
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:github/ghostty-org/ghostty@d929e6a34a091dcfd69d45011b96cc70b5575dac",
+          "referenceLocator": "pkg:github/ghostty-org/ghostty@81598385d608dda4946093d6d6a234d204a2f225",
           "referenceType": "purl"
         }
       ],
       "filesAnalyzed": false,
-      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The committed header tree SHA-256 is 0485974bbdb0d4813174e2d56454ca75a4624a7ab577fa769451a7a55772d91b. The Apple archive SHA-256 is 50aa562e33a9aa8028ffd922e733c218c92c217db3a8ba23e0e28c8818e5e10a.",
+      "licenseComments": "Exact source LICENSE SHA-256 386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1. The committed header tree SHA-256 is 174473992ced9db6741c4be6093b46214814db08f46365b2ff31944edeb173a8. The Apple archive SHA-256 is 673de3a7d2f202c4385673023d37a4ef3e094eb54fd6fdd3798b50b31fc66e31.",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
       "name": "Ghostty libghostty-vt",
-      "sourceInfo": "Built from exact commit d929e6a34a091dcfd69d45011b96cc70b5575dac with Zig 0.16.0 and -Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast. No explicit SIMD override is passed by the pinned Apple build.",
+      "sourceInfo": "Built from exact commit 81598385d608dda4946093d6d6a234d204a2f225 with Zig 0.16.0 and -Demit-lib-vt=true -Demit-xcframework=true -Doptimize=ReleaseFast. No explicit SIMD override is passed by the pinned Apple build.",
       "supplier": "Organization: Ghostty contributors",
-      "versionInfo": "1.3.2-dev+d929e6a34a091dcfd69d45011b96cc70b5575dac"
+      "versionInfo": "1.3.2-dev+81598385d608dda4946093d6d6a234d204a2f225"
     },
     {
       "SPDXID": "SPDXRef-Package-Uucode",
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "7e76fc7fab1e7ac728c52b35bbb3e5b8c639841abfc7fe1a4bcb13050594bc9e"
+          "checksumValue": "68d23543cb2c6c5dfdbdf38b38375e0c6d412a5c5fb72ce06bd139f7a4d25132"
         }
       ],
       "copyrightText": "Copyright (c) 2026 Jacob Sandlund; Copyright (c) 2008-2009 Bjoern Hoehrmann; Copyright (c) 1991-2025 Unicode, Inc.",
-      "downloadLocation": "https://deps.files.ghostty.org/uucode-2826a37a4562284fdacd8fa029d49509cc9bffcd.tar.gz",
+      "downloadLocation": "https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
@@ -71,7 +71,7 @@
       "licenseConcluded": "MIT AND Unicode-3.0",
       "licenseDeclared": "MIT AND Unicode-3.0",
       "name": "uucode",
-      "sourceInfo": "Ghostty pins Zig content hash uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA and compiles the UTF-8 decoder and Unicode tables into libghostty-vt.",
+      "sourceInfo": "Ghostty pins Zig content hash uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7 and compiles the UTF-8 decoder and Unicode tables into libghostty-vt.",
       "supplier": "Person: Jacob Sandlund",
       "versionInfo": "0.2.0"
     },
@@ -102,9 +102,35 @@
       "versionInfo": "1.2.0+66486a10623fa0d72fe91260f96c892e41aceb06"
     },
     {
+      "SPDXID": "SPDXRef-Package-Wuffs",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "17877d346f7988651d6c62e45b2e3b05c86809a6442c5e34612374b2a9719a1c"
+        }
+      ],
+      "copyrightText": "Copyright 2023 The Wuffs Authors",
+      "downloadLocation": "https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/google/wuffs-mirror-release-c@7411f488fe2e2c205c3d3b3d28638b7356522930",
+          "referenceType": "purl"
+        }
+      ],
+      "filesAnalyzed": false,
+      "licenseComments": "The source is declared Apache-2.0 OR MIT. Concluded: MIT. LICENSE SHA-256 f8ac2c75e7f629a87565c80d61ff9fe5aa15cdea0bda997d52a4dc13fdbd19cb; LICENSE-APACHE SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594; LICENSE-MIT SHA-256 bb811a4b485eac3caeb8bdc58bbafb355fbcb6116010a7ea9179e5c70b0bc878.",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "Apache-2.0 OR MIT",
+      "name": "Wuffs",
+      "sourceInfo": "Compiled as release/c/wuffs-v0.4.c (SHA-256 1f8039ef82911604c063f6ac2ed57254bdb17d742aebdeae06356530d4a0fde7) from mirror commit 7411f488fe2e2c205c3d3b3d28638b7356522930, Zig content hash N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI. Compiled into libghostty-vt for Kitty graphics image decoding.",
+      "supplier": "Organization: The Wuffs Authors",
+      "versionInfo": "0.4.0-alpha.10+3966.20260623"
+    },
+    {
       "SPDXID": "SPDXRef-Package-Simdutf",
       "copyrightText": "Copyright 2021 The simdutf authors; Facebook, Inc.; Idiap Research Institute; Deepmind Technologies; NEC Laboratories America; NYU; Google Fuchsia contributors",
-      "downloadLocation": "https://github.com/ghostty-org/ghostty/tree/d929e6a34a091dcfd69d45011b96cc70b5575dac/pkg/simdutf/vendor",
+      "downloadLocation": "https://github.com/ghostty-org/ghostty/tree/81598385d608dda4946093d6d6a234d204a2f225/pkg/simdutf/vendor",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
@@ -176,6 +202,11 @@
     },
     {
       "relatedSpdxElement": "SPDXRef-Package-ZigRuntime",
+      "relationshipType": "STATIC_LINK",
+      "spdxElementId": "SPDXRef-Package-Ghostty"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Package-Wuffs",
       "relationshipType": "STATIC_LINK",
       "spdxElementId": "SPDXRef-Package-Ghostty"
     }

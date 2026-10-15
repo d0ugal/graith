@@ -4,9 +4,9 @@
     "repository": "https://tangled.org/mitchellh.com/go-libghostty",
     "renovateRef": "main",
     "commit": "15bfda9e85fbcb04a4fc88a0f96044f449a3ce65",
-    "version": "v0.0.0-20260810222103-bea702a42723",
-    "moduleSum": "h1:7YvkbTHIYizaanAiMKiw9k37VmWP0lV+ymk1VG7exWk=",
-    "testedGhosttyCommit": "d929e6a34a091dcfd69d45011b96cc70b5575dac",
+    "version": "v0.0.0-20261014030425-15bfda9e85fb",
+    "moduleSum": "h1:91eStTkG5zyJ4k6gbrHc+nXs87SALgqYA6GtGHzbBW0=",
+    "testedGhosttyCommit": "81598385d608dda4946093d6d6a234d204a2f225",
     "licenseSHA256": "fdf9b4ad7b61687fd3d4b1e3efa63cbc10743e6b733a62669b53a324251357b9",
     "licenseConclusion": "MIT",
     "licenseReview": "4eba7523ffff230d7a348f6aa21dffaaa0922bfccc3e3f902a5fe9a3c79bd244"
@@ -14,30 +14,30 @@
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty.git",
     "renovateRef": "main",
-    "commit": "22fa134a07f5749edd9e92c6bc17d8aaf61843be",
+    "commit": "81598385d608dda4946093d6d6a234d204a2f225",
     "version": "1.3.2-dev",
-    "headersSHA256": "0485974bbdb0d4813174e2d56454ca75a4624a7ab577fa769451a7a55772d91b",
+    "headersSHA256": "174473992ced9db6741c4be6093b46214814db08f46365b2ff31944edeb173a8",
     "licenseSHA256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
     "licenseConclusion": "MIT",
     "licenseReview": "97036f38b4ac624f105099d931c8a9f8d09c5dc1153e1bf5cda801613733c2a5",
     "appleArtifact": {
-      "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0/libghostty-vt.xcframework.zip",
-      "sha256": "50aa562e33a9aa8028ffd922e733c218c92c217db3a8ba23e0e28c8818e5e10a"
+      "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-8159838-go-15bfda9-zig-0.16.0/libghostty-vt.xcframework.zip",
+      "sha256": "673de3a7d2f202c4385673023d37a4ef3e094eb54fd6fdd3798b50b31fc66e31"
     },
     "linuxArtifacts": {
       "amd64": {
-        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0-linux/libghostty-vt-linux-amd64.tar.gz",
-        "sha256": "11cfdf6a9eeef9eaa7197020bfa3695f35b3703d3a5e605f0e5f11e82e58000a"
+        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-8159838-go-15bfda9-zig-0.16.0-linux/libghostty-vt-linux-amd64.tar.gz",
+        "sha256": "b683f0bcc01d588db897a5d2a323eb8249b40a5c44ee38dbf464d6e5db948d93"
       },
       "arm64": {
-        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-d929e6a-go-bea702a-zig-0.16.0-linux/libghostty-vt-linux-arm64.tar.gz",
-        "sha256": "e59165755c5b3bbf893b51c877dd45061bd74e67732f65511b6dceaba4e822e4"
+        "url": "https://github.com/d0ugal/graith/releases/download/libghostty-vt-8159838-go-15bfda9-zig-0.16.0-linux/libghostty-vt-linux-arm64.tar.gz",
+        "sha256": "1749d9670baf717165a5d59093f0ae7ddb8db27d86797cb1e58c03a4f5a351c6"
       }
     }
   },
   "zig": {
     "repository": "https://codeberg.org/ziglang/zig",
-    "version": "0.17.0",
+    "version": "0.16.0",
     "sourceURL": "https://ziglang.org/download/0.16.0/zig-0.16.0.tar.xz",
     "sourceSHA256": "43186959edc87d5c7a1be7b7d2a25efffd22ce5807c7af99067f86f99641bfdf",
     "linuxX8664URL": "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz",
@@ -49,9 +49,9 @@
   "uucode": {
     "repository": "jacobsandlund/uucode",
     "version": "0.2.0",
-    "sourceURL": "https://deps.files.ghostty.org/uucode-2826a37a4562284fdacd8fa029d49509cc9bffcd.tar.gz",
-    "zigHash": "uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA",
-    "archiveSHA256": "7e76fc7fab1e7ac728c52b35bbb3e5b8c639841abfc7fe1a4bcb13050594bc9e",
+    "sourceURL": "https://github.com/jacobsandlund/uucode/archive/9d55524551411b493cca41ca06363625d90aff1e.tar.gz",
+    "zigHash": "uucode-0.2.0-ZZjBPuuFVgC8YZ8eld4fOKsZANLIhTFMzULQxhkLi1C7",
+    "archiveSHA256": "68d23543cb2c6c5dfdbdf38b38375e0c6d412a5c5fb72ce06bd139f7a4d25132",
     "licenseSHA256": "312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33",
     "decoderNoticeSHA256": "de219cece932aad5a817bf763393d8d149d378a15d2ad5320e3331eac07626dd",
     "unicodeNoticeSHA256": "1eda5a3b026870c737b22e8bcd4954338612c790db688242e003f41a4fa95175",
@@ -70,9 +70,25 @@
     "licenseDeclared": "Apache-2.0 OR BSD-3-Clause",
     "licenseReview": "6653ed4d6bf9e0a54ddf70c2576c373acb20ad046f4428106916e4232c5501bc"
   },
+  "wuffs": {
+    "repository": "google/wuffs-mirror-release-c",
+    "version": "0.4.0-alpha.10+3966.20260623",
+    "commit": "7411f488fe2e2c205c3d3b3d28638b7356522930",
+    "cSource": "release/c/wuffs-v0.4.c",
+    "sourceURL": "https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz",
+    "zigHash": "N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI",
+    "archiveSHA256": "17877d346f7988651d6c62e45b2e3b05c86809a6442c5e34612374b2a9719a1c",
+    "cSourceSHA256": "1f8039ef82911604c063f6ac2ed57254bdb17d742aebdeae06356530d4a0fde7",
+    "licenseSHA256": "f8ac2c75e7f629a87565c80d61ff9fe5aa15cdea0bda997d52a4dc13fdbd19cb",
+    "apacheLicenseSHA256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "mitLicenseSHA256": "bb811a4b485eac3caeb8bdc58bbafb355fbcb6116010a7ea9179e5c70b0bc878",
+    "licenseConclusion": "MIT",
+    "licenseDeclared": "Apache-2.0 OR MIT",
+    "licenseReview": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "simdutf": {
     "repository": "simdutf/simdutf",
-    "version": "9.3.0",
+    "version": "9.0.0",
     "manifestVersion": "5.2.8",
     "commit": "ca7acbcea967b5dcbab490066e99e3a6e6925539",
     "cppSHA256": "38dc5481dc4b7eef95cea8056b84d940419288100f317ecaff683bd89f163263",
