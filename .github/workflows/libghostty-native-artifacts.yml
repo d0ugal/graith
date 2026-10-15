@@ -1,12 +1,12 @@
 name: Publish native libghostty dependency artifacts
 
 on:
-  # zizmor: ignore[dangerous-triggers] pull_request_target only posts a static guidance
+  # pull_request_target only posts a static guidance
   # comment from a no-checkout job. Publication is authorized by an approving review from a
   # write/admin reviewer on the exact current head SHA of a same-repository lock-only PR.
   # Artifact jobs run trusted base code with the PR lock as data, and
   # RELEASE_TOKEN is isolated in a no-code push job.
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, synchronize, reopened]
     paths:
       - libghostty-native.lock.json
