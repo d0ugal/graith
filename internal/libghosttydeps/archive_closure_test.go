@@ -127,6 +127,22 @@ func lockJSONWithWuffs(t *testing.T, mutate func(map[string]any)) []byte {
 	return data
 }
 
+// lockJSONWithoutWuffs is the committed lock with Wuffs removed, so the
+// 11-member closure stays covered once the committed lock tracks Wuffs.
+func lockJSONWithoutWuffs(t *testing.T) []byte {
+	t.Helper()
+
+	lock := committedLock(t)
+	lock.Wuffs = nil
+
+	data, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return data
+}
+
 func sortedMembers(extra ...string) string {
 	members := append(append([]string{}, baseArchiveMembers...), extra...)
 
@@ -137,10 +153,7 @@ func sortedMembers(extra ...string) string {
 }
 
 func TestExpectedArchiveMembersAreLockDriven(t *testing.T) {
-	committed, err := os.ReadFile(filepath.Join("..", "..", LockFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
+	committed := lockJSONWithoutWuffs(t)
 
 	tests := []struct {
 		name    string
@@ -148,7 +161,7 @@ func TestExpectedArchiveMembersAreLockDriven(t *testing.T) {
 		want    string
 		wantErr string
 	}{
-		{"committed lock without Wuffs keeps the 11-member closure", committed, sortedMembers(), ""},
+		{"lock without Wuffs keeps the 11-member closure", committed, sortedMembers(), ""},
 		{"lock tracking Wuffs adds exactly its object", lockJSONWithWuffs(t, func(map[string]any) {}), sortedMembers("wuffs-v0.4.o"), ""},
 		{"member name follows the lock's C source", lockJSONWithWuffs(t, func(document map[string]any) {
 			document["wuffs"].(map[string]any)["cSource"] = "release/c/wuffs-v0.5.c"
@@ -203,10 +216,7 @@ func TestExpectedArchiveMembersAreLockDriven(t *testing.T) {
 func TestAuditRequiresExactSetEquality(t *testing.T) {
 	withWuffs := lockJSONWithWuffs(t, func(map[string]any) {})
 
-	committed, err := os.ReadFile(filepath.Join("..", "..", LockFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
+	committed := lockJSONWithoutWuffs(t)
 
 	tests := []struct {
 		name        string
