@@ -30,7 +30,7 @@ dependency unit.
 | Ghostty libghostty-vt | %[1]c%[5]s%[1]c / %[1]c%[6]s%[1]c | %[7]s |
 | uucode | %[1]c%[8]s%[1]c, Zig hash %[1]c%[9]s%[1]c | %[10]s |
 | Highway | %[1]c%[11]s%[1]c, upstream %[1]c%[12]s%[1]c, Zig hash %[1]c%[13]s%[1]c | %[14]s, elected from %[15]s |
-| simdutf amalgamation | compiled version %[1]c%[16]s%[1]c, corresponding upstream %[1]c%[17]s%[1]c | %[18]s |
+%[43]s| simdutf amalgamation | compiled version %[1]c%[16]s%[1]c, corresponding upstream %[1]c%[17]s%[1]c | %[18]s |
 | Zig bundled runtime | %[1]c%[19]s%[1]c compiler runtime and UBSan runtime | %[20]s |
 
 Ghostty's %[1]cpkg/simdutf/build.zig.zon%[1]c still says %[1]c%[21]s%[1]c, but that metadata is
@@ -73,7 +73,7 @@ The exact verified inputs are:
 - Highway archive %[1]c%[36]s%[1]c SHA-256
   %[1]c%[37]s%[1]c and elected BSD license SHA-256
   %[1]c%[38]s%[1]c;
-- vendored simdutf.cpp SHA-256
+%[44]s- vendored simdutf.cpp SHA-256
   %[1]c%[39]s%[1]c,
   simdutf.h SHA-256
   %[1]c%[40]s%[1]c,
@@ -100,7 +100,41 @@ provided by the operating system and are not copied into the candidate.
 		lock.Uucode.DecoderNoticeSHA256, lock.Uucode.UnicodeNoticeSHA256,
 		lock.Highway.SourceURL, lock.Highway.ArchiveSHA256, lock.Highway.LicenseSHA256,
 		lock.Simdutf.CppSHA256, lock.Simdutf.HeaderSHA256, lock.Simdutf.LicenseSHA256,
-		lock.GoLibghostty.TestedGhosttyCommit)
+		lock.GoLibghostty.TestedGhosttyCommit, wuffsInventoryRow(lock), wuffsInventoryEvidence(lock))
+}
+
+// wuffsNotice is the copyright line carried by the Wuffs LICENSE-MIT file. Its
+// SHA-256 is bound in the lock, so a changed notice fails the license review.
+const wuffsNotice = "Copyright 2023 The Wuffs Authors"
+
+// wuffsInventoryRow is the table row for Wuffs. It is empty when the lock does
+// not track Wuffs so the rendered inventory is unchanged for such locks.
+func wuffsInventoryRow(lock Lock) string {
+	wuffs := lock.Wuffs
+	if wuffs == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("| Wuffs | `%s`, mirror `%s`, Zig hash `%s` | %s, declared %s |\n",
+		wuffs.Version, wuffs.Commit, wuffs.ZigHash, wuffs.LicenseConclusion, wuffs.LicenseDeclared)
+}
+
+// wuffsInventoryEvidence is the exact-input bullet for Wuffs, empty when the
+// lock does not track it.
+func wuffsInventoryEvidence(lock Lock) string {
+	wuffs := lock.Wuffs
+	if wuffs == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("- Wuffs archive `%s` SHA-256\n  `%s`,\n"+
+		"  compiled C source `%s` SHA-256\n  `%s`,\n"+
+		"  LICENSE SHA-256\n  `%s`,\n"+
+		"  LICENSE-APACHE SHA-256\n  `%s`,\n"+
+		"  and LICENSE-MIT SHA-256\n  `%s`\n"+
+		"  (%s; the MIT and Apache-2.0 texts reproduced below are the Wuffs license texts);\n",
+		wuffs.SourceURL, wuffs.ArchiveSHA256, wuffs.CSource, wuffs.CSourceSHA256,
+		wuffs.LicenseSHA256, wuffs.ApacheSHA256, wuffs.MITSHA256, wuffsNotice)
 }
 
 func ReplaceNoticesInventory(document string, lock Lock) (string, error) {
@@ -216,6 +250,25 @@ func RenderSPDX(lock Lock) ([]byte, error) {
 			"versionInfo": lock.Zig.Version,
 		},
 	}
+	relationships := []any{
+		relationship("SPDXRef-DOCUMENT", "DESCRIBES", "SPDXRef-Package-GoLibghostty"),
+		relationship("SPDXRef-DOCUMENT", "DESCRIBES", "SPDXRef-Package-Ghostty"),
+		relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Uucode"),
+		relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Highway"),
+		relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Simdutf"),
+		relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-ZigRuntime"),
+	}
+
+	if lock.Wuffs != nil {
+		// Keep Highway, Wuffs, simdutf order so a lock without Wuffs renders
+		// byte-for-byte as before.
+		const afterHighway = 4
+
+		packages = append(packages[:afterHighway], append([]any{wuffsPackage(*lock.Wuffs)}, packages[afterHighway:]...)...)
+		relationships = append(relationships,
+			relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Wuffs"))
+	}
+
 	document := map[string]any{
 		"SPDXID": "SPDXRef-DOCUMENT",
 		"creationInfo": map[string]any{
@@ -226,15 +279,8 @@ func RenderSPDX(lock Lock) ([]byte, error) {
 		"documentNamespace": fmt.Sprintf("https://github.com/d0ugal/graith/sbom/libghostty-native/%s/%s", lock.Ghostty.Commit, lock.GoLibghostty.Commit),
 		"name":              "graith-libghostty-native-dependencies",
 		"packages":          packages,
-		"relationships": []any{
-			relationship("SPDXRef-DOCUMENT", "DESCRIBES", "SPDXRef-Package-GoLibghostty"),
-			relationship("SPDXRef-DOCUMENT", "DESCRIBES", "SPDXRef-Package-Ghostty"),
-			relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Uucode"),
-			relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Highway"),
-			relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-Simdutf"),
-			relationship("SPDXRef-Package-Ghostty", "STATIC_LINK", "SPDXRef-Package-ZigRuntime"),
-		},
-		"spdxVersion": "SPDX-2.3",
+		"relationships":     relationships,
+		"spdxVersion":       "SPDX-2.3",
 	}
 
 	data, err := json.MarshalIndent(document, "", "  ")
@@ -262,5 +308,25 @@ func relationship(from, kind, to string) map[string]string {
 		"relatedSpdxElement": to,
 		"relationshipType":   kind,
 		"spdxElementId":      from,
+	}
+}
+
+func wuffsPackage(wuffs Wuffs) map[string]any {
+	return map[string]any{
+		"SPDXID":           "SPDXRef-Package-Wuffs",
+		"checksums":        []any{checksum(wuffs.ArchiveSHA256)},
+		"copyrightText":    wuffsNotice,
+		"downloadLocation": wuffs.SourceURL,
+		"externalRefs":     []any{packageRef("pkg:github/" + wuffs.Repository + "@" + wuffs.Commit)},
+		"filesAnalyzed":    false,
+		"licenseComments": fmt.Sprintf("The source is declared %s. Concluded: %s. LICENSE SHA-256 %s; LICENSE-APACHE SHA-256 %s; LICENSE-MIT SHA-256 %s.",
+			wuffs.LicenseDeclared, wuffs.LicenseConclusion, wuffs.LicenseSHA256, wuffs.ApacheSHA256, wuffs.MITSHA256),
+		"licenseConcluded": wuffs.LicenseConclusion,
+		"licenseDeclared":  wuffs.LicenseDeclared,
+		"name":             "Wuffs",
+		"sourceInfo": fmt.Sprintf("Compiled as %s (SHA-256 %s) from mirror commit %s, Zig content hash %s. Compiled into libghostty-vt for Kitty graphics image decoding.",
+			wuffs.CSource, wuffs.CSourceSHA256, wuffs.Commit, wuffs.ZigHash),
+		"supplier":    "Organization: The Wuffs Authors",
+		"versionInfo": wuffs.Version,
 	}
 }
