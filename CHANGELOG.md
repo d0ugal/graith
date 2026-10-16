@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.73.30](https://github.com/d0ugal/graith/compare/v0.73.29...v0.73.30) (2026-10-16)
+
+
+### Features
+
+* **libghostty:** derive the audited archive closure from the lock ([0580729](https://github.com/d0ugal/graith/commit/0580729c0151d8b7fbfa1cb2dc10ac26f897cc69))
+* **libghostty:** track Wuffs as an optional native dependency ([51c4d35](https://github.com/d0ugal/graith/commit/51c4d357a4b19c532089cf70aa10341744518421))
+* propose MIT as the elected Wuffs license ([733155a](https://github.com/d0ugal/graith/commit/733155a6c297671df6e0e6edd4121f47d5d6faad))
+
+
+### Bug Fixes
+
+* accept uucode from its GitHub commit archive in the libghostty generator ([30435a3](https://github.com/d0ugal/graith/commit/30435a3c19bba28490ad50bf293d4092b1f8b336))
+* adapt to the updated libghostty clipboard and render-state APIs ([154b015](https://github.com/d0ugal/graith/commit/154b0154450875d85f03e29660daeead7e7aaf75))
+* cache the macOS major version and give sw_vers a longer timeout ([5b1a28f](https://github.com/d0ugal/graith/commit/5b1a28f857c17baffd26ad5011a7ebdb41e8f6b0))
+* convert the cursor style for the Metal renderers and decouple dependency tests from the committed Wuffs state ([6db6195](https://github.com/d0ugal/graith/commit/6db6195e4bc0b980bd26182f4d4d0b5de5c4a69a))
+* print archive member diff when the libghostty closure audit fails ([57109fb](https://github.com/d0ugal/graith/commit/57109fb4bb69fe0e86d1222dc7b91c18d3874d9d))
+* update golang.org/x/exp digest to f0251eb ([#2614](https://github.com/d0ugal/graith/issues/2614)) ([44a2f8e](https://github.com/d0ugal/graith/commit/44a2f8e09625fb7b4c519fc3a34eef63fbccb342))
+* update libghostty native dependency unit ([73886fb](https://github.com/d0ugal/graith/commit/73886fb50b22a3d70570c99d6eba04e17c041292))
+* update module github.com/grpc-ecosystem/grpc-gateway/v2 to v2.32.0 ([#2631](https://github.com/d0ugal/graith/issues/2631)) ([604408b](https://github.com/d0ugal/graith/commit/604408ba57ded4a597f6bb1b7cea084bd8815786))
+
+
+### Documentation
+
+* **libghostty:** describe the Wuffs dependency and lock-driven closure ([db6fabd](https://github.com/d0ugal/graith/commit/db6fabd1707d461309eb90916f493e1384daba20))
+
+
+### Tests
+
+* wait for forked session exit before TempDir cleanup ([f497bdd](https://github.com/d0ugal/graith/commit/f497bdd83d8e333a3f95a1b2282b27bbdbf6e2c0))
+
+
+### Continuous Integration
+
+* allow the Linux native source build to run Ghostty's test suite ([69360d6](https://github.com/d0ugal/graith/commit/69360d6e749de28716da4aae6a3b09b2744d534b))
+* authorize native libghostty artifacts by approving review ([0d95f37](https://github.com/d0ugal/graith/commit/0d95f371ff0326afba26fc1642d87fdfc8648e56))
+* generate ciworkflow action pins from the regen workflow ([9c6b951](https://github.com/d0ugal/graith/commit/9c6b951a2105e629165b5c251f1192aa6b8900bc))
+* place zizmor dangerous-triggers ignores on the flagged lines ([082ed8c](https://github.com/d0ugal/graith/commit/082ed8c5a61c151dd5b89226fa93028c42ea12f2))
+* regenerate action pins in the regen workflow ([053b997](https://github.com/d0ugal/graith/commit/053b9977f7e33d3380e738c04da7c4de18fafe7c))
+
+
+### Dependencies
+
+* accept the Wuffs license review (MIT) ([d032bdf](https://github.com/d0ugal/graith/commit/d032bdfd12f3eb4aa59c3d6baef5acc597abf9fb))
+* **deps:** lock file maintenance ([#2627](https://github.com/d0ugal/graith/issues/2627)) ([9228a90](https://github.com/d0ugal/graith/commit/9228a90c721955bee9bbcaf5832cea52f011227f))
+* **deps:** lock file maintenance ([#2634](https://github.com/d0ugal/graith/issues/2634)) ([7dbf03d](https://github.com/d0ugal/graith/commit/7dbf03dab98fe2b47f0810df8a5df2ed2a4167e1))
+* **deps:** update dependency gohugoio/hugo to v0.168.0 ([928a9d3](https://github.com/d0ugal/graith/commit/928a9d39f6ceb4f68d97230fffc2879b5e18259a))
+* **deps:** update dependency zizmorcore/zizmor to v1.31.0 ([#2630](https://github.com/d0ugal/graith/issues/2630)) ([91c99cf](https://github.com/d0ugal/graith/commit/91c99cfaa04510c16cf2368ebe65d05b074ffba5))
+* **deps:** update dependency zizmorcore/zizmor to v1.31.1 ([#2647](https://github.com/d0ugal/graith/issues/2647)) ([cdbda81](https://github.com/d0ugal/graith/commit/cdbda8103012f15063876590baf4a936ba0a0a23))
+* **deps:** update github/codeql-action action to v4.39.0 ([#2637](https://github.com/d0ugal/graith/issues/2637)) ([12e062f](https://github.com/d0ugal/graith/commit/12e062fa22dd03e182f192bdba4b71fe65c9c47c))
+* **deps:** update renovate/renovate docker tag to v44.157.1 ([#2615](https://github.com/d0ugal/graith/issues/2615)) ([9fd8708](https://github.com/d0ugal/graith/commit/9fd870899737fd1da952674385ac3f8d0e10a352))
+* **deps:** update renovate/renovate docker tag to v44.161.2 ([#2633](https://github.com/d0ugal/graith/issues/2633)) ([5313e21](https://github.com/d0ugal/graith/commit/5313e211ac144b313a22db3ea86223cf004be484))
+* **deps:** update renovate/renovate docker tag to v44.163.0 ([#2638](https://github.com/d0ugal/graith/issues/2638)) ([3cce1ed](https://github.com/d0ugal/graith/commit/3cce1ed8902aef8e7682eeae924287a0dcc84d87))
+* **deps:** update renovate/renovate docker tag to v44.164.0 ([#2640](https://github.com/d0ugal/graith/issues/2640)) ([31550db](https://github.com/d0ugal/graith/commit/31550db667b0020dc5643f65cce7fbbf5acfb1de))
+* **deps:** update renovate/renovate docker tag to v44.164.5 ([#2642](https://github.com/d0ugal/graith/issues/2642)) ([f00dfa1](https://github.com/d0ugal/graith/commit/f00dfa1b42a6135a108f7e9e550049a091b1578d))
+* **deps:** update renovate/renovate docker tag to v44.164.6 ([#2644](https://github.com/d0ugal/graith/issues/2644)) ([93d2455](https://github.com/d0ugal/graith/commit/93d2455078323fbabde611b480d3f719483ed531))
+* **deps:** update renovate/renovate docker tag to v44.164.7 ([#2648](https://github.com/d0ugal/graith/issues/2648)) ([e8e08e5](https://github.com/d0ugal/graith/commit/e8e08e5bfefb9c27eeef74338658fbc80305d0a9))
+* **deps:** update the Hugo deb checksum for 0.168.0 ([5eb2e2e](https://github.com/d0ugal/graith/commit/5eb2e2e07c1fd6b42e200be5aa70ed2b237b9f91))
+* **generated:** refresh generated dependency metadata ([177a91b](https://github.com/d0ugal/graith/commit/177a91beaaefbdd681b3f760431643bb329a8591))
+
 ## [0.73.29](https://github.com/d0ugal/graith/compare/v0.73.28...v0.73.29) (2026-10-14)
 
 
