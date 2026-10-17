@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.73.31](https://github.com/d0ugal/graith/compare/v0.73.30...v0.73.31) (2026-10-17)
+
+
+### Dependencies
+
+* **deps:** update renovate/renovate docker tag to v44.164.9 ([#2651](https://github.com/d0ugal/graith/issues/2651)) ([10a1dde](https://github.com/d0ugal/graith/commit/10a1dde9647e6162efe66ab32250e1dba54950dc))
+* **deps:** update renovate/renovate docker tag to v44.165.0 ([#2653](https://github.com/d0ugal/graith/issues/2653)) ([53f721c](https://github.com/d0ugal/graith/commit/53f721cafaf5747783586b6d933a7af17f95b96f))
+* **deps:** update renovate/renovate docker tag to v44.165.1 ([#2654](https://github.com/d0ugal/graith/issues/2654)) ([b3bec10](https://github.com/d0ugal/graith/commit/b3bec10fe61a5e271636846fa774750ab94d35aa))
+* **deps:** update renovate/renovate docker tag to v44.165.3 ([#2655](https://github.com/d0ugal/graith/issues/2655)) ([ca27776](https://github.com/d0ugal/graith/commit/ca27776d8794ace67d1dd4853afea1eacfb583ee))
+
 ## [0.73.30](https://github.com/d0ugal/graith/compare/v0.73.29...v0.73.30) (2026-10-16)
 
 
