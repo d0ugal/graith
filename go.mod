@@ -1,6 +1,6 @@
 module github.com/d0ugal/graith
 
-go 1.27.2
+go 1.27.3
 
 require (
 	charm.land/bubbles/v2 v2.2.1
@@ -32,7 +32,7 @@ require (
 	golang.org/x/term v0.47.0
 	google.golang.org/grpc v1.84.0
 	modernc.org/sqlite v1.60.1
-	tailscale.com v1.104.1
+	tailscale.com v1.104.2
 )
 
 require (
