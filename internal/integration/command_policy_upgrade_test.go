@@ -170,7 +170,11 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 		}
 
 		select {
-		case <-daemonDone:
+		case err := <-daemonDone:
+			var exitErr *exec.ExitError
+			if err != nil && !errors.As(err, &exitErr) {
+				t.Errorf("wait for killed baseline daemon: %v", err)
+			}
 		case <-time.After(5 * time.Second):
 		}
 	})
@@ -316,7 +320,10 @@ func TestCommandPolicyRemovalUpgradeFromExactBaseline(t *testing.T) {
 	runFixtureCLI(t, env, currentBinary, "--config", configPath, "daemon", "stop")
 
 	select {
-	case <-daemonDone:
+	case err := <-daemonDone:
+		if err != nil {
+			t.Fatalf("replacement daemon exited unsuccessfully: %v", err)
+		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("replacement daemon did not stop")
 	}

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -95,7 +96,13 @@ func TestDaemonRestartPreservesRunningSessionAcrossExecHandoff(t *testing.T) {
 		}
 
 		select {
-		case <-daemonDone:
+		case err := <-daemonDone:
+			if err != nil {
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) {
+					t.Errorf("wait for stopped daemon: %v", err)
+				}
+			}
 		case <-time.After(5 * time.Second):
 		}
 	})

@@ -892,7 +892,10 @@ func TestScenarioPolicyRetrySerializesDirectResume(t *testing.T) {
 
 	close(releaseRetry)
 	<-reconciled
-	<-resumed
+
+	if err := <-resumed; err != nil {
+		t.Fatalf("resume after scenario policy retry: %v", err)
+	}
 }
 
 func TestScenarioPolicyBoundedRestartDoesNotWedgeOnDriver(t *testing.T) {
