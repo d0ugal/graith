@@ -317,7 +317,7 @@ type ghosttyProcessTerminal struct {
 	opMu     sync.Mutex
 	cmd      *exec.Cmd
 	conn     net.Conn
-	waitDone chan error
+	waitDone chan struct{}
 	limiter  *ghosttyProcessLimiter
 	peakRSS  atomic.Int64
 
@@ -546,7 +546,7 @@ func newGhosttyProcessTerminalWithConfig(
 	terminal := &ghosttyProcessTerminal{
 		cmd:      cmd,
 		conn:     conn,
-		waitDone: make(chan error, 1),
+		waitDone: make(chan struct{}, 1),
 		limiter:  config.limiter,
 
 		rpcTimeout:      ghosttyRPCTimeout,
@@ -560,12 +560,14 @@ func newGhosttyProcessTerminalWithConfig(
 	slotHeld = false
 
 	go func() {
-		waitErr := cmd.Wait()
+		// The RPC connection reports helper failures; this wait only reaps the
+		// process and signals that its limiter slot can be released.
+		_ = cmd.Wait()
 		terminal.peakRSS.Store(extractPeakRSS(cmd.ProcessState))
 		ghosttyHelpers.remove(helperIdentity)
 		terminal.releaseSlot()
 
-		terminal.waitDone <- waitErr
+		terminal.waitDone <- struct{}{}
 
 		close(terminal.waitDone)
 	}()
