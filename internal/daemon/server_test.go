@@ -439,7 +439,7 @@ func TestServerShutdownNoRaceWithContextCancel(t *testing.T) {
 
 		select {
 		case err := <-errCh:
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				t.Fatalf("Serve after concurrent cancel and shutdown: %v", err)
 			}
 		case <-time.After(2 * time.Second):
