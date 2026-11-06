@@ -965,7 +965,10 @@ echo "braw version"
 		_ = os.WriteFile(releasePath, []byte("done"), 0o600)
 
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("AgentInfo during cleanup: %v", err)
+			}
 		case <-time.After(time.Second):
 			t.Error("AgentInfo did not finish during cleanup")
 		}

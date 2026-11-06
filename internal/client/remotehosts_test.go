@@ -591,7 +591,9 @@ func runContendingRemoteHostHelpers(t *testing.T, path string, actions ...string
 		case <-time.After(10 * time.Second):
 			_ = helper.cmd.Process.Kill()
 
-			<-done
+			if err := <-done; err == nil {
+				t.Fatal("remote-host helper exited successfully after remaining blocked")
+			}
 
 			t.Fatal("remote-host helper remained blocked after lock release")
 		}

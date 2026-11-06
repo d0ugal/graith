@@ -498,7 +498,7 @@ func (c *Client) RunPassthrough(ctx context.Context, opts PassthroughOpts) Passt
 type frameDemux struct {
 	dataCh    chan []byte
 	controlCh chan protocol.Envelope
-	errCh     chan error
+	errCh     chan struct{}
 	done      chan struct{}
 }
 
@@ -506,7 +506,7 @@ func (c *Client) startDemux(ctx context.Context) *frameDemux {
 	d := &frameDemux{
 		dataCh:    make(chan []byte, 64),
 		controlCh: make(chan protocol.Envelope, 4),
-		errCh:     make(chan error, 1),
+		errCh:     make(chan struct{}, 1),
 		done:      make(chan struct{}),
 	}
 	go func() {
@@ -516,7 +516,7 @@ func (c *Client) startDemux(ctx context.Context) *frameDemux {
 			frame, err := c.ReadFrame()
 			if err != nil {
 				select {
-				case d.errCh <- err:
+				case d.errCh <- struct{}{}:
 				default:
 				}
 

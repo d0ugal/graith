@@ -4034,7 +4034,10 @@ func TestKickedClientConnectionClosed(t *testing.T) {
 	// The kicked client's connection should be closed, causing its reader to
 	// return an error. This means the handler exits and stops accepting PTY input.
 	select {
-	case <-h1ReadErr:
+	case err := <-h1ReadErr:
+		if err == nil {
+			t.Fatal("kicked client reader exited without a connection error")
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("kicked client connection was not closed")
 	}
