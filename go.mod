@@ -8,7 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.1.1
 	github.com/adhocore/gronx v1.20.7
 	github.com/adrg/xdg v0.5.3
-	github.com/aymanbagabas/go-udiff v0.4.1
+	github.com/aymanbagabas/go-udiff v0.4.2
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsevents v0.2.0
