@@ -49,7 +49,7 @@ jobs:
         run: scripts/install-hugo.sh "$HUGO_VERSION" "$HUGO_LINUX_AMD64_DEB_SHA256"
       - name: Install Dart Sass
         run: scripts/install-dart-sass.sh "$DART_SASS_VERSION" "$DART_SASS_LINUX_X64_SHA256" "${{ runner.temp }}/dart-sass"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           # Use the repository toolchain for the website's nested Go module.
           go-version-file: go.mod
