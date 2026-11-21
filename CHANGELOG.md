@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.73.33](https://github.com/d0ugal/graith/compare/v0.73.32...v0.73.33) (2026-11-21)
+
+
+### Bug Fixes
+
+* update github.com/charmbracelet/ultraviolet digest to 8ecbcf0 ([#2844](https://github.com/d0ugal/graith/issues/2844)) ([264124e](https://github.com/d0ugal/graith/commit/264124e6895f879183a6ad66f7d1cff6678ce86a))
+* update golang.org/x/exp digest to 2791e40 ([#2842](https://github.com/d0ugal/graith/issues/2842)) ([5bac2a6](https://github.com/d0ugal/graith/commit/5bac2a62bb6722ee2c2e5beda685faf8dc81e3d7))
+* update golang.org/x/exp digest to 7a49493 ([#2834](https://github.com/d0ugal/graith/issues/2834)) ([adcf0f5](https://github.com/d0ugal/graith/commit/adcf0f583c375b7c7c26c4b35659d71fc946a635))
+* update golang.org/x/exp digest to 8801fbd ([#2850](https://github.com/d0ugal/graith/issues/2850)) ([334a475](https://github.com/d0ugal/graith/commit/334a47583ee46d9cc3872c8e98475c4a85bdc5e4))
+* update golang.org/x/exp digest to b15d094 ([#2845](https://github.com/d0ugal/graith/issues/2845)) ([7ce38ed](https://github.com/d0ugal/graith/commit/7ce38eddb5d0c9e45feec5e0393eec303dabf186))
+* update google.golang.org/genproto/googleapis/api digest to c8830f6 ([#2843](https://github.com/d0ugal/graith/issues/2843)) ([effdde5](https://github.com/d0ugal/graith/commit/effdde57d6e25e5d1b4df6296d81d40781ab9156))
+* update google.golang.org/genproto/googleapis/api digest to fd2c768 ([#2828](https://github.com/d0ugal/graith/issues/2828)) ([874c07d](https://github.com/d0ugal/graith/commit/874c07df1c462dd96c228f633eabbb190f78c16d))
+* update google.golang.org/genproto/googleapis/rpc digest to c8830f6 ([#2846](https://github.com/d0ugal/graith/issues/2846)) ([85584cb](https://github.com/d0ugal/graith/commit/85584cb9955c0e3dc41e8c806b0abad824c67647))
+* update google.golang.org/genproto/googleapis/rpc digest to fd2c768 ([#2829](https://github.com/d0ugal/graith/issues/2829)) ([d009c37](https://github.com/d0ugal/graith/commit/d009c377626c7d9d8fed57c2fc4b0a6bb36ec164))
+* update module charm.land/bubbles/v2 to v2.2.2 ([#2849](https://github.com/d0ugal/graith/issues/2849)) ([27b0378](https://github.com/d0ugal/graith/commit/27b037863dd44178ad175fb72ef7102eef58dab3))
+* update module charm.land/bubbletea/v2 to v2.1.2 ([#2838](https://github.com/d0ugal/graith/issues/2838)) ([7fb488c](https://github.com/d0ugal/graith/commit/7fb488c5cc0c640ba801ac742c68236224cdb5cf))
+* update module github.com/adhocore/gronx to v1.20.8 ([#2851](https://github.com/d0ugal/graith/issues/2851)) ([c256560](https://github.com/d0ugal/graith/commit/c2565605a94c6883be080cb87f814b9d89868737))
+* update module github.com/aymanbagabas/go-udiff to v0.4.2 ([#2823](https://github.com/d0ugal/graith/issues/2823)) ([5dea35c](https://github.com/d0ugal/graith/commit/5dea35c00af223f914299f690fba4bae7110838e))
+* update module github.com/charmbracelet/x/ansi to v0.11.10 ([#2841](https://github.com/d0ugal/graith/issues/2841)) ([9e39e67](https://github.com/d0ugal/graith/commit/9e39e671708c1d9c53055895c956083e821021d8))
+* update module github.com/grpc-ecosystem/grpc-gateway/v2 to v2.34.0 ([#2833](https://github.com/d0ugal/graith/issues/2833)) ([b2e3a8a](https://github.com/d0ugal/graith/commit/b2e3a8a18742f4777918346fb29be4e362086183))
+* update module github.com/klauspost/compress to v1.20.5 ([#2853](https://github.com/d0ugal/graith/issues/2853)) ([24e84cf](https://github.com/d0ugal/graith/commit/24e84cfccea5447f66dac236b59b0fdd22f5d2c6))
+* update module go.opentelemetry.io/auto/sdk to v1.2.2 ([#2854](https://github.com/d0ugal/graith/issues/2854)) ([0f99420](https://github.com/d0ugal/graith/commit/0f9942046cfd49d82a4b17ee885ffb7fc57b94cf))
+* update module golang.org/x/net to v0.63.0 ([#2837](https://github.com/d0ugal/graith/issues/2837)) ([3b640db](https://github.com/d0ugal/graith/commit/3b640db4d44c783b005acd6cf09b4bb36cbf0cdc))
+* update module modernc.org/memory to v1.13.0 ([#2824](https://github.com/d0ugal/graith/issues/2824)) ([c5e6165](https://github.com/d0ugal/graith/commit/c5e6165c6abe489207bb25829d2cc1e8501de969))
+
+
+### Dependencies
+
+* **deps:** update actions/dependency-review-action action to v5.0.1 ([#2835](https://github.com/d0ugal/graith/issues/2835)) ([07bdf5c](https://github.com/d0ugal/graith/commit/07bdf5cc4a49120cc106e75d0da8d5eb1df234c6))
+* **deps:** update actions/setup-go action to v7.1.0 ([#2831](https://github.com/d0ugal/graith/issues/2831)) ([38997e5](https://github.com/d0ugal/graith/commit/38997e5c2ac63db82bde11dec58a87864fbae835))
+* **deps:** update actions/setup-go digest to d8cbb80 ([#2830](https://github.com/d0ugal/graith/issues/2830)) ([26c685b](https://github.com/d0ugal/graith/commit/26c685b757319a1ffc6b5d30ccd8ccba0fd00b6c))
+* **deps:** update dependency goreleaser/goreleaser to v2.20.3 ([#2847](https://github.com/d0ugal/graith/issues/2847)) ([84af358](https://github.com/d0ugal/graith/commit/84af358d2747d3f5db5e779aec0aad5ae4499eaa))
+* **deps:** update github/codeql-action action to v4.39.4 ([#2848](https://github.com/d0ugal/graith/issues/2848)) ([b422454](https://github.com/d0ugal/graith/commit/b422454f449d53acad210fc9b80012beae13d89d))
+* **deps:** update module golang.org/x/vuln/cmd/govulncheck to v1.10.0 ([#2836](https://github.com/d0ugal/graith/issues/2836)) ([973e563](https://github.com/d0ugal/graith/commit/973e5634a63335eb2e929d0c32b98092209abc5e))
+* **deps:** update ossf/scorecard-action docker tag to v2.6.0 ([#2856](https://github.com/d0ugal/graith/issues/2856)) ([5283247](https://github.com/d0ugal/graith/commit/528324787727916eaca342408c2420e746f097bd))
+* **deps:** update renovate/renovate docker tag to v44.241.0 ([#2826](https://github.com/d0ugal/graith/issues/2826)) ([812faa2](https://github.com/d0ugal/graith/commit/812faa21897596e7c568a847620aebfabf1bb44f))
+* **deps:** update renovate/renovate docker tag to v44.244.1 ([#2827](https://github.com/d0ugal/graith/issues/2827)) ([e126190](https://github.com/d0ugal/graith/commit/e1261907a08a745c3523ce581e5f0f6b0d7c0c53))
+* **deps:** update renovate/renovate docker tag to v44.251.0 ([#2832](https://github.com/d0ugal/graith/issues/2832)) ([44b53aa](https://github.com/d0ugal/graith/commit/44b53aa2fc704515a7dfcc9ec5ce8608ccb36356))
+* **deps:** update renovate/renovate docker tag to v44.252.0 ([#2839](https://github.com/d0ugal/graith/issues/2839)) ([27715fa](https://github.com/d0ugal/graith/commit/27715fa714d84c6ea0f2f4492019863dbdf59b73))
+* **deps:** update renovate/renovate docker tag to v44.252.6 ([#2840](https://github.com/d0ugal/graith/issues/2840)) ([172df96](https://github.com/d0ugal/graith/commit/172df962c6bfc7cafe757001400666cf5517e4bb))
+* **deps:** update renovate/renovate docker tag to v44.257.6 ([#2857](https://github.com/d0ugal/graith/issues/2857)) ([e9c50d8](https://github.com/d0ugal/graith/commit/e9c50d8348ff66957ae2c6bd966b230db0ee6ae3))
+* **deps:** update renovate/renovate docker tag to v44.257.8 ([#2859](https://github.com/d0ugal/graith/issues/2859)) ([6e50873](https://github.com/d0ugal/graith/commit/6e5087317bac63f5238a1798f44942f4eff8ec40))
+* **deps:** update trufflesecurity/trufflehog docker tag to v3.100.0 ([#2858](https://github.com/d0ugal/graith/issues/2858)) ([f4e548b](https://github.com/d0ugal/graith/commit/f4e548be1f4f7d55670b2d4d18ad3838f79c3638))
+
 ## [0.73.32](https://github.com/d0ugal/graith/compare/v0.73.31...v0.73.32) (2026-11-15)
 
 
