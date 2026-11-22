@@ -31,7 +31,7 @@ require (
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
 	google.golang.org/grpc v1.85.0
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 	tailscale.com v1.104.7
 )
 
